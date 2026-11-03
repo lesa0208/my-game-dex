@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* Project breakpoints: md 768px tablet, lg 1024px desktop, wide 1440px. */
+  --breakpoint-wide: 90rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-solid: var(--primary-solid);
+  --color-primary-solid-foreground: var(--primary-solid-foreground);
+  --color-primary-text: var(--primary-text);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-highlight: var(--highlight);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Purple has three jobs, because the brand accent can't carry small text:
+ *
+ * --primary        The brand accent, #8B5CF6. For icons, borders, indicators and
+ *                  focus rings, which need 3:1. Never use it behind or as small
+ *                  text: neither white nor dark text reaches 4.5:1 on it.
+ * --primary-solid  Filled controls with text on them, such as buttons.
+ * --primary-text   Purple text, such as links.
+ *
+ * shadcn components added later may default to `bg-primary text-primary-foreground`.
+ * Switch those to the solid tokens.
+ */
+
+/*
+ * Light theme tokens. The app currently always renders with `class="dark"` on
+ * <html>; adding a theme switcher only requires changing that class.
+ */
+:root {
+  color-scheme: light;
+  --radius: 0.75rem;
+
+  --background: #f6f6f9;
+  --foreground: #16171d;
+  --card: #ffffff;
+  --card-foreground: #16171d;
+  --popover: #ffffff;
+  --popover-foreground: #16171d;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --primary-solid: #7c3aed;
+  --primary-solid-foreground: #ffffff;
+  --primary-text: #6d28d9;
+  --secondary: #ecedf2;
+  --secondary-foreground: #16171d;
+  --highlight: #0369a1;
+  --muted: #ecedf2;
+  --muted-foreground: #565c6b;
+  --accent: #e7e8ee;
+  --accent-foreground: #16171d;
+  --destructive: #dc2626;
+  --border: rgb(22 23 29 / 11%);
+  --input: rgb(22 23 29 / 16%);
+  --ring: #7c3aed;
+  --chart-1: #7c3aed;
+  --chart-2: #0369a1;
+  --chart-3: #a78bfa;
+  --chart-4: #38bdf8;
+  --chart-5: #565c6b;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #16171d;
+  --sidebar-primary: #7c3aed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ecedf2;
+  --sidebar-accent-foreground: #16171d;
+  --sidebar-border: rgb(22 23 29 / 11%);
+  --sidebar-ring: #7c3aed;
+}
+
+/* Brand default. */
+.dark {
+  color-scheme: dark;
+
+  --background: #101116;
+  --foreground: #f5f5f7;
+  --card: #191b24;
+  --card-foreground: #f5f5f7;
+  --popover: #191b24;
+  --popover-foreground: #f5f5f7;
+  --primary: #8b5cf6;
+  --primary-foreground: #ffffff;
+  --primary-solid: #7c3aed;
+  --primary-solid-foreground: #ffffff;
+  --primary-text: #a78bfa;
+  --secondary: #22242f;
+  --secondary-foreground: #f5f5f7;
+  --highlight: #38bdf8;
+  --muted: #22242f;
+  --muted-foreground: #9ca3af;
+  --accent: #262935;
+  --accent-foreground: #f5f5f7;
+  --destructive: #f87171;
+  --border: rgb(245 245 247 / 9%);
+  --input: rgb(245 245 247 / 14%);
+  --ring: #8b5cf6;
+  --chart-1: #8b5cf6;
+  --chart-2: #38bdf8;
+  --chart-3: #c4b5fd;
+  --chart-4: #7dd3fc;
+  --chart-5: #9ca3af;
+  --sidebar: #101116;
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #8b5cf6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #191b24;
+  --sidebar-accent-foreground: #f5f5f7;
+  --sidebar-border: rgb(245 245 247 / 9%);
+  --sidebar-ring: #8b5cf6;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring;
+  }
+  html {
+    @apply font-sans;
+    /* Keeps anchored posts and focused controls clear of the sticky header and
+       feed filters above, and the mobile bottom navigation below. */
+    scroll-padding-top: 7.5rem;
+    scroll-padding-bottom: 5rem;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
