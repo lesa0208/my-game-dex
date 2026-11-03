@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="300" height="400">
+<defs><linearGradient id="bg-shadow-of-the-colossus-ps2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cbd5e1"/><stop offset="1" stop-color="#94a3b8"/></linearGradient></defs>
+<rect width="300" height="400" fill="url(#bg-shadow-of-the-colossus-ps2)"/>
+<polygon points="86,330 86,226 62,226 62,164 98,164 98,128 126,128 126,86 174,86 174,128 208,128 208,172 240,172 240,232 214,232 214,330" fill="#1f2937" /><rect x="110" y="60" width="80" height="34" fill="#1f2937" /><rect x="128" y="102" width="12" height="8" fill="#bae6fd" /><rect x="160" y="102" width="12" height="8" fill="#bae6fd" /><polygon points="0,300 300,286 300,400 0,400" fill="#475569" /><rect x="244" y="277" width="12" height="10" fill="#111827" /><rect x="252" y="269" width="4" height="10" fill="#111827" />
+<rect x="0" y="0" width="300" height="34" fill="#1e3a8a" />
+<text x="20" y="22" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="1.5" fill="#ffffff">PLAYSTATION 2</text>
+<text x="20" y="332" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="#ffffff">Shadow of</text><text x="20" y="364" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="#ffffff">the Colossus</text>
+</svg>

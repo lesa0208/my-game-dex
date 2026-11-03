@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="300" height="400">
+<defs><linearGradient id="bg-panzer-dragoon-saga-saturn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#c2410c"/></linearGradient></defs>
+<rect width="300" height="400" fill="url(#bg-panzer-dragoon-saga-saturn)"/>
+<circle cx="214" cy="112" r="46" fill="#fef3c7" opacity="0.85"/><polygon points="0,300 70,262 150,296 230,250 300,290 300,400 0,400" fill="#b45309" /><polygon points="0,344 90,306 190,346 300,312 300,400 0,400" fill="#78350f" /><polygon points="54,202 112,168 146,176 176,132 244,104 202,160 226,158 184,190 152,204 124,226 92,216" fill="#1c1917" />
+<rect x="0" y="0" width="300" height="34" fill="#1e293b" />
+<text x="20" y="22" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="1.5" fill="#ffffff">SEGA SATURN</text>
+<text x="20" y="332" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="#ffffff">Panzer Dragoon</text><text x="20" y="364" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5" fill="#ffffff">Saga</text>
+</svg>
