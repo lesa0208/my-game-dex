@@ -179,7 +179,7 @@ Personal rating is private by default for the same reason. Public opinions belon
 
 **Decision.** Every table has RLS, explicit grants, and column-level update grants wherever a table has system or staff columns.
 
-**Why.** RLS controls rows, not columns, so a user-update policy would otherwise allow forging `like_count`, `follower_count`, `account_status` or `moderation_status`. Supabase's move to explicit grants fits this approach.
+**Why.** RLS controls rows, not columns, so a user-update policy would otherwise allow forging `like_count`, `follower_count`, `account_status` or `moderation_status`. Default privileges are also set explicitly, because the local stack's defaults gave `anon` full access to new tables. See [security-rls.md](security-rls.md#explicit-grants).
 
 **Consequence for staff.** Grants apply per role, and staff use the `authenticated` role. So staff can't write protected columns directly either. Their changes go through functions that check the staff role and record an audit row. This costs a function per staff action, and in return no staff change can skip the audit log.
 
@@ -193,7 +193,9 @@ Personal rating is private by default for the same reason. Public opinions belon
 
 **Trade-off.** UUIDv7 reveals its creation time. That's not a concern for these tables, where `created_at` is visible anyway, but it's a reason to avoid it on tables where creation time should stay private.
 
-**Availability.** PostgreSQL 18 has a built-in `uuidv7()`, and 17 doesn't, which we confirmed on a 17.5 engine. Supabase's platform appears to default to 17 ([Supabase discussion](https://github.com/orgs/supabase/discussions/46080)). So plan on a small `private.uuid_v7()` database function, which works on either version and can be replaced later without changing the schema. M0 confirms this on the actual environment. `gen_random_uuid()` is available everywhere, and remains the default for other tables.
+**Implementation.** The local Supabase stack runs PostgreSQL 17.11, which has no built-in `uuidv7()`, and the `pg_uuidv7` extension isn't available. M0 therefore adds `private.uuid_v7()`, which works on any version and can be replaced later without changing the schema. `gen_random_uuid()` remains the default for other tables.
+
+**Ordering.** IDs from different milliseconds sort by time, and tests confirm it. Within one millisecond the order is random, so never assume strict monotonic ordering. Pagination needs a stable sort, and any feature needing an exact order must use another column too. `uuid_extract_timestamp()` doesn't decode version 7 on PostgreSQL 17, so nothing should rely on it.
 
 ### ADR-008: Composite foreign keys enforce ownership
 
@@ -616,16 +618,16 @@ Avatars and shelf photos need storage buckets separately. Avatars belong with M2
 
 ### Before implementation
 
-These checks come first, because the tests so far ran on PGlite and not on Supabase.
+Results on the local stack, with CLI 3.0.0. All need repeating on a hosted project when one exists.
 
-| Check | How | Status |
-| --- | --- | --- |
-| Actual PostgreSQL version and supported extensions | `select version()`, and `pg_available_extensions` for `citext`, `pg_trgm`, `pgtap` | Not yet run. The current platform default appears to be 17, unconfirmed |
-| UUID generation | Run `private.uuid_v7()` and confirm ordering. Check for a built-in `uuidv7()` | Not yet run. Tested as absent on 17.5 |
-| Grants and RLS behavior | Confirm new tables have no default grants, then run the policy tests as `anon` and `authenticated` | Not yet run |
-| Migration dependencies | Apply M0 to M7 to an empty database in order, using a reset each time | Sequence reviewed on paper only |
-| Secret handling | Only the publishable key may be in `NEXT_PUBLIC_` variables, enforced by a CI check for the secret key name and value patterns | Not yet built |
-| Reproducible workflow | Supabase CLI and local stack, with one command to reset, migrate and test | Not yet built. Docker is installed, its engine wasn't running, and the CLI isn't installed |
+| Check | Status |
+| --- | --- |
+| PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
+| UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
+| Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
+| Migration dependencies | M0 applies to an empty database. M1 to M7 reviewed on paper only |
+| Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. No CI yet |
+| Reproducible workflow | `npm run db:verify` |
 
 **Gates that must be met along the way:**
 
@@ -647,6 +649,8 @@ These checks come first, because the tests so far ran on PGlite and not on Supab
 6. Add one reset, migrate and test command, and document it in the README.
 
 M0 creates no application tables and changes no application code. It stops there for review before M1.
+
+**Deviation.** `pgtap` isn't installed by the migration. The CLI installs it for a test run and removes it afterwards, so test tooling never exists outside tests. The migration installs `citext` and `pg_trgm`.
 
 ### Trade-offs of this sequence
 

@@ -25,7 +25,47 @@ Three properties of RLS shape this design:
 
 ### Explicit grants
 
-Supabase announced that new tables in `public` are no longer exposed automatically and need explicit grants, starting with new projects in May 2026 and with enforcement on existing projects scheduled for 30 October 2026 ([Supabase announcement](https://github.com/orgs/supabase/discussions/45329)). This design treats that as a benefit: every grant is deliberate and listed below. Confirm the current behavior when creating the project.
+**The architecture doesn't depend on any Supabase default.** Defaults differ between environments and versions. Supabase [announced](https://github.com/orgs/supabase/discussions/45329) that new `public` tables would stop being exposed automatically. But on the local stack with CLI 3.0.0 and PostgreSQL 17.11, an untouched new table gave `anon` full access with RLS off, and through the real API `anon` could read, insert, delete and run new functions. The hosted behavior hasn't been observed.
+
+So migration M0 sets the privileges explicitly, and tests check the result rather than the default:
+
+| Scope | Change | Reason |
+|---|---|---|
+| `postgres` in `public` | Revoke all on tables, sequences and functions from `anon`, `authenticated`, `service_role` | New objects get no implicit access |
+| `postgres` in `private` | The same | Stays closed if a platform default changes |
+| `postgres` in all schemas | Revoke EXECUTE on functions from `PUBLIC` | See below |
+| Schema `public` | Revoke CREATE from `PUBLIC` and the API roles | Only migrations create objects |
+| Schema `private` | Revoke all from `PUBLIC` and the API roles | Not exposed, and helpers are granted one at a time |
+
+**Default privileges apply per creating role.** Migrations run as `postgres`, a non-superuser that owns all application objects. `supabase_admin` keeps its own defaults, including in `public`, and `postgres` can't change them. So nothing else may own an application object, and a test fails if something does. Extensions go in the `extensions` schema, never `public`.
+
+**The role-wide function revoke.** PostgreSQL grants EXECUTE to `PUBLIC` on every new function, and a schema-scoped default can't remove a built-in default, which we confirmed: `anon` could still execute the function. So this one revoke is role-wide. It applies only to functions `postgres` creates from now on. Existing functions, and those owned by platform roles such as `supabase_auth_admin`, `supabase_storage_admin` and `supabase_admin`, don't change. The consequence is that any `postgres`-owned function, in any schema, needs an explicit grant to be callable.
+
+**Supabase-managed schemas aren't changed.** Comparing a snapshot of function, table and schema privileges and default privileges in `auth`, `storage`, `realtime`, `vault`, `graphql`, `graphql_public`, `supabase_functions`, `pgbouncer` and `_realtime` before and after M0 showed no differences. An API test also confirms auth, the REST API, storage and realtime still work.
+
+**Every later table therefore needs, in the same migration:**
+
+1. RLS enabled.
+2. Explicit grants, including to `service_role`. **Its RLS bypass doesn't replace SQL privileges:** without a grant it's refused like any other role.
+3. Policies.
+4. An entry in the approved grant lists in `supabase/tests/database/03_schema_guards.test.sql`, or the tests fail.
+
+A column default using `private.uuid_v7()` also needs EXECUTE for the inserting role. Tests confirmed that EXECUTE is enough, without USAGE on `private`.
+
+### Known limitations
+
+These are accepted for M0 and stay open until each is resolved:
+
+| Limitation | What it means | Required action |
+| --- | --- | --- |
+| **Hosted permissions are unverified** | Tests have run only on the local stack | Run the database tests on a hosted project before production use |
+| **Default privileges are per role** | `supabase_admin` keeps permissive defaults in `public`, which `postgres` can't change | Application objects must be created only by `postgres`, through migrations. The ownership guard detects others when tests run, not at creation |
+| **Guards cover named schemas only** | They inspect `public` and `private` | Add any future application schema to the guards in the same migration that creates it |
+| **Supabase-managed schemas stay untouched** | `postgres` keeps permissive defaults in `storage`, and no guard covers that schema | Never create application objects in `auth`, `storage`, `realtime` or other managed schemas, and don't alter their defaults |
+| **Secret scanning isn't in CI** | The pre-commit hook is per clone and can be skipped | Add `secrets:check` and `secrets:bundle` to CI when CI exists |
+| **Extension functions are callable by `anon`** | `anon` has USAGE on `extensions`, and extension functions are executable by `PUBLIC`. They're platform-owned, and aren't API endpoints because `extensions` isn't an exposed schema | Accepted. Keep extensions out of `public`, and keep `extensions` out of the exposed schemas |
+| **Enum types are usable by `PUBLIC`** | This reveals only labels that are public anyway | Accepted. Don't put sensitive values in enum labels |
+| **The migration role is powerful** | `postgres` isn't a superuser, but it can bypass RLS and create roles, as Supabase provides it | Accepted. Keep its credentials out of the application |
 
 ## Roles
 
@@ -488,7 +528,7 @@ When migrations are written:
 
 These were checked in November 2026 where possible, but could not be fully confirmed. Most can be checked first on the local Supabase stack, and must be confirmed again on the hosted project. The [Phase 2B plan](architecture-decisions.md#before-implementation) makes them a required first step:
 
-- The Data API grant behavior applies as announced.
-- The PostgreSQL major version on Supabase and its supported extensions. PostgreSQL 17 appears to be the current platform default, and it has no built-in `uuidv7()`. See [ADR-007](architecture-decisions.md#adr-007-uuid-strategy).
+- The Data API grant behavior on a hosted project. It differs from the announcement on the local stack, and the design no longer depends on it, but M0's tests must be rerun there.
+- The PostgreSQL major version and supported extensions on a hosted project. The local stack runs 17.11, with no built-in `uuidv7()`. See [ADR-007](architecture-decisions.md#adr-007-uuid-strategy).
 - The current recommended way to verify a session on the server.
 - Realtime authorization for messaging. Decide between Broadcast and Postgres Changes in the Messaging phase.

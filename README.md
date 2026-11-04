@@ -10,6 +10,7 @@ My Game Dex is a social network and collection manager for physical video game c
 
 - **Node.js 22 or newer.** The `cn` class-merging package used by shadcn/ui requires it (`engines: >=22`), and it is the strictest requirement of any direct dependency. Next.js itself needs only 20.9. The requirement is declared in `package.json`. The project is tested on Node 22.23.
 - npm, which comes with Node.js.
+- Docker Desktop, only for the [local database](#local-database).
 
 ## Getting started
 
@@ -31,7 +32,61 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run typecheck` | Generate route types and run the TypeScript compiler |
 | `npm run seed:art` | Regenerate the placeholder artwork in `public/seed/` |
 
-Run `typecheck`, `lint` and `build` before committing. There is no automated test suite yet.
+| `npm run db:start` / `db:stop` | Start or stop the local Supabase stack |
+| `npm run db:reset` | Recreate the local database and apply all migrations |
+| `npm run db:test` | Run database tests against the running stack |
+| `npm run db:verify` | Start, reset, migrate and test, in one command |
+| `npm run secrets:check` | Scan files for secrets |
+| `npm run secrets:bundle` | Scan browser bundles for secrets, after a build |
+| `npm run secrets:test` | Test the secret scanner |
+| `npm run hooks:install` | Enable the pre-commit secret check |
+
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes. The frontend has no automated tests yet.
+
+## Local database
+
+The database runs locally through Supabase's CLI and Docker. No hosted project exists, and the frontend doesn't use the database yet.
+
+### Prerequisites
+
+- **Docker Desktop**, running. On Windows, use the WSL 2 backend.
+- Node.js 22 or newer. The CLI is a pinned dev dependency, installed by `npm ci`, so don't install it globally.
+
+The first start downloads images and can take several minutes.
+
+### Workflow
+
+```bash
+npm run db:verify
+```
+
+That starts the stack, resets the database, applies `supabase/migrations/`, and runs:
+
+1. **pgTAP tests** in `supabase/tests/database/`, on the real local PostgreSQL.
+2. **API checks** in `scripts/db-smoke.mjs`, through the real local API, covering new-object exposure and that auth, REST, storage and realtime work.
+
+It stops at the first failed stage and prints a summary. A failing test names the check that failed.
+
+To add a migration, run `npx supabase migration new <name>`, then `npm run db:verify`. A new table needs RLS, explicit grants and policies in the same migration, plus an entry in the approved lists in `03_schema_guards.test.sql`. See [Explicit grants](docs/architecture/security-rls.md#explicit-grants).
+
+### Configuration
+
+No environment variables are needed for local development. Local URLs and development keys come from `npx supabase status`. **That command prints keys, so use `npm run db:status`, which redacts them.**
+
+Real secrets never go in the repository, or in `NEXT_PUBLIC_` variables. To block commits containing them, run `npm run hooks:install` once per clone.
+
+### Troubleshooting
+
+| Problem | What to do |
+| --- | --- |
+| "Docker isn't running" | Start Docker Desktop and wait until it's ready |
+| Port 54321 to 54324 is in use | Stop the other process, or another project's stack with `npx supabase stop` |
+| `supabase_vector` keeps restarting | Known issue on Windows, and harmless. See below |
+| "no files matched pattern: supabase/seed.sql" | Expected. There's no seed file yet |
+| Stack is in a bad state | Run `npm run db:stop`, then `npm run db:verify` |
+| A test fails after adding a table | Check that it has RLS and explicit grants, and is on the approved lists |
+
+**`supabase_vector` restarting.** This container ships container logs to the local analytics service. It reaches Docker through `tcp://host.docker.internal:2375`, which Docker Desktop keeps closed by default, so it exits and restarts. The database, auth, API, migrations and tests aren't affected, as they all pass while it restarts. The only loss is logs in the local Studio log explorer. Enabling Docker's "Expose daemon on tcp://localhost:2375 without TLS" setting would stop the restarts, but it's insecure, so we don't recommend it.
 
 ## Technology stack
 
