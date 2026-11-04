@@ -117,10 +117,16 @@ async function platformChecks() {
   const password = randomUUID();
   let userId;
   try {
-    response = await fetch(`${api}/auth/v1/signup`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
+    // Signup requires email verification since M2, and db-identity-checks.mjs tests
+    // that flow. These checks only need a signed-in user.
+    response = await fetch(`${api}/auth/v1/admin/users`, { method: "POST", headers: service, body: JSON.stringify({ email, password, email_confirm: true }) });
+    const created = await response.json();
+    userId = created.id;
+    check("auth can create a verified user", response.ok && !!userId, `status ${response.status}`);
+
+    response = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
     const session = await response.json();
-    userId = session.user?.id ?? session.id;
-    check("auth can sign up a user", response.ok && !!session.access_token, `status ${response.status}`);
+    check("auth can sign in a verified user", response.ok && !!session.access_token, `status ${response.status}`);
 
     const asUser = { apikey: anonKey, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" };
     response = await fetch(`${api}/auth/v1/user`, { headers: asUser });

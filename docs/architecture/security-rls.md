@@ -83,11 +83,11 @@ These are accepted for M0 and stay open until each is resolved:
 
 ## Helper functions
 
-These live in the `private` schema, which the Data API doesn't expose. They use `SECURITY DEFINER` so a policy can check membership without recursion, and `set search_path = ''` to prevent search-path attacks.
+These live in the `private` schema, which the Data API doesn't expose. They use `SECURITY DEFINER` so a policy can check membership without recursion, and `set search_path = ''` to prevent search-path attacks. A policy needs only EXECUTE on a helper. No role has USAGE on `private`, so a client calling one directly is refused. This was tested on the local stack.
 
 | Function | Returns true when |
 | --- | --- |
-| `private.is_active_user()` | Caller exists and `account_status = 'active'` |
+| `private.is_active_user()` | Caller has `account_status = 'active'`, a claimed handle and a verified email |
 | `private.has_staff_role(role)` | Caller holds that role, or `admin` |
 | `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner` |
 | `private.is_blocked_between(other)` | A block exists in either direction |
@@ -139,7 +139,22 @@ The application enforces this with a `noindex` robots tag, and by leaving these 
 
 ### Profiles
 
-**`profiles` holds only what's safe for anyone to see**: handle, display name, avatar, cover, bio and visibility settings. A profile row is readable by everyone, signed in or not, unless the account is suspended or a block exists. This is deliberate: comment authors and follow requests need a name and avatar to render, even for private accounts.
+**The public card is six columns: `id`, `handle`, `display_name`, `avatar_path`, `bio` and `country_code`.** Column grants enforce this, because RLS can't hide columns. Everything else on `profiles` has no client `SELECT`, including for signed-in users and the owner, so it also can't be filtered or sorted on to infer its value:
+
+| Column | How it's read |
+| --- | --- |
+| `allow_search_indexing` | Owner, through `public.get_my_account()`. An owner-controlled setting, never on a public card |
+| `follow_approval_required` | Owner, through `public.get_my_account()`. See below |
+| `collection_visibility` | Owner, through `public.get_my_account()`. M3 policies read it through a helper |
+| `account_status`, `handle_changed_at`, `handle_correction_until` | Owner, through `public.get_my_account()` |
+
+A profile row is readable by everyone, signed in or not, once it has a claimed handle and unless the account is suspended. Claiming a handle requires a verified email, so unverified accounts are never public. Block checks arrive with M3. This is deliberate: comment authors and follow requests need a name and avatar to render, even for private accounts.
+
+**`follow_approval_required` isn't public.** Clients don't need the setting itself, and exposing it would let anyone list which accounts are private. M3 should expose a narrower result to signed-in users, for example whether following a specific person would create a request.
+
+**Follower counts don't exist yet, and arrive with `follows` in M3.** Public counts must not reveal private relationships. M3 has to decide what a count includes, and test it. In particular, a count on a private account shouldn't change in a way that confirms a specific person's pending or hidden follow.
+
+**Search engine pages need a controlled read.** Pages can't read `allow_search_indexing` as `anon`. When public profile pages are built, they need a narrow server-side check that returns only whether a page may be indexed, and must default to `noindex` if it fails.
 
 The public card is confirmed by the product owner as handle (username), display name, avatar, optional bio and optional country, and stays visible even when a collection is private. Private collections and private collection information stay inaccessible to signed-out visitors and unauthorized users. Search indexing is a separate preference and doesn't determine access.
 
@@ -211,12 +226,15 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 
 | Table | `anon` | `authenticated` | Update columns |
 | --- | --- | --- | --- |
-| `profiles` | R: active accounts | R: active, not blocked. U: own. I: own, once | `handle`, `display_name`, `bio`, `avatar_path`, `cover_path`, `country_code`, `collection_visibility`, `follow_approval_required`, `allow_search_indexing` |
-| `user_preferences` | None | R, I, U: own | All except `user_id` |
+| `profiles` | R: public card columns, on claimed active accounts | R: same as `anon`. Blocks added in M3. U: own, when active. Created only by the signup trigger | `display_name`, `bio`, `country_code`, `collection_visibility`, `follow_approval_required`, `allow_search_indexing` |
+| `user_preferences` | None | R: own. U: own, when active. Created only by the signup trigger | All except `user_id` and timestamps |
 | `user_favorite_games` | R | R: not blocked. I, U, D: own, published games only | `position` |
 | `follows` | **No grant** | R: own side, or accepted and permitted. I: as follower. U: as followee, to accept. D: either side | `status`, from `pending` to `accepted` only |
 | `blocked_users` | None | R, I, D: as blocker | None |
-| `staff_roles` | None | R: own. Admins: all | Admin function only |
+| `staff_roles` | None | R: own. Audited admin functions arrive with M4 | None. An operator assigns the first administrator |
+| `private.handle_holds` | None | None | None, and no grant to any API role |
+
+`handle` changes only through `public.claim_handle()`, and `avatar_path` only through the server workflow. `service_role` has no direct access to these tables either: it can only execute `public.set_avatar_path()`.
 
 `follows.status` isn't writable on insert. A trigger sets it from the target's settings and rejects the insert if a block exists.
 
@@ -453,13 +471,239 @@ Under D13, the proposed initial Supabase region is **Central EU (Frankfurt), AWS
 | International data transfers | Any transfer outside the EU, including by subprocessors and support access |
 | Applicable law and privacy requirements | GDPR and other laws for a global audience, including D10 retention and D12 minimum age |
 
+## Authentication lifecycle
+
+This describes the local configuration in `supabase/config.toml`, tested through the real local Auth API and Mailpit. **It proves nothing about a hosted project, which doesn't exist.**
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unverified: signup
+  Unverified --> Verified: email link
+  Verified --> Active: claim_handle()
+  Active --> Active: one correction within 24 hours, or change after 30 days
+  Active --> Suspended: staff action, from M4
+  Suspended --> Active: staff action, from M4
+  Unverified --> [*]: account deleted
+  Verified --> [*]: account deleted
+  Active --> [*]: account deleted
+  Suspended --> [*]: account deleted
+```
+
+| State | Session | Public card | Can change profile and preferences | Can claim a handle |
+| --- | --- | --- | --- | --- |
+| Unverified | Refused: `email_not_confirmed` | No | No | No |
+| Verified, no handle | Yes | No | No | Yes |
+| Active | Yes | Yes | Yes | One correction within 24 hours, then after the cooldown |
+| Suspended | Yes | No | No | No |
+
+`private.is_active_user()` reads `auth.users.email_confirmed_at` as well as the profile, so a wrong Auth setting can't by itself activate an unverified account.
+
+**The signup trigger** runs in the same transaction as the auth user. It reads only `new.id`, inserts a profile and a preferences row with their defaults, and never reads metadata, so nothing in a signup request can set a handle or a role. If it fails, the signup rolls back with no user left behind. Exception text reaches the client through Auth, so the trigger logs only the SQLSTATE and raises a fixed, generic message.
+
+### Verified Auth behavior
+
+| Behavior | Result on the local stack |
+| --- | --- |
+| Email verification | Signup returns no session. Sign-in is refused until the emailed link is used |
+| Minimum password length | 12, enforced on signup and on password change |
+| Password reset | The emailed link gives a recovery session, which sets a new password. The old password stops working. The link works once |
+| Secure password change | A recent session can change its password. A session over 24 hours old gets `reauthentication_needed` |
+| Sign-in errors | A wrong password and an unknown email give an identical response |
+| Reset requests | The same response for known and unknown emails |
+| Signup with a registered email | Doesn't report that it's taken. **This depends on confirmations being enabled for both email and SMS.** With email alone, Auth returned `user_already_exists`. Timing was not measured |
+| Repeat emails | A second email to one address within 60 seconds gets a 429 |
+| User metadata | A user can write anything to `user_metadata`, including `role: admin`. Nothing reads it. `app_metadata` can't be written by a user |
+
+**What was not verified, and must not be claimed:**
+
+- **Account lockout doesn't exist in this configuration.** 170 consecutive wrong passwords for one account got no 429 and no lockout, and the correct password still worked immediately. The documented `/token` limit of 150 per 5 minutes per IP wasn't observed locally. Don't rely on it without testing it on the hosted project.
+- **Leaked-password checks aren't active.** `password1234` and `aaaaaaaaaaaa` were accepted. Supabase documents this check as a Pro plan feature, and it hasn't been tested.
+- **Password strength beyond length isn't enforced.**
+- **Real email delivery isn't tested.** Local mail goes to Mailpit.
+
+`email_sent = 100` in the local configuration exists only so tests can run. It isn't a production value.
+
+### Blockers before public authentication
+
+**Public authentication must not open until every one of these is resolved:**
+
+1. **Effective sign-in throttling and abuse protection.** None was observed locally.
+2. **CAPTCHA or equivalent risk controls** where appropriate.
+3. **Real email delivery and verification.** Only Mailpit has been tested.
+4. **Hosted Supabase security verification.** Everything here was observed locally only.
+5. **Minimum-age and applicable legal requirements.** See [Legal and age blockers](#legal-and-age-blockers).
+6. **Approved retention and deletion policies.** See [Retention of unverified accounts](#retention-of-unverified-accounts) and D10.
+
+### Requirements before any hosted registration
+
+Registration stays closed. `enable_signup = true` applies to the local stack only. These are the technical steps behind the blockers above.
+
+| Requirement | Why |
+| --- | --- |
+| Hosted `enable_signup = false` until the [legal blockers](#legal-and-age-blockers) are resolved | `supabase config push` can change hosted Auth settings, so compare before any push |
+| Re-run every check in `scripts/db-identity-checks.mjs` on the hosted project | Everything above was observed locally only |
+| Custom SMTP, with SPF and DKIM | Supabase's default sender is limited, and restricted to team members |
+| Production email rate limit, in place of the local value | The local value is for tests |
+| CAPTCHA on signup, sign-in and reset | Signup can be automated otherwise |
+| Application-level login throttling, per account and per IP | No throttling was observed locally |
+| Leaked-password protection, if the plan supports it | Then test it |
+| Email templates that say what the message is for | The defaults are generic |
+| A session-verification approach for the server, using `getClaims` or an equivalent | Connects to `getCurrentViewer()` |
+| Decisions on JWT expiry | A token stays cryptographically valid until it expires, including after deletion. On the local stack it found no data, and Auth refused it |
+
+## Assigning the first administrator
+
+**No real administrator has been assigned, and nothing does this automatically.** There's no bootstrap endpoint, and no API role can write to `staff_roles`, including `service_role`. Staff status comes from this table only. It's never read from metadata or JWT claims. Tests confirm a signup, a JWT claim, a profile update, a direct write and an API request can't grant a role.
+
+The first administrator is assigned by a named operator, who has direct database access, as a deliberate manual step:
+
+1. The product owner approves in writing who will hold the role.
+2. That person creates an account, verifies their email and claims a handle, like anyone else.
+3. The operator connects directly to the database as `postgres`. This is never done from application code, and never through the API.
+4. The operator runs this, replacing the placeholder, and checks that it reports exactly one inserted row:
+
+```sql
+begin;
+insert into public.staff_roles (user_id, role, granted_by)
+select p.id, 'admin', null
+from public.profiles p
+where p.handle = '<approved handle>';
+-- Expect INSERT 0 1. If not, roll back.
+commit;
+```
+
+5. The operator records who, when and why outside the database. `moderation_actions` doesn't exist until M4, and backfilling this entry is part of M4.
+
+Removal is the matching `delete`. Assigning further staff should use audited functions from M4, which call `private.has_staff_role()`. Until a policy needs that helper, it has no EXECUTE grant.
+
+## Handles
+
+Handles are lowercase ASCII `a-z`, `0-9` and `_`, 3 to 24 characters. `public.claim_handle()` is the only client path to setting one.
+
+**Ordinary uniqueness is by canonical spelling**, enforced by a database constraint. A claim may be in any case and is stored in lowercase, so `Marko` and `marko` are one handle. Input is validated as ASCII before lowercasing, because some non-ASCII letters lowercase to ASCII. `mike_1985` and `mike1985` can coexist, and so can `badminton` and `b4dminton`.
+
+**Normalization protects reserved names and brand terms only.** `private.handle_skeleton()` removes underscores, lowercases, and folds the approved lookalikes: `0`→`o`, `1` and `i`→`l`, `3`→`e`, `4`→`a`, `5`→`s`, `7`→`t`. It's used only for comparison, and a stored handle is never changed.
+
+| Attempt | Result |
+| --- | --- |
+| `admin`, `ADMIN`, `adm1n`, `admln`, `4dmin`, `a_d_m_i_n`, `_admin_` | Refused: reserved, same skeleton |
+| `support`, `supp0rt`, `5upport` | Refused: reserved, same skeleton |
+| `my_game_dex`, `myg4med3x`, `mygamedex_fan`, `the_gamedex` | Refused: a brand term anywhere in the name |
+| `marko` or `Marko`, while `marko` is live or held | Refused: same canonical handle |
+| `badminton`, `administrators_fan`, `support_group` | Allowed: reserved names other than brand terms only match whole |
+| `b4dminton`, while `badminton` is live | Allowed: a different spelling, by product-owner decision |
+
+A taken, reserved or held handle gives the same message, so the response doesn't reveal which applies. Display names are also checked for brand terms, including lookalikes. Other reserved words are allowed in display names, because a display name doesn't identify an account the way a handle does.
+
+**Known limits.** Normalization covers only these approved variants. Other lookalikes like `rn` for `m` aren't caught, and non-ASCII lookalikes can't occur in handles but can in display names. Because lookalikes of ordinary users are allowed, someone can register `b4dminton` to imitate `badminton`. Handling that is a matter for reporting and moderation.
+
+**Changing a handle.** All of this is enforced in `claim_handle()`, and the columns behind it have no client read or write grant.
+
+| Situation | Result |
+| --- | --- |
+| First claim | Allowed. Starts the 30-day clock, and allows one correction until exactly 24 hours later |
+| Within 24 hours, correction unused | One change allowed. Uses the correction, and restarts the 30-day clock |
+| After using the correction | Refused until 30 days after the correction |
+| At or after 24 hours, correction unused | Refused until 30 days after the first claim |
+| 30 days or more since the handle was last set | One change allowed, restarting the 30-day clock. Never grants another correction |
+| Same handle again, in any case | No change, and doesn't use the correction |
+| Failed attempt: reserved, taken, held or invalid | No change, and doesn't use the correction |
+
+**Holds.** Every released handle, whether from a correction, a later change or a deleted account, is held for 30 days by exact spelling, so nobody can take it immediately to impersonate its former owner. That includes the owner: a correction can't be undone straight away. A hold stores no link to the person. Expired holds stop applying immediately. `private.purge_expired_handle_holds()` only tidies expired rows. It never touches accounts, reserved names or anything else, and nothing schedules it yet. Clients have no access to holds, directly or through the API.
+
+**Concurrency.** Claims and releases take a per-handle lock until commit, in a fixed order, and a claim first locks the user's own row. So a claim can't slip in while another transaction is releasing that handle, and one correction can't be used twice. Reserved-name checks read a table no client can change, and don't depend on any index on `profiles`.
+
+## Avatar storage
+
+The `avatars` bucket is public for reads because a profile card is public. **Clients have no write path.** With no policy on `storage.objects` for this bucket, an upload, overwrite, move, list or delete from `anon` or `authenticated` is refused, including an owner on their own folder. Files arrive only through the server workflow in `src/features/avatars`, imported through its `server-only` entry point:
+
+1. **Verify on every mutation.** The user's token is checked with the Auth server, and `get_my_account` confirms the account is active.
+2. **Validate the bytes.** At most 2 MB. The signature must be JPEG, PNG or WebP, and the declared type and name are ignored. The file must fully decode, with the decoded format matching the signature. Between 32 and 4096 pixels per side, at most 16 megapixels, and not animated. Both size limits are checked from the header, before decoding. The side limit stops extreme shapes, and the pixel limit bounds total memory. SVG and GIF are refused.
+3. **Re-encode** to a 512×512 WebP with metadata removed. Only this output is stored.
+4. **Upload with the secret key**, to `{user id}/{random uuid}.webp`, with overwriting off. The key stays on the server.
+5. **Activate** through `public.set_avatar_path()`, executable only by `service_role`. It requires the file to exist, and a `CHECK` requires the path to be in the owner's folder with a random name.
+6. **Remove the old file** through the Storage API. If activation fails, the new file is removed and the current avatar keeps working.
+
+The bucket also accepts only `image/webp` up to 2 MB, even with the secret key. Errors return a code and never pass on upstream responses.
+
+**Limits of this design:**
+
+- Between steps 4 and 5, a validated file is publicly readable at an unguessable URL. A crash there leaves an orphan.
+- `replaceAvatar` reports `previousRemoved: false` if removing the old file fails, and the caller must log and retry. A public file stays readable until then.
+- Public files can be cached by browsers and CDNs after deletion. The workflow sets a long cache lifetime, because names never repeat, and this needs [legal review](#legal-and-age-blockers).
+- Validation depends on `sharp` and its bundled image libraries, which need security updates.
+
+**Future work, outside M2:** the upload route, meaning a route handler or server action, and its session integration. Also a request size limit applied before reading the body, per-user upload rate limits, the settings UI, production configuration of the secret key, and a sweep for orphaned files. Nothing in the application calls this workflow yet.
+
+## Account deletion
+
+`deleteAccountWithAvatars()` clears the avatar path, removes every file in the user's folder through the Storage API, and then deletes the user through the Auth Admin API. It takes a user ID, so its caller has to authorize the request. No client route exists yet.
+
+| Data | On deletion |
+| --- | --- |
+| `auth.users`, `profiles`, `user_preferences`, `staff_roles` | Removed, by cascade |
+| Files in the user's avatar folder | Removed by the workflow |
+| Handle | Held for 30 days, with no link to the person |
+
+**Deleting a user any other way leaves their files publicly readable.** Storage isn't part of the database. Tests confirm that a direct Auth Admin delete and a SQL delete from `auth.users` both succeed with the file still public. That includes the Supabase dashboard, which isn't tested but uses the same Admin path.
+
+### Required deletion procedure
+
+1. Delete accounts only through `deleteAccountWithAvatars()`. Don't use the dashboard, the Auth Admin API or SQL.
+2. If it fails, run it again. It's safe to repeat until the auth user is gone.
+3. If an account was deleted another way, an operator must immediately list `{user id}/` in the `avatars` bucket and remove those files **through the Storage API**, then record that it happened. Don't delete from `storage.objects` with SQL. Tests confirm Storage API removal works.
+4. Deleted public files may remain in caches for a time. See [Legal and age blockers](#legal-and-age-blockers).
+
+On the local stack, a deleted user's token was refused by Auth, found no account and changed nothing.
+
+The treatment of later user content stays under [D10](architecture-decisions.md#decisions-requiring-product-owner-approval) as those tables arrive.
+
+## Retention of unverified accounts
+
+**Nothing deletes unverified accounts. No scheduled job exists, and no scheduler is installed.** A test confirms an old unverified account is left alone.
+
+**Proposed, pending legal and product approval:** remove accounts unverified after seven days.
+
+If approved, a safe design would be:
+
+- Candidates must have `email_confirmed_at` null, no handle, and be older than the retention period, rechecked at deletion.
+- It deletes through the Auth Admin API, not SQL, in small batches.
+- It starts with a dry run that reports counts only, reviewed by an operator before any real run.
+- It records counts without email addresses, and has its own tests.
+
+Handle holds follow the approved 30-day rule, and don't depend on this decision.
+
+## Legal and age blockers
+
+These are legal and product questions. They need qualified legal advice, and **no technical control here answers them**.
+
+**Registration stays closed for real users until these are resolved.**
+
+| Question | Status |
+| --- | --- |
+| Minimum age (D12) | Provisionally 16, subject to legal review |
+| Whether a self-declared age is acceptable | Open. Regulators in several jurisdictions, including Australia, the UK, Brazil and the EU, and the US FTC, have questioned or rejected self-declaration for some services. How this applies here is for counsel |
+| What to do if a user turns out to be under age | Open |
+| Whether a parental consent flow is needed in any market | Open |
+| Retention of unverified accounts | Seven days proposed, not approved |
+| Retention and deletion of user content (D10) | Open |
+| How long deleted public files may remain in caches and backups | Open |
+| Lawful basis, privacy notice and terms | Not written |
+| Data region and processors (D13) | See [Data region and legal review](#data-region-and-legal-review) |
+
+**Technical assumptions, separate from the above:**
+
+- No age or date-of-birth field exists, and none is collected. No identity documents are collected, and no age verification exists.
+- A future age requirement can be added without changing M2, but none has been designed, because the legal answer decides what it needs.
+- Supabase's default error messages and tokens were tested for behavior, not compliance.
+
 ## Storage
 
 Supabase Storage needs its own policies, and public buckets bypass them for reads: anyone with the URL gets the file.
 
 | Bucket | Public | Contents | Write |
 | --- | --- | --- | --- |
-| `avatars` | Yes | Avatars, profile covers | Own folder |
+| `avatars` | Yes | Avatars, re-encoded to WebP | Server only. See [Avatar storage](#avatar-storage) |
 | `catalog` | Yes | Approved catalog images | Staff and server |
 | `catalog-submissions` | **No** | Images on unverified submissions | Own folder. Moved to `catalog` on approval |
 | `post-media-public` | Yes | Images on public posts | Own folder |
@@ -467,7 +711,7 @@ Supabase Storage needs its own policies, and public buckets bypass them for read
 
 The split matters. If followers-only images were in a public bucket, the URL alone would be enough to view them. Changing a post's visibility must move its images between buckets, handled by a server function.
 
-Upload rules:
+Upload rules, for the buckets still to be built. Avatars are stricter, and `catalog` is staff and server only:
 
 - Paths start with the user's ID, and the policy checks that against `auth.uid()`.
 - Size limits and a MIME allow-list on each bucket.
@@ -478,7 +722,11 @@ Upload rules:
 
 | Requirement | How it's enforced |
 | --- | --- |
-| Can't modify another user's profile | RLS `id = auth.uid()` on update; column grants |
+| Can't modify another user's profile | RLS `id = auth.uid()` on update; column grants. Tested directly and through the API |
+| Private profile settings stay private (M2) | No `SELECT` grant on those columns for any client role, which also blocks filtering and sorting on them |
+| Staff roles can't be self-assigned (M2) | No client or `service_role` write grant, a database-backed helper, and a signup trigger that never reads metadata |
+| Handles can't bypass the rules (M2) | `claim_handle()` is the only path, with no client grant on `handle`, `handle_changed_at` or `handle_correction_until`, no access to holds, and per-handle locks |
+| Avatars can't be written by clients (M2) | No storage policy for the bucket, server-only workflow, and a `CHECK` on the path |
 | Can't modify another user's collection items | RLS on owner; `WITH CHECK` prevents transfer; composite keys prevent cross-owner links |
 | Can't access private collections without permission | Private by default; layered visibility policy; accepted follows only; purchase data in an owner-only table |
 | Can't modify another user's posts | RLS on author; column grants prevent forging counters and moderation status |
@@ -520,7 +768,9 @@ To test these patterns before writing them down, we ran throwaway scripts with a
 | Q3 to Q5, public cards | Indexing on doesn't expose a private collection, and indexing off doesn't hide public content. The profile card stays public with a private collection. Wantlists default to private. An unspecified post fails, and the selected visibility is enforced for `anon`, pending and accepted followers |
 | Integrity | A composite foreign key with a null partner is skipped by PostgreSQL, and the `CHECK` closes that gap. Release needs a recorded game and platform. Duplicate release rejected, including with null variant. Release with owners can't be deleted. Two copies allowed. Post survives its item's deletion |
 
-**What the probes didn't cover:** all 45 tables, a real Supabase environment, Supabase's own Auth, Storage and Realtime, or performance at scale. It validates the patterns, and the real policies still need their own tests.
+**What the probes didn't cover:** all 45 tables, a real Supabase environment, Supabase's own Auth, Storage and Realtime, or performance at scale. It validates the patterns, and the real policies still need their own tests. M0 to M2 have those tests on the local stack, and later steps add theirs.
+
+The indexing result above predates M2: signed-out clients can no longer read that preference.
 
 ## Testing the real policies
 
@@ -538,4 +788,7 @@ These were checked in November 2026 where possible, but could not be fully confi
 - The Data API grant behavior on a hosted project. It differs from the announcement on the local stack, and the design no longer depends on it, but M0's tests must be rerun there.
 - The PostgreSQL major version and supported extensions on a hosted project. The local stack runs 17.11, with no built-in `uuidv7()`. See [ADR-007](architecture-decisions.md#adr-007-uuid-strategy).
 - The current recommended way to verify a session on the server.
+- Every check in `scripts/db-identity-checks.mjs`, including Auth rate limits, the private-column denials, and bucket settings. See [Requirements before any hosted registration](#requirements-before-any-hosted-registration).
+- That `postgres` can create the `on_auth_user_created` trigger and the `avatars` bucket through migrations on a hosted project. Local behavior is confirmed only.
+- GraphQL. `pg_graphql` is disabled on the local stack, so no second path to private columns exists there. If enabled, it needs the same tests.
 - Realtime authorization for messaging. Decide between Broadcast and Postgres Changes in the Messaging phase.

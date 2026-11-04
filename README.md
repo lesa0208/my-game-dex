@@ -64,6 +64,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 
 1. **pgTAP tests** in `supabase/tests/database/`, on the real local PostgreSQL.
 2. **API checks** in `scripts/db-smoke.mjs`, through the real local API, covering new-object exposure and that auth, REST, storage and realtime work.
+3. **Identity checks** in `scripts/db-identity-checks.mjs`, through the real Auth, REST and Storage APIs, with email delivered to the local Mailpit. These cover signup, profile privacy, staff escalation, handles, avatars and account deletion.
 
 It stops at the first failed stage and prints a summary. A failing test names the check that failed.
 

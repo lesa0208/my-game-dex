@@ -42,11 +42,11 @@ The three core concepts stay separate:
 
 ## Table inventory
 
-The design has 50 tables: the 26 requested and 24 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+The design has 51 tables: the 26 requested and 25 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
-| User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles` |
+| User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
 | Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
@@ -72,6 +72,7 @@ Why each supporting table is needed:
 | `collection_item_private` | RLS can't hide individual columns, so private purchase data needs its own table ([ADR-003](architecture-decisions.md#adr-003-private-purchase-data-lives-in-its-own-table)) |
 | `achievements`, `user_achievements` | Phase 1 has an Achievement post type, and users must not be able to award themselves one |
 | `staff_roles` | Staff status must not live anywhere a user can edit |
+| `handle_holds` | Reserved names and released handles must be enforced on the server, where no client can read or change them |
 | `moderation_actions` | Staff actions need an audit trail |
 | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks` | Metadata provider adapters, with the internal catalog as the source of truth |
 
@@ -144,32 +145,31 @@ Types with attributes or frequent changes use lookup tables instead: region code
 
 ### `profiles`
 
-The public card for a user. **Every column is safe for anyone to read**, because RLS works on rows, not columns. Private settings go in `user_preferences`. Email stays in Supabase's `auth.users` and is never copied here.
+A user's account record. **Only the public card columns can be read by clients**: `id`, `handle`, `display_name`, `avatar_path`, `bio` and `country_code`. RLS works on rows, not columns, so column grants protect the rest. Owners read their own private columns through `public.get_my_account()`. Email stays in Supabase's `auth.users` and is never copied here.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` | No | Same value as `auth.users.id` |
-| `handle` | `citext` | No | 3 to 30 characters: `a-z`, `0-9`, `_`. Matches `Collector.handle` |
-| `display_name` | `text` | No | 1 to 50 characters. Unicode allowed |
-| `bio` | `text` | Yes | Up to 500 characters |
-| `avatar_path` | `text` | Yes | Storage path, not a URL |
-| `cover_path` | `text` | Yes | Storage path |
-| `country_code` | `char(2)` | Yes | ISO 3166-1. Optional and user-provided |
-| `collection_visibility` | `visibility_level` | No | Default `private` (D2). Master switch for the whole collection |
-| `follow_approval_required` | `boolean` | No | Default `false` |
-| `allow_search_indexing` | `boolean` | No | Default `false` (D3). Whether this user's public pages may be indexed |
-| `follower_count` | `integer` | No | `system`. Default 0 |
-| `following_count` | `integer` | No | `system`. Default 0 |
-| `account_status` | `account_status` | No | `staff_only`. Default `active` |
+| `id` | `uuid` | No | Same value as `auth.users.id`. Public |
+| `handle` | `text` | Yes | Lowercase `a-z`, `0-9` and `_`, 3 to 24 characters. Public. Null until claimed, and set only through `claim_handle()`, which accepts any case and stores lowercase |
+| `display_name` | `text` | Yes | 1 to 50 characters. Unicode allowed, in NFKC form, with no control or bidirectional characters. Can't present as the platform. Public |
+| `avatar_path` | `text` | Yes | Storage path, not a URL: `{id}/{random uuid}.webp`. Public. Set only by the server workflow |
+| `bio` | `text` | Yes | Up to 500 characters. Public |
+| `country_code` | `text` | Yes | References `markets`. Optional and user-provided. Public |
+| `collection_visibility` | `visibility_level` | No | Default `private` (D2). Master switch for the whole collection. Owner only |
+| `follow_approval_required` | `boolean` | No | Default `false`. Owner only |
+| `allow_search_indexing` | `boolean` | No | Default `false` (D3). Whether this user's public pages may be indexed. Owner only |
+| `account_status` | `account_status` | No | `staff_only`. Default `active`. Means no sanction applies, and doesn't by itself make an account active. See `private.is_active_user()` |
+| `handle_changed_at` | `timestamptz` | Yes | `system`. Starts the 30-day change cooldown. Set exactly when `handle` is set |
+| `handle_correction_until` | `timestamptz` | Yes | `system`. End of the one correction allowed after a first claim. Cleared when used. Owner only |
 
 - **Primary key:** `id`
-- **Foreign keys:** `id` → `auth.users(id)` on delete cascade
-- **Unique:** `handle` (case-insensitive through `citext`)
-- **Indexes:** trigram GIN on `handle` and `display_name` for collector search
+- **Foreign keys:** `id` → `auth.users(id)` on delete cascade; `country_code` → `markets(code)` on delete set null
+- **Unique:** `handle`, by exact lowercase spelling
+- **Indexes:** `country_code`; trigram GIN on `handle` and `display_name` for collector search
 - **Timestamps:** `created_at`, `updated_at`
 - **Relationships:** owns collection items, shelves, posts and most user content
 
-Reserved handles such as `admin`, `support` and route names are rejected by a trigger.
+`cover_path` isn't built: no approved feature uses it. `follower_count` and `following_count` arrive with `follows` in M3, and must follow the rule in [Profiles](security-rls.md#profiles) that public counts can't reveal private relationships.
 
 ### `user_preferences`
 
@@ -181,7 +181,7 @@ Private settings, one row per user, readable only by that user.
 | `locale` | `text` | No | BCP 47 tag. Default `en` |
 | `timezone` | `text` | Yes | IANA name |
 | `theme` | `theme_preference` | No | Default `system` |
-| `default_currency` | `char(3)` | Yes | ISO 4217 |
+| `default_currency` | `text` | Yes | ISO 4217: three uppercase letters |
 | `preferred_region_code` | `text` | Yes | Default for catalog browsing |
 | `default_item_visibility` | `visibility_level` | No | Default `private` (D2) |
 | `default_shelf_visibility` | `visibility_level` | No | Default `private` (D2) |
@@ -258,6 +258,26 @@ Creating a block removes follows in both directions through a trigger.
 - **Foreign keys:** `user_id` → `profiles(id)` on delete cascade; `granted_by` → `profiles(id)` on delete set null
 - **Indexes:** `granted_by`
 - **Timestamps:** `created_at`
+
+No API role can write to this table, including `service_role`. See [Assigning the first administrator](security-rls.md#assigning-the-first-administrator).
+
+### `handle_holds`
+
+Lives in the `private` schema, with no grants to any API role. Names that can't be claimed: reserved names, permanently, and released handles, for 30 days. Stores a string with no link to any person.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `handle` | `text` | No | The reserved or released name |
+| `skeleton` | `text` | No | `system`. Generated by `private.handle_skeleton(handle)`. Compared for reserved names. Released handles compare by exact spelling |
+| `kind` | `text` | No | `reserved` or `released` |
+| `match` | `text` | No | `exact`, or `contains` for platform brand terms. Default `exact` |
+| `expires_at` | `timestamptz` | Yes | Required for `released`, and null for `reserved` |
+
+- **Primary key:** `handle`
+- **Foreign keys:** None
+- **Indexes:** `skeleton`; `expires_at` where set
+- **Timestamps:** `created_at`
+- **Constraints:** `CHECK ((kind = 'reserved') = (expires_at IS NULL))`; `CHECK (kind = 'reserved' OR match = 'exact')`
 
 ---
 
@@ -1285,7 +1305,7 @@ Deliberate exceptions to normalization, each maintained by a trigger:
 | Column | Why |
 | --- | --- |
 | `posts.like_count`, `posts.comment_count`, `comments.like_count` | Counting on every feed row doesn't scale |
-| `profiles.follower_count`, `profiles.following_count` | Shown on every profile |
+| `profiles.follower_count`, `profiles.following_count` | Shown on every profile. Added in M3 |
 | `conversations.last_message_at` | Inbox sort order |
 | `posts.subject_completeness` | A deliberate snapshot, not a duplicate: the author's disclosure at posting time, which keeps the post readable if the item goes private |
 

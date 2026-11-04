@@ -607,6 +607,38 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-off.** This depends on editors and evidence, and some older cartridges will need research. It's slower, but it avoids misclassifying thousands of releases by a rule that's known to be unreliable.
 
+### ADR-036: The public profile card is enforced with column grants
+
+**Decision.** Anonymous and signed-in clients can select only `id`, `handle`, `display_name`, `avatar_path`, `bio` and `country_code` on `profiles`. Owners read private settings through `public.get_my_account()`. `allow_search_indexing` and `follow_approval_required` are never public.
+
+**Why.** RLS doesn't hide columns, and a public projection would need its own rights and could drift from the table. A missing grant also blocks filtering and sorting on the column, which would otherwise reveal its value.
+
+**Trade-offs.** `select=*` fails for clients, so queries must name columns. Later public pages need a narrow check for indexing, and M3 needs one for follow requests. This replaces the earlier design, in which every column on `profiles` was public.
+
+### ADR-037: Handles are unique by spelling, and normalized only against reserved names
+
+**Decision.** `public.claim_handle()` is the only client path. Ordinary handles are unique by exact lowercase spelling, through a database constraint, and input in any case refers to the same handle. A normalized skeleton is compared only against reserved names and brand terms. A first claim allows one correction within 24 hours, and otherwise a change needs 30 days since the handle was last set. Released handles are held for 30 days by exact spelling, in `private.handle_holds`. A per-handle transaction lock covers claims and releases. This supersedes `citext` and the 3 to 30 length from the earlier design, and an earlier M2 draft that also applied the skeleton to ordinary handles, which the product owner rejected because it would stop `mike_1985` and `mike1985` coexisting.
+
+**Why.** Aggressive normalization suits impersonation of the platform and its staff, where false positives are cheap and the names are few. For ordinary usernames, it would refuse legitimate names. The lock is needed because a unique constraint alone can't stop a claim from reading "no hold" while another transaction is releasing that handle.
+
+**Trade-offs.** Someone can register `b4dminton` to imitate `badminton`, which leaves that to reporting and moderation. A correction allowance lets one account hold an extra name for 30 days, which is a small cost next to fixing typos. A short `exact` list and a `contains` list only for brand terms keep `badminton` valid.
+
+### ADR-038: Avatars are written only by the server
+
+**Decision.** Clients have no storage write access. A server-only workflow verifies the session, decodes and re-encodes every image with `sharp`, and writes with the secret key. This replaces the earlier "own folder" rule for avatars. `sharp` is a direct dependency, pinned exactly.
+
+**Why.** Storage validates the declared type, not the content, so only a server step can guarantee re-encoding and removal of location data.
+
+**Trade-offs.** A secret-key path exists, so its code must stay server-only, and bundle scanning checks that. Upload volume runs through the application server, which needs limits. See [Avatar storage](security-rls.md#avatar-storage) for the remaining integration.
+
+### ADR-039: Account activation needs a verified email and a handle
+
+**Decision.** An account is active only with a verified email, a claimed handle and `account_status = 'active'`, checked in `private.is_active_user()`. The signup trigger creates only default rows. No automatic deletion of unverified accounts exists, and seven-day retention is a proposal pending legal and product approval.
+
+**Why.** It keeps unverified accounts out of public view, and doesn't depend on a single Auth setting.
+
+**Trade-off.** A row exists for each unverified signup, until a retention rule is approved.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -624,10 +656,12 @@ Most general game databases focus on games rather than physical releases. Expect
 | Classification rules are applied inconsistently | The examples in ADR-026, and a recorded note on judgment calls |
 | Cover art rights block the visual design | Resolve [D15](#needed-before-catalog-work) before committing to a provider |
 | Self-reported data is treated as fact | Don't present ownership, valuation or achievements as verified |
+| Credential attacks succeed because Auth doesn't throttle them | No throttling or lockout was seen locally. Application-level throttling and CAPTCHA are hosted registration requirements |
+| A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
 
 ## Phase 2B plan
 
-Accepted by the product owner as the implementation roadmap. Nothing here has started. Work proceeds one step at a time, with constraints, grants, RLS policies and tests delivered together, and each step needs authorization.
+Accepted by the product owner as the implementation roadmap. Work proceeds one step at a time, with constraints, grants, RLS policies and tests delivered together, and each step needs authorization.
 
 ### Table classification
 
@@ -658,6 +692,7 @@ Accepted by the product owner as the implementation roadmap. Nothing here has st
 | `game_relations` | Remakes, remasters and compilations | Supporting | `games` | Yes | D6 requires explicit links as records are approved |
 | `catalog_change_requests` | Submission review queue | Supporting | `profiles`, `games`, `releases`, `platforms` | Yes | D5 needs it as soon as users can submit |
 | `staff_roles` | Staff authorization | Supporting | `profiles` | Yes | Approval is restricted to staff |
+| `handle_holds` | Reserved and released handles | Supporting | None | Yes | Handle rules need a store no client can reach. In `private` |
 | `moderation_actions` | Audit log | Supporting | `profiles` | Yes | Staff functions write to it. `report_id` is added with `reports` |
 | `follows` | Accepted follows | Supporting | `profiles` | Yes | The visibility policies under D1 depend on it, and retrofitting means rewriting them |
 | `blocked_users` | Blocks | Supporting | `profiles` | Yes | Same reason |
@@ -686,7 +721,7 @@ Accepted by the product owner as the implementation roadmap. Nothing here has st
 | `provider_records` | Raw provider data | Later | `external_providers` | No | Blocked by D14 |
 | `catalog_field_locks` | Protects corrections from sync | Later | `games`, `releases`, `platforms`, `profiles` | No | Only matters with providers |
 
-That's 9 Core, 19 Supporting and 22 Later. **The first phase has 27 tables**: all Core, and all Supporting except `catalog_images`.
+That's 9 Core, 20 Supporting and 22 Later. **The first phase has 28 tables**: all Core, and all Supporting except `catalog_images`.
 
 ### First phase migration sequence
 
@@ -696,7 +731,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | --- | --- | --- |
 | **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
-| **M2 Identity** | `profiles`, `user_preferences`, `staff_roles`, sign-up trigger, role helpers | Everything is owned by a profile |
+| **M2 Identity** (built locally, awaiting approval) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** | `follows`, `blocked_users`, visibility helpers | Later policies call these |
 | **M4 Audit and notices** | `moderation_actions`, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
@@ -714,7 +749,7 @@ Later groups, in order:
 | **L5 Messaging** | `conversations`, `conversation_members`, `messages` | D11, D16 |
 | **L6 Providers** | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks`, `catalog_images.provider_code` | D14 |
 
-Avatars and shelf photos need storage buckets separately. Avatars belong with M2, as their paths are on `profiles`. They should use the upload rules in [security-rls.md](security-rls.md#storage).
+Shelf photos need a storage bucket separately, using the upload rules in [security-rls.md](security-rls.md#storage). Avatars are part of M2, and described in [Avatar storage](security-rls.md#avatar-storage).
 
 ### Before implementation
 
@@ -725,7 +760,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | M0 applies to an empty database. M1 to M7 reviewed on paper only |
+| Migration dependencies | M0 to M2 apply to an empty database. M3 to M7 reviewed on paper only |
 | Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. No CI yet |
 | Reproducible workflow | `npm run db:verify` |
 
@@ -734,7 +769,8 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | Before | Required |
 | --- | --- |
 | Catalog approval workflows open (M7 in use) | Written editorial eligibility guidelines (A3) |
-| Real user data is processed | Retention policy (A2, D10), minimum age (D12), Frankfurt legal review (D13) |
+| Real user data is processed | Retention policy (A2, D10), minimum age (D12), Frankfurt legal review (D13). See [Legal and age blockers](security-rls.md#legal-and-age-blockers) |
+| Public authentication opens | All of [Blockers before public authentication](security-rls.md#blockers-before-public-authentication), and [Requirements before any hosted registration](security-rls.md#requirements-before-any-hosted-registration) |
 | Public launch | Reporting (L4), rate limiting, and a security review of all policies |
 
 ### First implementation step
@@ -760,8 +796,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner authorizes M2 Identity.
-2. Build M2 to M7 locally, one reviewed step at a time.
+1. The product owner reviews M2 Identity, then authorizes M3.
+2. Build M3 to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

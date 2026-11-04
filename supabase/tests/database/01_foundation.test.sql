@@ -18,7 +18,7 @@ select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'p
 -- Only approved objects exist. Later steps add to this list deliberately.
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
-  array['hardware_requirements', 'markets', 'media_formats', 'platform_media_formats', 'platform_names', 'platforms', 'region_codes'],
+  array['handle_holds', 'hardware_requirements', 'markets', 'media_formats', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'region_codes', 'staff_roles', 'user_preferences'],
   'only the approved tables exist, with no views or sequences'
 );
 

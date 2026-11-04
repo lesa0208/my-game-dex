@@ -45,7 +45,7 @@ function runCli(args) {
 
 function runNode(script) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(root, "scripts", script)], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", join(root, "scripts", script)], { cwd: root, stdio: "inherit" });
     child.on("close", (code) => resolve(code ?? 1));
   });
 }
@@ -57,6 +57,7 @@ const steps = {
   reset: () => runCli(["db", "reset"]),
   pgtap: () => runCli(["test", "db"]),
   smoke: () => runNode("db-smoke.mjs"),
+  identity: () => runNode("db-identity-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -80,8 +81,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke"],
-    verify: ["start", "reset", "pgtap", "smoke"],
+    test: ["pgtap", "smoke", "identity"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

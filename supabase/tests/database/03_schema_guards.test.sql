@@ -12,7 +12,16 @@ create temp table approved_relation_grants (relation text, grantee text);
 insert into approved_relation_grants
   select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements']) as t
   cross join unnest(array['anon', 'authenticated', 'service_role']) as r;
+-- M2: test 08 asserts the exact columns. service_role has no table access here.
+insert into approved_relation_grants values
+  ('profiles', 'anon'), ('profiles', 'authenticated'),
+  ('user_preferences', 'authenticated'), ('staff_roles', 'authenticated');
 create temp table approved_function_grants (fn text, grantee text);
+insert into approved_function_grants values
+  ('claim_handle(text)', 'authenticated'),
+  ('get_my_account()', 'authenticated'),
+  ('set_avatar_path(uuid,text)', 'service_role'),
+  ('private.is_active_user()', 'authenticated');
 create temp table approved_schema_usage (schema_name text, grantee text);
 
 -- Public tables without RLS

@@ -305,7 +305,7 @@ erDiagram
 
   profiles {
     uuid id PK,FK
-    citext handle UK
+    text handle UK
     text display_name
     visibility_level collection_visibility
     boolean follow_approval_required
@@ -326,6 +326,10 @@ erDiagram
     staff_role role PK
   }
 ```
+
+`private.handle_holds` has no relationships, deliberately. A held handle is a string with no link to the person who used it, so holds outlast an account without keeping any trace of who it was.
+
+Deleting a user from `auth.users` cascades to `profiles`, then to `user_preferences` and `staff_roles`. A trigger first creates the 30-day hold on the handle. Avatar files don't cascade, because Storage isn't part of the database. See [Account deletion](security-rls.md#account-deletion).
 
 ## Gaming catalog
 
