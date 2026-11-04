@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope. The SQL here illustrates the policies. It isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented locally, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -224,7 +224,9 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 
 | Table | `anon` | `authenticated` | Writes |
 | --- | --- | --- | --- |
-| `region_codes`, `markets`, `platforms`, `genres`, `franchises` | R | R | Catalog staff |
+| `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements` | R | R | **No client write path.** `service_role` has `SELECT` only. Staff tooling arrives later, through functions. Implemented in M1 |
+| `genres`, `franchises` | R | R | Catalog staff |
+| `release_hardware_requirements` | R: `can_read_release` | Same | Submission and staff functions only |
 | `release_markets`, `release_components` | R: `can_read_release` | Same | Submission and staff functions only |
 | `game_relations` | R: both games published | Same | Catalog staff only |
 | `games`, `releases`, `game_platforms` | R: `published`, `merged` | R: same, plus own submissions, and an `excluded` release the caller owns a preserved copy of. Catalog editors: all | Submission and staff functions only |
@@ -253,7 +255,7 @@ Separately from these rules, the submission function is rate limited. Approved a
 
 ### Physical-only scope
 
-No table, column or enum value represents a digital product, and `releases.media_format` is required. **The database can't inspect whether a cartridge or disc contains game data**, or whether a user physically holds what they declare. So eligibility is enforced by the only path into the global catalog, staff review, and the database enforces what follows from that decision.
+No table, column or enum value represents a digital product, and `releases.media_format_code` is required. **The database can't inspect whether a cartridge or disc contains game data**, or whether a user physically holds what they declare. So eligibility is enforced by the only path into the global catalog, staff review, and the database enforces what follows from that decision.
 
 An editor excludes an out-of-scope release through a staff function. That function:
 
@@ -420,7 +422,7 @@ No single layer covers everything. The last column lists what the database can't
 | Preserved records aren't deleted by age (A2) | | Owners may delete their own | No function or job deletes by age | Retention policy, to be defined |
 | No standalone components | `item_id` required, foreign key, cascade | Write limited to own items | | |
 | No box-only or manual-only items | No enum value expresses it. `media_condition` can't be `not_included` | | | Declaration when adding an item |
-| Medium really holds game data | `media_format` required, with no digital values | Users can't approve | One approval function | **Editorial only.** Editors follow written guidelines (A3), and unclear cases stay in review |
+| Medium really holds game data | `media_format_code` required, physical formats only, with a `CHECK` backstop | Users can't approve | One approval function | **Editorial only.** Editors follow written guidelines (A3), and unclear cases stay in review |
 | Medium is really present | | | | **User's declaration only.** Can't be verified |
 | Staff actions are authorized and audited | | Protected columns have no client grant | Functions check role and write `moderation_actions` | Limit who holds roles |
 | Only staff approve the catalog | `status` constraints | `status` has no client grant | One approval function | |
@@ -431,6 +433,10 @@ No single layer covers everything. The last column lists what the database can't
 | Rating scale (D8) | `CHECK` | | | |
 | Region code set per Release | Foreign key to `region_codes` | Users can't edit a published release | | Editors classify it. No country rule exists |
 | Partial media described (Q8) | Required enum, default `unknown` | Protected once published | | Editors set it, and don't guess |
+| Reference data is public and read-only (M1) | | RLS read policies. Only `SELECT` is granted, including to `service_role` | | |
+| Platform identity is stable (P2) | Unique slug | | Trigger blocks slug changes | |
+| A format is valid for its platform (P7) | Composite foreign key, in M5 | | | Editors choose the format |
+| Hardware requirements don't become a hardware catalog (R1) | No ownership column | | | Nothing links them to collections |
 
 ## Data region and legal review
 
@@ -483,7 +489,8 @@ Upload rules:
 | Users can't attach items to another user's submission (D5, Q7) | `can_use_release()` in insert and update policies, because foreign keys ignore RLS |
 | Approval doesn't reveal who owns a copy (D5, Q7) | `submitted_by` is cleared on approval, enforced by a `CHECK`, with credit kept in a staff-only table |
 | Indexing doesn't affect access (Q3) | No policy reads `allow_search_indexing` |
-| Digital products stay out of the catalog (physical-only scope) | No digital values or fields, required `media_format`, staff review, and an `excluded` state |
+| Digital products stay out of the catalog (physical-only scope) | No digital values or fields, required `media_format_code`, staff review, and an `excluded` state |
+| Reference data can't be changed by clients (M1) | Only `SELECT` is granted, with no write policy. Tested as `anon`, `authenticated` and `service_role`, directly and through the API |
 | Invalid records stay private and uncounted (Q9) | `record_status` in the read policy and in the shared count function |
 
 ## Design probe

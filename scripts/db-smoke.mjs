@@ -82,6 +82,32 @@ async function exposureChecks() {
   check("the private schema isn't exposed through the API", response.status === 406 && body.includes("PGRST106"), `status ${response.status}`);
 }
 
+async function referenceChecks(asUser) {
+  console.log("\nReference data through the API");
+  const tables = ["region_codes", "markets", "platforms", "platform_names", "media_formats", "platform_media_formats", "hardware_requirements"];
+  for (const table of tables) {
+    let response = await fetch(`${api}/rest/v1/${table}?select=*&limit=1`, { headers: anon });
+    const rows = response.ok ? await response.json() : [];
+    check(`anon reads ${table}`, response.ok && rows.length === 1, `status ${response.status}`);
+
+    response = await fetch(`${api}/rest/v1/${table}`, { method: "POST", headers: anon, body: "{}" });
+    check(`anon can't write ${table}`, response.status === 401 || response.status === 403, `status ${response.status}`);
+
+    response = await fetch(`${api}/rest/v1/${table}?select=*&limit=1`, { headers: asUser });
+    check(`a signed-in user reads ${table}`, response.ok, `status ${response.status}`);
+
+    response = await fetch(`${api}/rest/v1/${table}`, { method: "POST", headers: asUser, body: "{}" });
+    check(`a signed-in user can't write ${table}`, response.status === 401 || response.status === 403, `status ${response.status}`);
+
+    response = await fetch(`${api}/rest/v1/${table}`, { method: "POST", headers: service, body: "{}" });
+    check(`service_role can't write ${table} without a grant`, response.status === 401 || response.status === 403, `status ${response.status}`);
+  }
+
+  const response = await fetch(`${api}/rest/v1/platforms?slug=eq.mega-drive&select=slug,platform_names(name)`, { headers: anon });
+  const [platform] = response.ok ? await response.json() : [];
+  check("the API can resolve a platform's aliases", !!platform?.platform_names?.some((row) => row.name === "Genesis"), `status ${response.status}`);
+}
+
 async function platformChecks() {
   console.log("\nPlatform services");
   let response = await fetch(`${api}/auth/v1/health`, { headers: { apikey: anonKey } });
@@ -100,6 +126,9 @@ async function platformChecks() {
     response = await fetch(`${api}/auth/v1/user`, { headers: asUser });
     check("auth can read the signed-in user", response.ok, `status ${response.status}`);
 
+    await referenceChecks(asUser);
+
+    console.log("\nPlatform services, continued");
     response = await fetch(`${api}/rest/v1/`, { headers: service });
     check("the REST API responds", response.ok, `status ${response.status}`);
 

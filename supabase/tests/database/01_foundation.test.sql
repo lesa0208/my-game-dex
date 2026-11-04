@@ -1,7 +1,7 @@
--- M0: extensions, schema and approved enum types.
+-- Foundation: extensions, schema and approved enum types.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(39);
+select plan(41);
 
 -- Environment
 select ok(current_setting('server_version_num')::int >= 170000, 'PostgreSQL is 17 or newer');
@@ -15,8 +15,12 @@ select is((select extnamespace::regnamespace::text from pg_extension where extna
 select has_schema('private', 'private schema exists');
 select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'private'), 'postgres', 'postgres owns the private schema');
 
--- No application objects at M0
-select is((select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')), 0, 'M0 creates no tables, views or sequences');
+-- Only approved objects exist. Later steps add to this list deliberately.
+select is(
+  (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
+  array['hardware_requirements', 'markets', 'media_formats', 'platform_media_formats', 'platform_names', 'platforms', 'region_codes'],
+  'only the approved tables exist, with no views or sequences'
+);
 
 -- Approved enums: exact labels, in order
 select enum_has_labels('public', 'visibility_level', array['public', 'followers', 'private']);
@@ -31,7 +35,9 @@ select enum_has_labels('public', 'catalog_review_status', array['open', 'in_revi
 select enum_has_labels('public', 'date_precision', array['day', 'month', 'year', 'unknown']);
 select enum_has_labels('public', 'game_kind', array['game', 'compilation', 'expansion']);
 select enum_has_labels('public', 'platform_kind', array['console', 'handheld', 'hybrid', 'computer', 'other']);
-select enum_has_labels('public', 'media_format', array['cartridge', 'cd', 'dvd', 'gd_rom', 'mini_dvd', 'umd', 'blu_ray', 'game_card', 'floppy', 'other']);
+select hasnt_type('public', 'media_format', 'the M0 media_format enum was replaced by media_formats');
+select enum_has_labels('public', 'media_category', array['cartridge', 'optical_disc', 'solid_state_card', 'magnetic_disk', 'magnetic_tape']);
+select enum_has_labels('public', 'hardware_requirement_kind', array['revision', 'add_on', 'compatibility_mode']);
 select enum_has_labels('public', 'game_relation_type', array['remake_of', 'remaster_of', 'contains']);
 select enum_has_labels('public', 'component_kind', array['insert', 'map', 'artwork', 'other']);
 select enum_has_labels('public', 'media_playability', array['playable_from_media', 'download_required', 'unknown']);
@@ -59,7 +65,7 @@ select is(
 );
 select is(
   (select count(*)::int from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typtype = 'e'),
-  30, 'exactly the 30 approved enum types exist'
+  31, 'exactly the 31 approved enum types exist'
 );
 
 select * from finish();

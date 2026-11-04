@@ -6,8 +6,12 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(18);
 
--- Approved grants to API roles: object name, role. Empty at M0.
+-- Approved grants to API roles: object name, role.
 create temp table approved_relation_grants (relation text, grantee text);
+-- M1: reference data is publicly readable. Test 07 confirms it's SELECT only.
+insert into approved_relation_grants
+  select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements']) as t
+  cross join unnest(array['anon', 'authenticated', 'service_role']) as r;
 create temp table approved_function_grants (fn text, grantee text);
 create temp table approved_schema_usage (schema_name text, grantee text);
 
@@ -45,7 +49,7 @@ create temp view guard_relation_grants as
   select distinct e.relation, coalesce(r.rolname, 'PUBLIC') as grantee
     from entries e left join pg_roles r on r.oid = e.grantee_oid
    where (e.grantee_oid = 0 or r.rolname in ('anon', 'authenticated', 'service_role'))
-     and not exists (select 1 from approved_relation_grants x where x.relation = e.relation and x.grantee = coalesce(r.rolname, 'PUBLIC'));
+     and not exists (select 1 from approved_relation_grants x where x.relation = regexp_replace(e.relation, '^public\.', '') and x.grantee = coalesce(r.rolname, 'PUBLIC'));
 
 -- Unapproved EXECUTE for API roles or PUBLIC
 create temp view guard_function_grants as

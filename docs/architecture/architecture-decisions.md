@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope. M0 to M7 is accepted as the roadmap, and no migrations are created until the product owner authorizes the first implementation step.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M7 is the accepted roadmap. M0 and M1 are implemented locally. Each later step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -38,12 +38,17 @@ This records why the database is designed as it is, what each choice costs, and 
 | [028](#adr-028-release-eligibility-and-playability-are-separate) | Release eligibility and playability are separate |
 | [029](#adr-029-invalid-records-are-preserved-not-deleted) | Invalid records are preserved, not deleted |
 | [030](#adr-030-a-collection-item-always-includes-the-game-medium) | A Collection Item always includes the game medium |
+| [031](#adr-031-platform-identity-is-separate-from-its-names) | Platform identity is separate from its names |
+| [032](#adr-032-physical-media-is-a-category-plus-a-reference-format) | Physical media is a category plus a reference format |
+| [033](#adr-033-hardware-requirements-sit-on-the-release) | Hardware requirements sit on the Release |
+| [034](#adr-034-multiple-media-reuses-the-release-component-model) | Multiple media reuses the Release component model |
+| [035](#adr-035-game-boy-classification-follows-the-physical-edition) | Game Boy classification follows the physical edition |
 
 ## Decisions requiring product-owner approval
 
 ### What still blocks migrations
 
-**Only the product owner's authorization of the first implementation step.** All Phase 2A decisions needed for migrations are made, and the [plan](#phase-2b-plan) is accepted as the roadmap.
+**Only the product owner's authorization of each step.** The [plan](#phase-2b-plan) is the accepted roadmap, with M0 and M1 implemented locally.
 
 ### D1 to D9: product owner's decisions
 
@@ -89,6 +94,29 @@ This records why the database is designed as it is, what each choice costs, and 
 | **A1** | Collection statistics | **Approved.** Only active Collection Items on approved, qualifying physical Releases count as owned. Unverified submissions show separately as pending. Rejected, excluded and invalid-preserved records are distinguishable from pending, and never count |
 | **A2** | Preserved records | **Approved.** No automatic deletion by age. Owners may delete their own. A formal retention policy will be defined before real user data is processed |
 | **A3** | Meaningful game data | **Approved.** Written editorial eligibility guidelines are required before catalog approval workflows open. The medium must contain actual game data. Download codes, Game-Key Cards, installer-only and launcher-only media and digital entitlements stay excluded. Unclear cases require editorial review |
+
+### P1 to P10 and R1 to R8: product owner's decisions
+
+| # | Decision | Outcome |
+| --- | --- | --- |
+| **P1** | Regional names | **Approved.** One canonical platform, with hardware and media differences preserved at the Release level |
+| **P2** | Platform identity | **Approved.** Stable slugs, with names stored separately |
+| **P3** | Hardware revisions | **Approved with change.** No automatic new platforms, with release-level requirements. See [ADR-033](#adr-033-hardware-requirements-sit-on-the-release) |
+| **P4** | Add-ons | **Approved.** Separate software platforms, using `base_platform_id`. No collecting of hardware |
+| **P5** | Cross-compatible products | **Approved.** One Release on its primary intended platform, with ambiguous cases going to editors |
+| **P6** | Home computers and PC | **Permanently in scope**, in a later seed batch. Digital-only software, download-code boxes and installer-only products stay excluded |
+| **P7** | Media formats | **Modified.** Category plus specific format. See [ADR-032](#adr-032-physical-media-is-a-category-plus-a-reference-format) |
+| **P8** | Schema | **Approved.** `platform_names` and `base_platform_id` added. `generation` removed. The array was replaced by a table |
+| **P9** | Evercade | **In scope**, in a later seed batch, because its games are on the cartridge |
+| **P10** | Platform seed | **Accepted** after checks, with uncertain values null |
+| **R1** | Hardware requirements | **Approved** |
+| **R2** | Media reference model | **Approved**, through a forward migration |
+| **R3** | Manufacturer | **Approved.** The platform owner or primary brand |
+| **R4** | Proprietary media names | **Approved.** Specific names |
+| **R5** | Aliases | **Approved.** Official regional names and common aliases, excluding clones, codenames and unrelated hardware models |
+| **R6** | Multiple media | **Modified.** One Release can hold several pieces and formats. See [ADR-034](#adr-034-multiple-media-reuses-the-release-component-model) |
+| **R7** | Game Boy classification | **Modified.** Three distinct cases. See [ADR-035](#adr-035-game-boy-classification-follows-the-physical-edition) |
+| **R8** | Seed sources | **Conditionally approved.** Recorded in [reference-data-sources.md](reference-data-sources.md) |
 
 ### Needed before launch, may need legal advice
 
@@ -424,7 +452,7 @@ Most general game databases focus on games rather than physical releases. Expect
 
 | Area | Change |
 | --- | --- |
-| `media_format` | The boxed-code value is gone, and the field is required on every Release |
+| Media format | No boxed-code value exists, and `media_format_code` is required on every Release |
 | `games` | Publishing requires a qualifying physical Release, directly or through a compilation |
 | `game_platforms` | Records physical availability only, and the release date field was removed |
 | `completeness` | `parts_only` is gone, and a Collection Item always includes the medium (Q12) |
@@ -512,6 +540,73 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-off.** Collectors can't log an empty box or a standalone manual, by design. The database prevents representing these, and can't verify what someone physically holds, so a false declaration can't be detected. Treat ownership as self-reported.
 
+### ADR-031: Platform identity is separate from its names
+
+**Decision.** A platform's identity is its slug, which a trigger makes immutable. Canonical names can change, and regional names and aliases live in `platform_names`. Mega Drive and Genesis, NES and Famicom, and PC Engine and TurboGrafx-16 are each one platform.
+
+**Why.** Collectors treat these as one system with regional names, and duplicating them would split reviews, search and discussion.
+
+**The rule that makes this safe.** A shared name doesn't imply compatibility: Famicom and NES cartridges have different pin counts, PC Engine and TurboGrafx-16 HuCards have reversed pins, and Japanese Mega Drive cartridges don't fit a Genesis. Those differences belong to each Release, and in `platforms.notes` for reference.
+
+**`generation` was removed,** because console generations are disputed and nothing uses them. Adding it later is simple.
+
+**Trade-off.** One platform row hides physical differences until Releases exist. Filtering by region must use the Release's region code, not the alias.
+
+### ADR-032: Physical media is a category plus a reference format
+
+**Decision.** A closed `media_category` enum holds the general type, and a `media_formats` table holds specific formats. `platform_media_formats` lists valid pairs, which M5 enforces with a composite foreign key. There's no `other` value: an unusual format gets a row, added by staff.
+
+**Why a table, not an enum.** Physical formats are varied: HuCards, Videocarts, proprietary discs, and later cassettes and several floppy sizes. An enum would need a migration per format. A table also gives names and descriptions, and supports the foreign key. This replaces M0's unused `media_format` enum through a forward migration.
+
+**Granularity rule.** A specific row exists only when collectors or manufacturers name that format. Otherwise the generic row plus the platform says enough. So most consoles share `rom-cartridge`, even though shells differ: the platform and Release record that.
+
+**Physical-only.** A category can't express a digital product, and only staff can add a format, with a `CHECK` as a backstop. Game-Key Cards still rely on editors, because they look like game cards.
+
+**Trade-off.** Editors will sometimes debate whether a format deserves its own row. Adding one later is simple.
+
+### ADR-033: Hardware requirements sit on the Release
+
+**Decision.** `hardware_requirements` holds definitions, and `release_hardware_requirements` links a Release to one at a level: `required`, `partial`, `not_compatible` or `compatible`. Revisions create no platform rows.
+
+**Why not a single "requires" field.** Research found the real cases don't fit one: requiring a revision (New 3DS), failing on one (Virtua Racing on Genesis 3), and needing an add-on (Expansion Pak), sometimes only partly (Perfect Dark). Some differ by edition, which is why this sits on the Release.
+
+**Why this isn't a hardware catalog.** Rows exist only when a release needs one, they have no ownership column, and nothing links them to collections. One row can describe a capability met in several ways, such as Super CD-ROM².
+
+**Trade-offs.** Data will be incomplete at launch, so no row means nothing recorded, never "runs on everything". Soft limits, such as a game needing separate controllers on Switch Lite, aren't modeled until needed. Disc-less models such as Series S are a property of the hardware, so they need no rows.
+
+### ADR-034: Multiple media reuses the Release component model
+
+**Decision.** Approved as R6. `releases.media_format_code` is the primary format, and `media_count` counts its pieces. Additional formats in the same retail edition are `release_components` rows with `kind = 'game_media'`, a format and a platform. Separately sold formats remain separate Releases. No new table is needed.
+
+**Alternatives considered.**
+
+| Option | Why not |
+| --- | --- |
+| A `release_media` table listing every piece | Adds a table, and duplicates the primary format or makes every single-disc release need a child row |
+| One Release per format in a box | Contradicts R6, and misrepresents one physical product |
+| A format array on `releases` | Can't enforce valid platform and format pairs, or carry quantities |
+
+**Validation.** A rolled-back prototype on the local PostgreSQL 17.11 confirmed multiple discs, multiple floppies, mixed formats, invalid format rejection, missing pieces on a copy, and that Q12 still holds. M5 adds real tests.
+
+**Trade-offs.** Reading all media means reading two places. The "primary" format is an editorial judgment. Completeness stays declared, so a copy's pieces aren't checked against the edition automatically.
+
+### ADR-035: Game Boy classification follows the physical edition
+
+**Decision.** Approved as R7. Original Game Boy, dual-mode and Game Boy Color exclusive releases are distinguished through `hardware_requirements`, using `gb-original`, `gb-dual-mode` and `gbc-exclusive`. A Release has one primary platform, and one cartridge is one Release, however many systems it runs on.
+
+**Rules for editors:**
+
+1. **Shell color alone never decides.** Black and clear shells are only a hint.
+2. Work from the physical edition: the label and box, including any compatibility statement.
+3. Use documented technical evidence where available. Pan Docs defines a cartridge header value for games that also run on older units, and another for Color-only games. This shows compatibility, and doesn't decide the primary platform by itself.
+4. Dual-mode primary platform: the system the physical edition is presented for. If its packaging presents both equally, record that in a note and escalate.
+5. A release on these platforms is published only with exactly one of the three classifications.
+6. If evidence conflicts or is missing, it stays in review. Never guess, and never create a second Release for the other system.
+
+**Other ambiguous cross-compatible cases** follow the same approach: primary platform from the physical edition, compatibility in `release_hardware_requirements`, and no duplicate Release. Examples are Switch 2 Edition cards and discs with next-generation upgrades. Genuinely different physical editions remain separate Releases.
+
+**Trade-off.** This depends on editors and evidence, and some older cartridges will need research. It's slower, but it avoids misclassifying thousands of releases by a rule that's known to be unreliable.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -543,6 +638,11 @@ Accepted by the product owner as the implementation roadmap. Nothing here has st
 | `profiles` | Public user card | Core | `auth.users` | Yes | Everything is owned by a profile |
 | `user_preferences` | Private settings and defaults | Core | `profiles`, `region_codes` | Yes | Holds the private defaults under D2 |
 | `platforms` | Consumer gaming platforms | Core | None | Yes | Every Release needs one |
+| `platform_names` | Regional names and aliases | Supporting | `platforms`, `region_codes` | Yes | P1 and P2 |
+| `media_formats` | Physical media reference | Supporting | None | Yes | P7, and `releases` depends on it |
+| `platform_media_formats` | Valid platform and format pairs | Supporting | `platforms`, `media_formats` | Yes | Composite key on `releases` depends on it |
+| `hardware_requirements` | Requirement definitions | Supporting | `platforms` | Yes | R1 |
+| `release_hardware_requirements` | Release requirements | Supporting | `releases`, `hardware_requirements` | Yes | R1 and R7 |
 | `games` | The abstract game | Core | `profiles` | Yes | Core concept |
 | `releases` | A qualifying physical edition | Core | `game_platforms`, `region_codes`, `profiles` | Yes | Core concept |
 | `collection_items` | An owned physical game | Core | `profiles`, `releases` | Yes | Core concept, with privacy and Q9 status |
@@ -586,7 +686,7 @@ Accepted by the product owner as the implementation roadmap. Nothing here has st
 | `provider_records` | Raw provider data | Later | `external_providers` | No | Blocked by D14 |
 | `catalog_field_locks` | Protects corrections from sync | Later | `games`, `releases`, `platforms`, `profiles` | No | Only matters with providers |
 
-That's 9 Core, 14 Supporting and 22 Later. **The first phase has 22 tables**: all Core, and all Supporting except `catalog_images`.
+That's 9 Core, 19 Supporting and 22 Later. **The first phase has 27 tables**: all Core, and all Supporting except `catalog_images`.
 
 ### First phase migration sequence
 
@@ -595,11 +695,11 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | Step | Contents | Why here |
 | --- | --- | --- |
 | **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
-| **M1 Reference data** | `region_codes`, `markets`, `platforms`, seeded | No dependencies, public read only |
+| **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
 | **M2 Identity** | `profiles`, `user_preferences`, `staff_roles`, sign-up trigger, role helpers | Everything is owned by a profile |
 | **M3 Authorization graph** | `follows`, `blocked_users`, visibility helpers | Later policies call these |
 | **M4 Audit and notices** | `moderation_actions`, a minimal `notifications` | Staff functions write to both |
-| **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, read helpers | Needs reference data and profiles |
+| **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
 
@@ -660,8 +760,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner authorizes the [first implementation step](#first-implementation-step).
-2. Build M0 to M7 locally, one reviewed step at a time.
+1. The product owner authorizes M2 Identity.
+2. Build M2 to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

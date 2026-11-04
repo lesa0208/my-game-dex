@@ -1,6 +1,6 @@
 # Relationships
 
-**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented locally.
 
 This document shows how the tables connect and what happens when data is deleted. All of it is proposed to be hosted in Central EU (Frankfurt), AWS `eu-central-1` (D13), with [legal review outstanding](security-rls.md#data-region-and-legal-review). Column details are in [database-schema.md](database-schema.md). To keep the diagrams readable, each shows only the columns that matter for its relationships.
 
@@ -58,7 +58,8 @@ erDiagram
     text edition_name
     text variant_name
     text packaging
-    media_format media_format
+    text media_format_code FK
+    smallint media_count
     media_playability media_playability
     text product_code
   }
@@ -105,7 +106,88 @@ Three rules follow, all enforced by the database:
 - A release can't exist for a game and platform pairing that isn't recorded. The composite foreign key to `game_platforms` prevents it.
 - A release can't be deleted while anyone owns a copy. `ON DELETE RESTRICT` prevents it.
 - A user can own any number of copies. There's deliberately no unique constraint on owner and release.
-- A Release is always on a physical medium, because `media_format` is required and has no digital values.
+- A Release is always on a physical medium, because `media_format_code` is required and only physical formats exist.
+- A Release's format must be valid for its platform, because of the composite foreign key to `platform_media_formats`.
+
+## Platforms and physical media
+
+```mermaid
+erDiagram
+  platforms ||--o{ platforms : "has add-ons"
+  platforms ||--o{ platform_names : "is also called"
+  region_codes ||--o{ platform_names : "named in"
+  platforms ||--o{ platform_media_formats : "uses"
+  media_formats ||--o{ platform_media_formats : "is used by"
+  platform_media_formats ||--o{ releases : "constrains"
+  platforms ||--o{ hardware_requirements : "defines"
+  hardware_requirements ||--o{ release_hardware_requirements : "applies through"
+  releases ||--o{ release_hardware_requirements : "has"
+
+  platforms {
+    uuid id PK
+    text slug UK
+    text name
+    text family
+    uuid base_platform_id FK
+    smallint released_year
+  }
+  platform_names {
+    uuid platform_id FK
+    text name
+    text region_code FK
+  }
+  media_formats {
+    text code PK
+    media_category category
+    text name
+  }
+  hardware_requirements {
+    text code PK
+    uuid platform_id FK
+    hardware_requirement_kind kind
+  }
+  release_hardware_requirements {
+    uuid release_id PK,FK
+    text requirement_code PK,FK
+    requirement_level level
+  }
+```
+
+| Situation | Treatment |
+| --- | --- |
+| Mega Drive and Genesis | One platform, with Genesis in `platform_names`. Physical differences stay on each Release |
+| Hardware revision, such as Switch Lite | No platform row |
+| A game only for a revision, such as Xenoblade Chronicles 3D | Release on the base platform, with `new-3ds-family` at `required` |
+| A game that fails on a revision, such as Virtua Racing | Release on the base platform, with `genesis-3` at `not_compatible` |
+| A game needing an add-on, such as Donkey Kong 64 | `n64-expansion-pak` at `required`. Partial needs, such as Perfect Dark, use `partial` |
+| Add-on with its own library, such as Mega-CD | A separate platform, with `base_platform_id` set. It adds no collectible hardware |
+| Backward compatibility, such as a PS1 disc on a PS2 | Nothing recorded, and no duplicate Release |
+
+## Multiple media in one physical edition
+
+Approved as R6. One retail edition is one Release, however many pieces of media it holds. Separately sold editions in different formats stay separate Releases.
+
+| Edition | `media_format_code` | `media_count` | `release_components` |
+| --- | --- | --- | --- |
+| A game on two CDs | `cd-rom` | 2 | None |
+| A computer game on four floppies | The floppy format | 4 | None |
+| A cartridge with a bonus game disc | `rom-cartridge` | 1 | `game_media`, with the disc's format and platform |
+| Floppies and CDs in one box | The primary format | Its count | `game_media`, with the other format and quantity |
+| The same game sold once on floppy and once on CD | One each | As sold | **Two Releases** |
+
+The primary format is the one holding the main game, an editorial decision. An additional piece must be a valid format for its stated platform, enforced by a foreign key, and a piece without actual game data is an ordinary component rather than `game_media`.
+
+**For an individual copy,** `media_condition` describes the medium overall, and `collection_item_components` records individual pieces. A copy with one disc of two is `incomplete`, with "Disc 2" at `not_included`. It still counts as one owned game, because a Collection Item needs the game medium, not every piece. Whether a copy is complete stays a declared value.
+
+## Game Boy classification
+
+Approved as R7. Three cases are kept distinct, with no duplicate Releases. Rules for editors are in [ADR-035](architecture-decisions.md#adr-035-game-boy-classification-follows-the-physical-edition).
+
+| Case | Primary platform | `release_hardware_requirements` |
+| --- | --- | --- |
+| Original Game Boy release | `game-boy` | `gb-original` at `compatible` |
+| Dual-mode cartridge | Decided from the physical edition | `gb-dual-mode` at `compatible` |
+| Game Boy Color exclusive | `game-boy-color` | `gbc-exclusive` at `required` |
 
 ## Physical release examples
 
@@ -146,7 +228,7 @@ The same game can be classified differently across platforms and generations, be
 | A disc or card with no meaningful game data | Excluded |
 | An empty box, or a manual, insert, map or artwork without the game | Never a Collection Item |
 | A console, arcade board or hardware accessory | Out of scope |
-| A game card that contains the game | **Qualifies** with `media_format = 'game_card'` |
+| A game card that contains the game | **Qualifies** with a format such as `nintendo-switch-game-card` |
 | A disc that plays the game after normal installation | **Qualifies** as `playable_from_media` |
 | A disc holding game data, with additional downloads needed for essential gameplay | **Qualifies** as `download_required` |
 | A disc holding game data, where it isn't known what downloads are needed | **Qualifies** as `unknown` |
@@ -191,6 +273,7 @@ A Collection Item is one physical game. The medium is always part of it, except 
 | Game with manual, no box | `incomplete` | `not_included` | A grade | Yes, one owned game |
 | Game, box and manual | `complete` | A grade | A grade | Yes, one owned game |
 | Factory sealed | `sealed` | A grade or null | Null | Yes, one owned game |
+| One disc of a two-disc game | `incomplete` | As owned | As owned | Yes, one owned game |
 | Box, manual, inserts, maps or artwork without the game | None | | | **No: can't be represented** |
 
 Three structures work together, and none can create standalone component ownership:
@@ -672,7 +755,10 @@ Storage files don't cascade with database rows. Account deletion must also remov
 | `releases` | `catalog_change_requests` | Cascade | Rejected and merged records stay, so this is reached only by retention jobs |
 | `releases` | `collection_items` | Restrict | Users own physical copies of it. Merge instead |
 | `releases` | `wantlist_items`, `posts`, `reviews` | Restrict | Merge instead |
-| `region_codes`, `markets`, `platforms`, `genres`, `franchises` | All children | Restrict | Reference data |
+| `region_codes`, `markets`, `genres`, `franchises`, `media_formats`, `hardware_requirements` | All children | Restrict | Reference data |
+| `platforms` | `platforms`, `releases`, `hardware_requirements` | Restrict | Reference data |
+| `platforms` | `platform_names`, `platform_media_formats` | Cascade | Parts of the platform record |
+| `releases` | `release_hardware_requirements` | Cascade | Parts of the release |
 | `releases` | `release_markets`, `release_components` | Cascade | Parts of the release |
 | `games` | `game_relations` | Cascade | Links only. Merges repoint them first |
 | `collection_items` | `collection_item_components` | Cascade | Parts of the item |

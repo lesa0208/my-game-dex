@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope. Nothing here is implemented, and these are not migrations.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented on the local stack, in `supabase/migrations/`. The rest is design, and these aren't migrations.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 
@@ -42,12 +42,12 @@ The three core concepts stay separate:
 
 ## Table inventory
 
-The design has 45 tables: the 26 requested and 19 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+The design has 50 tables: the 26 requested and 24 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles` |
-| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `release_markets`, `release_components`, `game_relations`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
+| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
@@ -60,6 +60,9 @@ Why each supporting table is needed:
 | --- | --- |
 | `region_codes` | A controlled vocabulary for the collector-facing regional classification of a Release |
 | `markets`, `release_markets` | One physical release can be distributed across several countries or territories, recorded independently of its region code |
+| `platform_names` | Regional names and common aliases, stored apart from a platform's stable identity |
+| `media_formats`, `platform_media_formats` | Separates a general media category from the specific physical format, and enforces valid platform and format pairs |
+| `hardware_requirements`, `release_hardware_requirements` | Some physical releases need, or don't work on, a particular revision or add-on, without creating platforms or a hardware catalog |
 | `release_components` | Inserts, maps, artwork and other original materials that came with an edition |
 | `collection_item_components` | Which of those materials a user's copy has, and their condition |
 | `game_relations` | Explicit links between originals, remakes and remasters, and between compilations and the games they contain |
@@ -110,9 +113,11 @@ Why each supporting table is needed:
 | `date_precision` | `day`, `month`, `year`, `unknown` |
 | `game_kind` | `game`, `compilation`, `expansion` |
 | `platform_kind` | `console`, `handheld`, `hybrid`, `computer`, `other` |
-| `media_format` | `cartridge`, `cd`, `dvd`, `gd_rom`, `mini_dvd`, `umd`, `blu_ray`, `game_card`, `floppy`, `other`. Every value is a physical medium containing the game |
+| `media_category` | `cartridge`, `optical_disc`, `solid_state_card`, `magnetic_disk`, `magnetic_tape`. All physical. There's deliberately no `other` |
+| `hardware_requirement_kind` | `revision`, `add_on`, `compatibility_mode` |
+| `requirement_level` | `required`, `partial`, `not_compatible`, `compatible`. Added in M5 |
 | `game_relation_type` | `remake_of`, `remaster_of`, `contains` |
-| `component_kind` | `insert`, `map`, `artwork`, `other`. Materials only, with no value for a game, box or manual |
+| `component_kind` | `insert`, `map`, `artwork`, `other`, plus `game_media` for additional media pieces, added in M5. No value for a box or manual |
 | `media_playability` | `playable_from_media`, `download_required`, `unknown` |
 | `collection_record_status` | `active`, `invalid_preserved` |
 | `edition_kind` | `standard`, `limited`, `collector`, `reprint`, `bundle`, `promotional`, `other` |
@@ -298,7 +303,7 @@ The controlled vocabulary, approved under D7:
 | --- | --- | --- | --- |
 | `code` | `text` | No | |
 | `label` | `text` | No | Shown to users |
-| `description` | `text` | Yes | Guidance for reviewers |
+| `description` | `text` | No | Guidance for reviewers |
 | `position` | `smallint` | No | Display order |
 
 - **Primary key:** `code`
@@ -306,7 +311,7 @@ The controlled vocabulary, approved under D7:
 
 ### `markets`
 
-Countries and territories, identified by ISO 3166-1 alpha-2 codes. Withdrawn ISO codes can be added for historical markets. Groupings such as "Benelux" or "Nordics" aren't stored, so a release lists the actual countries.
+Countries and territories, identified by ISO 3166-1 alpha-2 codes. M1 seeds the 249 officially assigned codes, with sources in [reference-data-sources.md](reference-data-sources.md). Withdrawn ISO codes can be added for historical markets, and user-assigned codes such as `XK` only if a release needs one. Groupings such as "Benelux" or "Nordics" aren't stored, so a release lists the actual countries.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -320,20 +325,95 @@ Phase 1 values map as `NA` to `ntsc-uc`, `EU` to `pal` and `JP` to `ntsc-j`.
 
 ### `platforms`
 
+A software platform, not collectible hardware. **Identity is the slug, which can't change.** Regional names go in `platform_names`, and hardware revisions don't create rows. Add-ons with their own software library, such as Mega-CD, are separate platforms with `base_platform_id` set. M1 seeds 58.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
-| `slug` | `text` | No | For example `super-nintendo` |
-| `name` | `text` | No | Matches `Platform.name` |
+| `slug` | `text` | No | For example `mega-drive`. A trigger blocks changes |
+| `name` | `text` | No | Canonical name. Can change without affecting identity |
 | `short_name` | `text` | No | Matches `Platform.shortName` |
-| `manufacturer` | `text` | Yes | |
+| `manufacturer` | `text` | Yes | The platform owner or primary brand, not a contract assembler |
+| `family` | `text` | No | Product line, for browsing |
 | `kind` | `platform_kind` | No | |
-| `generation` | `smallint` | Yes | |
-| `released_year` | `smallint` | Yes | |
+| `base_platform_id` | `uuid` | Yes | Set for add-ons. A trigger blocks chains of add-ons |
+| `released_year` | `smallint` | Yes | Earliest release anywhere. Null if uncertain |
+| `notes` | `text` | Yes | Public. Records uncertainty and physical differences |
 
 - **Primary key:** `id`
-- **Unique:** `slug`
-- **Indexes:** `(generation, name)`
+- **Foreign keys:** `base_platform_id` → `platforms(id)` on delete restrict
+- **Unique:** `slug`, `name`
+- **Indexes:** `(family, name)`; `base_platform_id` where not null; trigram GIN on `name`
+- **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** `CHECK (base_platform_id IS DISTINCT FROM id)`
+
+Backward compatibility has no table. A PlayStation disc played on a PlayStation 2 stays one PlayStation Release.
+
+### `platform_names`
+
+Official regional names and common collector aliases. Clones, codenames and unrelated hardware models are excluded. **A shared name never implies that hardware or media are interchangeable**: Famicom and NES cartridges, for example, have different pin counts.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `platform_id` | `uuid` | No | |
+| `name` | `text` | No | |
+| `region_code` | `text` | Yes | Where this name applies. Null means a general alias. Describes naming only, and never determines a Release's region code |
+
+- **Primary key:** none. Identity is the unique constraint
+- **Foreign keys:** `platform_id` → `platforms(id)` on delete cascade; `region_code` → `region_codes(code)` on delete restrict
+- **Unique:** `NULLS NOT DISTINCT (platform_id, name, region_code)`
+- **Indexes:** `region_code` where not null; trigram GIN on `name`
+- **Timestamps:** `created_at`, `updated_at`
+
+### `media_formats`
+
+The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `code` | `text` | No | For example `hucard`, `gd-rom`, `wii-u-optical-disc` |
+| `category` | `media_category` | No | |
+| `name` | `text` | No | |
+| `description` | `text` | Yes | |
+| `position` | `smallint` | No | Display order |
+
+- **Primary key:** `code`
+- **Unique:** `name`
+- **Indexes:** `(category, position)`
+- **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** a `CHECK` rejects codes and names suggesting a digital product, as a backstop. Eligibility is still an editorial decision, because a Game-Key Card looks like a game card
+
+Later computer and PC batches add rows such as compact cassette and 3.5-inch floppy disk, with no schema change. Tests confirm this.
+
+### `platform_media_formats`
+
+Which formats a platform's physical games use. M5 requires a Release's platform and format to appear here, through a composite foreign key.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `platform_id` | `uuid` | No | |
+| `media_format_code` | `text` | No | |
+
+- **Primary key:** `(platform_id, media_format_code)`
+- **Foreign keys:** `platform_id` → `platforms(id)` on delete cascade; `media_format_code` → `media_formats(code)` on delete restrict
+- **Indexes:** `media_format_code`
+- **Timestamps:** `created_at`
+
+### `hardware_requirements`
+
+Definitions of capabilities a physical release can need or be classified by. **These aren't hardware anyone owns:** nothing connects them to collections, and a row is added only when a release needs it. M1 seeds 11.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `code` | `text` | No | For example `new-3ds-family`, `n64-expansion-pak`, `gb-dual-mode` |
+| `platform_id` | `uuid` | No | The platform it relates to |
+| `label` | `text` | No | |
+| `kind` | `hardware_requirement_kind` | No | |
+| `description` | `text` | No | One capability can be met in several ways, such as Super CD-ROM² |
+
+- **Primary key:** `code`
+- **Foreign keys:** `platform_id` → `platforms(id)` on delete restrict
+- **Unique:** `(platform_id, label)`
 - **Timestamps:** `created_at`, `updated_at`
 
 ### `games`
@@ -407,8 +487,8 @@ One specific physical edition: platform, region code, physical format, packaging
 | `barcode` | `text` | Yes | UPC or EAN. Not unique: reprints can reuse one |
 | `local_title` | `text` | Yes | Title in this market when it differs, such as "Biohazard" |
 | `publisher_name` | `text` | Yes | Plain text until `companies` exists |
-| `media_format` | `media_format` | No | Required: a Release is always on a physical medium |
-| `media_count` | `smallint` | Yes | Number of discs or cartridges |
+| `media_format_code` | `text` | No | The primary format. Required: a Release is always on a physical medium |
+| `media_count` | `smallint` | No | Default 1. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
 | `media_playability` | `media_playability` | No | Default `unknown`. Whether the game plays from the medium, subject to normal installation, or needs additional downloads for essential gameplay (Q8). `staff_only` once published |
 | `packaging` | `text` | Yes | "Big box", "Jewel case", "Steelbook" |
 | `languages` | `text[]` | Yes | BCP 47 tags, as printed on the package |
@@ -423,6 +503,7 @@ One specific physical edition: platform, region code, physical format, packaging
 - **Primary key:** `id`
 - **Foreign keys:**
   - `(game_id, platform_id)` → `game_platforms(game_id, platform_id)`, so a release can't exist for a pairing that isn't recorded
+  - `(platform_id, media_format_code)` → `platform_media_formats(platform_id, media_format_code)`, so a release can't use a format its platform doesn't have
   - `region_code` → `region_codes(code)` on delete restrict
   - `merged_into_id` → `releases(id)` on delete restrict
   - `submitted_by` → `profiles(id)` on delete set null
@@ -465,7 +546,9 @@ The countries and territories a physical release is known to have been distribut
 
 ### `release_components`
 
-Original materials that came with a physical edition: inserts, maps, artwork and others. This describes what an edition included, and is never owned by anyone. The box, manual and medium are described on `releases` and tracked per copy on `collection_items`, so they aren't listed here. Components aren't standalone products and can't be a Release themselves.
+What a physical edition included beyond its primary media: inserts, maps, artwork, and additional game media. This describes an edition, and is never owned by anyone. The box, manual and primary medium are described on `releases` and tracked per copy on `collection_items`, so they aren't listed here. Components aren't standalone products and can't be a Release themselves.
+
+**Multiple media in one edition (R6).** Several pieces of the same format need only `releases.media_count`. A genuinely mixed edition adds a row with `kind = 'game_media'` for each additional format, such as a bonus game disc packaged with a cartridge. Separately sold formats are separate Releases. See [relationships.md](relationships.md#multiple-media-in-one-physical-edition).
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -474,11 +557,30 @@ Original materials that came with a physical edition: inserts, maps, artwork and
 | `kind` | `component_kind` | No | |
 | `label` | `text` | No | "Fold-out world map" |
 | `quantity` | `smallint` | No | Default 1 |
+| `media_format_code` | `text` | Yes | Required when `kind = 'game_media'`, and otherwise null |
+| `platform_id` | `uuid` | Yes | The platform that media piece is for. Required when `kind = 'game_media'`, and otherwise null |
 
 - **Primary key:** `id`
-- **Foreign keys:** `release_id` → `releases(id)` on delete cascade
+- **Foreign keys:** `release_id` → `releases(id)` on delete cascade; `(platform_id, media_format_code)` → `platform_media_formats(platform_id, media_format_code)` on delete restrict
 - **Unique:** `(release_id, kind, label)`
-- **Indexes:** covered by the unique constraint
+- **Indexes:** covered by the unique constraint; `(platform_id, media_format_code)` where not null
+- **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** `CHECK ((kind = 'game_media') = (media_format_code IS NOT NULL))` and the same for `platform_id`
+
+### `release_hardware_requirements`
+
+Links a physical Release to a hardware requirement, at a level. This sits on the Release because requirements can differ by edition: Perfect Dark's requirement differs by region, for example. **No row means nothing is recorded, never "runs on everything".** Added in M5.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `release_id` | `uuid` | No | |
+| `requirement_code` | `text` | No | |
+| `level` | `requirement_level` | No | `required`, `partial`, `not_compatible`, or `compatible` for documented cross-compatibility |
+| `note` | `text` | Yes | Why, for editors |
+
+- **Primary key:** `(release_id, requirement_code)`
+- **Foreign keys:** `release_id` → `releases(id)` on delete cascade; `requirement_code` → `hardware_requirements(code)` on delete restrict
+- **Indexes:** `requirement_code`
 - **Timestamps:** `created_at`, `updated_at`
 
 ### `genres`
@@ -648,7 +750,7 @@ What each `completeness` value means, with details in [relationships.md](relatio
 | Value | Meaning | Counts as one owned game |
 | --- | --- | --- |
 | `loose` | The cartridge or disc only | Yes |
-| `incomplete` | The game with some of its packaging or materials | Yes |
+| `incomplete` | The game with some of its packaging, materials or media pieces, such as one disc of two | Yes |
 | `complete` | Complete in Box (CIB) | Yes |
 | `sealed` | Factory sealed, on the declared edition and condition | Yes |
 
@@ -691,7 +793,7 @@ The owner-only part of a collection item. Only the owner can read it, whatever t
 
 ### `collection_item_components`
 
-Which original materials this copy has, such as an insert or map, and their condition. **This table can't hold a standalone component:** `item_id` is required, a foreign key requires a real item, and deleting the item deletes its components. Readable only by those who can read the parent item, and the owner alone can write. Rows never count towards statistics.
+Which original materials or additional media pieces this copy has, such as an insert, a map or "Disc 2", and their condition. **This table can't hold a standalone component:** `item_id` is required, a foreign key requires a real item, and deleting the item deletes its components. Readable only by those who can read the parent item, and the owner alone can write. Rows never count towards statistics.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
