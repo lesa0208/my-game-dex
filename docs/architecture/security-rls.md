@@ -1,0 +1,494 @@
+# Security and Row Level Security
+
+**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope. The SQL here illustrates the policies. It isn't a migration.
+
+## The security model
+
+A browser using the Supabase publishable key can call the Data API directly, without passing through Next.js. So **the database is the security boundary**, and application code can't be relied on to enforce access.
+
+Access passes through four layers, each doing something the others can't:
+
+| Layer | What it controls | Example |
+| --- | --- | --- |
+| **Grants** | Which tables and **columns** a role may touch | A user can't update `profiles.follower_count` |
+| **RLS policies** | Which **rows** a role may touch | A user can only update their own profile |
+| **Constraints** | Whether the data is valid and consistent | A shelf and its items must share one owner |
+| **Server functions** | Multi-step or privileged actions | Publishing a catalog entry, starting a conversation |
+
+### RLS alone isn't enough
+
+Three properties of RLS shape this design:
+
+1. **RLS can't hide columns.** If someone can read a row, they can read every column in it. That's why purchase prices are in a separate table and `profiles` holds only public-safe fields.
+2. **RLS can't restrict which columns are updated.** A policy allowing users to update their own post also lets them set `like_count` to a million. Column-level grants close that gap.
+3. **RLS doesn't validate.** Length limits and formats have to be `CHECK` constraints, because a direct API call skips application validation.
+
+### Explicit grants
+
+Supabase announced that new tables in `public` are no longer exposed automatically and need explicit grants, starting with new projects in May 2026 and with enforcement on existing projects scheduled for 30 October 2026 ([Supabase announcement](https://github.com/orgs/supabase/discussions/45329)). This design treats that as a benefit: every grant is deliberate and listed below. Confirm the current behavior when creating the project.
+
+## Roles
+
+| Role | Who | Key | Bypasses RLS |
+| --- | --- | --- | --- |
+| `anon` | Signed-out visitors | Publishable | No |
+| `authenticated` | Signed-in users | Publishable + user session | No |
+| `service_role` | Server jobs only | Secret | **Yes** |
+| Staff | Signed-in users with a `staff_roles` row | Publishable + user session | No |
+
+- Staff are normal `authenticated` users, and read policies check `staff_roles`. **Grants apply per role, not per user, so a column grant can't let staff write what users can't.** All staff writes therefore go through functions that check `private.has_staff_role()` and record a `moderation_actions` row, which also guarantees every staff change is audited. Wherever this document says "Staff" or "Catalog staff" under writes, it means through those functions.
+- The secret key bypasses RLS, so server code using it can technically read anything, including private data. It's limited to the named jobs below and must not be used for general reads.
+- The secret key is never in browser code, and `NEXT_PUBLIC_` variables never hold it. Supabase is replacing the legacy `anon` and `service_role` keys with publishable and secret keys ([Supabase docs](https://supabase.com/docs/guides/getting-started/api-keys)), so use the new ones from the start.
+- Policies never trust `user_metadata` from the JWT, because users can edit it. Roles come from tables.
+
+## Helper functions
+
+These live in the `private` schema, which the Data API doesn't expose. They use `SECURITY DEFINER` so a policy can check membership without recursion, and `set search_path = ''` to prevent search-path attacks.
+
+| Function | Returns true when |
+| --- | --- |
+| `private.is_active_user()` | Caller exists and `account_status = 'active'` |
+| `private.has_staff_role(role)` | Caller holds that role, or `admin` |
+| `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner` |
+| `private.is_blocked_between(other)` | A block exists in either direction |
+| `private.can_view_collection(owner)` | Caller is the owner; or isn't blocked and the owner's `collection_visibility` allows it |
+| `private.can_view_post(post_id)` | Caller can read that post under its policy |
+| `private.is_published_release(release)`, `private.is_published_game(game)` | The record is `published` |
+| `private.owns_copy_of(release)` | Caller owns a collection item on that release |
+| `private.can_read_release(release)` | The record is `published` or `merged`, or the caller submitted it or is a catalog editor, or it's `excluded` and the caller owns a preserved copy |
+| `private.can_use_release(release)` | The record is `published`, or the caller submitted it and it's `unverified`, `under_review` or `rejected`. Never `excluded` |
+| `private.is_conversation_member(conversation)` | Caller is a current member (`left_at IS NULL`) |
+| `private.can_send_message(conversation)` | Caller is a member and no block exists with another member of a direct conversation |
+
+```sql
+-- Illustrative
+create function private.is_conversation_member(conv uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.conversation_members m
+    where m.conversation_id = conv
+      and m.user_id = (select auth.uid())
+      and m.left_at is null
+  )
+$$;
+```
+
+**Why messaging needs a helper.** The obvious policy on `conversation_members` queries `conversation_members` itself, which PostgreSQL rejects with `infinite recursion detected in policy`. We reproduced this in the design probe below. The helper reads the table with its owner's rights and avoids the loop.
+
+## Public profiles and public collections
+
+### What signed-out visitors can browse
+
+Approved as D3: public profiles, public collections, public games and public posts are available without signing in. The `anon` role gets read access to those and nothing else. Follower lists and who-liked lists are readable only when signed in, because D3 didn't include them and scraping them reveals people's connections.
+
+Public pages should query as `anon`, even for signed-in visitors, wherever per-viewer data isn't needed. A query that runs as `anon` can't return private data, so its result is safe to cache.
+
+### Search engine indexing
+
+Approved as Q3: `profiles.allow_search_indexing` defaults to `false`, and users explicitly opt in for their public profile and eligible public content. **This preference has no effect on access.** No policy reads it. Turning it on can't make private content visible, and turning it off doesn't hide public content.
+
+| Page | Indexed when |
+| --- | --- |
+| Published games and releases | Always |
+| Unverified, rejected or merged catalog records | Never |
+| A user's profile, public shelves and public items | `allow_search_indexing` is on |
+| A public post | Its author has `allow_search_indexing` on |
+| Anything else | Never |
+
+The application enforces this with a `noindex` robots tag, and by leaving these pages out of the sitemap. **This is a request to search engines, not access control.** Public content stays reachable by URL and through the Data API, and the settings screen should say so. Privacy comes from the visibility settings.
+
+### Profiles
+
+**`profiles` holds only what's safe for anyone to see**: handle, display name, avatar, cover, bio and visibility settings. A profile row is readable by everyone, signed in or not, unless the account is suspended or a block exists. This is deliberate: comment authors and follow requests need a name and avatar to render, even for private accounts.
+
+The public card is confirmed by the product owner as handle (username), display name, avatar, optional bio and optional country, and stays visible even when a collection is private. Private collections and private collection information stay inaccessible to signed-out visitors and unauthorized users. Search indexing is a separate preference and doesn't determine access.
+
+A "private account" means `follow_approval_required = true` and `collection_visibility` set to `followers` or `private`. The card stays visible and the content doesn't. Email and auth data stay in `auth.users`, which is never exposed.
+
+### Collections: three checks
+
+Access to a collection item requires passing all of these, and the most restrictive setting wins. **Under D2, collections, shelves, items and wantlist entries are all private by default**, so nothing appears publicly until the user explicitly chooses.
+
+```mermaid
+flowchart TD
+  A["Viewer requests a collection item"] --> B{"Viewer is the owner?"}
+  B -- Yes --> Allow["Show item, including private data"]
+  B -- No --> C{"Block in either direction?"}
+  C -- Yes --> Deny["Hidden"]
+  C -- No --> D{"Owner's collection_visibility"}
+  D -- private --> Deny
+  D -- followers --> E{"Accepted follower?"}
+  D -- public --> F{"Item visibility"}
+  E -- No --> Deny
+  E -- Yes --> F
+  F -- private --> Deny
+  F -- public --> Show["Show item. Never purchase data"]
+  F -- followers --> G{"Accepted follower?"}
+  G -- Yes --> Show
+  G -- No --> Deny
+```
+
+| Owner's setting | Item's setting | Signed-out visitor | Other user | Accepted follower | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `private` (default) | `private` (default) | No | No | No | Yes |
+| `private` | `public` | No | No | No | Yes |
+| `public` | `private` | No | No | No | Yes |
+| `public` | `followers` | No | No | Yes | Yes |
+| `public` | `public` | Yes | Yes | Yes | Yes |
+| `followers` | `public` | No | No | Yes | Yes |
+
+Consequences:
+
+- **Purchase price, currency, purchase date, personal rating and notes are visible only to the owner, always.** They're in `collection_item_private`, which has no read path for anyone else, including followers and staff.
+- **Shelves don't grant access to items.** Reading a `shelf_items` row requires being able to read both the shelf and the item. A private item on a public shelf is simply absent for other viewers, and displayed counts must count visible rows, not stored totals.
+- **Preserved invalid records are private whatever their `visibility`.** The read policy requires `record_status = 'active'` for anyone but the owner, and a preserved record's components and shelf entries follow.
+- **Search and aggregates** respect the same rules. Trending counts come from public activity only, and statistics count only [counted copies](database-schema.md#collection_items).
+
+### Making things public under private defaults
+
+Public display needs two or three settings to agree: the collection, the item and, for a shelf, the shelf. Marking one thing public can appear to do nothing, which is the main usability cost of D2. So:
+
+- Each visibility control shows the **effective** result, such as "Hidden: your collection is private".
+- A single explicit "publish" action changes the required settings together. It runs through a function and always confirms what will become visible, for example "Publish this shelf and its 40 items".
+- Bulk publishing never happens without that confirmation, and changing a default only affects new records.
+- Approved as Q5: `posts.visibility` has no database default, so an unspecified post fails rather than becoming public. The composer may preselect `public`, always shows the selection, and lets the user change it before publishing. RLS enforces the selected value.
+- Posting a pickup from a private item shows that the release and completeness will be disclosed.
+- Approved as Q4: wantlists default to private, and users can explicitly make them public. A wantlist entry's visibility is separate from `collection_visibility`, so a user can share what they're looking for while keeping their collection private.
+
+### Followers-only needs approval to mean anything
+
+If anyone can follow instantly, "followers only" is public with one extra click. So the setting is only as strong as `follow_approval_required`. Approved as D1: access requires `status = 'accepted'`, and a pending request grants nothing. A user who picks `followers` should be prompted to turn on approval.
+
+### Blocks
+
+Blocks are enforced in both directions for signed-in users, and they override an accepted follow. A block can't stop someone from viewing public content while signed out, because public means public. The block list has no client read path except a user reading their own blocks, so nobody can discover who blocked them.
+
+## Policy matrix
+
+R = read, I = insert, U = update, D = delete. "Own" means the row's owner column equals `auth.uid()`. Every table has RLS enabled. "Columns" lists what a client may update; anything else has no grant.
+
+### User system
+
+| Table | `anon` | `authenticated` | Update columns |
+| --- | --- | --- | --- |
+| `profiles` | R: active accounts | R: active, not blocked. U: own. I: own, once | `handle`, `display_name`, `bio`, `avatar_path`, `cover_path`, `country_code`, `collection_visibility`, `follow_approval_required`, `allow_search_indexing` |
+| `user_preferences` | None | R, I, U: own | All except `user_id` |
+| `user_favorite_games` | R | R: not blocked. I, U, D: own, published games only | `position` |
+| `follows` | **No grant** | R: own side, or accepted and permitted. I: as follower. U: as followee, to accept. D: either side | `status`, from `pending` to `accepted` only |
+| `blocked_users` | None | R, I, D: as blocker | None |
+| `staff_roles` | None | R: own. Admins: all | Admin function only |
+
+`follows.status` isn't writable on insert. A trigger sets it from the target's settings and rejects the insert if a block exists.
+
+### Gaming catalog
+
+| Table | `anon` | `authenticated` | Writes |
+| --- | --- | --- | --- |
+| `region_codes`, `markets`, `platforms`, `genres`, `franchises` | R | R | Catalog staff |
+| `release_markets`, `release_components` | R: `can_read_release` | Same | Submission and staff functions only |
+| `game_relations` | R: both games published | Same | Catalog staff only |
+| `games`, `releases`, `game_platforms` | R: `published`, `merged` | R: same, plus own submissions, and an `excluded` release the caller owns a preserved copy of. Catalog editors: all | Submission and staff functions only |
+| `game_genres`, `game_franchises` | R | R | Catalog staff |
+| `catalog_images` | R: approved, `licensed` or `user_contributed` | Same, plus own uploads. Catalog editors: all | Submission and staff functions only |
+| `catalog_change_requests` | **No grant** | Catalog editors: R. Everyone else uses `my_catalog_submissions()` | Submission and staff functions only |
+| `external_providers`, `external_references`, `catalog_field_locks` | None | Catalog staff | Server jobs and catalog staff |
+| `private.provider_records` | None | None | Server jobs only |
+
+### User-submitted releases
+
+Approved as D5, with changes: submissions are marked unverified and can't become global catalog entries without a staff decision. The full workflow is in [relationships.md](relationships.md#submission-and-approval-workflow). The rules that enforce it:
+
+| Rule | How |
+| --- | --- |
+| Unverified records are private to the submitter and catalog editors | Read policies on `games`, `releases` and `game_platforms` check `status` and `submitted_by` |
+| Users can't approve anything, including their own | `status` has no client grant. Only staff functions change it, after checking the `catalog_editor` role |
+| Nothing auto-approves | Approval has one path, the staff function. No job, threshold or provider sync calls it |
+| A user can attach only their own submissions | `can_use_release()` in the `collection_items` policies. **This check is required because foreign keys ignore RLS**, so anyone who knew a record's ID could otherwise attach to it |
+| Unverified records can't reach public content | `posts`, `reviews`, `wantlist_items` and `user_favorite_games` policies allow published records only |
+| A published row doesn't reveal its submitter | `submitted_by` is cleared on approval and a `CHECK` enforces that. Otherwise a catalog entry for a rare release would reveal who owns it, even with a private collection. The credit stays in the staff-only `catalog_change_requests` |
+| Duplicate checks don't reveal other submissions | Global uniqueness applies to published records only |
+| Submitted images stay private | Held in the private `catalog-submissions` bucket until approved |
+
+Separately from these rules, the submission function is rate limited. Approved as Q7: a public item pointing at an unverified release shows other viewers a neutral "Unverified release" placeholder, and nothing from the record, its markets or its components.
+
+### Physical-only scope
+
+No table, column or enum value represents a digital product, and `releases.media_format` is required. **The database can't inspect whether a cartridge or disc contains game data**, or whether a user physically holds what they declare. So eligibility is enforced by the only path into the global catalog, staff review, and the database enforces what follows from that decision.
+
+An editor excludes an out-of-scope release through a staff function. That function:
+
+- Sets the release to `excluded`, which removes it from public view.
+- Sets attached items to `invalid_preserved`, without deleting them.
+- Notifies every affected owner, and records an audit row.
+
+`can_use_release()` then blocks new additions. The preservation and correction workflow is in [relationships.md](relationships.md#invalid-record-preservation-and-correction).
+
+**`record_status` has no client grant**, so an owner can't clear the flag directly. Relinking to a usable release clears it through a trigger, and every other edit is rejected until then.
+
+### Collection system
+
+| Table | `anon` | `authenticated` | Update columns |
+| --- | --- | --- | --- |
+| `collection_items` | R: passes all checks, and `record_status = 'active'` | R: same, or own. I, U: own, active, `release_id` passes `can_use_release`. D: own | `release_id`, `completeness`, the four conditions, `visibility` |
+| `collection_item_private` | **No grant** | R, I, U, D: own only | All except keys |
+| `shelves` | R: visible | R: visible, or own. I, U, D: own | `name`, `description`, `visibility`, `sort_rank` |
+| `shelf_items` | R: shelf and item both readable | Same, or own. I, U, D: own | `sort_rank` |
+| `collection_item_components` | R: parent item readable | Same, or own. I, U, D: own | `kind`, `label`, `condition` |
+| `wantlist_items` | R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | `minimum_completeness`, `priority`, `visibility` |
+
+```sql
+-- Illustrative
+create policy collection_items_read on public.collection_items
+for select to anon, authenticated using (
+  owner_id = (select auth.uid())
+  or (
+    record_status = 'active'
+    and visibility <> 'private'
+    and private.can_view_collection(owner_id)
+    and (visibility = 'public' or private.is_accepted_follower(owner_id))
+  )
+);
+
+create policy collection_items_update on public.collection_items
+for update to authenticated
+using (owner_id = (select auth.uid()) and private.is_active_user())
+with check (
+  owner_id = (select auth.uid())
+  and private.can_use_release(release_id)
+);
+
+-- Column grants do what the policy can't.
+grant update (release_id, completeness, overall_condition, box_condition,
+              media_condition, manual_condition, visibility)
+  on public.collection_items to authenticated;
+```
+
+`WITH CHECK` plus the column grant means an owner can't transfer an item to someone else, or attach it to another user's submission.
+
+### Social system
+
+| Table | `anon` | `authenticated` | Update columns |
+| --- | --- | --- | --- |
+| `posts` | R: public, visible, not deleted | R: per visibility, not blocked, or own. Staff: all. I, U: own, active, published catalog references only, and `visibility` must be stated | `title`, `body`, `visibility`, `deleted_at` |
+| `post_images` | R: post readable | Same. I, D: own post | `alt_text`, `position` |
+| `comments` | R: post readable, not deleted | Same. I: own, post readable, not blocked. U: own | `body`, `deleted_at` |
+| `likes` | **No grant** | R: post readable. I, D: own, target readable | None |
+| `bookmarks` | **No grant** | R, I, D: own, post readable on insert | None |
+| `reviews` | R: post readable | Same. Any active user may review a published game or release through a server function, and ownership isn't required (D9) | None directly |
+| `achievements` | R | R | Staff |
+| `user_achievements` | R | R | **Server only**, so a user can't award themselves |
+| `notifications` | **No grant** | R, D: recipient. No insert | `read_at` |
+
+A client can't insert a post with `kind = 'achievement'`. A `WITH CHECK` excludes it, and the server creates it after awarding the achievement.
+
+### Messaging
+
+| Table | `anon` | `authenticated` | Update columns |
+| --- | --- | --- | --- |
+| `conversations` | **No grant** | R: member. Created through a function | None |
+| `conversation_members` | **No grant** | R: member of that conversation. Joined through a function | Own: `last_read_at`, `muted_until` |
+| `messages` | **No grant** | R: member. I: sender is self, `can_send_message`. U: own | `body`, `deleted_at` |
+
+```sql
+-- Illustrative
+create policy messages_read on public.messages
+for select to authenticated
+using (private.is_conversation_member(conversation_id));
+
+create policy messages_insert on public.messages
+for insert to authenticated
+with check (
+  sender_id = (select auth.uid())
+  and private.can_send_message(conversation_id)
+);
+```
+
+**Staff have no policy that reads conversations.** When a user reports a message, the filing function copies that message into `reports.content_snapshot`. Staff see the snapshot and nothing else in the conversation. Messages are protected by RLS and encrypted at rest, but they aren't end-to-end encrypted. See [D11](architecture-decisions.md#decisions-requiring-product-owner-approval).
+
+### Moderation
+
+| Table | `anon` | `authenticated` |
+| --- | --- | --- |
+| `reports` | **No grant** | Moderators: R. Everyone else has no read policy. Filed and updated through functions |
+| `moderation_actions` | **No grant** | Moderators: R. Rows are added only by staff functions. No update or delete for anyone |
+
+**Reporters don't read `reports` directly.** A read policy on their own rows would also expose the snapshot and the assigned moderator, because RLS can't limit columns. A `my_reports()` function returns only the target and status.
+
+## Operations requiring server-side authorization
+
+RLS handles simple ownership. These need trusted server code because they span several rows, check rules RLS can't express, or use privileges a client must never hold.
+
+**Database functions callable by signed-in users** (`SECURITY DEFINER`, each checking the caller itself):
+
+| Operation | Why |
+| --- | --- |
+| Start a conversation, add group members | Enforces `message_permission` and blocks, whose data the caller can't read |
+| Publish a review | Writes `posts` and `reviews` atomically |
+| File a report, list own reports | Captures a snapshot of content, verifying the reporter could see it. Listing returns only safe fields |
+| Staff actions: hide content, set catalog status, review change requests | Column grants block direct writes, and each action records an audit row |
+| Add an item with purchase data | Writes both item tables atomically |
+| Submit a release or game | Creates `unverified` rows the caller can't otherwise insert, plus the review record. Rate limited |
+| List own submissions | `my_catalog_submissions()` returns status and reviewer note, never the reviewer's identity |
+| Publish a shelf or a collection | Changes several visibility settings together after explicit confirmation |
+| Catalog review: approve, request changes, merge, reject, exclude | Crosses several tables atomically and records an audit row. Requires `catalog_editor` |
+| Reverse an exclusion, or relink a preserved record for an owner | Restores valid state across owners. Requires `admin`, with an audit row |
+| Collection statistics | One shared function, so every count uses the same definition of a counted copy. A separate summary function returns pending, not approved and invalid preserved, for the caller only (A1) |
+| Classify games: write `game_relations` | Requires `catalog_editor`. Never automatic, and never based on marketing terms alone |
+| Leave a conversation | Sets `left_at` |
+
+**Next.js server code with the secret key** (Server Actions, route handlers, background jobs):
+
+| Operation | Why |
+| --- | --- |
+| Delete an account | Removes the auth user and storage files |
+| Export account data | Crosses every table, and needs identity re-verification |
+| Award achievements | Must be unforgeable |
+| Run metadata provider sync | Provider credentials must stay server-side |
+| Image processing and malware checks | Strips location data before the file becomes visible |
+| Send notifications and email | Fan-out and provider credentials |
+
+**Next.js-level controls that the database can't provide:**
+
+- **Rate limiting** of sign-ups, posts, reports, messages and follows. RLS has no notion of request rate.
+- **Input validation** with friendly errors, duplicating the database constraints for usability.
+- **Secure session handling.** Server code must verify the session rather than trust cookie contents. Confirm Supabase's current recommended method when implementing.
+- **Cache safety.** Per-viewer data, including `viewerHasLiked` and anything read with a session, must never enter `use cache` or a shared cache. Only public catalog data can be cached. The existing `cacheComponents` setup makes this an easy mistake.
+
+### Rules for `SECURITY DEFINER`
+
+These functions bypass RLS, so each one is a potential hole:
+
+- Lives in `private` when only policies call it. Functions meant to be called by clients must validate `auth.uid()` as their first step.
+- Always sets `set search_path = ''` and schema-qualifies every name.
+- Revokes `EXECUTE` from `public`, then grants only to the roles that need it.
+- Never takes a user ID as a trusted parameter when `auth.uid()` will do.
+
+Views use `security_invoker = true`, because a default view runs with its owner's rights and silently bypasses RLS.
+
+## Where each rule is enforced
+
+No single layer covers everything. The last column lists what the database can't do, because it can't examine a physical object or know what a user holds.
+
+| Requirement | Database constraint | RLS and grants | Trigger or function | Application or editorial |
+| --- | --- | --- | --- | --- |
+| Others can't read private collection data | | Owner-only `collection_item_private`. Read policies on items | | Cache rules for per-viewer data |
+| Can't attach to another user's submission | | `can_use_release()` on insert and update | | |
+| Unverified submissions don't leak | Partial uniqueness on published rows. `submitted_by` cleared by `CHECK` | Read policies on `status` and `submitted_by` | Approval clears submitter | Neutral placeholder |
+| Excluded releases can't be added | | `can_use_release()` | | Hide them from pickers |
+| Preserved records stay private | `record_status` and `invalidated_at` must agree | `record_status` has no grant. Read policy requires `active` | Exclusion sets it, and relinking clears it | Notification and resolution screens |
+| Statistics count only qualifying games (A1) | | Counts see only readable rows | One shared count function, and a caller-only summary for the other categories | All features use those functions |
+| Preserved records aren't deleted by age (A2) | | Owners may delete their own | No function or job deletes by age | Retention policy, to be defined |
+| No standalone components | `item_id` required, foreign key, cascade | Write limited to own items | | |
+| No box-only or manual-only items | No enum value expresses it. `media_condition` can't be `not_included` | | | Declaration when adding an item |
+| Medium really holds game data | `media_format` required, with no digital values | Users can't approve | One approval function | **Editorial only.** Editors follow written guidelines (A3), and unclear cases stay in review |
+| Medium is really present | | | | **User's declaration only.** Can't be verified |
+| Staff actions are authorized and audited | | Protected columns have no client grant | Functions check role and write `moderation_actions` | Limit who holds roles |
+| Only staff approve the catalog | `status` constraints | `status` has no client grant | One approval function | |
+| Public queries and search exclude invalid records | Search indexes are partial on `published` | Read policies on `status` | | Jobs using the secret key filter on status |
+| Provider imports exclude invalid records | | Provider data has no client access | Matching skips excluded records | Adapters drop digital-only data |
+| Purchase data is owner-only | | Separate table, no other read path | | |
+| Accepted follows only (D1) | | `is_accepted_follower()` | Trigger sets follow status | |
+| Rating scale (D8) | `CHECK` | | | |
+| Region code set per Release | Foreign key to `region_codes` | Users can't edit a published release | | Editors classify it. No country rule exists |
+| Partial media described (Q8) | Required enum, default `unknown` | Protected once published | | Editors set it, and don't guess |
+
+## Data region and legal review
+
+Under D13, the proposed initial Supabase region is **Central EU (Frankfurt), AWS `eu-central-1`**. This is the product owner's preference for the initial deployment. The project hasn't been created.
+
+**Hosting in Frankfurt isn't, by itself, proof of GDPR compliance**, and nothing in this design should be read as a claim of legal compliance. Before real user data is stored, these need review:
+
+| Area | To check |
+| --- | --- |
+| Supabase Data Processing Agreement | Terms, and how it's put in place for this project |
+| Data processing arrangements | Roles, purposes, and the subprocessors involved |
+| Backups and logs | Where they're stored, what they contain, and how long they're kept |
+| Storage and CDN behavior | Where files are stored and served from, and how caching affects deletion |
+| International data transfers | Any transfer outside the EU, including by subprocessors and support access |
+| Applicable law and privacy requirements | GDPR and other laws for a global audience, including D10 retention and D12 minimum age |
+
+## Storage
+
+Supabase Storage needs its own policies, and public buckets bypass them for reads: anyone with the URL gets the file.
+
+| Bucket | Public | Contents | Write |
+| --- | --- | --- | --- |
+| `avatars` | Yes | Avatars, profile covers | Own folder |
+| `catalog` | Yes | Approved catalog images | Staff and server |
+| `catalog-submissions` | **No** | Images on unverified submissions | Own folder. Moved to `catalog` on approval |
+| `post-media-public` | Yes | Images on public posts | Own folder |
+| `post-media-private` | **No** | Images on followers-only or private posts | Own folder. Read through short-lived signed URLs |
+
+The split matters. If followers-only images were in a public bucket, the URL alone would be enough to view them. Changing a post's visibility must move its images between buckets, handled by a server function.
+
+Upload rules:
+
+- Paths start with the user's ID, and the policy checks that against `auth.uid()`.
+- Size limits and a MIME allow-list on each bucket.
+- **Re-encode every image on the server, which strips metadata.** Photos of a collection taken at home can contain GPS coordinates, and this is a real risk to collectors who own valuable items.
+- Serve only re-encoded files, and never allow SVG uploads from users because they can carry scripts.
+
+## Requirements checklist
+
+| Requirement | How it's enforced |
+| --- | --- |
+| Can't modify another user's profile | RLS `id = auth.uid()` on update; column grants |
+| Can't modify another user's collection items | RLS on owner; `WITH CHECK` prevents transfer; composite keys prevent cross-owner links |
+| Can't access private collections without permission | Private by default; layered visibility policy; accepted follows only; purchase data in an owner-only table |
+| Can't modify another user's posts | RLS on author; column grants prevent forging counters and moderation status |
+| Can't read conversations they don't belong to | Membership helper on all messaging tables; no `anon` grant; no staff read policy |
+| Purchase information stays owner-only (D2) | Separate table with no read path for anyone else |
+| Private information isn't exposed to signed-out visitors (D3) | `anon` grants limited to public tables, with row checks on each |
+| Unverified records don't become global entries (D5) | Status has no client grant, one approval function, and published-only references |
+| Users can't attach items to another user's submission (D5, Q7) | `can_use_release()` in insert and update policies, because foreign keys ignore RLS |
+| Approval doesn't reveal who owns a copy (D5, Q7) | `submitted_by` is cleared on approval, enforced by a `CHECK`, with credit kept in a staff-only table |
+| Indexing doesn't affect access (Q3) | No policy reads `allow_search_indexing` |
+| Digital products stay out of the catalog (physical-only scope) | No digital values or fields, required `media_format`, staff review, and an `excluded` state |
+| Invalid records stay private and uncounted (Q9) | `record_status` in the read policy and in the shared count function |
+
+## Design probe
+
+To test these patterns before writing them down, we ran throwaway scripts with a subset of the tables, real roles, and real policies. They ran on both PostgreSQL 18.6 and 17.5 (PGlite), because Supabase's platform appears to default to 17. All four rounds passed on both versions, **200 checks in total**: 49 on the original design, 43 on the D1 to D9 changes, 43 on the physical-only scope, region model, game relations and Q3 to Q7, and 65 on Q8, Q9, Q12, A1 and A2. The scripts weren't added to the repository.
+
+| Area | Verified |
+| --- | --- |
+| Private data | A public item row has no price or notes columns. `anon` has no access to the private table. A follower reads 0 private rows. Owner reads their own |
+| Modifying others | Updates to another user's profile, item and post affect 0 rows. Item ownership can't be transferred. Can't post as another user |
+| Forgery | A user can't change their follower count, suspension status, a post's like count or its moderation status |
+| Visibility | An accepted follower sees a followers-only collection. Pending followers, strangers and `anon` don't. A block overrides an accepted follow |
+| Shelves | A private item on a public shelf is hidden. Can't shelve another user's item or use another user's shelf |
+| Messaging | Non-members read and send nothing. Sender can't be spoofed. The naive policy fails with recursion, and the helper fixes it |
+| Staff and reports | A moderator can't write a staff column directly, only through a function that checks the role and records an audit row. Non-staff callers are rejected. A reporter can't read `reports` and sees only safe fields through a function |
+| Private defaults (D2) | New items and shelves are hidden from `anon` and other users. A public item stays hidden until the collection is also public. A post can't be created without a visibility |
+| Indexing (D3) | A signed-out page can read the preference, which is off by default. Another user can't change it |
+| Submissions (D5) | Marked unverified. Hidden from `anon` and others, including a new game-platform pairing. The submitter can attach copies immediately, and others can't, on insert or update. Posts and wantlists can't reference it. Users can't approve it. A second user can submit the same release without learning of the first. Approval publishes and clears the submitter, and a `CHECK` rejects publishing with one attached. Merge moves copies. Rejection keeps them |
+| Identity and ratings (D6, D8, D9) | Different packaging is a separate release. Scores accept 0.5, 9.5 and 10, and reject 0, 9.3 and 10.5. A user owning no copy can review, and an unverified game can't be reviewed |
+| Physical-only scope | Digital values aren't valid media formats. A release requires a physical medium |
+| Allowed items (Q12) | Loose, incomplete, complete and sealed copies are accepted. Box-only values don't exist, a missing medium is rejected, and contradictory states fail. A component can't exist without an item, and adds nothing to a count |
+| Partial media (Q8) | Playability defaults to `unknown`, a qualifying release can say a download is required, and users can't change it |
+| Statistics and retention (A1, A2) | Owned, pending, not approved and invalid preserved are separate, and only owned is counted. The official count is the same signed out. The summary only describes the caller. A ten-year-old preserved record remains. The owner can delete it, and other users can't |
+| Invalid records (Q9) | Only staff can exclude. Nothing is deleted. Every owner is notified, and it's audited. The owner still reads the record and its private data, while `anon` and others can't, and it leaves public shelves. It stops counting, and no new additions are allowed. The owner can't clear the flag, but relinking corrects it. A wrong exclusion can be reversed |
+| Regions and markets (D7) | Old tree codes are rejected. One release can list several markets, and no rule ties markets to a region code. Unknown means `unknown` and no markets. Users can't edit markets. An unverified release's markets stay hidden |
+| Classification and materials (Q2) | Relationships are public only between published games, and users can't write them. Components follow the parent item's visibility |
+| Q3 to Q5, public cards | Indexing on doesn't expose a private collection, and indexing off doesn't hide public content. The profile card stays public with a private collection. Wantlists default to private. An unspecified post fails, and the selected visibility is enforced for `anon`, pending and accepted followers |
+| Integrity | A composite foreign key with a null partner is skipped by PostgreSQL, and the `CHECK` closes that gap. Release needs a recorded game and platform. Duplicate release rejected, including with null variant. Release with owners can't be deleted. Two copies allowed. Post survives its item's deletion |
+
+**What the probes didn't cover:** all 45 tables, a real Supabase environment, Supabase's own Auth, Storage and Realtime, or performance at scale. It validates the patterns, and the real policies still need their own tests.
+
+## Testing the real policies
+
+When migrations are written:
+
+1. **Policy matrix tests in CI.** For each table, act as `anon`, the owner, a stranger, a pending follower, an accepted follower, a blocked user and staff, then assert allowed and denied actions.
+2. **Schema guard tests in CI.** Fail the build if any `public` table lacks RLS, if `anon` has a grant on a table not on the approved list, or if a `SECURITY DEFINER` function lacks a fixed `search_path`.
+3. **Performance tests.** Run `EXPLAIN` on feed and collection queries with realistic data. Supabase's guidance is to wrap `auth.uid()` as `(select auth.uid())`, index the filtered columns, and scope policies with `TO authenticated` where possible ([Supabase RLS performance](https://supabase.com/docs/guides/database/postgres/row-level-security)). Helpers taking per-row values can't be cached this way, so they need measuring.
+4. **Run Supabase's security advisor** before each release.
+
+## To verify when creating the project
+
+These were checked in November 2026 where possible, but could not be fully confirmed. Most can be checked first on the local Supabase stack, and must be confirmed again on the hosted project. The [Phase 2B plan](architecture-decisions.md#before-implementation) makes them a required first step:
+
+- The Data API grant behavior applies as announced.
+- The PostgreSQL major version on Supabase and its supported extensions. PostgreSQL 17 appears to be the current platform default, and it has no built-in `uuidv7()`. See [ADR-007](architecture-decisions.md#adr-007-uuid-strategy).
+- The current recommended way to verify a session on the server.
+- Realtime authorization for messaging. Decide between Broadcast and Postgres Changes in the Messaging phase.

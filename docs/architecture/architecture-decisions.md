@@ -1,0 +1,663 @@
+# Architecture decisions
+
+**Status:** Final Phase 2A design, approved by the product owner. It includes the decisions on D1 to D9, Q1 to Q12, A1 to A3 and D13, and the strict physical-only scope. M0 to M7 is accepted as the roadmap, and no migrations are created until the product owner authorizes the first implementation step.
+
+This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
+
+## Summary
+
+| ADR | Decision |
+| --- | --- |
+| [001](#adr-001-game-release-and-collection-item-are-separate) | Game, Release and Collection Item are separate tables |
+| [002](#adr-002-region-codes-and-markets-are-independent) | Region codes and markets are independent |
+| [003](#adr-003-private-purchase-data-lives-in-its-own-table) | Private purchase data lives in its own table |
+| [004](#adr-004-visibility-is-layered-and-the-most-restrictive-wins) | Visibility is layered, and the most restrictive setting wins |
+| [005](#adr-005-followers-only-means-accepted-followers) | Followers-only means accepted followers |
+| [006](#adr-006-grants-and-rls-work-together) | Grants and RLS work together |
+| [007](#adr-007-uuid-strategy) | UUIDs, with UUIDv7 for high-volume tables |
+| [008](#adr-008-composite-foreign-keys-enforce-ownership) | Composite foreign keys enforce ownership |
+| [009](#adr-009-exclusive-arcs-instead-of-polymorphic-references) | Exclusive arcs instead of polymorphic references |
+| [010](#adr-010-reviews-extend-posts) | Reviews extend posts |
+| [011](#adr-011-a-few-trigger-maintained-counters) | A few trigger-maintained counters |
+| [012](#adr-012-fractional-ranks-for-ordering) | Fractional ranks for ordering |
+| [013](#adr-013-soft-delete-only-where-evidence-matters) | Soft delete only where evidence matters |
+| [014](#adr-014-enums-for-closed-sets-tables-for-open-ones) | Enums for closed sets, tables for open ones |
+| [015](#adr-015-metadata-providers-are-replaceable-adapters) | Metadata providers are replaceable adapters |
+| [016](#adr-016-catalog-changes-are-reviewed-and-merges-leave-tombstones) | Catalog changes are reviewed, and merges leave tombstones |
+| [017](#adr-017-every-image-records-its-source-and-license) | Every image records its source and license |
+| [018](#adr-018-feeds-read-on-demand-first) | Feeds read on demand first |
+| [019](#adr-019-search-starts-in-postgresql) | Search starts in PostgreSQL |
+| [020](#adr-020-staff-see-messages-only-through-reports) | Staff see messages only through reports |
+| [021](#adr-021-achievements-are-awarded-by-the-server) | Achievements are awarded by the server |
+| [022](#adr-022-partition-later-not-now) | Partition later, not now |
+| [023](#adr-023-private-by-default-with-an-explicit-publish-step) | Private by default, with an explicit publish step |
+| [024](#adr-024-indexing-is-a-profile-preference) | Indexing is a profile preference |
+| [025](#adr-025-the-product-is-permanently-physical-only) | The product is permanently physical-only |
+| [026](#adr-026-game-classification-is-a-manual-decision-recorded-as-relationships) | Game classification is a manual decision, recorded as relationships |
+| [027](#adr-027-frankfurt-is-the-proposed-initial-region) | Frankfurt is the proposed initial region |
+| [028](#adr-028-release-eligibility-and-playability-are-separate) | Release eligibility and playability are separate |
+| [029](#adr-029-invalid-records-are-preserved-not-deleted) | Invalid records are preserved, not deleted |
+| [030](#adr-030-a-collection-item-always-includes-the-game-medium) | A Collection Item always includes the game medium |
+
+## Decisions requiring product-owner approval
+
+### What still blocks migrations
+
+**Only the product owner's authorization of the first implementation step.** All Phase 2A decisions needed for migrations are made, and the [plan](#phase-2b-plan) is accepted as the roadmap.
+
+### D1 to D9: product owner's decisions
+
+| # | Decision | Status | Outcome |
+| --- | --- | --- | --- |
+| **D1** | Followers only | **Approved** | Access requires an accepted follow |
+| **D2** | Default privacy | **Approved with change** | Collections, shelves and items default to **private**. Users explicitly choose to publish. Purchase information stays owner-only. See [ADR-023](#adr-023-private-by-default-with-an-explicit-publish-step) |
+| **D3** | Signed-out browsing | **Approved** | Public profiles, collections, games and posts are browsable without signing in. Private information is never exposed. Indexing preferences are supported. See [ADR-024](#adr-024-indexing-is-a-profile-preference) |
+| **D4** | Consoles and accessories | **Approved** | Physical video games only, with no console or accessory catalog. Further defined by [ADR-025](#adr-025-the-product-is-permanently-physical-only) |
+| **D5** | User-submitted releases | **Approved with change** | Submissions are marked unverified and usable immediately by the submitter. They never automatically become global entries. Staff moderate them through a workflow. See [ADR-016](#adr-016-catalog-changes-are-reviewed-and-merges-leave-tombstones) |
+| **D6** | Game versus Release | **Approved** | Ports share a Game. Remakes are separate Games. Different editions, regions and packaging variants are separate Releases. Further defined by [ADR-026](#adr-026-game-classification-is-a-manual-decision-recorded-as-relationships) |
+| **D7** | Region taxonomy | **Approved** | A flat [taxonomy](database-schema.md#region_codes) of 11 codes, plus independent distribution markets and physical edition identity, replaces the earlier hierarchy. See the [examples](relationships.md#physical-release-examples) and [ADR-002](#adr-002-region-codes-and-markets-are-independent) |
+| **D8** | Rating scale | **Approved** | Half-point steps from 0.5 to 10 |
+| **D9** | Review eligibility | **Approved** | Any active user may review. Ownership is self-reported and not required. Only published games and releases can be reviewed |
+| **D13** | Data region | **Selected as proposed** | Central EU (Frankfurt), AWS `eu-central-1`. Project not created. Legal review outstanding. See [ADR-027](#adr-027-frankfurt-is-the-proposed-initial-region) |
+
+### Q1 to Q7: product owner's decisions
+
+| # | Question | Decision |
+| --- | --- | --- |
+| **Q1** | Region tree | **Replaced** by the region code and market model in D7 |
+| **Q2** | Remasters | **Decided.** See [ADR-026](#adr-026-game-classification-is-a-manual-decision-recorded-as-relationships) |
+| **Q3** | Indexing default | **Off.** Users opt in. It doesn't affect access control |
+| **Q4** | Wantlist privacy | **Private by default.** Users can make them public |
+| **Q5** | Post visibility | **Composer may preselect public.** Visibility is explicit and changeable, the database never silently makes an unspecified post public, and RLS enforces the selection |
+| **Q6** | Boxed download codes | **Excluded**, along with all other digital products. See [ADR-025](#adr-025-the-product-is-permanently-physical-only) |
+| **Q7** | Public items on unverified releases | **Approved.** A neutral "Unverified release" placeholder, exposing none of the submitted text |
+
+### Q8 to Q12: product owner's decisions
+
+| # | Question | Decision |
+| --- | --- | --- |
+| **Q8** | Partial media | **Conditionally allowed.** The medium must contain actual game data, and `media_playability` records whether additional downloads are needed. Unclear eligibility requires editor review. See [ADR-028](#adr-028-release-eligibility-and-playability-are-separate) |
+| **Q9** | Invalid or out-of-scope releases | **Preserve user data.** Excluded from the catalog, with no new additions, owners notified, records kept private and uncounted, and a controlled resolution process. See [ADR-029](#adr-029-invalid-records-are-preserved-not-deleted) |
+| **Q10** | Arcade boards | **Excluded from launch scope.** No arcade boards, hardware or accessory catalog |
+| **Q11** | Region-free platforms | **Approved.** Classify by collector-facing regional identity. `region-free` only for a release genuinely classified that way |
+| **Q12** | Box-only and manual-only items | **Excluded, final.** The medium must be present. See [ADR-030](#adr-030-a-collection-item-always-includes-the-game-medium) |
+
+### A1 to A3: product owner's decisions
+
+| # | Question | Decision |
+| --- | --- | --- |
+| **A1** | Collection statistics | **Approved.** Only active Collection Items on approved, qualifying physical Releases count as owned. Unverified submissions show separately as pending. Rejected, excluded and invalid-preserved records are distinguishable from pending, and never count |
+| **A2** | Preserved records | **Approved.** No automatic deletion by age. Owners may delete their own. A formal retention policy will be defined before real user data is processed |
+| **A3** | Meaningful game data | **Approved.** Written editorial eligibility guidelines are required before catalog approval workflows open. The medium must contain actual game data. Download codes, Game-Key Cards, installer-only and launcher-only media and digital entitlements stay excluded. Unclear cases require editorial review |
+
+### Needed before launch, may need legal advice
+
+| # | Decision | Recommendation | Notes |
+| --- | --- | --- | --- |
+| **D10** | **Data retention on account deletion.** | Delete personal data and posts. Keep comments and messages with the author removed. Keep report snapshots for a defined period. Purge notifications after 90 days | **Needs legal review, and a formal retention policy before real user data is processed (A2).** GDPR's right to erasure may apply to retained content, especially message text and report snapshots |
+| **D11** | **Message privacy.** | Protected by RLS and encryption at rest, without end-to-end encryption. Staff see only reported messages. Privacy policy states this plainly | End-to-end encryption is a large addition that limits moderation and search |
+| **D12** | **Minimum age.** A global social network has to address COPPA, GDPR-K and similar rules. | Set a minimum age, such as 16, confirmed at sign-up, and store only the confirmation rather than a birth date | **Needs legal review.** Allowing younger users adds consent requirements |
+
+### Needed before catalog work
+
+| # | Decision | Recommendation | Notes |
+| --- | --- | --- | --- |
+| **D14** | **Metadata provider and budget.** | Contact IGDB and at least one alternative. No provider goes live until its terms are reviewed and `commercial_use_cleared` is set. See [ADR-015](#adr-015-metadata-providers-are-replaceable-adapters) | We couldn't confirm commercial terms from public sources. Treat all as unknown until confirmed in writing |
+| **D15** | **Cover art.** Box art is typically owned by publishers, and a provider's API terms may not grant us display rights. Art is central to the product. | Get legal advice. Start with user-contributed photographs of owned copies, plus any art a provider explicitly licenses | **Needs legal review.** This could shape the visual product |
+| **D16** | **Launch scope for messaging.** | One-to-one messaging only at launch, with the schema ready for groups | Groups add moderation and notification work |
+
+## Decisions
+
+### ADR-001: Game, Release and Collection Item are separate
+
+**Decision.** Three separate tables, with `game_platforms` linking games and platforms. A release has a composite foreign key to `game_platforms`.
+
+**Why.** They are different things. A user's favorite is a Game. A catalog entry with a product code is a Release. A copy with a crushed box corner and a price paid is a Collection Item. Merging any two breaks collector use cases: region variants couldn't be told apart, and a user couldn't own two copies.
+
+**Trade-off.** Common screens need joins through three levels. This is fine with the indexes specified, and the reads can be cached at catalog level.
+
+**Considered.** Dropping `game_platforms` and deriving it from `releases`. It was kept because it was part of the requested design, because the composite key catches bad data, and because it makes "games on this platform" a simple query. The earlier reason, that a game could be known on a platform before a physical release is cataloged, no longer applies: rows record physical availability only.
+
+**Known limits.** Publishing a Game requires a qualifying physical Release, directly or through a compilation.
+
+### ADR-002: Region codes and markets are independent
+
+**Decision.** A release has one `region_code` from a controlled vocabulary of 11 values, and any number of `release_markets` rows naming actual countries or territories. There's no constraint between them, no hierarchy, and no table mapping a code to countries. Both attach to the platform-specific Release, never to the Game. Package identity stays on the Release as edition, variant, packaging, languages, rating labels, product code and barcode.
+
+**Why.** A release's classification, where it was sold, and what the physical package is are three different facts. PAL, NTSC-U/C, NTSC-J and Asia don't map to fixed country lists, and conventions vary by platform and generation. Any fixed mapping would be wrong for some releases, and would push reviewers to invent data.
+
+**Approved.** The product owner approved replacing the previously approved hierarchy with this flat taxonomy, since a hierarchy can't separate these three concepts: `pal-de` under `pal` assumes a country belongs to one code, and combines classification with market.
+
+**A region code isn't a hardware lock.** Under Q11, a platform having no region lock doesn't make its releases `region-free`.
+
+**How the requirements are met:**
+
+| Requirement | How |
+| --- | --- |
+| Mexico isn't automatically separate | It's a market of a shared release when the physical edition is shared |
+| Hong Kong, Taiwan and Southeast Asia aren't one release | `asia` is a classification only, and each package is its own Release |
+| PAL stays broad | `pal` is one code, and countries are markets |
+| Australia and New Zealand are representable without assuming identical packaging | They're markets, on a shared package or their own |
+| Nothing is invented | `unknown`, and no market rows |
+| Historical differences | Each classification belongs to one platform-specific Release, and withdrawn country codes can be added |
+
+**Trade-offs.** Filtering is less automatic: "show me German releases" means filtering on market `DE`, and only finds releases whose markets are recorded. Catalog entry takes more effort. Markets may be incomplete, so absence isn't evidence. A mapping table could make entry faster later by suggesting values, but it must never enforce them.
+
+### ADR-003: Private purchase data lives in its own table
+
+**Decision.** Price, currency, purchase date, personal rating and notes go in `collection_item_private`, one-to-one with `collection_items`, readable only by the owner.
+
+**Why.** RLS works on rows. Any policy that lets a visitor read a public item also exposes every column in it, including what the owner paid. Purchase history in a public response would be a serious privacy failure, and collectors are also an obvious theft target, so this data shouldn't be one mistaken query away.
+
+**Alternatives considered.**
+
+| Option | Problem |
+| --- | --- |
+| Single table, with a public view omitting the columns | The base table has to remain unreadable, and the view has to bypass RLS or re-implement it, so the safety depends on every future query |
+| Single table with column grants | Owners need to read those columns while others don't, and grants apply per role, not per user |
+| Encrypting the columns | Complicated, and blocks spending statistics |
+
+**Trade-off.** Adding an item with purchase data writes two tables, handled by one database function. Owner views need a left join. Selectively sharing a price later would need a new mechanism, but loosening privacy later is much easier than recovering from a leak.
+
+Personal rating is private by default for the same reason. Public opinions belong in `reviews`.
+
+### ADR-004: Visibility is layered and the most restrictive wins
+
+**Decision.** `profiles.collection_visibility` is a master switch. Each item and shelf also has its own `visibility`. A viewer needs to pass all of them, and shelves never grant access to items.
+
+**Why.** Users need a one-click way to make everything private without touching every row. Keeping the settings independent means switching the master back restores the earlier per-item choices. All default to private under D2, as described in [ADR-023](#adr-023-private-by-default-with-an-explicit-publish-step).
+
+**Trade-off.** Each row check calls a function. Queries are nearly always scoped to one owner, so this runs on a small set. Listing items across owners, such as "who owns this release", is the expensive case and should be precomputed.
+
+### ADR-005: Followers-only means accepted followers
+
+**Decision.** Approved as D1. `follows.status` is `pending` or `accepted`, set by a trigger. Only `accepted` grants access.
+
+**Why.** Without approval, followers-only offers no real protection. Adding `status` after launch would require a migration of a hot table, whereas including it now costs one column.
+
+### ADR-006: Grants and RLS work together
+
+**Decision.** Every table has RLS, explicit grants, and column-level update grants wherever a table has system or staff columns.
+
+**Why.** RLS controls rows, not columns, so a user-update policy would otherwise allow forging `like_count`, `follower_count`, `account_status` or `moderation_status`. Supabase's move to explicit grants fits this approach.
+
+**Consequence for staff.** Grants apply per role, and staff use the `authenticated` role. So staff can't write protected columns directly either. Their changes go through functions that check the staff role and record an audit row. This costs a function per staff action, and in return no staff change can skip the audit log.
+
+**Trade-off.** A new column isn't client-writable until granted. That's a useful safe default, but can surprise developers, and insert grants need the same attention. CI checks guard against mistakes.
+
+### ADR-007: UUID strategy
+
+**Decision.** UUIDs throughout for user-generated and catalog entities. UUIDv7 for high-volume tables: `collection_items`, `posts`, `comments`, `likes`, `notifications`, `messages`, `reports`, `moderation_actions`, `provider_records`.
+
+**Why.** UUIDs can be created anywhere and don't reveal totals in URLs. Random UUIDv4 values scatter inserts across the index, which hurts at large scale. UUIDv7 is time-ordered and so inserts near the end, and can double as the sort key for pagination.
+
+**Trade-off.** UUIDv7 reveals its creation time. That's not a concern for these tables, where `created_at` is visible anyway, but it's a reason to avoid it on tables where creation time should stay private.
+
+**Availability.** PostgreSQL 18 has a built-in `uuidv7()`, and 17 doesn't, which we confirmed on a 17.5 engine. Supabase's platform appears to default to 17 ([Supabase discussion](https://github.com/orgs/supabase/discussions/46080)). So plan on a small `private.uuid_v7()` database function, which works on either version and can be replaced later without changing the schema. M0 confirms this on the actual environment. `gen_random_uuid()` is available everywhere, and remains the default for other tables.
+
+### ADR-008: Composite foreign keys enforce ownership
+
+**Decision.** Where a row links two things that must share an owner, it carries `owner_id` and uses composite foreign keys, such as `shelf_items` to `shelves` and `collection_items`. `posts` uses this for its item and shelf, and `reviews` uses `(release_id, game_id)` to keep a release consistent with its game.
+
+**Why.** It makes cross-user links impossible at the database level, whatever the application or policy does.
+
+**Trade-off.** A slightly redundant column and extra unique constraints. This is the one form of redundancy that adds safety rather than risk, because the foreign keys keep it consistent.
+
+**Watch for.** PostgreSQL skips a composite foreign key when any of its columns is null. So `posts` needs `CHECK (release_id IS NULL OR game_id IS NOT NULL)`, and migrations must check this for every composite key with nullable columns.
+
+### ADR-009: Exclusive arcs instead of polymorphic references
+
+**Decision.** Tables pointing to one of several parents, such as `likes` and `reports`, have one nullable foreign key per parent, plus `CHECK (num_nonnulls(...) = 1)`.
+
+**Why.** The common alternative of `target_type` and `target_id` can't have foreign keys, so it allows dangling references and has no cascading deletes.
+
+**Trade-off.** Each new target type needs a new column. Targets are few and change rarely.
+
+### ADR-010: Reviews extend posts
+
+**Decision.** A review is a `post` with `kind = 'review'`, plus a `reviews` row holding the title, score and game. The text stays in `posts.body`.
+
+**Why.** Reviews appear in the feed and need likes, comments, bookmarks, moderation and reports, all of which already work on posts. Storing the text once avoids it diverging.
+
+**Trade-off.** Reviews and their posts must be written together, handled by one function. Game page queries join two tables.
+
+### ADR-011: A few trigger-maintained counters
+
+**Decision.** Only the counters listed in [the schema](database-schema.md#scale-and-performance) are stored. Others are computed or held in rollups.
+
+**Why.** Counting likes for every post in a feed gets expensive, and these numbers appear everywhere.
+
+**Trade-off.** Counters can drift and need a periodic reconciliation job. A viral post creates contention on one row. If that happens, move to batched updates. Counters aren't client-writable, because of the column grants.
+
+### ADR-012: Fractional ranks for ordering
+
+**Decision.** Shelves and shelf items sort by a text fractional index (`sort_rank`), compared with `COLLATE "C"`.
+
+**Why.** Moving one game on a shelf with 2,000 items updates one row, rather than renumbering the rest. Users reorder often, and virtual shelves are core to the product.
+
+**Trade-off.** Ranks grow if the same spot is repeatedly split, so an occasional rebalance is needed. Two concurrent moves can tie, so sorts break ties on the ID. `user_favorite_games` uses a simple `position`, as it's capped at 10.
+
+### ADR-013: Soft delete only where evidence matters
+
+**Decision.** `posts`, `comments`, `messages` and `reviews` have `deleted_at`. Everything else is a hard delete.
+
+**Why.** Moderation needs to see what was said, even after deletion. Applying soft delete everywhere, though, leaves every query and unique constraint needing a filter, and it keeps personal data longer than necessary.
+
+**Trade-off.** Soft-deleted content needs a purge schedule, which is part of [D10](#decisions-requiring-product-owner-approval).
+
+### ADR-014: Enums for closed sets, tables for open ones
+
+**Decision.** PostgreSQL enums for stable, closed sets used in code, such as `completeness` and `post_kind`. Lookup tables for sets with attributes or that staff should be able to change, such as `region_codes` and `markets`.
+
+**Why.** Enums generate precise TypeScript types with `supabase gen types`, matching the discriminated unions Phase 1 already uses.
+
+**Trade-off.** Enum values are easy to add, but hard to remove. Removing one needs a type swap migration, so values should be added carefully.
+
+### ADR-015: Metadata providers are replaceable adapters
+
+**Decision.** The internal database is the only source the application reads. Providers connect through server-side adapters, and their data enters through a staged, reviewable pipeline.
+
+```mermaid
+flowchart LR
+  subgraph External
+    A["Provider A"]
+    B["Provider B"]
+    C["Community sources"]
+  end
+  subgraph Adapters["Server-side adapters"]
+    AA["Adapter A"]
+    AB["Adapter B"]
+    AC["Adapter C"]
+  end
+  A --> AA
+  B --> AB
+  C --> AC
+  AA --> N["Normalized records"]
+  AB --> N
+  AC --> N
+  N --> S[("private.provider_records")]
+  S --> M{"Match to the catalog"}
+  M -- "Matches a published record" --> P["Update, skipping locked fields"]
+  M -- "New or uncertain" --> R["Staff review"]
+  R --> P
+  P --> DB[("games, releases, platforms")]
+  DB --> App["Application"]
+```
+
+**Rules:**
+
+1. **The application never calls a provider during a user request.** A provider outage or rate limit can't take down a page.
+2. **Our IDs are ours.** Provider IDs live only in `external_references`, so several can link to one game and any can be dropped.
+3. **Human corrections win.** `catalog_field_locks` stops a sync overwriting a corrected field.
+4. **Nothing runs until cleared.** `commercial_use_cleared` and `images_cleared` on `external_providers` gate each provider, and the adapter's job checks them first.
+5. **Images are copied only when licensed.** No hotlinking. See [ADR-017](#adr-017-every-image-records-its-source-and-license).
+6. **A provider match never approves a user submission.** A match can suggest a merge to an editor, but can't change a submission's status, and new provider records also pass through staff review.
+7. **Adapters import physical releases only.** Digital-only games and editions in a provider's data are ignored, and never promoted. Provider data alone doesn't establish that a product contains the game on a physical medium, so an editor still confirms it.
+
+**The adapter contract.** Illustrative only, for the implementation phase:
+
+```ts
+type ProviderAdapter = {
+  code: string;
+  capabilities: { games: boolean; releases: boolean; platforms: boolean; images: boolean };
+  listChangedSince(entity: CatalogEntity, since: Date, cursor?: string): Promise<ProviderPage>;
+  fetchById(entity: CatalogEntity, externalId: string): Promise<ProviderRecord | null>;
+  normalize(record: ProviderRecord): NormalizedRecord;
+};
+```
+
+Each adapter is one module, for example `src/features/catalog/providers/<code>/`. Rate limits and retries sit in a shared job runner.
+
+**What we found on providers.** Public information was thin, and none of this is legal confirmation:
+
+| Provider | Finding | Status |
+| --- | --- | --- |
+| IGDB | Secondary sources say commercial use requires a partnership ([IGDB's post](https://medium.com/igdb/igdb-api-v4-is-coming-6ba97874edbc), [Twitch developer forum](https://discuss.dev.twitch.com/t/commercial-use-of-igdb-api/23567)) | Confirm directly |
+| MobyGames | No commercial pricing or terms found | Unknown |
+| ScreenScraper | No commercial terms found. Community tool documentation lists request limits ([Skyscraper docs](https://gemba.github.io/skyscraper/SCRAPINGMODULES)) | Unknown |
+| TheGamesDB | No commercial terms found. Community tool documentation lists request limits (same source) | Unknown |
+
+Most general game databases focus on games rather than physical releases. Expect region, edition and product code coverage to be uneven, which is one reason user submissions (D5) matter. Check each provider's coverage for releases as part of [D14](#needed-before-catalog-work).
+
+**Trade-off.** More work upfront than calling an API directly, and there's a data delay. In return, there's no dependency on any provider and the catalog keeps its value independently.
+
+### ADR-016: Catalog changes are reviewed, and merges leave tombstones
+
+**Decision.** Approved under D5, with changes. User submissions are stored in `games`, `releases` and `game_platforms` with `status = 'unverified'`, and are visible only to the submitter and catalog editors. The submitter can attach their own items immediately. Only a staff function can publish one, and each submission has a record in `catalog_change_requests`. Duplicates are merged by setting `status = 'merged'` and `merged_into_id`, then moving references. The old row stays. The workflow is in [relationships.md](relationships.md#submission-and-approval-workflow).
+
+**Why this storage.** `collection_items.release_id` stays a single required foreign key, so every collection query works the same way, and approval changes a status without moving the user's items. A separate submissions table would have needed an optional second reference on every collection item, and a migration of those references at approval.
+
+**The risk of this choice** is that unverified rows sit beside real ones, so anything that bypasses RLS could expose them. Mitigations:
+
+- Search indexes are partial on `published`.
+- Jobs using the secret key, such as sitemaps, trending and provider matching, must filter on status, and tests check this.
+- `game_platforms` has its own status, so a submission can't add a pairing to the public catalog.
+- Global uniqueness applies to published rows only, so duplicate errors can't reveal another user's submission.
+- `submitted_by` is cleared on approval, so a public row can't show who owns a rare release. A `CHECK` enforces this.
+- Policies check `can_use_release()`, because foreign keys ignore RLS.
+
+**Trade-off.** Needs admin tooling and staff time, and a backlog directly affects users, who see their release as unverified until reviewed. Several users may submit the same release, leaving editors to merge them. Repointing in large collections needs batches. A rejected record stays private to its submitter indefinitely, since the physical copy still exists.
+
+**Excluded differs from rejected.** A rejected record is a genuine physical product with a problem, so the owner's copy and record stay as they are. An excluded record is outside the physical-only scope, so its attached items are preserved as invalid records. See [ADR-029](#adr-029-invalid-records-are-preserved-not-deleted).
+
+**Tombstones.** Keep old links and provider references working, and `ON DELETE RESTRICT` protects user data from an accidental delete.
+
+### ADR-017: Every image records its source and license
+
+**Decision.** `catalog_images` stores `license_status`, `attribution` and `provider_code`. Only approved `licensed` and `user_contributed` images are readable by the public. All are stored in our own buckets, with submission images in a private bucket until approved, and `uploaded_by` cleared on approval. Posts and avatars are handled separately, as described in [security-rls.md](security-rls.md#storage).
+
+**Why.** Rights vary by source, and art is central to this product. Recording the source lets us remove everything from one source if terms change. Hotlinking would make us dependent on another service and expose visitors' requests to it.
+
+**Trade-off.** Storage cost and a review step. Until [D15](#needed-before-catalog-work) is settled, there may be limited cover art.
+
+### ADR-018: Feeds read on demand first
+
+**Decision.** The Following feed queries posts from followed users using `(author_id, id DESC)`. Latest uses a partial index on public posts. For You starts as a simple ranking on recent public posts.
+
+**Why.** Pre-building a feed for each user is complex and only pays off at scale. On-demand reads handle the early stages and are simple to get right with RLS.
+
+**Trade-off.** Following thousands of users, or very high traffic, will eventually be too slow. `feed_items` is the planned next step, adding a table without changing `posts`. Feed responses can't use shared caches because they're per-viewer.
+
+### ADR-019: Search starts in PostgreSQL
+
+**Decision.** Full-text search and trigram indexes in PostgreSQL for titles and handles. Search reads through the same database functions, so RLS still applies.
+
+**Why.** It adds no new infrastructure and is sufficient for early Latin-script catalogs.
+
+**Trade-off.** PostgreSQL's default text search and trigrams handle Japanese and other non-Latin scripts poorly, which matters for a global catalog with `local_title`. A dedicated search engine is the likely next step, fed by the catalog and restricted to public data.
+
+### ADR-020: Staff see messages only through reports
+
+**Decision.** No policy lets staff read conversations. Filing a report copies the reported message into `reports.content_snapshot`.
+
+**Why.** It limits who can see private messages to the people in the conversation, and it's easy to explain to users. The secret key can technically read everything, so server code using it must be limited and audited.
+
+**Trade-off.** Staff get less context when judging a report. Reporters could be allowed to include a few nearby messages, as a later refinement.
+
+### ADR-021: Achievements are awarded by the server
+
+**Decision.** `achievements` holds definitions and `user_achievements` holds awards, written only by server code. Clients can't insert a post with `kind = 'achievement'`.
+
+**Why.** Achievement is a Phase 1 post type, but the requested table list had nowhere to store one, and letting users write their own would make them meaningless.
+
+**Trade-off.** Two small extra tables. Note that achievements based on collection size, such as "Century Shelf", rest on self-reported data, so they can't be treated as proof of ownership.
+
+### ADR-022: Partition later, not now
+
+**Decision.** No partitioning at launch. High-volume tables use UUIDv7 and owner-scoped indexes to keep this path open.
+
+**Why.** Partitioning adds real complexity, including restrictions on primary keys and foreign keys, and has no benefit at small scale.
+
+**Trade-off.** Partitioning an existing large table is a real project. `collection_items` would need its primary key changed to include `owner_id`, which affects composite foreign keys. Revisit when any table nears roughly 100 million rows, or when maintenance becomes slow.
+
+### ADR-023: Private by default, with an explicit publish step
+
+**Decision.** Changed from the original recommendation under D2 and Q4. `profiles.collection_visibility`, `shelves.visibility`, `collection_items.visibility`, `wantlist_items.visibility` and their preferences all default to `private`. Purchase information remains owner-only regardless. Under Q5, `posts.visibility` has no database default, and the composer may preselect `public`.
+
+**Why.** Users decide what becomes public, and a mistake leaves something hidden rather than exposed. Physical collections can be valuable, so this is the safer position.
+
+**Trade-offs for the product owner:**
+
+- **Thinner public content early on.** Trending, suggested collectors and public shelves depend on people choosing to publish. This works against the social-first goal, so onboarding should invite users to publish.
+- **Several settings must agree.** A public shelf needs a public collection and public items. A user who makes only the shelf public would see an empty shelf from the outside. The design addresses this with an effective-visibility display and a single confirmed publish action, described in [security-rls.md](security-rls.md#making-things-public-under-private-defaults).
+- **Posts can still disclose.** A public pickup post from a private item shows its release and completeness, by the author's explicit choice.
+
+### ADR-024: Indexing is a profile preference
+
+**Decision.** Approved under D3 and Q3. `profiles.allow_search_indexing` controls whether a user's public pages may be indexed, off by default. Published catalog pages are always indexable. Unverified records never are. It doesn't replace privacy or access control, and no policy reads it.
+
+**Why on `profiles`.** A signed-out page needs to read it, and `user_preferences` is owner-only. It isn't sensitive.
+
+**Trade-off.** Indexing rules are enforced by a `noindex` tag and sitemap omission, and search engines choose whether to honor them. So this reduces discovery and doesn't protect content. The default of off reduces search traffic.
+
+### ADR-025: The product is permanently physical-only
+
+**Decision.** My Game Dex exclusively catalogs, manages, showcases and discusses physical video game editions and physical collections. This is a permanent product requirement, not a launch limitation or a feature to revisit.
+
+**The test.** A product qualifies only if its physical medium contains actual game data. Box, manual, inserts, maps and artwork are components of a physical edition, not products themselves, and a user must possess the physical game medium to add a game to their collection.
+
+**Excluded permanently:** download codes in boxes, boxed digital download products, Game-Key Cards that only authorize downloading, digital-only editions, digital copies, account-bound entitlements, streaming and cloud gaming products, digital licenses and access keys, media containing only an installer, launcher or access key or no meaningful game data, and packaging or materials without the game.
+
+**What this changes:**
+
+| Area | Change |
+| --- | --- |
+| `media_format` | The boxed-code value is gone, and the field is required on every Release |
+| `games` | Publishing requires a qualifying physical Release, directly or through a compilation |
+| `game_platforms` | Records physical availability only, and the release date field was removed |
+| `completeness` | `parts_only` is gone, and a Collection Item always includes the medium (Q12) |
+| Catalog workflow | A new `excluded` state, separate from `rejected`, which preserves user records (Q9) |
+| `media_playability` | Records whether a qualifying release needs additional downloads (Q8) |
+| Provider adapters | Digital data is ignored and never promoted |
+| Materials | `release_components` and `collection_item_components` record them as parts of an edition and a copy |
+
+**Why no field records "contains game data".** Being published is the record of that decision: every published Release has been accepted by an editor as qualifying. A separate field would be self-reported and could disagree with the status. `media_playability` describes something different, covered in [ADR-028](#adr-028-release-eligibility-and-playability-are-separate).
+
+**Trade-offs.** The database can't detect a Game-Key Card, because it's physically similar to a real game card, so correctness depends on editors, and they need a clear guideline. Modern platforms are where this is hardest. Some users will want to log products that are excluded, so the submission flow should explain the scope before they start.
+
+### ADR-026: Game classification is a manual decision, recorded as relationships
+
+**Decision.** A catalog editor decides whether something is a new Game, and records the link in `game_relations`. **Nothing is classified automatically, and marketing terminology alone never decides it.** A product called "Remastered", "HD" or "Definitive" may be either.
+
+| Rule | Game record | Relationship |
+| --- | --- | --- |
+| Ports share a Game | Same | None |
+| Straight technical enhancements, re-releases, reprints and simple redistributions | Same | None |
+| Remakes | Separate | `remake_of` |
+| Substantially rebuilt or materially altered remasters | **May be** separate, by editor decision | `remaster_of` |
+| Collections containing multiple games | Separate, `kind = 'compilation'` | `contains`, for each game |
+| Different physical editions, packaging, regions and print variants | Same | None. Separate Releases |
+
+**Questions for editors**, in order:
+
+1. Is this several games sold as one? If so, it's a compilation.
+2. Was the game rebuilt, such as with new engine work or rebuilt assets, rather than running the original at a better resolution or frame rate?
+3. Is the content or play materially altered, such as changed structure, mechanics or story?
+4. If neither applies, it's the same Game. If the answer is unclear, keep it the same Game and record a note, because a merge is more work than a later split.
+
+**Examples for consistency.** These apply the rules as guidance. Editors should confirm the facts of each case:
+
+| Product | Treatment | Reason |
+| --- | --- | --- |
+| *Chrono Trigger* on PlayStation, after the SNES original | Same Game, new Release | A port |
+| *Metal Gear Solid* Greatest Hits | Same Game, new Release | A reprint |
+| *The Last of Us Remastered* | Same Game, new Release | A technical enhancement, despite the name |
+| *Resident Evil* (2002, GameCube) | Separate Game, `remake_of` the 1996 original | A remake, despite the same title |
+| *Metal Gear Solid: The Twin Snakes* | Separate Game, `remake_of` | A remake |
+| *Shadow of the Colossus* (2018, PS4) | Separate Game, `remake_of` the PS2 game | Rebuilt |
+| *The Legend of Zelda: Ocarina of Time 3D* | Separate Game, `remaster_of` | Substantially rebuilt. An example of a judgment call |
+| *The Ico & Shadow of the Colossus Collection* | Separate compilation Game, `contains` both | The games inside stay the same Games |
+
+**Trade-off.** Judgment means editors will sometimes disagree, so `game_relations.note` records the reasoning and `moderation_actions` records the decision. Reviews and favorites attach to the Game, so a split later would need those reassigned by hand.
+
+### ADR-027: Frankfurt is the proposed initial region
+
+**Decision.** D13 selects Central EU (Frankfurt), AWS `eu-central-1`, as the product owner's preference for the initial deployment. The project hasn't been created.
+
+**Trade-offs.** Readers far from Europe will have higher latency for uncached data, which CDN caching of public content can reduce. A project's region is effectively fixed at creation, so changing later means a migration.
+
+**Not a compliance claim.** Selecting an EU region isn't proof of GDPR compliance. The Data Processing Agreement, processing arrangements, backups and logs, storage and CDN behavior, international transfers, and applicable legal requirements all still need review, as listed in [security-rls.md](security-rls.md#data-region-and-legal-review).
+
+### ADR-028: Release eligibility and playability are separate
+
+**Decision.** Under Q8, whether a release qualifies is an editorial decision recorded by publishing it. Whether it plays without downloads is a fact on the release, `media_playability`: `playable_from_media`, `download_required` or `unknown`.
+
+| Situation | Result |
+| --- | --- |
+| Playable from the medium, subject to normal installation | Published as `playable_from_media` |
+| Holds actual game data, and downloads are needed for essential gameplay | Published as `download_required`, shown clearly |
+| Holds actual game data, and download needs aren't known | Published as `unknown` |
+| Eligibility is unclear | Stays in review. Never approved by default |
+| Installer, launcher, access key, Game-Key Card, or no meaningful game data | Excluded |
+
+**Why.** The two can differ: a disc can qualify and still need downloads. Having a disc or cartridge doesn't mean the complete game is available offline, so the default is `unknown`, never an assumption. A provider's data can't set it to `playable_from_media` on its own.
+
+**Trade-offs.** Editors need evidence, and much of the catalog may stay `unknown`. Download requirements can change after release through patches, so this describes the medium as sold. Under A3, written editorial eligibility guidelines are required before catalog approval opens, because the database can't inspect a medium.
+
+### ADR-029: Invalid records are preserved, not deleted
+
+**Decision.** Under Q9, excluding a release never deletes user data. Attached items become `record_status = 'invalid_preserved'`, which makes them private and uncounted. The workflow is in [relationships.md](relationships.md#invalid-record-preservation-and-correction).
+
+**Why a stored status rather than deriving it from the release.** It's a clear, indexable distinction between a valid game and a preserved record. Policies can check it on the row without a lookup per row, and it gives the resolution queue an index. Both are set in one transaction by the staff function. The trade-off is that the status and the release could disagree if a function were wrong, so tests check that they don't.
+
+**Trade-offs.** Excluded releases can't be hard-deleted while records reference them, so they accumulate. Under A2, preserved records aren't deleted by age, so they stay until resolved, deleted by their owner, or covered by the retention policy still to be defined. A published release later excluded affects every owner, so exclusions need care, and reversal needs an admin. Owners of a preserved copy can read that excluded release, so it isn't hidden from everyone. That read is limited to owners, and is needed to correct the record.
+
+### ADR-030: A Collection Item always includes the game medium
+
+**Decision.** Under Q12, a Collection Item represents an actual physical game. No `completeness` value expresses a missing medium, `media_condition` can't be `not_included`, and a component can't exist without an item. A loose cartridge or disc is a valid item, and counts as one owned game. Sealed copies rely on the declared edition and sealed condition.
+
+**Why completeness stays a declared value.** It isn't derived from `release_components`, because that data will often be incomplete, and a release's contents can't be checked against the copy. The completeness rules catch contradictions only.
+
+**Trade-off.** Collectors can't log an empty box or a standalone manual, by design. The database prevents representing these, and can't verify what someone physically holds, so a false declaration can't be detected. Treat ownership as self-reported.
+
+## Risks to watch
+
+| Risk | Mitigation |
+| --- | --- |
+| A policy mistake exposes private data | Owner-only table for purchase data, policy matrix tests, schema guards in CI |
+| The secret key leaks or is misused | Server-only, never `NEXT_PUBLIC_`, limited to named jobs, rotation plan |
+| Per-viewer data enters a shared cache | Rule in [security-rls.md](security-rls.md#operations-requiring-server-side-authorization), with code review and a test for it |
+| RLS helper calls slow large queries | Scope by owner, index, measure with `EXPLAIN`, precompute cross-owner views |
+| The catalog review queue falls behind | Build admin tools early. Submitters can already use their entries, so a delay doesn't block them. Any trusted-contributor program must still not auto-approve without a new product decision |
+| An unverified record leaks into a global surface | Published-only indexes, status filters in jobs using the secret key, and tests for each surface |
+| Private defaults leave the platform looking empty | Onboarding that invites publishing, and tracking the share of collections made public |
+| A profile card reveals more than users expect | Cards are public by decision, and `country_code` is optional. Keep the settings screen clear about what's always visible |
+| A Game-Key Card or similar gets past review | A written guideline for editors, and users can report catalog errors. A published record can move to `excluded`, which preserves every owner's items as invalid records |
+| Market data is thin or uneven | Treat markets as known distribution only. Never present absence as fact |
+| Classification rules are applied inconsistently | The examples in ADR-026, and a recorded note on judgment calls |
+| Cover art rights block the visual design | Resolve [D15](#needed-before-catalog-work) before committing to a provider |
+| Self-reported data is treated as fact | Don't present ownership, valuation or achievements as verified |
+
+## Phase 2B plan
+
+Accepted by the product owner as the implementation roadmap. Nothing here has started. Work proceeds one step at a time, with constraints, grants, RLS policies and tests delivered together, and each step needs authorization.
+
+### Table classification
+
+**First phase** means the first migration phase. **Core** is required for the first functional version: accounts, catalog, physical collections, shelves and privacy. **Supporting** is required for integrity, authorization or catalog correctness. **Later** can be added without changing the initial architecture.
+
+| Table | Purpose | Class | Depends on | First phase | Why |
+| --- | --- | --- | --- | --- | --- |
+| `profiles` | Public user card | Core | `auth.users` | Yes | Everything is owned by a profile |
+| `user_preferences` | Private settings and defaults | Core | `profiles`, `region_codes` | Yes | Holds the private defaults under D2 |
+| `platforms` | Consumer gaming platforms | Core | None | Yes | Every Release needs one |
+| `games` | The abstract game | Core | `profiles` | Yes | Core concept |
+| `releases` | A qualifying physical edition | Core | `game_platforms`, `region_codes`, `profiles` | Yes | Core concept |
+| `collection_items` | An owned physical game | Core | `profiles`, `releases` | Yes | Core concept, with privacy and Q9 status |
+| `collection_item_private` | Owner-only purchase data | Core | `collection_items` | Yes | Purchase data can't be added safely later on the public table |
+| `shelves` | User-arranged groups | Core | `profiles` | Yes | Virtual shelves are the default collection view |
+| `shelf_items` | Item-to-shelf references | Core | `shelves`, `collection_items` | Yes | Shelves don't work without it |
+| `game_platforms` | Physical game and platform pairing | Supporting | `games`, `platforms`, `profiles` | Yes | Composite key on `releases` depends on it |
+| `region_codes` | Controlled vocabulary | Supporting | None | Yes | Foreign key on `releases` |
+| `markets` | Countries and territories | Supporting | None | Yes | Needed by D7 |
+| `release_markets` | Distribution of a Release | Supporting | `releases`, `markets` | Yes | Needed by D7 from the first catalog entry |
+| `release_components` | Materials an edition included | Supporting | `releases` | Yes | Small, and part of edition identity |
+| `collection_item_components` | Materials a copy has | Supporting | `collection_items` | Yes | Completeness tracking under Q12 |
+| `game_relations` | Remakes, remasters and compilations | Supporting | `games` | Yes | D6 requires explicit links as records are approved |
+| `catalog_change_requests` | Submission review queue | Supporting | `profiles`, `games`, `releases`, `platforms` | Yes | D5 needs it as soon as users can submit |
+| `staff_roles` | Staff authorization | Supporting | `profiles` | Yes | Approval is restricted to staff |
+| `moderation_actions` | Audit log | Supporting | `profiles` | Yes | Staff functions write to it. `report_id` is added with `reports` |
+| `follows` | Accepted follows | Supporting | `profiles` | Yes | The visibility policies under D1 depend on it, and retrofitting means rewriting them |
+| `blocked_users` | Blocks | Supporting | `profiles` | Yes | Same reason |
+| `notifications` | User notices | Supporting | `profiles` | Yes | Q9 and D5 must notify owners. Post, comment and conversation columns are added with those tables |
+| `catalog_images` | Image provenance | Supporting | `games`, `releases`, `profiles` | No | Blocked by D15. `provider_code` is added with providers |
+| `wantlist_items` | Wanted games | Later | `profiles`, `releases`, `games`, `platforms` | No | Self-contained, and first to follow |
+| `user_favorite_games` | Favorites | Later | `profiles`, `games` | No | Profile polish |
+| `genres` | Genre vocabulary | Later | None | No | Browsing only |
+| `game_genres` | Game to genre | Later | `games`, `genres` | No | Browsing only |
+| `franchises` | Franchise vocabulary | Later | None | No | Browsing only |
+| `game_franchises` | Game to franchise | Later | `games`, `franchises` | No | Browsing only |
+| `posts` | Feed content | Later | `profiles`, `games`, `releases`, `collection_items`, `shelves`, `user_achievements` | No | Next major phase. The Home Feed stays on seed data until then |
+| `post_images` | Post images | Later | `posts` | No | With posts |
+| `comments` | Post comments | Later | `posts`, `profiles` | No | With posts |
+| `likes` | Likes | Later | `posts`, `comments`, `profiles` | No | With posts |
+| `bookmarks` | Saved posts | Later | `posts`, `profiles` | No | With posts |
+| `reviews` | Scored reviews | Later | `posts`, `games`, `releases` | No | Depends on posts |
+| `achievements` | Achievement definitions | Later | None | No | With posts |
+| `user_achievements` | Awarded achievements | Later | `achievements`, `profiles` | No | With posts |
+| `reports` | User reports | Later | `profiles`, `posts`, `comments`, `messages`, `shelves`, `collection_items` | No | **Required before public launch**, with targets added as their tables arrive |
+| `conversations` | Conversations | Later | `profiles` | No | Blocked by D16 |
+| `conversation_members` | Membership | Later | `conversations`, `profiles` | No | With messaging |
+| `messages` | Messages | Later | `conversations`, `profiles` | No | With messaging |
+| `external_providers` | Provider registry | Later | None | No | Blocked by D14 |
+| `external_references` | Links to provider IDs | Later | `external_providers`, `games`, `releases`, `platforms` | No | Blocked by D14 |
+| `provider_records` | Raw provider data | Later | `external_providers` | No | Blocked by D14 |
+| `catalog_field_locks` | Protects corrections from sync | Later | `games`, `releases`, `platforms`, `profiles` | No | Only matters with providers |
+
+That's 9 Core, 14 Supporting and 22 Later. **The first phase has 22 tables**: all Core, and all Supporting except `catalog_images`.
+
+### First phase migration sequence
+
+Each step ships its grants, RLS policies, constraints and tests together, so no table ever exists without its security. Each depends only on earlier steps.
+
+| Step | Contents | Why here |
+| --- | --- | --- |
+| **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
+| **M1 Reference data** | `region_codes`, `markets`, `platforms`, seeded | No dependencies, public read only |
+| **M2 Identity** | `profiles`, `user_preferences`, `staff_roles`, sign-up trigger, role helpers | Everything is owned by a profile |
+| **M3 Authorization graph** | `follows`, `blocked_users`, visibility helpers | Later policies call these |
+| **M4 Audit and notices** | `moderation_actions`, a minimal `notifications` | Staff functions write to both |
+| **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, read helpers | Needs reference data and profiles |
+| **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
+| **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
+
+Later groups, in order:
+
+| Step | Contents | Blocked by |
+| --- | --- | --- |
+| **L1 Collection extras** | `wantlist_items`, `user_favorite_games`, `genres`, `game_genres`, `franchises`, `game_franchises` | Nothing |
+| **L2 Images** | `catalog_images`, storage buckets | D15 |
+| **L3 Social** | `achievements`, `user_achievements`, `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, notification columns | Nothing |
+| **L4 Reporting** | `reports`, `moderation_actions.report_id` | L3. Needed before public launch |
+| **L5 Messaging** | `conversations`, `conversation_members`, `messages` | D11, D16 |
+| **L6 Providers** | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks`, `catalog_images.provider_code` | D14 |
+
+Avatars and shelf photos need storage buckets separately. Avatars belong with M2, as their paths are on `profiles`. They should use the upload rules in [security-rls.md](security-rls.md#storage).
+
+### Before implementation
+
+These checks come first, because the tests so far ran on PGlite and not on Supabase.
+
+| Check | How | Status |
+| --- | --- | --- |
+| Actual PostgreSQL version and supported extensions | `select version()`, and `pg_available_extensions` for `citext`, `pg_trgm`, `pgtap` | Not yet run. The current platform default appears to be 17, unconfirmed |
+| UUID generation | Run `private.uuid_v7()` and confirm ordering. Check for a built-in `uuidv7()` | Not yet run. Tested as absent on 17.5 |
+| Grants and RLS behavior | Confirm new tables have no default grants, then run the policy tests as `anon` and `authenticated` | Not yet run |
+| Migration dependencies | Apply M0 to M7 to an empty database in order, using a reset each time | Sequence reviewed on paper only |
+| Secret handling | Only the publishable key may be in `NEXT_PUBLIC_` variables, enforced by a CI check for the secret key name and value patterns | Not yet built |
+| Reproducible workflow | Supabase CLI and local stack, with one command to reset, migrate and test | Not yet built. Docker is installed, its engine wasn't running, and the CLI isn't installed |
+
+**Gates that must be met along the way:**
+
+| Before | Required |
+| --- | --- |
+| Catalog approval workflows open (M7 in use) | Written editorial eligibility guidelines (A3) |
+| Real user data is processed | Retention policy (A2, D10), minimum age (D12), Frankfurt legal review (D13) |
+| Public launch | Reporting (L4), rate limiting, and a security review of all policies |
+
+### First implementation step
+
+**M0 Foundation, on the local stack only.** No hosted project is needed.
+
+1. Create a `phase-2b-m0-foundation` branch from `phase-2-architecture`.
+2. Add the Supabase CLI as a pinned dev dependency, and initialize `supabase/`.
+3. Start the local stack, and run the environment checks above. **If the results contradict this design, stop and report before writing any migration.**
+4. Write one migration for: `private` schema, required extensions, enum types, the `updated_at` trigger function and `private.uuid_v7()`.
+5. Add the test runner, with schema guards that fail if a `public` table lacks RLS, if `anon` holds an unapproved grant, or if a `SECURITY DEFINER` function has no fixed `search_path`.
+6. Add one reset, migrate and test command, and document it in the README.
+
+M0 creates no application tables and changes no application code. It stops there for review before M1.
+
+### Trade-offs of this sequence
+
+- **The social feed comes after collections.** The Home Feed stays on seed data through the first phase. Collections are the foundation that posts reference, so this order avoids rework, although the product is social-first.
+- **No reporting in the first phase.** That's acceptable only before public launch, and L4 has to ship before real users arrive.
+- **No images in the first phase.** The catalog shows placeholders until D15 is settled, so the first version won't look like the finished product.
+
+## Suggested next steps
+
+1. The product owner authorizes the [first implementation step](#first-implementation-step).
+2. Build M0 to M7 locally, one reviewed step at a time.
+3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
+4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
+5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.
