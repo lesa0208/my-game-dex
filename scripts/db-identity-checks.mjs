@@ -74,6 +74,23 @@ const createdUsers = new Set();
 
 const post = (path, headers, body) => fetch(`${api}${path}`, { method: "POST", headers, body: JSON.stringify(body ?? {}) });
 const rpc = (name, headers, body) => post(`/rest/v1/rpc/${name}`, headers, body);
+
+/**
+ * True only when the database refused for lack of a privilege on exactly this object.
+ * Any other refusal, such as a trigger or a function's own checks, doesn't count,
+ * because it would hide a grant that shouldn't exist.
+ */
+async function deniedByPrivilege(response, kind, name) {
+  if (response.ok) return false;
+  const text = await response.text();
+  let message = "";
+  try {
+    message = JSON.parse(text)?.message ?? "";
+  } catch {
+    message = text;
+  }
+  return new RegExp(`^permission denied for ${kind} ${name}$`).test(message);
+}
 const signIn = (email, password) => post("/auth/v1/token?grant_type=password", anon, { email, password });
 
 /** A verified user with a session and, by default, a claimed handle. */
@@ -165,11 +182,11 @@ async function signupLifecycle() {
 
   section("Handles through the API");
   response = await rpc("claim_handle", anon, { p_handle: newHandle() });
-  check("anon can't claim a handle", !response.ok, `status ${response.status}`);
+  check("anon has no EXECUTE on claim_handle", await deniedByPrivilege(response, "function", "claim_handle"), `status ${response.status}`);
   response = await fetch(`${api}/rest/v1/profiles?id=eq.${userId}`, { method: "PATCH", headers: me, body: JSON.stringify({ handle: newHandle() }) });
-  check("a handle can't be set directly", response.status === 401 || response.status === 403, `status ${response.status}`);
+  check("a handle can't be set directly", await deniedByPrivilege(response, "table", "profiles"), `status ${response.status}`);
   response = await fetch(`${api}/rest/v1/profiles?id=eq.${userId}`, { method: "PATCH", headers: me, body: JSON.stringify({ handle_changed_at: "2000-01-01T00:00:00Z" }) });
-  check("the cooldown can't be reset directly", response.status === 401 || response.status === 403, `status ${response.status}`);
+  check("the cooldown can't be reset directly", await deniedByPrivilege(response, "table", "profiles"), `status ${response.status}`);
   const corrected = newHandle();
   response = await rpc("claim_handle", me, { p_handle: corrected.toUpperCase() });
   check("one correction works, and stores the handle in lowercase", response.ok && (await response.json()) === corrected, `status ${response.status}`);
@@ -179,7 +196,7 @@ async function signupLifecycle() {
   response = await rpc("claim_handle", me, { p_handle: handle });
   check("a correction can't be undone straight away", !response.ok, `status ${response.status}`);
   response = await fetch(`${api}/rest/v1/profiles?id=eq.${userId}`, { method: "PATCH", headers: me, body: JSON.stringify({ handle_correction_until: "2100-01-01T00:00:00Z" }) });
-  check("the correction allowance can't be restored directly", response.status === 401 || response.status === 403, `status ${response.status}`);
+  check("the correction allowance can't be restored directly", await deniedByPrivilege(response, "table", "profiles"), `status ${response.status}`);
 
   const fresh = await createUser({ claim: false });
   const freshHeaders = asUser(fresh.token);
@@ -354,14 +371,14 @@ async function staffEscalation() {
 
   for (const [label, headers] of [["a user", afterMeta], ["anon", anon], ["service_role", service]]) {
     response = await post("/rest/v1/staff_roles", headers, { user_id: user.id, role: "admin" });
-    check(`${label} can't insert a staff role through the API`, response.status === 401 || response.status === 403, `status ${response.status}`);
+    check(`${label} can't insert a staff role through the API`, await deniedByPrivilege(response, "table", "staff_roles"), `status ${response.status}`);
   }
   response = await rpc("has_staff_role", afterMeta, { p_role: "admin" });
   check("role helpers aren't exposed as API functions", !response.ok, `status ${response.status}`);
   response = await fetch(`${api}/rest/v1/profiles?id=eq.${user.id}`, { method: "PATCH", headers: afterMeta, body: JSON.stringify({ account_status: "active" }) });
-  check("account status can't be changed", response.status === 401 || response.status === 403, `status ${response.status}`);
+  check("account status can't be changed", await deniedByPrivilege(response, "table", "profiles"), `status ${response.status}`);
   response = await rpc("set_avatar_path", afterMeta, { p_user_id: user.id, p_path: null });
-  check("a user can't call the server-only avatar function", !response.ok, `status ${response.status}`);
+  check("a user has no EXECUTE on the server-only avatar function", await deniedByPrivilege(response, "function", "set_avatar_path"), `status ${response.status}`);
   response = await rpc("set_avatar_path", anon, { p_user_id: user.id, p_path: null });
   check("anon can't call the server-only avatar function", !response.ok, `status ${response.status}`);
   check("no staff role exists after every attempt", psql(`select count(*) from public.staff_roles where user_id = '${user.id}';`) === "0");

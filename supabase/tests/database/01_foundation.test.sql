@@ -18,13 +18,13 @@ select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'p
 -- Only approved objects exist. Later steps add to this list deliberately.
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
-  array['handle_holds', 'hardware_requirements', 'markets', 'media_formats', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'region_codes', 'staff_roles', 'user_preferences'],
+  array['blocked_users', 'follows', 'handle_holds', 'hardware_requirements', 'markets', 'media_formats', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'region_codes', 'staff_roles', 'user_preferences'],
   'only the approved tables exist, with no views or sequences'
 );
 
 -- Approved enums: exact labels, in order
 select enum_has_labels('public', 'visibility_level', array['public', 'followers', 'private']);
-select enum_has_labels('public', 'follow_status', array['pending', 'accepted']);
+select enum_has_labels('public', 'follow_status', array['pending', 'accepted', 'rejected', 'cancelled']);
 select enum_has_labels('public', 'theme_preference', array['system', 'dark', 'light']);
 select enum_has_labels('public', 'message_permission', array['everyone', 'followers', 'nobody']);
 select enum_has_labels('public', 'staff_role', array['moderator', 'catalog_editor', 'admin']);

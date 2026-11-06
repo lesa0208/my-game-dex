@@ -21,7 +21,29 @@ insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
   ('get_my_account()', 'authenticated'),
   ('set_avatar_path(uuid,text)', 'service_role'),
-  ('private.is_active_user()', 'authenticated');
+  ('private.is_active_user()', 'authenticated'),
+  -- M3: clients act only through these. follows and blocked_users have no client grants.
+  ('request_follow(uuid)', 'authenticated'),
+  ('cancel_follow_request(uuid)', 'authenticated'),
+  ('unfollow(uuid)', 'authenticated'),
+  ('accept_follow_request(uuid)', 'authenticated'),
+  ('reject_follow_request(uuid)', 'authenticated'),
+  ('remove_follower(uuid)', 'authenticated'),
+  ('block_user(uuid)', 'authenticated'),
+  ('unblock_user(uuid)', 'authenticated'),
+  ('get_follow_state(uuid)', 'authenticated'),
+  ('get_followers(uuid,integer,timestamp with time zone,uuid)', 'authenticated'),
+  ('get_following(uuid,integer,timestamp with time zone,uuid)', 'authenticated'),
+  ('get_profile_counts(uuid)', 'authenticated'),
+  ('get_received_follow_requests(integer,timestamp with time zone,uuid)', 'authenticated'),
+  ('get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'authenticated'),
+  ('get_my_blocks(integer,timestamp with time zone,uuid)', 'authenticated'),
+  -- M3: called by policies during reads. No role has USAGE on private.
+  ('private.block_peers()', 'authenticated'),
+  ('private.is_blocked_between(uuid)', 'anon'), ('private.is_blocked_between(uuid)', 'authenticated'),
+  ('private.is_accepted_follower(uuid)', 'anon'), ('private.is_accepted_follower(uuid)', 'authenticated'),
+  ('private.can_view_level(uuid,visibility_level)', 'anon'), ('private.can_view_level(uuid,visibility_level)', 'authenticated'),
+  ('private.can_view_collection(uuid)', 'anon'), ('private.can_view_collection(uuid)', 'authenticated');
 create temp table approved_schema_usage (schema_name text, grantee text);
 
 -- Public tables without RLS

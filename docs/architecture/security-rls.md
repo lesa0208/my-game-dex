@@ -89,9 +89,12 @@ These live in the `private` schema, which the Data API doesn't expose. They use 
 | --- | --- |
 | `private.is_active_user()` | Caller has `account_status = 'active'`, a claimed handle and a verified email |
 | `private.has_staff_role(role)` | Caller holds that role, or `admin` |
-| `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner` |
+| `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner`, and caller's own account is active |
 | `private.is_blocked_between(other)` | A block exists in either direction |
-| `private.can_view_collection(owner)` | Caller is the owner; or isn't blocked and the owner's `collection_visibility` allows it |
+| `private.can_view_level(owner, level)` | Caller is the owner; or `owner` is active, no block exists, and `level` allows it. The core rule. Never reads staff status |
+| `private.can_view_collection(owner)` | `can_view_level` with the owner's `collection_visibility` |
+| `private.can_view_connections(owner)` | Caller is the owner; or is active, no block exists, and `owner` is public or caller is an accepted follower. Lists and counts only |
+| `private.block_peers()` | Everyone in a block with the caller, for use once per query |
 | `private.can_view_post(post_id)` | Caller can read that post under its policy |
 | `private.is_published_release(release)`, `private.is_published_game(game)` | The record is `published` |
 | `private.owns_copy_of(release)` | Caller owns a collection item on that release |
@@ -150,9 +153,11 @@ The application enforces this with a `noindex` robots tag, and by leaving these 
 
 A profile row is readable by everyone, signed in or not, once it has a claimed handle and unless the account is suspended. Claiming a handle requires a verified email, so unverified accounts are never public. Block checks arrive with M3. This is deliberate: comment authors and follow requests need a name and avatar to render, even for private accounts.
 
-**`follow_approval_required` isn't public.** Clients don't need the setting itself, and exposing it would let anyone list which accounts are private. M3 should expose a narrower result to signed-in users, for example whether following a specific person would create a request.
+**`follow_approval_required` isn't public.** Exposing it would let anyone filter for private accounts. `public.get_follow_state(target)` is the narrow alternative, for signed-in active users, one target at a time. It returns `self`, `can_follow`, `can_request`, `requested`, `following`, `blocked_by_you` or `unavailable`. Someone could still check accounts one by one, because a "Request" button inherently shows this, so it needs application rate limiting.
 
-**Follower counts don't exist yet, and arrive with `follows` in M3.** Public counts must not reveal private relationships. M3 has to decide what a count includes, and test it. In particular, a count on a private account shouldn't change in a way that confirms a specific person's pending or hidden follow.
+**Blocks hide cards from signed-in users, in both directions.** A signed-out visitor can still see a card, because public means public.
+
+**Follower counts aren't on the card.** See [Follower lists and counts](#follower-lists-and-counts).
 
 **Search engine pages need a controlled read.** Pages can't read `allow_search_indexing` as `anon`. When public profile pages are built, they need a narrow server-side check that returns only whether a page may be indexed, and must default to `noindex` if it fails.
 
@@ -216,7 +221,158 @@ If anyone can follow instantly, "followers only" is public with one extra click.
 
 ### Blocks
 
-Blocks are enforced in both directions for signed-in users, and they override an accepted follow. A block can't stop someone from viewing public content while signed out, because public means public. The block list has no client read path except a user reading their own blocks, so nobody can discover who blocked them.
+Blocks are enforced in both directions for signed-in users.
+
+| Effect | Behavior |
+| --- | --- |
+| Follows, requests and cooldowns | Removed in both directions, atomically, by a trigger, so an operator's insert is covered too |
+| Unblocking | Restores nothing. A later request is a fresh one |
+| Following while a block exists | Refused with `user unavailable`, the same answer as an unknown or suspended account. A trigger also refuses it at the row level |
+| Profile cards | Hidden from both signed-in users |
+| Followers-only and public content | Hidden from both signed-in users, through `can_view_level` |
+| Follower lists and counts | Unavailable to both, and neither appears in lists the other views |
+| A block list | Only the blocker can read it, through `get_my_blocks()`, which returns card fields so they can unblock |
+| A suspended user | Can still block, unblock, unfollow, reject and remove followers. Actions that reduce access stay available |
+
+**Previously published public content** isn't deleted or edited. It's hidden from each party while signed in, and stays visible to everyone else. Likes and comments aren't removed. Owners will be able to delete comments on their own posts when those tables arrive in L3, and later tables must apply this rule.
+
+**Limits.** A blocked user can sign out and still see public content, including the card and avatar URL. Comparing signed-in and signed-out views also reveals that a block exists. Followers-only and private content stays hidden either way.
+
+### Who can see what
+
+Implemented by `private.can_view_level`, and tested through a real RLS policy for each viewer.
+
+| Viewer | Card | `public` content | `followers` content | `private` content | Follower lists and counts |
+| --- | --- | --- | --- | --- | --- |
+| Owner, even if suspended | Own, via `get_my_account()` | Yes | Yes | Yes | Exact |
+| Anonymous | Yes | Yes | No | No | No |
+| Signed-in stranger | Yes | Yes | No | No | Public accounts only |
+| Pending follower | Yes | Yes | **No** | No | Same as stranger |
+| Rejected requester | Yes | Yes | **No** | No | Same as stranger |
+| Accepted follower | Yes | Yes | Yes | **No** | Yes |
+| Blocked, either direction | **No** | **No** when signed in | No | No | No |
+| Suspended, deactivated, unverified or no handle | Same as anonymous | Yes | **No**, even if accepted | No | No |
+| Moderator or admin | Same as their relationship | Same | **No bypass** | **No bypass** | Same |
+
+If the owner is suspended or has no handle, only the owner can see their content. Staff access to private content can only come through audited M4 functions, and purchase data stays owner-only. Later policies on collections, shelves and wantlists must also apply their own item, shelf and entry checks.
+
+**Authentication alone never grants access.** Being signed in adds nothing beyond a signed-out visitor, except the ability to have a relationship.
+
+## Follow requests
+
+**No client role has any access to `follows` or `blocked_users`.** RLS is on with no client policies, and every change goes through a `SECURITY DEFINER` function with an empty `search_path`, which takes the acting user only from `auth.uid()`. There's one row per ordered pair, ever.
+
+```mermaid
+stateDiagram-v2
+  [*] --> accepted: request, public account
+  [*] --> pending: request, private account
+  pending --> accepted: owner accepts
+  pending --> rejected: owner rejects, 30-day cooldown
+  pending --> cancelled: requester cancels
+  rejected --> cancelled: requester cancels, cooldown kept
+  accepted --> cancelled: owner removes, 30-day cooldown
+  cancelled --> pending: request, no active cooldown, private account
+  cancelled --> accepted: request, no active cooldown, public account
+  cancelled --> rejected: request during cooldown
+  accepted --> [*]: unfollow, or a block
+  pending --> [*]: a block
+  rejected --> [*]: a block
+  cancelled --> [*]: a block
+```
+
+A trigger refuses every other transition, for any writer including an operator.
+
+| State | Meaning | Requester sees | Owner sees |
+| --- | --- | --- | --- |
+| `pending` | Awaiting a decision | "Requested" | In their queue |
+| `accepted` | Grants access while the follower is active | "Following" | A follower |
+| `rejected` | The owner refused, or a retry during a cooldown | **"Requested"**, indistinguishable from `pending` | Nothing |
+| `cancelled` | Withdrawn by the requester, or removed by the owner | "Follow" or "Request" | Nothing |
+
+**Rejection is silent.** `rejected` reads as "Requested" in `get_follow_state` and `get_sent_follow_requests`, and it stays that way, even after the cooldown ends, until the requester cancels. It never reaches the owner's queue, and can't be accepted later.
+
+**A request during a cooldown:**
+
+- Reads to the requester exactly like a real request.
+- Creates nothing actionable. The row becomes `rejected`, and stays out of the owner's queue.
+- Will send no notification, when notifications arrive in M4.
+- Never changes `rerequest_after`.
+- Reuses the one row, so it can't build up history.
+- Is idempotent when repeated.
+- Can't be bypassed by cancelling. `cancelled` keeps the cooldown, so cancelling and retrying leads straight back to `rejected`.
+
+A cooldown ends at exactly 30 days. After that, cancelling and requesting creates a real request.
+
+**Other rules:**
+
+| Situation | Result |
+| --- | --- |
+| Cancelling your own pending request | No cooldown, so you can request again |
+| Unfollowing | Deletes the row, with no cooldown |
+| Owner removes a follower | `cancelled` with a 30-day cooldown, including on a public account. A re-follow during it returns "Requested", which can reveal the removal, though the follower has already lost access |
+| Owner disables approval | Pending requests stay pending. Rejections stay. Later requests from others follow immediately |
+| Owner enables approval | Accepted follows stay |
+| Followers-only visibility with approval off | Allowed. It doesn't enable approval, so anyone can follow and gain access. The future UI must clearly explain this |
+| Adding access: `request_follow`, `accept_follow_request` | Require an active account |
+| Reducing access: cancel, unfollow, reject, remove, block, unblock | Require only a verified account, so a suspended user can still protect themselves |
+
+**Request limit.** At most 200 outstanding requests per user, as a database safeguard, not a substitute for rate limiting. It counts `pending` and `rejected` together, because both read as "Requested", so reaching it can't reveal a rejection. The requester can free places by cancelling. Instant follows of public accounts aren't limited.
+
+**Retention.** `rejected` and `cancelled` rows are kept with no purge job, pending approval of retention under D10. They're removed when either account is deleted, or by a block.
+
+### Concurrency
+
+All follow and block changes for a pair of users take a transaction-scoped lock, in either direction. `request_follow` also takes a per-requester lock first, for the limit, and a shared lock on the target's profile, so it waits for an uncommitted change to that account. The primary key makes a duplicate row impossible.
+
+| Race, tested with a transaction held open | Result |
+| --- | --- |
+| Six identical requests, or five identical accepts | All succeed, with one row |
+| Mutual requests, or mutual blocks | No deadlock |
+| Accept, then a cancel during it | The cancel waits and does nothing, so the follow stands |
+| Cancel, then an accept during it | The accept is refused |
+| Block, then a request or accept during it | Refused, with no row |
+| Request or accept, then a block during it | The block waits, then removes it |
+| Unblock, then a request during it | The request waits, then succeeds as a fresh relationship |
+| Target's deletion, then a request during it | Refused, with no row |
+| Request, then the target's deletion during it | The deletion waits, then removes the row |
+| Requester's own deletion, then a request during it | Refused, with no row |
+| Change to private, then a request during it | The request waits, and is pending |
+| Change to public, then a request during it | The request waits, and follows immediately |
+| Approval disabled during a repeated request | Stays pending |
+| Four requests at 199 outstanding | Exactly one succeeds, and the total never exceeds 200 |
+
+### Follower lists and counts
+
+`get_followers`, `get_following` and `get_profile_counts` are signed-in only, and share one rule. **Public counts represent visible relationships, not necessarily the complete total.**
+
+| Viewer | Sees |
+| --- | --- |
+| Owner | Every accepted relationship: the exact total, including suspended and private accounts |
+| Anyone else permitted | Accepted relationships with public, active accounts they have no block with, plus their own relationship |
+| Not permitted: blocked, inactive, or a stranger to a private account | An empty list, and no count row. The same as an unknown account |
+
+- **Only accepted relationships count.** Pending and rejected never do.
+- **A private account's relationships aren't exposed through either side.** A public account's "following" list doesn't reveal that it follows a private account, and a private follower isn't on a public account's list. So watching two counts can't show who followed whom.
+- **Pages** return at most 100 rows, with keyset paging on the timestamp and ID. A test walks every page and compares it with the count, for each kind of viewer.
+- **Lists return** only card fields and the cursor.
+- **Counts are live, with no cached counters.** When an account changes between public and private, counts are right immediately.
+
+Measured with `supabase/benchmarks/m3_connections.sql`: 50,000 accounts, 20% private, and about 510,000 relationships, on local Docker. Query plans use the partial indexes, and a deep page reads about as many rows as a first page.
+
+| Operation | Time |
+| --- | --- |
+| First page of 50, from 50,000 followers | 1 to 4 ms |
+| A page 40,000 rows in | 1 to 2 ms |
+| Counts, for 50,000 followers | 43 to 45 ms |
+| Counts, for 5,000 followers | 35 ms |
+| Counts, for a typical account | 1 ms |
+| Follow state | 1 ms |
+| 50 profile cards through RLS | 22 to 26 ms |
+| Handle search over cards | 30 ms |
+
+These don't justify a cache. A count scans the account's followers, so it will slow down with very large accounts, and a cache could sit behind the same function if measurements call for it.
+
+An earlier prototype evaluated visibility per row in RLS, and a page took 6.5 seconds, so lists use functions. **Later RLS policies must avoid per-row functions on large tables:** RLS checks run before non-leakproof filters such as `LIKE`, so a per-row block check took 666 ms for one handle search. Computing the block list once per query brought it to 30 ms.
 
 ## Policy matrix
 
@@ -226,17 +382,17 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 
 | Table | `anon` | `authenticated` | Update columns |
 | --- | --- | --- | --- |
-| `profiles` | R: public card columns, on claimed active accounts | R: same as `anon`. Blocks added in M3. U: own, when active. Created only by the signup trigger | `display_name`, `bio`, `country_code`, `collection_visibility`, `follow_approval_required`, `allow_search_indexing` |
+| `profiles` | R: public card columns, on claimed active accounts | R: same as `anon`, unless a block exists in either direction. U: own, when active. Created only by the signup trigger | `display_name`, `bio`, `country_code`, `collection_visibility`, `follow_approval_required`, `allow_search_indexing` |
 | `user_preferences` | None | R: own. U: own, when active. Created only by the signup trigger | All except `user_id` and timestamps |
 | `user_favorite_games` | R | R: not blocked. I, U, D: own, published games only | `position` |
-| `follows` | **No grant** | R: own side, or accepted and permitted. I: as follower. U: as followee, to accept. D: either side | `status`, from `pending` to `accepted` only |
-| `blocked_users` | None | R, I, D: as blocker | None |
+| `follows` | **No grant** | **No grant.** Functions only. See [Follow requests](#follow-requests) | None |
+| `blocked_users` | **No grant** | **No grant.** Functions only | None |
 | `staff_roles` | None | R: own. Audited admin functions arrive with M4 | None. An operator assigns the first administrator |
 | `private.handle_holds` | None | None | None, and no grant to any API role |
 
 `handle` changes only through `public.claim_handle()`, and `avatar_path` only through the server workflow. `service_role` has no direct access to these tables either: it can only execute `public.set_avatar_path()`.
 
-`follows.status` isn't writable on insert. A trigger sets it from the target's settings and rejects the insert if a block exists.
+`service_role` has no access to `follows` or `blocked_users` either, and can't execute the follow and block functions, which need a real user.
 
 ### Gaming catalog
 
@@ -447,7 +603,7 @@ No single layer covers everything. The last column lists what the database can't
 | Public queries and search exclude invalid records | Search indexes are partial on `published` | Read policies on `status` | | Jobs using the secret key filter on status |
 | Provider imports exclude invalid records | | Provider data has no client access | Matching skips excluded records | Adapters drop digital-only data |
 | Purchase data is owner-only | | Separate table, no other read path | | |
-| Accepted follows only (D1) | | `is_accepted_follower()` | Trigger sets follow status | |
+| Accepted follows only (D1) | | `is_accepted_follower()` | Functions set status, and a trigger refuses illegal transitions | |
 | Rating scale (D8) | `CHECK` | | | |
 | Region code set per Release | Foreign key to `region_codes` | Users can't edit a published release | | Editors classify it. No country rule exists |
 | Partial media described (Q8) | Required enum, default `unknown` | Protected once published | | Editors set it, and don't guess |
@@ -723,6 +879,9 @@ Upload rules, for the buckets still to be built. Avatars are stricter, and `cata
 | Requirement | How it's enforced |
 | --- | --- |
 | Can't modify another user's profile | RLS `id = auth.uid()` on update; column grants. Tested directly and through the API |
+| Followers-only content needs an accepted follow (M3) | `can_view_level` requires an accepted follow and an active viewer. Pending, rejected and suspended followers are refused, and staff status is never read |
+| Follows and blocks can't be written directly (M3) | No client or `service_role` grant, no policies, functions that take the actor only from `auth.uid()`, and pair locks |
+| Blocks can't be bypassed through direct APIs (M3) | Card policy, helper checks and function checks, tested through the API and with held-open transactions |
 | Private profile settings stay private (M2) | No `SELECT` grant on those columns for any client role, which also blocks filtering and sorting on them |
 | Staff roles can't be self-assigned (M2) | No client or `service_role` write grant, a database-backed helper, and a signup trigger that never reads metadata |
 | Handles can't bypass the rules (M2) | `claim_handle()` is the only path, with no client grant on `handle`, `handle_changed_at` or `handle_correction_until`, no access to holds, and per-handle locks |
@@ -774,7 +933,9 @@ The indexing result above predates M2: signed-out clients can no longer read tha
 
 ## Testing the real policies
 
-When migrations are written:
+M0 to M3 have this in place. `npm run db:mutation` also applies each violation in `scripts/security-mutations.mjs` to the local stack, and fails if one can't be applied, isn't detected, passes a suite expected to fail, or if a subprocess times out or exits abnormally.
+
+For each step:
 
 1. **Policy matrix tests in CI.** For each table, act as `anon`, the owner, a stranger, a pending follower, an accepted follower, a blocked user and staff, then assert allowed and denied actions.
 2. **Schema guard tests in CI.** Fail the build if any `public` table lacks RLS, if `anon` has a grant on a table not on the approved list, or if a `SECURITY DEFINER` function lacks a fixed `search_path`.

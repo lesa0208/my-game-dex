@@ -58,6 +58,7 @@ const steps = {
   pgtap: () => runCli(["test", "db"]),
   smoke: () => runNode("db-smoke.mjs"),
   identity: () => runNode("db-identity-checks.mjs"),
+  authorization: () => runNode("db-authorization-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -81,8 +82,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity"],
+    test: ["pgtap", "smoke", "identity", "authorization"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

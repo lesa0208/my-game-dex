@@ -10,6 +10,18 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', p_id, 'role', 'authenticated')::text, true);
 end $$;
 
+-- Runs a statement and returns its result, or the error as text, so that an unexpected
+-- error fails the named assertion instead of aborting the file.
+create function pg_temp.try(p_sql text) returns text language plpgsql as $t$
+declare r text;
+begin
+  execute p_sql into r;
+  return r;
+exception when others then
+  return 'error: ' || sqlerrm;
+end $t$;
+grant execute on function pg_temp.try(text) to authenticated;
+
 insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
 select ('00000000-0000-0000-0000-0000000000' || s)::uuid, 'authenticated', 'authenticated', s || '@example.test', now(), '00000000-0000-0000-0000-000000000000'
 from unnest(array['a1', 'b2', 'c3', 'd4', 'e5', 'f6', 'a7', 'a8']) as s;
@@ -118,7 +130,7 @@ select pg_temp.as_user('00000000-0000-0000-0000-0000000000f6');
 set local role authenticated;
 select throws_ok(format('select public.claim_handle(%L)', h), 'P0001', 'handle unavailable', 'held: ' || h)
 from unnest(array['marko', 'Marko', 'MARKO']) as h;
-select is(public.claim_handle('mark0'), 'mark0', 'a different spelling isn''t held');
+select is(pg_temp.try($$select public.claim_handle('mark0')$$), 'mark0', 'a different spelling isn''t held');
 reset role;
 select is((select count(*)::int from private.handle_holds where kind = 'released' and handle = 'mark0'), 0, 'no hold was created by that claim');
 
@@ -148,7 +160,7 @@ reset role;
 update public.profiles set handle_changed_at = now() - interval '30 days' where handle = 'badminton';
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000d4');
 set local role authenticated;
-select is(public.claim_handle('badminton_two'), 'badminton_two', 'exactly 30 days later, a change works');
+select is(pg_temp.try($$select public.claim_handle('badminton_two')$$), 'badminton_two', 'exactly 30 days later, a change works');
 select throws_ok($$select public.claim_handle('badminton_three')$$, 'P0001', 'handle change not available yet', 'a later change never grants another correction');
 reset role;
 select is((select handle_correction_until from public.profiles where id = '00000000-0000-0000-0000-0000000000d4'), null, 'no allowance remains after a regular change');

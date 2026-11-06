@@ -64,11 +64,18 @@ select is(
   (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef and not coalesce(p.proconfig @> array['search_path=""'], false)),
   0, 'every SECURITY DEFINER function pins an empty search_path'
 );
-select results_eq(
-  $$select p.oid::regprocedure::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef order by 1$$,
+select is(
+  (select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef),
   array[
-    'claim_handle(text)', 'get_my_account()', 'private.handle_new_user()', 'private.has_staff_role(staff_role)',
-    'private.hold_handle_on_delete()', 'private.is_active_user()', 'private.validate_display_name()', 'set_avatar_path(uuid,text)'
+    'accept_follow_request(uuid)', 'block_user(uuid)', 'cancel_follow_request(uuid)', 'claim_handle(text)', 'get_follow_state(uuid)',
+    'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)',
+    'get_my_account()', 'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_profile_counts(uuid)',
+    'get_received_follow_requests(integer,timestamp with time zone,uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)',
+    'private.block_peers()', 'private.can_view_collection(uuid)', 'private.can_view_connections(uuid)', 'private.can_view_level(uuid,visibility_level)',
+    'private.handle_new_user()', 'private.has_staff_role(staff_role)', 'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)',
+    'private.is_active_user()', 'private.is_blocked_between(uuid)', 'private.require_active_user()', 'private.require_verified_user()',
+    'private.validate_display_name()', 'reject_follow_request(uuid)', 'remove_follower(uuid)', 'request_follow(uuid)', 'set_avatar_path(uuid,text)',
+    'unblock_user(uuid)', 'unfollow(uuid)'
   ],
   'only the expected functions are SECURITY DEFINER'
 );

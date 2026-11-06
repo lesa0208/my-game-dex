@@ -43,6 +43,13 @@ This records why the database is designed as it is, what each choice costs, and 
 | [033](#adr-033-hardware-requirements-sit-on-the-release) | Hardware requirements sit on the Release |
 | [034](#adr-034-multiple-media-reuses-the-release-component-model) | Multiple media reuses the Release component model |
 | [035](#adr-035-game-boy-classification-follows-the-physical-edition) | Game Boy classification follows the physical edition |
+| [036](#adr-036-the-public-profile-card-is-enforced-with-column-grants) | The public profile card is enforced with column grants |
+| [037](#adr-037-handles-are-unique-by-spelling-and-normalized-only-against-reserved-names) | Handles are unique by spelling, and normalized only against reserved names |
+| [038](#adr-038-avatars-are-written-only-by-the-server) | Avatars are written only by the server |
+| [039](#adr-039-account-activation-needs-a-verified-email-and-a-handle) | Account activation needs a verified email and a handle |
+| [040](#adr-040-follows-and-blocks-are-reached-only-through-functions) | Follows and blocks are reached only through functions |
+| [041](#adr-041-rejection-is-silent) | Rejection is silent |
+| [042](#adr-042-follower-counts-are-live-and-count-visible-relationships) | Follower counts are live, and count visible relationships |
 
 ## Decisions requiring product-owner approval
 
@@ -199,7 +206,7 @@ Personal rating is private by default for the same reason. Public opinions belon
 
 ### ADR-005: Followers-only means accepted followers
 
-**Decision.** Approved as D1. `follows.status` is `pending` or `accepted`, set by a trigger. Only `accepted` grants access.
+**Decision.** Approved as D1. `follows.status` has four states, set by controlled functions. See [ADR-041](#adr-041-rejection-is-silent). Only `accepted` grants access, and only while the follower's account is active.
 
 **Why.** Without approval, followers-only offers no real protection. Adding `status` after launch would require a migration of a hot table, whereas including it now costs one column.
 
@@ -639,6 +646,30 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-off.** A row exists for each unverified signup, until a retention rule is approved.
 
+### ADR-040: Follows and blocks are reached only through functions
+
+**Decision.** No client role, nor `service_role`, has any access to `follows` or `blocked_users`. RLS is on with no policies. All changes and reads go through `SECURITY DEFINER` functions with an empty `search_path`, which take the actor only from `auth.uid()`. A transaction-scoped lock covers each pair. This replaces the earlier design of own-row policies with triggers.
+
+**Why.** A readable `status` would reveal rejections. Per-row visibility in RLS took 6.5 seconds for one follower page in a prototype, against about 2 ms with one permission check in a function. Functions also put each transition in one place, where it can be locked and tested.
+
+**Trade-offs.** Each new read needs a function, and each function widens the API surface, so guards and exact grant tests cover them. Feeds in L3 will need a helper or a narrow grant.
+
+### ADR-041: Rejection is silent
+
+**Decision.** Approved by the product owner. A rejected request reads as "Requested" until the requester cancels. A retry during the 30-day cooldown looks real, but creates nothing actionable and doesn't change the cooldown. Removing a follower starts the same cooldown.
+
+**Why.** It avoids telling someone they were refused, which can provoke harassment, and it stops request spam.
+
+**Trade-offs.** A legitimate requester can wait indefinitely, seeing "Requested". A rejection row has to be stored, which is personal data awaiting retention rules under D10. A re-follow of a public account during a removal cooldown returns "Requested", which can reveal the removal.
+
+### ADR-042: Follower counts are live, and count visible relationships
+
+**Decision.** Approved by the product owner. `get_profile_counts` computes counts live under the same rule as the lists. Owners see exact totals. Others see relationships with public, active accounts, with no block, plus their own. There are no stored counters.
+
+**Why.** Stored counts can drift, create a hot row and deadlocks, and can't apply a per-viewer rule. A public total would also let someone correlate two counts to infer a private follow.
+
+**Trade-offs.** Public counts undercount, by design, and different viewers can see different numbers. A count takes about 44 ms for 50,000 followers locally, and grows with followers. A cache can sit behind the same function if measurements call for it.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -657,6 +688,8 @@ Most general game databases focus on games rather than physical releases. Expect
 | Cover art rights block the visual design | Resolve [D15](#needed-before-catalog-work) before committing to a provider |
 | Self-reported data is treated as fact | Don't present ownership, valuation or achievements as verified |
 | Credential attacks succeed because Auth doesn't throttle them | No throttling or lockout was seen locally. Application-level throttling and CAPTCHA are hosted registration requirements |
+| A rejected or removed user seeks another route to contact someone | Silent rejection and blocks limit this, and reporting (L4) is required before launch |
+| New RLS policies add per-row functions on large tables | Compute once per query, and measure with `supabase/benchmarks/` |
 | A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
 
 ## Phase 2B plan
@@ -731,8 +764,8 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | --- | --- | --- |
 | **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
-| **M2 Identity** (built locally, awaiting approval) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
-| **M3 Authorization graph** | `follows`, `blocked_users`, visibility helpers | Later policies call these |
+| **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
+| **M3 Authorization graph** (built locally, awaiting approval) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
 | **M4 Audit and notices** | `moderation_actions`, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
@@ -760,7 +793,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | M0 to M2 apply to an empty database. M3 to M7 reviewed on paper only |
+| Migration dependencies | M0 to M3 apply to an empty database. M4 to M7 reviewed on paper only |
 | Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. No CI yet |
 | Reproducible workflow | `npm run db:verify` |
 
@@ -771,7 +804,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | Catalog approval workflows open (M7 in use) | Written editorial eligibility guidelines (A3) |
 | Real user data is processed | Retention policy (A2, D10), minimum age (D12), Frankfurt legal review (D13). See [Legal and age blockers](security-rls.md#legal-and-age-blockers) |
 | Public authentication opens | All of [Blockers before public authentication](security-rls.md#blockers-before-public-authentication), and [Requirements before any hosted registration](security-rls.md#requirements-before-any-hosted-registration) |
-| Public launch | Reporting (L4), rate limiting, and a security review of all policies |
+| Public launch | Reporting (L4), including impersonation reporting and moderation, because lookalike handles may coexist. Rate limiting, and a security review of all policies |
 
 ### First implementation step
 
@@ -796,8 +829,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M2 Identity, then authorizes M3.
-2. Build M3 to M7 locally, one reviewed step at a time.
+1. The product owner reviews M3 Authorization, then authorizes M4.
+2. Build M4 to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

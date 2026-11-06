@@ -103,7 +103,7 @@ Why each supporting table is needed:
 | Type | Values |
 | --- | --- |
 | `visibility_level` | `public`, `followers`, `private` |
-| `follow_status` | `pending`, `accepted` |
+| `follow_status` | `pending`, `accepted`, `rejected`, `cancelled` |
 | `theme_preference` | `system`, `dark`, `light` |
 | `message_permission` | `everyone`, `followers`, `nobody` |
 | `staff_role` | `moderator`, `catalog_editor`, `admin` |
@@ -169,7 +169,7 @@ A user's account record. **Only the public card columns can be read by clients**
 - **Timestamps:** `created_at`, `updated_at`
 - **Relationships:** owns collection items, shelves, posts and most user content
 
-`cover_path` isn't built: no approved feature uses it. `follower_count` and `following_count` arrive with `follows` in M3, and must follow the rule in [Profiles](security-rls.md#profiles) that public counts can't reveal private relationships.
+`cover_path` isn't built: no approved feature uses it. Follower counts aren't stored. They're computed live by `public.get_profile_counts()`. See [Follower lists and counts](security-rls.md#follower-lists-and-counts).
 
 ### `user_preferences`
 
@@ -216,20 +216,25 @@ Favorites reference a **Game**, not a Release, since a favorite is about the gam
 
 ### `follows`
 
+No client role has any access to this table. Everything goes through the functions in [Follow requests](security-rls.md#follow-requests). There's one row per ordered pair, ever, so repeated requests can't build up history.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `follower_id` | `uuid` | No | |
 | `followee_id` | `uuid` | No | |
-| `status` | `follow_status` | No | `system`. Set by a trigger from the target's `follow_approval_required` |
+| `status` | `follow_status` | No | `system`. A trigger refuses any transition not in the state machine |
+| `rerequest_after` | `timestamptz` | Yes | `system`. End of a rejection or removal cooldown. A retry never changes it |
+| `requested_at` | `timestamptz` | No | `system`. Default `now()` |
+| `accepted_at` | `timestamptz` | Yes | `system`. Set exactly when `status` is `accepted`. Orders follower lists |
 
 - **Primary key:** `(follower_id, followee_id)`
 - **Foreign keys:** both → `profiles(id)` on delete cascade
 - **Unique:** covered by the primary key
-- **Indexes:** `(followee_id, status, created_at DESC)` for follower lists and requests; `(follower_id, status, created_at DESC)` for following lists and feeds
+- **Indexes:** partial on `(followee_id, accepted_at DESC, follower_id DESC)` and `(follower_id, accepted_at DESC, followee_id DESC)` where accepted, for lists and counts; `(followee_id, requested_at DESC, follower_id DESC)` where pending, for the owner's queue; `(follower_id, requested_at DESC, followee_id DESC)` where pending or rejected, for the requester's list and the request limit
 - **Timestamps:** `created_at`, `updated_at`
-- **Constraints:** `CHECK (follower_id <> followee_id)`
+- **Constraints:** `CHECK (follower_id <> followee_id)`; `CHECK ((status = 'accepted') = (accepted_at IS NOT NULL))`; `CHECK (status <> 'rejected' OR rerequest_after IS NOT NULL)`; `CHECK (status NOT IN ('pending', 'accepted') OR rerequest_after IS NULL)`
 
-Only `accepted` follows grant access. See [ADR-005](architecture-decisions.md#adr-005-followers-only-means-accepted-followers).
+Only `accepted` follows grant access, and only while the follower's own account is active. See [ADR-005](architecture-decisions.md#adr-005-followers-only-means-accepted-followers).
 
 ### `blocked_users`
 
@@ -240,11 +245,11 @@ Only `accepted` follows grant access. See [ADR-005](architecture-decisions.md#ad
 
 - **Primary key:** `(blocker_id, blocked_id)`
 - **Foreign keys:** both → `profiles(id)` on delete cascade
-- **Indexes:** `blocked_id`, so blocks can be checked in both directions
+- **Indexes:** `(blocked_id, blocker_id)`, so blocks can be checked in both directions
 - **Timestamps:** `created_at`
 - **Constraints:** `CHECK (blocker_id <> blocked_id)`
 
-Creating a block removes follows in both directions through a trigger.
+No client role has any access to this table. Creating a block removes follows, requests and cooldowns in both directions through a trigger, and unblocking restores none of them. See [Blocks](security-rls.md#blocks).
 
 ### `staff_roles`
 
@@ -1305,7 +1310,6 @@ Deliberate exceptions to normalization, each maintained by a trigger:
 | Column | Why |
 | --- | --- |
 | `posts.like_count`, `posts.comment_count`, `comments.like_count` | Counting on every feed row doesn't scale |
-| `profiles.follower_count`, `profiles.following_count` | Shown on every profile. Added in M3 |
 | `conversations.last_message_at` | Inbox sort order |
 | `posts.subject_completeness` | A deliberate snapshot, not a duplicate: the author's disclosure at posting time, which keeps the post readable if the item goes private |
 
