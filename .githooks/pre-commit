@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks commits containing secrets. Install with: npm run hooks:install
+exec node scripts/check-secrets.mjs --staged
