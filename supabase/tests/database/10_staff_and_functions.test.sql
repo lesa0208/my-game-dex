@@ -67,14 +67,16 @@ select is(
 select is(
   (select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef),
   array[
-    'accept_follow_request(uuid)', 'block_user(uuid)', 'cancel_follow_request(uuid)', 'claim_handle(text)', 'get_follow_state(uuid)',
+    'accept_follow_request(uuid)', 'block_user(uuid)', 'cancel_follow_request(uuid)', 'claim_handle(text)', 'delete_notification(uuid)', 'get_audit_events(integer,uuid)', 'get_follow_state(uuid)',
     'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)',
-    'get_my_account()', 'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_profile_counts(uuid)',
+    'get_my_account()', 'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_my_notifications(integer,uuid)', 'get_profile_counts(uuid)',
     'get_received_follow_requests(integer,timestamp with time zone,uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)',
+    'get_unread_notification_count()', 'grant_staff_role(uuid,staff_role,text)', 'mark_notifications_read(uuid)',
     'private.block_peers()', 'private.can_view_collection(uuid)', 'private.can_view_connections(uuid)', 'private.can_view_level(uuid,visibility_level)',
     'private.handle_new_user()', 'private.has_staff_role(staff_role)', 'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)',
-    'private.is_active_user()', 'private.is_blocked_between(uuid)', 'private.require_active_user()', 'private.require_verified_user()',
-    'private.validate_display_name()', 'reject_follow_request(uuid)', 'remove_follower(uuid)', 'request_follow(uuid)', 'set_avatar_path(uuid,text)',
+    'private.is_active_user()', 'private.is_blocked_between(uuid)', 'private.notify_follow_change()', 'private.require_active_user()', 'private.require_verified_user()',
+    'private.validate_display_name()', 'reject_follow_request(uuid)', 'remove_follower(uuid)', 'request_follow(uuid)', 'revoke_staff_role(uuid,staff_role,text)',
+    'set_account_status(uuid,account_status,text)', 'set_avatar_path(uuid,text)',
     'unblock_user(uuid)', 'unfollow(uuid)'
   ],
   'only the expected functions are SECURITY DEFINER'

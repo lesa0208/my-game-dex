@@ -38,6 +38,15 @@ insert into approved_function_grants values
   ('get_received_follow_requests(integer,timestamp with time zone,uuid)', 'authenticated'),
   ('get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'authenticated'),
   ('get_my_blocks(integer,timestamp with time zone,uuid)', 'authenticated'),
+  ('grant_staff_role(uuid,staff_role,text)', 'authenticated'),
+  ('revoke_staff_role(uuid,staff_role,text)', 'authenticated'),
+  ('set_account_status(uuid,account_status,text)', 'authenticated'),
+  ('get_audit_events(integer,uuid)', 'authenticated'),
+  -- M4b: notifications have no client grants; clients use only these.
+  ('get_my_notifications(integer,uuid)', 'authenticated'),
+  ('get_unread_notification_count()', 'authenticated'),
+  ('mark_notifications_read(uuid)', 'authenticated'),
+  ('delete_notification(uuid)', 'authenticated'),
   -- M3: called by policies during reads. No role has USAGE on private.
   ('private.block_peers()', 'authenticated'),
   ('private.is_blocked_between(uuid)', 'anon'), ('private.is_blocked_between(uuid)', 'authenticated'),

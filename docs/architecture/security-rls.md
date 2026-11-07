@@ -76,7 +76,7 @@ These are accepted for M0 and stay open until each is resolved:
 | `service_role` | Server jobs only | Secret | **Yes** |
 | Staff | Signed-in users with a `staff_roles` row | Publishable + user session | No |
 
-- Staff are normal `authenticated` users, and read policies check `staff_roles`. **Grants apply per role, not per user, so a column grant can't let staff write what users can't.** All staff writes therefore go through functions that check `private.has_staff_role()` and record a `moderation_actions` row, which also guarantees every staff change is audited. Wherever this document says "Staff" or "Catalog staff" under writes, it means through those functions.
+- Staff are normal `authenticated` users, and read policies check `staff_roles`. **Grants apply per role, not per user, so a column grant can't let staff write what users can't.** All staff writes therefore go through functions that check `private.require_active_staff()` and record a `private.audit_events` row in the same transaction, which also guarantees every staff change is audited. See [Staff actions](#staff-actions). Wherever this document says "Staff" or "Catalog staff" under writes, it means through those functions.
 - The secret key bypasses RLS, so server code using it can technically read anything, including private data. It's limited to the named jobs below and must not be used for general reads.
 - The secret key is never in browser code, and `NEXT_PUBLIC_` variables never hold it. Supabase is replacing the legacy `anon` and `service_role` keys with publishable and secret keys ([Supabase docs](https://supabase.com/docs/guides/getting-started/api-keys)), so use the new ones from the start.
 - Policies never trust `user_metadata` from the JWT, because users can edit it. Roles come from tables.
@@ -88,7 +88,8 @@ These live in the `private` schema, which the Data API doesn't expose. They use 
 | Function | Returns true when |
 | --- | --- |
 | `private.is_active_user()` | Caller has `account_status = 'active'`, a claimed handle and a verified email |
-| `private.has_staff_role(role)` | Caller holds that role, or `admin` |
+| `private.has_staff_role(role)` | Caller holds that role, or `admin`. Doesn't check the account, so staff functions use `require_active_staff` |
+| `private.require_active_staff(role)` | Raises `not permitted` unless the caller holds the role and is active, verified and has a handle (M4) |
 | `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner`, and caller's own account is active |
 | `private.is_blocked_between(other)` | A block exists in either direction |
 | `private.can_view_level(owner, level)` | Caller is the owner; or `owner` is active, no block exists, and `level` allows it. The core rule. Never reads staff status |
@@ -295,7 +296,7 @@ A trigger refuses every other transition, for any writer including an operator.
 
 - Reads to the requester exactly like a real request.
 - Creates nothing actionable. The row becomes `rejected`, and stays out of the owner's queue.
-- Will send no notification, when notifications arrive in M4.
+- Sends no notification, because the row never becomes `pending` (M4b).
 - Never changes `rerequest_after`.
 - Reuses the one row, so it can't build up history.
 - Is idempotent when repeated.
@@ -340,6 +341,8 @@ All follow and block changes for a pair of users take a transaction-scoped lock,
 | Change to public, then a request during it | The request waits, and follows immediately |
 | Approval disabled during a repeated request | Stays pending |
 | Four requests at 199 outstanding | Exactly one succeeds, and the total never exceeds 200 |
+
+Since M4b, `request_follow` and `accept_follow_request` also lock both accounts before the follow row, because the notifications they create reference both. See [Notifications](#notifications).
 
 ### Follower lists and counts
 
@@ -387,7 +390,7 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | `user_favorite_games` | R | R: not blocked. I, U, D: own, published games only | `position` |
 | `follows` | **No grant** | **No grant.** Functions only. See [Follow requests](#follow-requests) | None |
 | `blocked_users` | **No grant** | **No grant.** Functions only | None |
-| `staff_roles` | None | R: own. Audited admin functions arrive with M4 | None. An operator assigns the first administrator |
+| `staff_roles` | None | R: own. Changed only through the audited [staff functions](#staff-actions) | None. An operator assigns the first administrator |
 | `private.handle_holds` | None | None | None, and no grant to any API role |
 
 `handle` changes only through `public.claim_handle()`, and `avatar_path` only through the server workflow. `service_role` has no direct access to these tables either: it can only execute `public.set_avatar_path()`.
@@ -493,7 +496,7 @@ grant update (release_id, completeness, overall_condition, box_condition,
 | `reviews` | R: post readable | Same. Any active user may review a published game or release through a server function, and ownership isn't required (D9) | None directly |
 | `achievements` | R | R | Staff |
 | `user_achievements` | R | R | **Server only**, so a user can't award themselves |
-| `notifications` | **No grant** | R, D: recipient. No insert | `read_at` |
+| `notifications` | **No grant** | **No grant.** Functions only, for the recipient (M4-D11). See [Notifications](#notifications) | None. `read_at` changes through `mark_notifications_read` |
 
 A client can't insert a post with `kind = 'achievement'`. A `WITH CHECK` excludes it, and the server creates it after awarding the achievement.
 
@@ -526,7 +529,7 @@ with check (
 | Table | `anon` | `authenticated` |
 | --- | --- | --- |
 | `reports` | **No grant** | Moderators: R. Everyone else has no read policy. Filed and updated through functions |
-| `moderation_actions` | **No grant** | Moderators: R. Rows are added only by staff functions. No update or delete for anyone |
+| `private.audit_events` (M4, replaces the planned `moderation_actions`) | **No grant** | **No grant.** Admins read through `get_audit_events()`. Rows are added only by staff functions. See [Audit log](#audit-log) |
 
 **Reporters don't read `reports` directly.** A read policy on their own rows would also expose the snapshot and the assigned moderator, because RLS can't limit columns. A `my_reports()` function returns only the target and status.
 
@@ -598,7 +601,7 @@ No single layer covers everything. The last column lists what the database can't
 | No box-only or manual-only items | No enum value expresses it. `media_condition` can't be `not_included` | | | Declaration when adding an item |
 | Medium really holds game data | `media_format_code` required, physical formats only, with a `CHECK` backstop | Users can't approve | One approval function | **Editorial only.** Editors follow written guidelines (A3), and unclear cases stay in review |
 | Medium is really present | | | | **User's declaration only.** Can't be verified |
-| Staff actions are authorized and audited | | Protected columns have no client grant | Functions check role and write `moderation_actions` | Limit who holds roles |
+| Staff actions are authorized and audited | | Protected columns have no client grant | Functions check for active staff and write `private.audit_events` in the same transaction | Limit who holds roles and owner credentials |
 | Only staff approve the catalog | `status` constraints | `status` has no client grant | One approval function | |
 | Public queries and search exclude invalid records | Search indexes are partial on `published` | Read policies on `status` | | Jobs using the secret key filter on status |
 | Provider imports exclude invalid records | | Provider data has no client access | Matching skips excluded records | Adapters drop digital-only data |
@@ -707,6 +710,128 @@ Registration stays closed. `enable_signup = true` applies to the local stack onl
 | A session-verification approach for the server, using `getClaims` or an equivalent | Connects to `getCurrentViewer()` |
 | Decisions on JWT expiry | A token stays cryptographically valid until it expires, including after deletion. On the local stack it found no data, and Auth refused it |
 
+## Staff actions
+
+Staff are ordinary `authenticated` users. Every staff change goes through one of these functions, which check the caller, make the change and write an audit row in one transaction. A call that changes nothing returns `false` and records nothing.
+
+| Function | Caller | Rules |
+| --- | --- | --- |
+| `grant_staff_role(user, role, reason)` | Admin | The target must be active, verified and have a handle. Admins may grant `admin` (M4-D12) |
+| `revoke_staff_role(user, role, reason)` | Admin | At least one other active admin must remain, so the last admin can't step down |
+| `set_account_status(user, status, reason)` | Moderator for accounts without a staff role. Admin for staff accounts | Only `active` and `suspended`. Never your own account. `deactivated` accounts are refused |
+| `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page |
+
+**The caller must be active staff.** `private.require_active_staff(role)` requires the role and an active, verified account with a handle. `private.has_staff_role()` alone doesn't check the account, so no function uses it on its own. A suspended admin can't act.
+
+**Reasons** are required, trimmed, and 1 to 500 characters. They go to the audit log only, never to the affected user (M4-D8).
+
+**Staff changes happen one at a time.** Each function takes a single advisory lock, `private.lock_staff_changes()`, before checking its caller, so the check sees the result of any concurrent change. Two admins revoking each other leaves one admin. A grant to an account being suspended sees the suspension. A moderator suspended mid-action is refused.
+
+**Suspension and M3 locks.** M3 functions never take the staff lock, and the staff functions take no M3 lock, so they can't deadlock. A suspension waits for the user's in-flight follow to commit, through the row lock on their profile. A follow that began before an uncommitted suspension finishes as if it came just before it, because the suspension reads no follow data. Access-reducing actions still work during and after a suspension (M4-D6).
+
+**How suspension takes effect.** Every write path reads `account_status` from the database on each request, never from the session token, so existing sessions are refused on their next request:
+
+| Path | Check | Suspended user |
+| --- | --- | --- |
+| Profile and preferences updates | RLS with `is_active_user()` | Refused |
+| `claim_handle` | Active, under a row lock | Refused |
+| Avatar changes | Server checks `get_my_account()`, then `set_avatar_path` rechecks under a row lock | Refused |
+| `request_follow`, `accept_follow_request` | `require_active_user()` | Refused |
+| Cancel, unfollow, reject, remove follower, block, unblock | Verified account only | Allowed on purpose (M4-D6) |
+| Staff functions | `require_active_staff()` | Refused |
+
+**These checks assume `READ COMMITTED`.** Each check runs in its own statement after the lock is taken, so it sees every change committed before. That's Postgres's default, and the only level the Data API uses: clients can't choose another. A direct database session at `REPEATABLE READ` or `SERIALIZABLE` would take its snapshot before the lock and could check against older data. Only the owner and superusers connect directly, and they're outside these protections anyway. Functions added later must keep the lock before the check.
+
+**Not covered (M4-D7).** Suspension doesn't end sessions or block sign-in. A suspended user can still use the Auth API, for example to change their password, but nothing in the database depends on it. An Auth-level ban needs server code with the secret key, and is deferred.
+
+### Audit log
+
+`private.audit_events` records staff and operator actions. It sits in the `private` schema, which the Data API doesn't expose, and no API role has any privilege on it.
+
+| Column | Notes |
+| --- | --- |
+| `id` | UUIDv7, so ordering by id follows insertion time, to the millisecond. Not a guaranteed commit order |
+| `occurred_at` | When the transaction started, not when the change committed |
+| `actor_id` | Staff member. Null for an operator working in SQL |
+| `action` | `staff_role_granted`, `staff_role_revoked`, `account_suspended`, `account_reinstated`, `operator_action` |
+| `target_profile_id` | |
+| `reason` | Required |
+| `metadata` | Before and after values, such as `{"from": "active", "to": "suspended"}`. At most 2 KB |
+
+**How far the log can be trusted:**
+
+| Who | Protection |
+| --- | --- |
+| `anon`, `authenticated`, `service_role` | No schema access, no table privileges, no EXECUTE on the writer. They can't read, write or forge rows |
+| Our own `SECURITY DEFINER` functions | Rows are added only through `private.record_audit()`. Triggers refuse `UPDATE`, `DELETE` and `TRUNCATE`, and a test checks that no function body changes the table |
+| The database owner or a superuser | **Not protected.** They can disable the triggers, or alter or drop the table. Trust here rests on limiting who holds those credentials, backups and the platform's own logs, and later on copying the log to write-once storage outside the database |
+
+So the log is append-only for application and API roles, not immutable.
+
+**Every staff change is audited, or doesn't happen.** The audit row is written in the same transaction, and a failed write rolls the change back. A refused call rolls back too, so refusals aren't logged. Logging them would need a separate connection, and is left to the API layer.
+
+**Neither timestamps nor ids guarantee commit order.** This matters most when transactions run concurrently. `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written. For staff functions that happens under the staff lock, so the id usually follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. A row the owner writes directly, without the lock, has no ordering guarantee at all. In the stress tests, id order always matched commit order, but that's an observation, not a guarantee. Don't treat either column as commit order. A strict order would need a sequence column, which can be added if audits ever need one.
+
+**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names.
+
+**Retention is undecided (M4-D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
+
+## Notifications
+
+In-app notifications for follows, requests, acceptances and moderation (M4b). There's no email, push, realtime delivery, queue or worker: the client reads the unread count when it navigates or every few minutes.
+
+**Written only by triggers, in the same transaction as their cause.** A notification commits or rolls back with the follow, block or status change behind it, so neither can exist without the other. A failure to store one fails the change, and errors are never caught and ignored.
+
+| Change | Effect |
+| --- | --- |
+| New `pending`, or `cancelled` to `pending` | `follow_request` to the account being followed |
+| New `accepted`, or `cancelled` to `accepted` | `follow` to the account being followed |
+| `pending` to `accepted` | The request notice is withdrawn, and `follow_accepted` goes to the follower |
+| `pending` to `rejected` or `cancelled`, or the row removed | The request notice is withdrawn |
+| A retry during a cooldown | **Nothing.** The row stays `rejected`, or moves from `cancelled` to `rejected`, which notifies nobody |
+| A block, either direction | Every notice between the two is removed, both ways. Unblocking restores nothing |
+| `active` to `suspended`, or back | `moderation` to the account, holding only `{"status": ...}` |
+| Account deletion | Every notice the account received or caused is removed (M4-D4) |
+
+**No duplicates (M4-D3).** Each notice records `event_at`, the time of the follow change that caused it, and `(recipient, actor, type, event_at)` is unique, so the same change never notifies twice. Repeated follow, unfollow, follow of one account notifies once per 24 hours. That check runs under the M3 pair lock, so two racing calls can't both pass it. Requests need no window: there's at most one pending request per pair, its notice is withdrawn when it stops being pending, and a rejection starts a cooldown. The window looks only at stored notices. So if the recipient deletes a follow notice, the next follow from that account notifies again, even within 24 hours. Cancelling and re-requesting is a new request, so it shows the request again once per cycle.
+
+**Preferences (M4-D9).** `user_preferences.notification_settings` holds in-app toggles for `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. A check constraint refuses anything else, so `moderation` can't be turned off (M4-D8). A type that's off stores nothing, and turning it on again brings nothing back. Users change it with the existing update grant, under the same RLS as their other preferences.
+
+**Moderation notices never name who acted, or why.** The actor is always null, and a check constraint allows only the status in `data`. The staff member's reason stays in the audit log.
+
+**Access is through functions only (M4-D11).** No API role has any privilege on the table, and RLS is on with no policies.
+
+| Function | Rules |
+| --- | --- |
+| `get_my_notifications(limit, before)` | The caller's own, newest first, 1 to 100 per page, with the actor's card |
+| `get_unread_notification_count()` | Counts up to 100, so the interface shows "99+" beyond 99 |
+| `mark_notifications_read(up_to)` | Marks the caller's visible unread notices up to that id, or all when null, and returns how many changed |
+| `delete_notification(id)` | Deletes one of the caller's own. Silent otherwise |
+
+All four take the recipient from `auth.uid()`, need a verified account, and work for suspended accounts too, so a suspended user can read their moderation notice. `anon` and `service_role` can't execute them.
+
+**Actors are shown by M3's card rule.** A notice shows only while its actor is active, has a handle and shares no block with the caller. The list, the count and mark-as-read apply the same filter. A hidden notice isn't deleted, so it shows again, still unread, if the actor is reinstated. Moderation notices have no actor and always show.
+
+**Lock order.** Inserting a notice checks both foreign keys, which takes a key-share lock on both profiles. Account deletion locks the profile first and then the follow rows. So `request_follow` and `accept_follow_request` lock both profiles before the follow row; otherwise a deletion racing them deadlocks, and Postgres aborts the deletion. M4b redefines those two functions for this, adding one statement each and changing nothing else. Any later function that writes rows referencing profiles should follow the same order. This adds no new cycle. Both functions still take the pair lock first, and key-share locks conflict only with deletion or key changes, never with each other or with a status change. Account deletion takes no pair lock and no lock on the other profile. `mark_notifications_read` skips rows another transaction has locked, which are being deleted or marked already, so it never waits on a row lock.
+
+**Account deletion through Auth.** Auth deletes the user as its own role, and the cascade removes their follow rows, which withdraws request notices. So the withdrawal trigger, `private.notify_follow_change()`, is `SECURITY DEFINER`, like `hold_handle_on_delete`. Without that, deleting an account with a pending request fails with a permission error.
+
+| Race, tested with a transaction held open | Result |
+| --- | --- |
+| An accept, then the requester's deletion during it | The deletion waits, then removes the account and every notice |
+| A deletion that has locked the profile, then an accept or the user's own request | The accept or request waits before locking the follow row. No deadlock, and the deletion completes |
+| A cancel, then an accept during it | The accept is refused, and nobody is notified |
+| An accept, then a cancel during it | The cancel waits and changes nothing. Only the acceptance notice remains |
+| A block, then a request during it | Refused, with nothing stored |
+| A request, then a block during it | The block waits, then removes the notice |
+| A follow, then unfollow and follow again during it | One notice, under the 24-hour rule |
+| A notice being created, then mark all as read | Doesn't wait, and the new notice stays unread |
+| A block removing notices, then mark all as read | Doesn't wait |
+
+**Known limitation: simultaneous deletion of related accounts.** If two accounts that follow each other, or have notified each other, are deleted at the same moment, each cascade can lock the shared follow or notification rows in a different order. Postgres then aborts one deletion with a deadlock error, the other completes, and nothing is left half-deleted. Retrying the aborted deletion succeeds. M3's follows cascade already had this risk, and notifications add more shared rows. It isn't tested, and it's accepted until account deletion runs through a single serialized path.
+
+**Retention is undecided (M4-D10).** Nothing removes notifications except their recipient, a block, or account deletion. That's an interim state, not a commitment. The indexes support a later purge by age.
+
 ## Assigning the first administrator
 
 **No real administrator has been assigned, and nothing does this automatically.** There's no bootstrap endpoint, and no API role can write to `staff_roles`, including `service_role`. Staff status comes from this table only. It's never read from metadata or JWT claims. Tests confirm a signup, a JWT claim, a profile update, a direct write and an API request can't grant a role.
@@ -716,10 +841,15 @@ The first administrator is assigned by a named operator, who has direct database
 1. The product owner approves in writing who will hold the role.
 2. That person creates an account, verifies their email and claims a handle, like anyone else.
 3. The operator connects directly to the database as `postgres`. This is never done from application code, and never through the API.
-4. The operator runs this, replacing the placeholder, and checks that it reports exactly one inserted row:
+4. The operator runs this, replacing the placeholders, and checks that it reports exactly one inserted row. The audit row and the role commit together:
 
 ```sql
 begin;
+select private.record_operator_action(
+  (select p.id from public.profiles p where p.handle = '<approved handle>'),
+  'First administrator, approved by <approver> on <date>',
+  '{"role": "admin"}'
+);
 insert into public.staff_roles (user_id, role, granted_by)
 select p.id, 'admin', null
 from public.profiles p
@@ -728,9 +858,9 @@ where p.handle = '<approved handle>';
 commit;
 ```
 
-5. The operator records who, when and why outside the database. `moderation_actions` doesn't exist until M4, and backfilling this entry is part of M4.
+5. The operator also keeps the written approval outside the database.
 
-Removal is the matching `delete`. Assigning further staff should use audited functions from M4, which call `private.has_staff_role()`. Until a policy needs that helper, it has no EXECUTE grant.
+After that, staff are managed only through the audited functions in [Staff actions](#staff-actions). The operator steps in again only if no active administrator remains, using the same procedure.
 
 ## Handles
 
@@ -798,6 +928,7 @@ The bucket also accepts only `image/webp` up to 2 MB, even with the secret key. 
 | Data | On deletion |
 | --- | --- |
 | `auth.users`, `profiles`, `user_preferences`, `staff_roles` | Removed, by cascade |
+| Notifications the user received or caused | Removed, by cascade (M4-D4) |
 | Files in the user's avatar folder | Removed by the workflow |
 | Handle | Held for 30 days, with no link to the person |
 
@@ -884,6 +1015,12 @@ Upload rules, for the buckets still to be built. Avatars are stricter, and `cata
 | Blocks can't be bypassed through direct APIs (M3) | Card policy, helper checks and function checks, tested through the API and with held-open transactions |
 | Private profile settings stay private (M2) | No `SELECT` grant on those columns for any client role, which also blocks filtering and sorting on them |
 | Staff roles can't be self-assigned (M2) | No client or `service_role` write grant, a database-backed helper, and a signup trigger that never reads metadata |
+| Staff changes are authorized, serialized and audited (M4) | Functions only, requiring active staff, under one lock, with the audit row in the same transaction. Tested directly, through the API and with held-open transactions |
+| The audit log can't be read or changed by clients (M4) | `private` schema, no privileges for any API role, append-only triggers. Owners and superusers aren't constrained, as documented |
+| Suspension applies to existing sessions (M4) | Every write path reads `account_status` from the database. Tested with a suspended user's live session |
+| Notifications are private to their recipient (M4b) | No privileges on the table for any API role. Four functions that take the recipient from `auth.uid()` |
+| Notifications keep M3's promises (M4b) | Created from status transitions, so a cooldown retry notifies nobody. Withdrawn when a request leaves pending, removed on block, hidden while the actor isn't visible |
+| Notifications can't reveal staff reasons (M4b) | A check constraint allows only the status in a moderation notice, and it never names the actor |
 | Handles can't bypass the rules (M2) | `claim_handle()` is the only path, with no client grant on `handle`, `handle_changed_at` or `handle_correction_until`, no access to holds, and per-handle locks |
 | Avatars can't be written by clients (M2) | No storage policy for the bucket, server-only workflow, and a `CHECK` on the path |
 | Can't modify another user's collection items | RLS on owner; `WITH CHECK` prevents transfer; composite keys prevent cross-owner links |

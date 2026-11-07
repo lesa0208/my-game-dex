@@ -9,9 +9,13 @@ const WORKFLOW = "src/features/avatars/avatar-workflow.ts";
 
 const q = (text) => `$x$${text}$x$`;
 
-/** Rewrites a function body, and fails if the pattern is no longer there. */
+/**
+ * Rewrites a function body, and fails if the pattern is no longer there. Carriage
+ * returns are removed first: a Windows checkout stores bodies with \r\n line endings,
+ * and the patterns are written with \n.
+ */
 const rewrite = (signature, from, to) =>
-  `do $m$ declare d text := pg_get_functiondef('${signature}'::regprocedure); begin if position(${q(from)} in d) = 0 then raise exception 'pattern missing'; end if; execute replace(d, ${q(from)}, ${q(to)}); end $m$;`;
+  `do $m$ declare d text := replace(pg_get_functiondef('${signature}'::regprocedure), chr(13), ''); begin if position(${q(from)} in d) = 0 then raise exception 'pattern missing'; end if; execute replace(d, ${q(from)}, ${q(to)}); end $m$;`;
 
 const sql = (name, expect, statement, role = "postgres") => ({ name, expect, sql: statement, role });
 const code = (name, expect, from, to, file = WORKFLOW) => ({ name, expect, code: { file, from, to } });
@@ -166,4 +170,79 @@ export const m3Mutations = [
   sql("list function loses definer safety", "pgtap", `alter function public.${PAGING} set search_path = public;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations };
+// M4a: one violation per audit and staff-authorization risk.
+const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
+const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
+const STATUS = "public.set_account_status(uuid, public.account_status, text)";
+const AUDIT_READ = "public.get_audit_events(integer, uuid)";
+
+export const m4Mutations = [
+  // Confidentiality and forgery
+  sql("audit table granted to clients", "pgtap", "grant select, insert on private.audit_events to authenticated;"),
+  sql("audit writer exposed", "pgtap", "grant execute on function private.record_audit(uuid, private.audit_action, uuid, text, jsonb) to authenticated;"),
+  sql("service_role may grant roles", "both", `grant execute on function ${GRANT} to service_role;`),
+  sql("anon may read the audit log", "both", `grant execute on function ${AUDIT_READ} to anon;`),
+  sql("moderators may read the audit log", "both", rewrite(AUDIT_READ, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  // Append-only
+  sql("audit rows can be changed", "pgtap", "drop trigger audit_events_no_update_or_delete on private.audit_events;"),
+  sql("audit table can be truncated", "pgtap", "drop trigger audit_events_no_truncate on private.audit_events;"),
+  // Completeness and atomicity
+  sql("grant not audited", "both", rewrite(GRANT, "perform private.record_audit(v_me, 'staff_role_granted'", "perform pg_catalog.jsonb_build_array(v_me, 'staff_role_granted'")),
+  sql("suspension not audited", "both", rewrite(STATUS, "perform private.record_audit(\n", "perform pg_catalog.jsonb_build_array(\n")),
+  sql("audit failure ignored", "pgtap", rewrite("private.record_audit(uuid, private.audit_action, uuid, text, jsonb)", "  return v_id;\nend;", "  return v_id;\nexception when others then\n  return null;\nend;")),
+  sql("reason not required", "pgtap", rewrite("private.require_reason(text)", "if v_reason is null or pg_catalog.char_length", "if pg_catalog.char_length")),
+  // Staff authorization
+  sql("moderator may grant roles", "pgtap", rewrite(GRANT, "v_me := private.require_active_staff('admin');", "v_me := private.require_active_staff('moderator');")),
+  sql("suspended staff may act", "both", rewrite("private.require_active_staff(public.staff_role)", "or not private.is_active_user() ", "")),
+  sql("inactive account may receive a role", "both", rewrite(GRANT, "where p.id = p_user and p.account_status = 'active' and p.handle", "where p.id = p_user and p.handle")),
+  sql("last administrator may be removed", "pgtap", rewrite(REVOKE, "if p_role = 'admin' and private.other_active_admins(p_user) = 0 then", "if false then")),
+  sql("moderator may suspend staff", "pgtap", rewrite(STATUS, "  if exists (select 1 from public.staff_roles s where s.user_id = p_user) then", "  if false then")),
+  sql("self-suspension allowed", "pgtap", rewrite(STATUS, "if p_user is null or p_user = v_me then", "if p_user is null then")),
+  sql("deactivation managed by staff", "pgtap", rewrite(STATUS, "p_status not in ('active', 'suspended')", "p_status not in ('active', 'suspended', 'deactivated')")),
+  sql("staff function without search_path", "pgtap", `alter function ${STATUS} set search_path = public;`),
+  // Concurrency
+  sql("staff changes not serialized", "api", rewrite("private.lock_staff_changes()", "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('staff-changes', 0));", "null;")),
+];
+
+const NOTIFY = "private.notify(uuid, uuid, public.notification_type, timestamptz, jsonb)";
+const FOLLOW_CHANGE = "private.notify_follow_change()";
+const LIST = "public.get_my_notifications(integer, uuid)";
+const COUNT = "public.get_unread_notification_count()";
+const MARK = "public.mark_notifications_read(uuid)";
+const VISIBLE = "(n.actor_id is null or (a.handle is not null and a.account_status = 'active' and not (n.actor_id = any (v_peers))))";
+const LOCK_COMMENT = "\n  -- M4b: lock both accounts before the follow row. See the header.\n";
+
+export const m4bMutations = [
+  // Confidentiality
+  sql("notifications granted to clients", "both", "grant select, insert on public.notifications to authenticated;"),
+  sql("notification writer exposed", "pgtap", `grant execute on function ${NOTIFY} to authenticated;`),
+  sql("service_role may list notifications", "both", `grant execute on function ${LIST} to service_role;`),
+  sql("missing recipient filter", "both", rewrite(LIST, "where n.recipient_id = v_me\n      and (p_before", "where (p_before")),
+  sql("list ignores actor visibility", "both", rewrite(LIST, `\n      and ${VISIBLE}\n    order by`, "\n    order by")),
+  sql("count ignores actor visibility", "both", rewrite(COUNT, `\n        and ${VISIBLE}\n      limit 100`, "\n      limit 100")),
+  sql("mark read ignores actor visibility", "pgtap", rewrite(MARK, "\n          and (x.actor_id is null or", "\n          and (true or")),
+  sql("another user's notification can be deleted", "both", rewrite("public.delete_notification(uuid)", "where n.id = p_id and n.recipient_id = v_me", "where n.id = p_id")),
+  // M3 promises
+  sql("cooldown retry notifies", "both", rewrite(FOLLOW_CHANGE, "if new.status = 'pending' then", "if new.status in ('pending', 'rejected') then")),
+  sql("request notice not withdrawn", "both", rewrite(FOLLOW_CHANGE, "if tg_op <> 'INSERT' and old.status = 'pending' and (tg_op = 'DELETE' or new.status <> 'pending') then", "if false then")),
+  sql("block keeps notifications", "both", "drop trigger remove_notifications_on_block on public.blocked_users;"),
+  sql("block removes one direction only", "both", rewrite("private.remove_notifications_on_block()", "\n     or (n.recipient_id = new.blocked_id and n.actor_id = new.blocker_id)", "")),
+  // Idempotency and deduplication
+  sql("event key removed", "pgtap", `alter table public.notifications drop constraint notifications_event_key; ${rewrite(NOTIFY, "\n  on conflict (recipient_id, actor_id, type, event_at) do nothing;", ";")}`),
+  sql("24-hour window removed", "both", rewrite(NOTIFY, "and n.created_at > pg_catalog.now() - interval '24 hours'", "and false")),
+  sql("mark read ignores its bound", "pgtap", rewrite(MARK, "and (p_up_to is null or x.id <= p_up_to)", "")),
+  sql("mark read waits on locked rows", "api", rewrite(MARK, "for update of x skip locked", "for update of x")),
+  // Preferences
+  sql("preference ignored", "both", rewrite(NOTIFY, "and up.notification_settings ->> p_type::text = 'false'", "and false")),
+  sql("preference validation dropped", "both", "alter table public.user_preferences drop constraint user_preferences_notification_settings_valid;"),
+  // Moderation notices
+  sql("moderation notice names the staff member", "both", `alter table public.notifications drop constraint notifications_shape; ${rewrite("private.notify_account_status_change()", "perform private.notify(new.id, null, 'moderation'", "perform private.notify(new.id, (select auth.uid()), 'moderation'")}`),
+  sql("moderation notice skipped", "both", "drop trigger notify_account_status_change on public.profiles;"),
+  // Account deletion and lock order
+  sql("deleted actor's notices kept", "both", "alter table public.notifications drop constraint notifications_shape, drop constraint notifications_actor_id_fkey, add constraint notifications_actor_id_fkey foreign key (actor_id) references public.profiles (id) on delete set null;"),
+  sql("follow notices written as the caller", "both", `alter function ${FOLLOW_CHANGE} security invoker;`),
+  sql("accept locks the follow before the accounts", "both", rewrite("public.accept_follow_request(uuid)", `${LOCK_COMMENT}  perform 1 from public.profiles p where p.id in (v_me, p_requester) order by p.id for key share;\n`, "\n")),
+  sql("request locks the follow before the accounts", "both", rewrite("public.request_follow(uuid)", `${LOCK_COMMENT}  perform 1 from public.profiles p where p.id = v_me for key share;\n`, "\n")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations };
