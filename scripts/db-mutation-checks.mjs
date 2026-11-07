@@ -107,8 +107,11 @@ function applyCodeMutation(directory, mutation) {
   if (existsSync(journalPath(directory))) throw new RecoveryConflict("a journal entry already exists; run --recover first");
   const file = resolve(root, mutation.code.file);
   const original = readFileSync(file, "utf8");
-  if (!original.includes(mutation.code.from)) throw new Error("code pattern missing");
-  const mutated = original.replace(mutation.code.from, mutation.code.to);
+  // Patterns are written with \n. A Windows checkout may use \r\n, so follow the file.
+  const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  const from = mutation.code.from.replace(/\n/g, eol);
+  if (!original.includes(from)) throw new Error("code pattern missing");
+  const mutated = original.replace(from, mutation.code.to.replace(/\n/g, eol));
   if (mutated === original) throw new Error("the mutation doesn't change the file");
 
   writeDurable(backupPath(directory), original);
@@ -288,6 +291,7 @@ select concat_ws(' ',
   nullif('staff_roles=' || (select count(*) from public.staff_roles), 'staff_roles=0'),
   nullif('follows=' || (select count(*) from public.follows), 'follows=0'),
   nullif('blocks=' || (select count(*) from public.blocked_users), 'blocks=0'),
+  nullif('audit_events=' || (select count(*) from private.audit_events), 'audit_events=0'),
   nullif('released_holds=' || (select count(*) from private.handle_holds where kind = 'released'), 'released_holds=0'),
   nullif('reserved_holds=' || (select count(*) from private.handle_holds where kind = 'reserved'), 'reserved_holds=44'),
   nullif('storage_objects=' || (select count(*) from storage.objects), 'storage_objects=0'),
@@ -326,7 +330,7 @@ async function runApi(timeout) {
   let failedCount = 0;
   let elapsed = 0;
   const stages = {};
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

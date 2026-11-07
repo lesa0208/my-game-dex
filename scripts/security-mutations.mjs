@@ -9,9 +9,13 @@ const WORKFLOW = "src/features/avatars/avatar-workflow.ts";
 
 const q = (text) => `$x$${text}$x$`;
 
-/** Rewrites a function body, and fails if the pattern is no longer there. */
+/**
+ * Rewrites a function body, and fails if the pattern is no longer there. Carriage
+ * returns are removed first: a Windows checkout stores bodies with \r\n line endings,
+ * and the patterns are written with \n.
+ */
 const rewrite = (signature, from, to) =>
-  `do $m$ declare d text := pg_get_functiondef('${signature}'::regprocedure); begin if position(${q(from)} in d) = 0 then raise exception 'pattern missing'; end if; execute replace(d, ${q(from)}, ${q(to)}); end $m$;`;
+  `do $m$ declare d text := replace(pg_get_functiondef('${signature}'::regprocedure), chr(13), ''); begin if position(${q(from)} in d) = 0 then raise exception 'pattern missing'; end if; execute replace(d, ${q(from)}, ${q(to)}); end $m$;`;
 
 const sql = (name, expect, statement, role = "postgres") => ({ name, expect, sql: statement, role });
 const code = (name, expect, from, to, file = WORKFLOW) => ({ name, expect, code: { file, from, to } });
@@ -166,4 +170,38 @@ export const m3Mutations = [
   sql("list function loses definer safety", "pgtap", `alter function public.${PAGING} set search_path = public;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations };
+// M4a: one violation per audit and staff-authorization risk.
+const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
+const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
+const STATUS = "public.set_account_status(uuid, public.account_status, text)";
+const AUDIT_READ = "public.get_audit_events(integer, uuid)";
+
+export const m4Mutations = [
+  // Confidentiality and forgery
+  sql("audit table granted to clients", "pgtap", "grant select, insert on private.audit_events to authenticated;"),
+  sql("audit writer exposed", "pgtap", "grant execute on function private.record_audit(uuid, private.audit_action, uuid, text, jsonb) to authenticated;"),
+  sql("service_role may grant roles", "both", `grant execute on function ${GRANT} to service_role;`),
+  sql("anon may read the audit log", "both", `grant execute on function ${AUDIT_READ} to anon;`),
+  sql("moderators may read the audit log", "both", rewrite(AUDIT_READ, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  // Append-only
+  sql("audit rows can be changed", "pgtap", "drop trigger audit_events_no_update_or_delete on private.audit_events;"),
+  sql("audit table can be truncated", "pgtap", "drop trigger audit_events_no_truncate on private.audit_events;"),
+  // Completeness and atomicity
+  sql("grant not audited", "both", rewrite(GRANT, "perform private.record_audit(v_me, 'staff_role_granted'", "perform pg_catalog.jsonb_build_array(v_me, 'staff_role_granted'")),
+  sql("suspension not audited", "both", rewrite(STATUS, "perform private.record_audit(\n", "perform pg_catalog.jsonb_build_array(\n")),
+  sql("audit failure ignored", "pgtap", rewrite("private.record_audit(uuid, private.audit_action, uuid, text, jsonb)", "  return v_id;\nend;", "  return v_id;\nexception when others then\n  return null;\nend;")),
+  sql("reason not required", "pgtap", rewrite("private.require_reason(text)", "if v_reason is null or pg_catalog.char_length", "if pg_catalog.char_length")),
+  // Staff authorization
+  sql("moderator may grant roles", "pgtap", rewrite(GRANT, "v_me := private.require_active_staff('admin');", "v_me := private.require_active_staff('moderator');")),
+  sql("suspended staff may act", "both", rewrite("private.require_active_staff(public.staff_role)", "or not private.is_active_user() ", "")),
+  sql("inactive account may receive a role", "both", rewrite(GRANT, "where p.id = p_user and p.account_status = 'active' and p.handle", "where p.id = p_user and p.handle")),
+  sql("last administrator may be removed", "pgtap", rewrite(REVOKE, "if p_role = 'admin' and private.other_active_admins(p_user) = 0 then", "if false then")),
+  sql("moderator may suspend staff", "pgtap", rewrite(STATUS, "  if exists (select 1 from public.staff_roles s where s.user_id = p_user) then", "  if false then")),
+  sql("self-suspension allowed", "pgtap", rewrite(STATUS, "if p_user is null or p_user = v_me then", "if p_user is null then")),
+  sql("deactivation managed by staff", "pgtap", rewrite(STATUS, "p_status not in ('active', 'suspended')", "p_status not in ('active', 'suspended', 'deactivated')")),
+  sql("staff function without search_path", "pgtap", `alter function ${STATUS} set search_path = public;`),
+  // Concurrency
+  sql("staff changes not serialized", "api", rewrite("private.lock_staff_changes()", "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('staff-changes', 0));", "null;")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations };

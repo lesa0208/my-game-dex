@@ -51,7 +51,7 @@ The design has 51 tables: the 26 requested and 25 supporting tables. Each suppor
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
-| Moderation | `reports` | `moderation_actions` |
+| Moderation | `reports` | `private.audit_events` (M4) |
 | Metadata providers | None | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks` |
 
 Why each supporting table is needed:
@@ -73,7 +73,7 @@ Why each supporting table is needed:
 | `achievements`, `user_achievements` | Phase 1 has an Achievement post type, and users must not be able to award themselves one |
 | `staff_roles` | Staff status must not live anywhere a user can edit |
 | `handle_holds` | Reserved names and released handles must be enforced on the server, where no client can read or change them |
-| `moderation_actions` | Staff actions need an audit trail |
+| `private.audit_events` | Staff actions need an audit trail that no client can read or change |
 | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks` | Metadata provider adapters, with the internal catalog as the source of truth |
 
 ## Conventions
@@ -1181,24 +1181,25 @@ Exactly one target column is set. The snapshot preserves what was reported, even
 - **Timestamps:** `created_at`, `updated_at`, `resolved_at`
 - **Constraints:** a `CHECK` allows at most one target, and requires exactly one at creation through the filing function. Targets may later become null when a target is hard-deleted
 
-### `moderation_actions`
+### `audit_events`
 
-Append-only audit log. Staff can add rows, nobody can change them.
+In the `private` schema (M4). Replaces the planned `moderation_actions` (decision D1). Append-only for application and API roles: no API role has any privilege, rows are added only by `private.record_audit()`, and triggers refuse `UPDATE`, `DELETE` and `TRUNCATE`. A database owner or superuser can still bypass this. See [Audit log](security-rls.md#audit-log).
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` (v7) | No | |
-| `actor_id` | `uuid` | Yes | Staff member |
-| `report_id` | `uuid` | Yes | |
+| `id` | `uuid` (v7) | No | Default `private.uuid_v7()` |
+| `occurred_at` | `timestamptz` | No | Default `now()` |
+| `actor_id` | `uuid` | Yes | Staff member. Null for an operator working in SQL |
+| `action` | `private.audit_action` | No | `staff_role_granted`, `staff_role_revoked`, `account_suspended`, `account_reinstated`, `operator_action`. Later steps add values, such as `hide_post` and `merge_game` |
 | `target_profile_id` | `uuid` | Yes | |
-| `action` | `text` | No | `hide_post`, `suspend_user`, `merge_game` |
-| `reason` | `text` | Yes | |
-| `metadata` | `jsonb` | No | Before and after values. Default `{}` |
+| `reason` | `text` | No | Trimmed, 1 to 500 characters |
+| `metadata` | `jsonb` | No | Before and after values. An object of at most 2 KB. Default `{}` |
 
 - **Primary key:** `id`
-- **Foreign keys:** `actor_id`, `target_profile_id` → `profiles(id)` on delete set null; `report_id` → `reports(id)` on delete set null
-- **Indexes:** `(actor_id, id DESC)`; `(target_profile_id, id DESC)`; `report_id`
-- **Timestamps:** `created_at`
+- **Foreign keys:** none, deliberately. Deleting an account doesn't change the log, and rows hold no copies of profile data. L4 Reporting adds a report reference
+- **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null
+- **Timestamps:** `occurred_at`. Rows are never updated
+- **Retention:** undecided (D10). Nothing removes rows, which is an interim state, not a commitment
 
 ---
 

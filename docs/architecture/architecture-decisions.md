@@ -50,6 +50,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [040](#adr-040-follows-and-blocks-are-reached-only-through-functions) | Follows and blocks are reached only through functions |
 | [041](#adr-041-rejection-is-silent) | Rejection is silent |
 | [042](#adr-042-follower-counts-are-live-and-count-visible-relationships) | Follower counts are live, and count visible relationships |
+| [043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) | The audit log is private, and append-only for application roles |
 
 ## Decisions requiring product-owner approval
 
@@ -222,7 +223,7 @@ Personal rating is private by default for the same reason. Public opinions belon
 
 ### ADR-007: UUID strategy
 
-**Decision.** UUIDs throughout for user-generated and catalog entities. UUIDv7 for high-volume tables: `collection_items`, `posts`, `comments`, `likes`, `notifications`, `messages`, `reports`, `moderation_actions`, `provider_records`.
+**Decision.** UUIDs throughout for user-generated and catalog entities. UUIDv7 for high-volume tables: `collection_items`, `posts`, `comments`, `likes`, `notifications`, `messages`, `reports`, `audit_events`, `provider_records`.
 
 **Why.** UUIDs can be created anywhere and don't reveal totals in URLs. Random UUIDv4 values scatter inserts across the index, which hurts at large scale. UUIDv7 is time-ordered and so inserts near the end, and can double as the sort key for pagination.
 
@@ -505,7 +506,7 @@ Most general game databases focus on games rather than physical releases. Expect
 | *The Legend of Zelda: Ocarina of Time 3D* | Separate Game, `remaster_of` | Substantially rebuilt. An example of a judgment call |
 | *The Ico & Shadow of the Colossus Collection* | Separate compilation Game, `contains` both | The games inside stay the same Games |
 
-**Trade-off.** Judgment means editors will sometimes disagree, so `game_relations.note` records the reasoning and `moderation_actions` records the decision. Reviews and favorites attach to the Game, so a split later would need those reassigned by hand.
+**Trade-off.** Judgment means editors will sometimes disagree, so `game_relations.note` records the reasoning and `private.audit_events` records the decision. Reviews and favorites attach to the Game, so a split later would need those reassigned by hand.
 
 ### ADR-027: Frankfurt is the proposed initial region
 
@@ -670,6 +671,14 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** Public counts undercount, by design, and different viewers can see different numbers. A count takes about 44 ms for 50,000 followers locally, and grows with followers. A cache can sit behind the same function if measurements call for it.
 
+### ADR-043: The audit log is private, and append-only for application roles
+
+**Decision.** Approved by the product owner as M4 decisions D1, D2, D5, D7, D10 and D12. Staff and operator actions are recorded in `private.audit_events`, which replaces the planned `public.moderation_actions`. No API role has any privilege on it. Rows are added only through `private.record_audit()`, in the same transaction as the action, and triggers refuse updates, deletes and truncation. Admins read it through `get_audit_events()`. Staff functions require active staff, take one lock for all staff changes, and record a required reason. Moderators suspend and reinstate accounts without a staff role, admins handle staff accounts, and nobody acts on themselves. One active admin may grant `admin`, and the last active admin can't be removed.
+
+**Why.** An audit trail is only useful if clients can't read, forge or erase it, and if no staff change can happen without a row. Keeping it out of `public` removes a whole class of policy mistakes. Plain IDs without foreign keys mean account deletion never rewrites history.
+
+**Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension doesn't end sessions or block sign-in at the Auth level (D7), though every database path already refuses a suspended user. Retention is undecided (D10), and nothing removes rows until a policy is approved.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -691,6 +700,8 @@ Most general game databases focus on games rather than physical releases. Expect
 | A rejected or removed user seeks another route to contact someone | Silent rejection and blocks limit this, and reporting (L4) is required before launch |
 | New RLS policies add per-row functions on large tables | Compute once per query, and measure with `supabase/benchmarks/` |
 | A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
+| Someone with owner credentials edits the audit log | Triggers only stop application roles. Limit owner credentials, keep backups, and plan an export to write-once storage before launch |
+| A suspended user keeps a live session | Every database path refuses them. An Auth-level ban is deferred (D7), and needed if non-database features are added |
 
 ## Phase 2B plan
 
@@ -726,7 +737,7 @@ Accepted by the product owner as the implementation roadmap. Work proceeds one s
 | `catalog_change_requests` | Submission review queue | Supporting | `profiles`, `games`, `releases`, `platforms` | Yes | D5 needs it as soon as users can submit |
 | `staff_roles` | Staff authorization | Supporting | `profiles` | Yes | Approval is restricted to staff |
 | `handle_holds` | Reserved and released handles | Supporting | None | Yes | Handle rules need a store no client can reach. In `private` |
-| `moderation_actions` | Audit log | Supporting | `profiles` | Yes | Staff functions write to it. `report_id` is added with `reports` |
+| `private.audit_events` | Audit log | Supporting | None, by design | Yes | Staff functions write to it (M4). A report reference is added with `reports` |
 | `follows` | Accepted follows | Supporting | `profiles` | Yes | The visibility policies under D1 depend on it, and retrofitting means rewriting them |
 | `blocked_users` | Blocks | Supporting | `profiles` | Yes | Same reason |
 | `notifications` | User notices | Supporting | `profiles` | Yes | Q9 and D5 must notify owners. Post, comment and conversation columns are added with those tables |
@@ -765,8 +776,8 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
-| **M3 Authorization graph** (built locally, awaiting approval) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
-| **M4 Audit and notices** | `moderation_actions`, a minimal `notifications` | Staff functions write to both |
+| **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
+| **M4 Audit and notices** (M4a audit built locally, M4b notifications next) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
@@ -778,7 +789,7 @@ Later groups, in order:
 | **L1 Collection extras** | `wantlist_items`, `user_favorite_games`, `genres`, `game_genres`, `franchises`, `game_franchises` | Nothing |
 | **L2 Images** | `catalog_images`, storage buckets | D15 |
 | **L3 Social** | `achievements`, `user_achievements`, `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, notification columns | Nothing |
-| **L4 Reporting** | `reports`, `moderation_actions.report_id` | L3. Needed before public launch |
+| **L4 Reporting** | `reports`, a report reference on `private.audit_events` | L3. Needed before public launch |
 | **L5 Messaging** | `conversations`, `conversation_members`, `messages` | D11, D16 |
 | **L6 Providers** | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks`, `catalog_images.provider_code` | D14 |
 
@@ -829,8 +840,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M3 Authorization, then authorizes M4.
-2. Build M4 to M7 locally, one reviewed step at a time.
+1. The product owner reviews M4a Audit, then authorizes M4b Notifications.
+2. Build M4b to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

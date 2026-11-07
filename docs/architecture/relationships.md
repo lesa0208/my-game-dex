@@ -661,8 +661,8 @@ erDiagram
   messages ||--o{ reports : "is reported"
   shelves ||--o{ reports : "is reported"
   collection_items ||--o{ reports : "is reported"
-  reports ||--o{ moderation_actions : "leads to"
-  profiles ||--o{ moderation_actions : "performs"
+  reports ||--o{ audit_events : "leads to, from L4"
+  profiles ||--o{ audit_events : "performs, by id only"
 
   reports {
     uuid id PK
@@ -673,11 +673,12 @@ erDiagram
     jsonb content_snapshot
     report_status status
   }
-  moderation_actions {
+  audit_events {
     uuid id PK
-    uuid actor_id FK
-    uuid report_id FK
-    text action
+    uuid actor_id
+    uuid target_profile_id
+    audit_action action
+    text reason
     jsonb metadata
   }
 ```
