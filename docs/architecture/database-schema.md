@@ -187,7 +187,7 @@ Private settings, one row per user, readable only by that user.
 | `default_shelf_visibility` | `visibility_level` | No | Default `private` (D2) |
 | `default_post_visibility` | `visibility_level` | No | Default `public`. Pre-fills the composer only |
 | `message_permission` | `message_permission` | No | Default `followers` |
-| `notification_settings` | `jsonb` | No | In-app toggles (D9): `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. Nothing else is allowed, so `moderation` can't be turned off. Default `{}` |
+| `notification_settings` | `jsonb` | No | In-app toggles (M4-D9): `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. Nothing else is allowed, so `moderation` can't be turned off. Default `{}` |
 
 - **Primary key:** `user_id`
 - **Foreign keys:** `user_id` → `profiles(id)` on delete cascade; `preferred_region_code` → `region_codes(code)` on delete set null
@@ -1075,7 +1075,7 @@ Awarded only by the server, so an achievement can't be forged.
 
 ### `notifications`
 
-Built in M4b. Rows are written only by triggers, in the same transaction as the follow, block or status change that causes them. No client role has any privilege: clients read and manage their own notifications only through functions (D11). See [Notifications](security-rls.md#notifications). M4 stores only `follow`, `follow_request`, `follow_accepted` and `moderation`. Later phases add `post_id`, `comment_id` and `conversation_id` columns and their types, with the features that cause them.
+Built in M4b. Rows are written only by triggers, in the same transaction as the follow, block or status change that causes them. No client role has any privilege: clients read and manage their own notifications only through functions (M4-D11). See [Notifications](security-rls.md#notifications). M4 stores only `follow`, `follow_request`, `follow_accepted` and `moderation`. Later phases add `post_id`, `comment_id` and `conversation_id` columns and their types, with the features that cause them.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1084,17 +1084,17 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 | `actor_id` | `uuid` | Yes | Required for follow types. Always null for `moderation`, which never names who acted |
 | `type` | `notification_type` | No | |
 | `event_at` | `timestamptz` | Yes | The follow's `requested_at` or `accepted_at`. Required for follow types, null for `moderation` |
-| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (D8). Default `{}` |
+| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (M4-D8). Default `{}` |
 | `created_at` | `timestamptz` | No | Default `now()` |
 | `read_at` | `timestamptz` | Yes | Set by `mark_notifications_read` |
 
 - **Primary key:** `id`
-- **Foreign keys:** `recipient_id` and `actor_id` → `profiles(id)`, both on delete cascade (D4), so nothing about a deleted account remains in anyone's notifications
+- **Foreign keys:** `recipient_id` and `actor_id` → `profiles(id)`, both on delete cascade (M4-D4), so nothing about a deleted account remains in anyone's notifications
 - **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict
 - **Checks:** the type, actor, event and data combinations above; the actor is never the recipient
 - **Indexes:** `(recipient_id, id DESC)`; `(recipient_id, id DESC)` where `read_at IS NULL`; `(actor_id, recipient_id)` where `actor_id` is not null
 - **Timestamps:** `created_at`, `read_at`. `event_at` is the time of the change that caused the notification
-- **Retention:** undecided (D10). Nothing removes rows except their owner, a block, or account deletion. That's an interim state, not a commitment
+- **Retention:** undecided (M4-D10). Nothing removes rows except their owner, a block, or account deletion. That's an interim state, not a commitment
 
 ---
 
@@ -1184,7 +1184,7 @@ Exactly one target column is set. The snapshot preserves what was reported, even
 
 ### `audit_events`
 
-In the `private` schema (M4). Replaces the planned `moderation_actions` (decision D1). Append-only for application and API roles: no API role has any privilege, rows are added only by `private.record_audit()`, and triggers refuse `UPDATE`, `DELETE` and `TRUNCATE`. A database owner or superuser can still bypass this. See [Audit log](security-rls.md#audit-log).
+In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1). Append-only for application and API roles: no API role has any privilege, rows are added only by `private.record_audit()`, and triggers refuse `UPDATE`, `DELETE` and `TRUNCATE`. A database owner or superuser can still bypass this. See [Audit log](security-rls.md#audit-log).
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1200,7 +1200,7 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (decisio
 - **Foreign keys:** none, deliberately. Deleting an account doesn't change the log, and rows hold no copies of profile data. L4 Reporting adds a report reference
 - **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null
 - **Timestamps:** `occurred_at`. Rows are never updated
-- **Retention:** undecided (D10). Nothing removes rows, which is an interim state, not a commitment
+- **Retention:** undecided (M4-D10). Nothing removes rows, which is an interim state, not a commitment
 
 ---
 
@@ -1303,7 +1303,7 @@ Rough sizing assumes 1 million users with an average of 300 items each. These ar
 | Table | Rough rows | Approach |
 | --- | --- | --- |
 | `collection_items` | 300M | Always queried by `owner_id`. UUIDv7 keeps inserts local. Hash partitioning by `owner_id` is the path if needed |
-| `likes`, `notifications` | Billions over time | Notifications need a retention period (D10). Likes can be time-partitioned later |
+| `likes`, `notifications` | Billions over time | Notifications need a retention period (M4-D10). Likes can be time-partitioned later |
 | `messages` | Billions over time | `(conversation_id, id DESC)` keeps reads narrow. Partition by time when needed |
 | `games`, `releases` | Millions | Read-heavy, so cache aggressively at the application layer |
 

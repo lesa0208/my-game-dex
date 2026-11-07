@@ -496,7 +496,7 @@ grant update (release_id, completeness, overall_condition, box_condition,
 | `reviews` | R: post readable | Same. Any active user may review a published game or release through a server function, and ownership isn't required (D9) | None directly |
 | `achievements` | R | R | Staff |
 | `user_achievements` | R | R | **Server only**, so a user can't award themselves |
-| `notifications` | **No grant** | **No grant.** Functions only, for the recipient (D11). See [Notifications](#notifications) | None. `read_at` changes through `mark_notifications_read` |
+| `notifications` | **No grant** | **No grant.** Functions only, for the recipient (M4-D11). See [Notifications](#notifications) | None. `read_at` changes through `mark_notifications_read` |
 
 A client can't insert a post with `kind = 'achievement'`. A `WITH CHECK` excludes it, and the server creates it after awarding the achievement.
 
@@ -716,18 +716,18 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 
 | Function | Caller | Rules |
 | --- | --- | --- |
-| `grant_staff_role(user, role, reason)` | Admin | The target must be active, verified and have a handle. Admins may grant `admin` (D12) |
+| `grant_staff_role(user, role, reason)` | Admin | The target must be active, verified and have a handle. Admins may grant `admin` (M4-D12) |
 | `revoke_staff_role(user, role, reason)` | Admin | At least one other active admin must remain, so the last admin can't step down |
 | `set_account_status(user, status, reason)` | Moderator for accounts without a staff role. Admin for staff accounts | Only `active` and `suspended`. Never your own account. `deactivated` accounts are refused |
 | `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page |
 
 **The caller must be active staff.** `private.require_active_staff(role)` requires the role and an active, verified account with a handle. `private.has_staff_role()` alone doesn't check the account, so no function uses it on its own. A suspended admin can't act.
 
-**Reasons** are required, trimmed, and 1 to 500 characters. They go to the audit log only, never to the affected user (D8).
+**Reasons** are required, trimmed, and 1 to 500 characters. They go to the audit log only, never to the affected user (M4-D8).
 
 **Staff changes happen one at a time.** Each function takes a single advisory lock, `private.lock_staff_changes()`, before checking its caller, so the check sees the result of any concurrent change. Two admins revoking each other leaves one admin. A grant to an account being suspended sees the suspension. A moderator suspended mid-action is refused.
 
-**Suspension and M3 locks.** M3 functions never take the staff lock, and the staff functions take no M3 lock, so they can't deadlock. A suspension waits for the user's in-flight follow to commit, through the row lock on their profile. A follow that began before an uncommitted suspension finishes as if it came just before it, because the suspension reads no follow data. Access-reducing actions still work during and after a suspension (D6).
+**Suspension and M3 locks.** M3 functions never take the staff lock, and the staff functions take no M3 lock, so they can't deadlock. A suspension waits for the user's in-flight follow to commit, through the row lock on their profile. A follow that began before an uncommitted suspension finishes as if it came just before it, because the suspension reads no follow data. Access-reducing actions still work during and after a suspension (M4-D6).
 
 **How suspension takes effect.** Every write path reads `account_status` from the database on each request, never from the session token, so existing sessions are refused on their next request:
 
@@ -737,12 +737,12 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 | `claim_handle` | Active, under a row lock | Refused |
 | Avatar changes | Server checks `get_my_account()`, then `set_avatar_path` rechecks under a row lock | Refused |
 | `request_follow`, `accept_follow_request` | `require_active_user()` | Refused |
-| Cancel, unfollow, reject, remove follower, block, unblock | Verified account only | Allowed on purpose (D6) |
+| Cancel, unfollow, reject, remove follower, block, unblock | Verified account only | Allowed on purpose (M4-D6) |
 | Staff functions | `require_active_staff()` | Refused |
 
 **These checks assume `READ COMMITTED`.** Each check runs in its own statement after the lock is taken, so it sees every change committed before. That's Postgres's default, and the only level the Data API uses: clients can't choose another. A direct database session at `REPEATABLE READ` or `SERIALIZABLE` would take its snapshot before the lock and could check against older data. Only the owner and superusers connect directly, and they're outside these protections anyway. Functions added later must keep the lock before the check.
 
-**Not covered (D7).** Suspension doesn't end sessions or block sign-in. A suspended user can still use the Auth API, for example to change their password, but nothing in the database depends on it. An Auth-level ban needs server code with the secret key, and is deferred.
+**Not covered (M4-D7).** Suspension doesn't end sessions or block sign-in. A suspended user can still use the Auth API, for example to change their password, but nothing in the database depends on it. An Auth-level ban needs server code with the secret key, and is deferred.
 
 ### Audit log
 
@@ -750,7 +750,7 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 
 | Column | Notes |
 | --- | --- |
-| `id` | UUIDv7, so ordering by id follows insertion time, to the millisecond |
+| `id` | UUIDv7, so ordering by id follows insertion time, to the millisecond. Not a guaranteed commit order |
 | `occurred_at` | When the transaction started, not when the change committed |
 | `actor_id` | Staff member. Null for an operator working in SQL |
 | `action` | `staff_role_granted`, `staff_role_revoked`, `account_suspended`, `account_reinstated`, `operator_action` |
@@ -770,11 +770,11 @@ So the log is append-only for application and API roles, not immutable.
 
 **Every staff change is audited, or doesn't happen.** The audit row is written in the same transaction, and a failed write rolls the change back. A refused call rolls back too, so refusals aren't logged. Logging them would need a separate connection, and is left to the API layer.
 
-**Ordering is approximate within a millisecond.** `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written, under the lock, so it follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. In the stress tests, id order always matched commit order. A strict order would need a sequence column, which can be added if audits ever need one.
+**Neither timestamps nor ids guarantee commit order.** This matters most when transactions run concurrently. `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written. For staff functions that happens under the staff lock, so the id usually follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. A row the owner writes directly, without the lock, has no ordering guarantee at all. In the stress tests, id order always matched commit order, but that's an observation, not a guarantee. Don't treat either column as commit order. A strict order would need a sequence column, which can be added if audits ever need one.
 
 **Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names.
 
-**Retention is undecided (D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
+**Retention is undecided (M4-D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
 
 ## Notifications
 
@@ -791,15 +791,15 @@ In-app notifications for follows, requests, acceptances and moderation (M4b). Th
 | A retry during a cooldown | **Nothing.** The row stays `rejected`, or moves from `cancelled` to `rejected`, which notifies nobody |
 | A block, either direction | Every notice between the two is removed, both ways. Unblocking restores nothing |
 | `active` to `suspended`, or back | `moderation` to the account, holding only `{"status": ...}` |
-| Account deletion | Every notice the account received or caused is removed (D4) |
+| Account deletion | Every notice the account received or caused is removed (M4-D4) |
 
-**No duplicates (D3).** Each notice records `event_at`, the time of the follow change that caused it, and `(recipient, actor, type, event_at)` is unique, so the same change never notifies twice. Repeated follow, unfollow, follow of one account notifies once per 24 hours. That check runs under the M3 pair lock, so two racing calls can't both pass it. Requests need no window: there's at most one pending request per pair, its notice is withdrawn when it stops being pending, and a rejection starts a cooldown. The window looks only at stored notices. So if the recipient deletes a follow notice, the next follow from that account notifies again, even within 24 hours. Cancelling and re-requesting is a new request, so it shows the request again once per cycle.
+**No duplicates (M4-D3).** Each notice records `event_at`, the time of the follow change that caused it, and `(recipient, actor, type, event_at)` is unique, so the same change never notifies twice. Repeated follow, unfollow, follow of one account notifies once per 24 hours. That check runs under the M3 pair lock, so two racing calls can't both pass it. Requests need no window: there's at most one pending request per pair, its notice is withdrawn when it stops being pending, and a rejection starts a cooldown. The window looks only at stored notices. So if the recipient deletes a follow notice, the next follow from that account notifies again, even within 24 hours. Cancelling and re-requesting is a new request, so it shows the request again once per cycle.
 
-**Preferences (D9).** `user_preferences.notification_settings` holds in-app toggles for `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. A check constraint refuses anything else, so `moderation` can't be turned off (D8). A type that's off stores nothing, and turning it on again brings nothing back. Users change it with the existing update grant, under the same RLS as their other preferences.
+**Preferences (M4-D9).** `user_preferences.notification_settings` holds in-app toggles for `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. A check constraint refuses anything else, so `moderation` can't be turned off (M4-D8). A type that's off stores nothing, and turning it on again brings nothing back. Users change it with the existing update grant, under the same RLS as their other preferences.
 
 **Moderation notices never name who acted, or why.** The actor is always null, and a check constraint allows only the status in `data`. The staff member's reason stays in the audit log.
 
-**Access is through functions only (D11).** No API role has any privilege on the table, and RLS is on with no policies.
+**Access is through functions only (M4-D11).** No API role has any privilege on the table, and RLS is on with no policies.
 
 | Function | Rules |
 | --- | --- |
@@ -830,7 +830,7 @@ All four take the recipient from `auth.uid()`, need a verified account, and work
 
 **Known limitation: simultaneous deletion of related accounts.** If two accounts that follow each other, or have notified each other, are deleted at the same moment, each cascade can lock the shared follow or notification rows in a different order. Postgres then aborts one deletion with a deadlock error, the other completes, and nothing is left half-deleted. Retrying the aborted deletion succeeds. M3's follows cascade already had this risk, and notifications add more shared rows. It isn't tested, and it's accepted until account deletion runs through a single serialized path.
 
-**Retention is undecided (D10).** Nothing removes notifications except their recipient, a block, or account deletion. That's an interim state, not a commitment. The indexes support a later purge by age.
+**Retention is undecided (M4-D10).** Nothing removes notifications except their recipient, a block, or account deletion. That's an interim state, not a commitment. The indexes support a later purge by age.
 
 ## Assigning the first administrator
 
@@ -928,7 +928,7 @@ The bucket also accepts only `image/webp` up to 2 MB, even with the secret key. 
 | Data | On deletion |
 | --- | --- |
 | `auth.users`, `profiles`, `user_preferences`, `staff_roles` | Removed, by cascade |
-| Notifications the user received or caused | Removed, by cascade (D4) |
+| Notifications the user received or caused | Removed, by cascade (M4-D4) |
 | Files in the user's avatar folder | Removed by the workflow |
 | Handle | Held for 30 days, with no link to the person |
 

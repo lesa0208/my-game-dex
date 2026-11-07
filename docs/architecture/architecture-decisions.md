@@ -127,6 +127,25 @@ This records why the database is designed as it is, what each choice costs, and 
 | **R7** | Game Boy classification | **Modified.** Three distinct cases. See [ADR-035](#adr-035-game-boy-classification-follows-the-physical-edition) |
 | **R8** | Seed sources | **Conditionally approved.** Recorded in [reference-data-sources.md](reference-data-sources.md) |
 
+### M4-D1 to M4-D12: product owner's decisions for M4
+
+These are separate from D1 to D22 above. M4 documents cite them as M4-D1 to M4-D12.
+
+| # | Decision | Outcome |
+| --- | --- | --- |
+| **M4-D1** | Audit log | **Approved.** `private.audit_events`, append-only for application and API roles. Replaces the planned `moderation_actions`. See [ADR-043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) |
+| **M4-D2** | Who reads the audit log | **Approved.** Admins only, through `get_audit_events()` |
+| **M4-D3** | Duplicate notifications | **Approved.** One notice per event, and repeated follows of one account notify once per 24 hours |
+| **M4-D4** | Deleted accounts in notifications | **Approved.** Deleting the recipient or the actor deletes the notice |
+| **M4-D5** | Who suspends | **Approved.** Moderators suspend and reinstate accounts without a staff role. Admins handle staff accounts. Nobody suspends themselves |
+| **M4-D6** | Suspended users | **Approved.** They can still cancel, unfollow, reject, remove followers, block and unblock, as in M3 |
+| **M4-D7** | Auth-level bans | **Deferred.** Suspension doesn't end sessions or block sign-in. Every database path refuses a suspended user |
+| **M4-D8** | Moderation notices | **Approved.** Mandatory, and never include the staff member or their reason |
+| **M4-D9** | Notification preferences | **Approved.** In-app only, on by default, with no backfill when turned on |
+| **M4-D10** | Retention of notifications and audit events | **Undecided,** pending legal review and [D10](#needed-before-launch-may-need-legal-advice). M4 has no purge or scheduled deletion |
+| **M4-D11** | Notification access | **Approved.** Only through `SECURITY DEFINER` functions. No API role has table access. See [ADR-044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) |
+| **M4-D12** | Granting `admin` | **Approved.** One active admin may grant `admin`, and the grant is audited |
+
 ### Needed before launch, may need legal advice
 
 | # | Decision | Recommendation | Notes |
@@ -674,19 +693,19 @@ Most general game databases focus on games rather than physical releases. Expect
 
 ### ADR-043: The audit log is private, and append-only for application roles
 
-**Decision.** Approved by the product owner as M4 decisions D1, D2, D5, D7, D10 and D12. Staff and operator actions are recorded in `private.audit_events`, which replaces the planned `public.moderation_actions`. No API role has any privilege on it. Rows are added only through `private.record_audit()`, in the same transaction as the action, and triggers refuse updates, deletes and truncation. Admins read it through `get_audit_events()`. Staff functions require active staff, take one lock for all staff changes, and record a required reason. Moderators suspend and reinstate accounts without a staff role, admins handle staff accounts, and nobody acts on themselves. One active admin may grant `admin`, and the last active admin can't be removed.
+**Decision.** Approved by the product owner as M4-D1, M4-D2, M4-D5, M4-D7, M4-D10 and M4-D12. Staff and operator actions are recorded in `private.audit_events`, which replaces the planned `public.moderation_actions`. No API role has any privilege on it. Rows are added only through `private.record_audit()`, in the same transaction as the action, and triggers refuse updates, deletes and truncation. Admins read it through `get_audit_events()`. Staff functions require active staff, take one lock for all staff changes, and record a required reason. Moderators suspend and reinstate accounts without a staff role, admins handle staff accounts, and nobody acts on themselves. One active admin may grant `admin`, and the last active admin can't be removed.
 
 **Why.** An audit trail is only useful if clients can't read, forge or erase it, and if no staff change can happen without a row. Keeping it out of `public` removes a whole class of policy mistakes. Plain IDs without foreign keys mean account deletion never rewrites history.
 
-**Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension doesn't end sessions or block sign-in at the Auth level (D7), though every database path already refuses a suspended user. Retention is undecided (D10), and nothing removes rows until a policy is approved.
+**Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension doesn't end sessions or block sign-in at the Auth level (M4-D7), though every database path already refuses a suspended user. Retention is undecided (M4-D10), and nothing removes rows until a policy is approved.
 
 ### ADR-044: Notifications come from state changes, in the same transaction
 
-**Decision.** Approved by the product owner as M4 decisions D3, D4, D8, D9 and D11. `public.notifications` is written only by triggers on `follows`, `blocked_users` and `profiles`, in the same transaction as the change. A follow notifies from its status transition alone, so a cooldown retry notifies nobody. A request notice is withdrawn when the request leaves pending, and a block removes every notice between the pair. Each notice is keyed to the time of the change that caused it, and repeated follows of the same account notify once per 24 hours. Preferences are in-app only and on by default. Moderation notices can't be turned off and never carry the staff reason. Deleting either account deletes the notice. Clients have no table access and use four functions, which hide a notice while its actor isn't visible.
+**Decision.** Approved by the product owner as M4-D3, M4-D4, M4-D8, M4-D9 and M4-D11. `public.notifications` is written only by triggers on `follows`, `blocked_users` and `profiles`, in the same transaction as the change. A follow notifies from its status transition alone, so a cooldown retry notifies nobody. A request notice is withdrawn when the request leaves pending, and a block removes every notice between the pair. Each notice is keyed to the time of the change that caused it, and repeated follows of the same account notify once per 24 hours. Preferences are in-app only and on by default. Moderation notices can't be turned off and never carry the staff reason. Deleting either account deletes the notice. Clients have no table access and use four functions, which hide a notice while its actor isn't visible.
 
 **Why.** Triggers cover every write path, including later ones, and one transaction means a notice can't exist without its cause or the reverse. Driving notices from transitions rather than calls keeps M3's silent-rejection promise without special cases. Function-only access lets one visibility rule apply to lists, counts and marking as read.
 
-**Trade-offs.** Inserting a notice locks both profiles, so `request_follow` and `accept_follow_request` now take those locks before the follow row, matching account deletion and avoiding a deadlock. That redefines two M3 functions, with nothing else changed. The withdrawal trigger runs as its owner, because Auth's account deletion reaches it. Cancelling and re-requesting can show a request again, once per cycle. A recipient who deletes a follow notice can get another before 24 hours have passed. There's no delivery beyond the app: no email, push or realtime. Retention is undecided (D10).
+**Trade-offs.** Inserting a notice locks both profiles, so `request_follow` and `accept_follow_request` now take those locks before the follow row, matching account deletion and avoiding a deadlock. That redefines two M3 functions, with nothing else changed. The withdrawal trigger runs as its owner, because Auth's account deletion reaches it. Cancelling and re-requesting can show a request again, once per cycle. A recipient who deletes a follow notice can get another before 24 hours have passed. There's no delivery beyond the app: no email, push or realtime. Retention is undecided (M4-D10).
 
 ## Risks to watch
 
@@ -711,9 +730,9 @@ Most general game databases focus on games rather than physical releases. Expect
 | Two related accounts deleted at the same moment deadlock | Postgres aborts one, with nothing half-deleted, and a retry succeeds. Accepted as a known limitation. See [Notifications](security-rls.md#notifications) |
 | A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
 | Someone with owner credentials edits the audit log | Triggers only stop application roles. Limit owner credentials, keep backups, and plan an export to write-once storage before launch |
-| A suspended user keeps a live session | Every database path refuses them. An Auth-level ban is deferred (D7), and needed if non-database features are added |
+| A suspended user keeps a live session | Every database path refuses them. An Auth-level ban is deferred (M4-D7), and needed if non-database features are added |
 | A new code path writes rows that notifications reference, in a different lock order | Lock the referenced profiles before the referencing rows, as the follow functions do. The API checks force this race for accept and request |
-| Notifications and audit events grow without limit | Nothing removes them until D10 sets a retention period. Both tables are indexed for a later purge |
+| Notifications and audit events grow without limit | Nothing removes them until M4-D10 sets a retention period. Both tables are indexed for a later purge |
 
 ## Phase 2B plan
 
@@ -789,7 +808,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
-| **M4 Audit and notices** (M4a committed locally, M4b notifications built locally) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
+| **M4 Audit and notices** (done, verified on the local stack only) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
@@ -852,7 +871,7 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M4b Notifications.
+1. Review and merge the M4 pull request.
 2. Build M5 to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
