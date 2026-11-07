@@ -51,6 +51,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [041](#adr-041-rejection-is-silent) | Rejection is silent |
 | [042](#adr-042-follower-counts-are-live-and-count-visible-relationships) | Follower counts are live, and count visible relationships |
 | [043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) | The audit log is private, and append-only for application roles |
+| [044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) | Notifications come from state changes, in the same transaction |
 
 ## Decisions requiring product-owner approval
 
@@ -679,6 +680,14 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension doesn't end sessions or block sign-in at the Auth level (D7), though every database path already refuses a suspended user. Retention is undecided (D10), and nothing removes rows until a policy is approved.
 
+### ADR-044: Notifications come from state changes, in the same transaction
+
+**Decision.** Approved by the product owner as M4 decisions D3, D4, D8, D9 and D11. `public.notifications` is written only by triggers on `follows`, `blocked_users` and `profiles`, in the same transaction as the change. A follow notifies from its status transition alone, so a cooldown retry notifies nobody. A request notice is withdrawn when the request leaves pending, and a block removes every notice between the pair. Each notice is keyed to the time of the change that caused it, and repeated follows of the same account notify once per 24 hours. Preferences are in-app only and on by default. Moderation notices can't be turned off and never carry the staff reason. Deleting either account deletes the notice. Clients have no table access and use four functions, which hide a notice while its actor isn't visible.
+
+**Why.** Triggers cover every write path, including later ones, and one transaction means a notice can't exist without its cause or the reverse. Driving notices from transitions rather than calls keeps M3's silent-rejection promise without special cases. Function-only access lets one visibility rule apply to lists, counts and marking as read.
+
+**Trade-offs.** Inserting a notice locks both profiles, so `request_follow` and `accept_follow_request` now take those locks before the follow row, matching account deletion and avoiding a deadlock. That redefines two M3 functions, with nothing else changed. The withdrawal trigger runs as its owner, because Auth's account deletion reaches it. Cancelling and re-requesting can show a request again, once per cycle. A recipient who deletes a follow notice can get another before 24 hours have passed. There's no delivery beyond the app: no email, push or realtime. Retention is undecided (D10).
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -699,9 +708,12 @@ Most general game databases focus on games rather than physical releases. Expect
 | Credential attacks succeed because Auth doesn't throttle them | No throttling or lockout was seen locally. Application-level throttling and CAPTCHA are hosted registration requirements |
 | A rejected or removed user seeks another route to contact someone | Silent rejection and blocks limit this, and reporting (L4) is required before launch |
 | New RLS policies add per-row functions on large tables | Compute once per query, and measure with `supabase/benchmarks/` |
+| Two related accounts deleted at the same moment deadlock | Postgres aborts one, with nothing half-deleted, and a retry succeeds. Accepted as a known limitation. See [Notifications](security-rls.md#notifications) |
 | A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
 | Someone with owner credentials edits the audit log | Triggers only stop application roles. Limit owner credentials, keep backups, and plan an export to write-once storage before launch |
 | A suspended user keeps a live session | Every database path refuses them. An Auth-level ban is deferred (D7), and needed if non-database features are added |
+| A new code path writes rows that notifications reference, in a different lock order | Lock the referenced profiles before the referencing rows, as the follow functions do. The API checks force this race for accept and request |
+| Notifications and audit events grow without limit | Nothing removes them until D10 sets a retention period. Both tables are indexed for a later purge |
 
 ## Phase 2B plan
 
@@ -777,7 +789,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
-| **M4 Audit and notices** (M4a audit built locally, M4b notifications next) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
+| **M4 Audit and notices** (M4a committed locally, M4b notifications built locally) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
@@ -840,8 +852,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M4a Audit, then authorizes M4b Notifications.
-2. Build M4b to M7 locally, one reviewed step at a time.
+1. The product owner reviews M4b Notifications.
+2. Build M5 to M7 locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

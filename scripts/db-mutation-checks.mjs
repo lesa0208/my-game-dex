@@ -3,7 +3,7 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|all] [--out results.json] [--log run.log] [--only name]
+ *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|all] [--out results.json] [--log run.log] [--only name]
  *   node scripts/db-mutation-checks.mjs --recover
  *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
  *
@@ -292,6 +292,7 @@ select concat_ws(' ',
   nullif('follows=' || (select count(*) from public.follows), 'follows=0'),
   nullif('blocks=' || (select count(*) from public.blocked_users), 'blocks=0'),
   nullif('audit_events=' || (select count(*) from private.audit_events), 'audit_events=0'),
+  nullif('notifications=' || (select count(*) from public.notifications), 'notifications=0'),
   nullif('released_holds=' || (select count(*) from private.handle_holds where kind = 'released'), 'released_holds=0'),
   nullif('reserved_holds=' || (select count(*) from private.handle_holds where kind = 'reserved'), 'reserved_holds=44'),
   nullif('storage_objects=' || (select count(*) from storage.objects), 'storage_objects=0'),
@@ -330,7 +331,7 @@ async function runApi(timeout) {
   let failedCount = 0;
   let elapsed = 0;
   const stages = {};
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

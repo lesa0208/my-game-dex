@@ -602,6 +602,7 @@ erDiagram
     uuid recipient_id FK
     uuid actor_id FK
     notification_type type
+    timestamptz event_at
     timestamptz read_at
   }
 ```

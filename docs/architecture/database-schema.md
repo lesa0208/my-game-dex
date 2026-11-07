@@ -187,7 +187,7 @@ Private settings, one row per user, readable only by that user.
 | `default_shelf_visibility` | `visibility_level` | No | Default `private` (D2) |
 | `default_post_visibility` | `visibility_level` | No | Default `public`. Pre-fills the composer only |
 | `message_permission` | `message_permission` | No | Default `followers` |
-| `notification_settings` | `jsonb` | No | Per-type email and in-app toggles. Default `{}` |
+| `notification_settings` | `jsonb` | No | In-app toggles (D9): `follow`, `follow_request` and `follow_accepted`, each `true` or `false`. A missing key means on. Nothing else is allowed, so `moderation` can't be turned off. Default `{}` |
 
 - **Primary key:** `user_id`
 - **Foreign keys:** `user_id` → `profiles(id)` on delete cascade; `preferred_region_code` → `region_codes(code)` on delete set null
@@ -1075,25 +1075,26 @@ Awarded only by the server, so an achievement can't be forged.
 
 ### `notifications`
 
-Created only by triggers and privileged functions. Purged after 90 days, a period awaiting approval as part of [D10](architecture-decisions.md#decisions-requiring-product-owner-approval).
+Built in M4b. Rows are written only by triggers, in the same transaction as the follow, block or status change that causes them. No client role has any privilege: clients read and manage their own notifications only through functions (D11). See [Notifications](security-rls.md#notifications). M4 stores only `follow`, `follow_request`, `follow_accepted` and `moderation`. Later phases add `post_id`, `comment_id` and `conversation_id` columns and their types, with the features that cause them.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` (v7) | No | |
+| `id` | `uuid` (v7) | No | Default `private.uuid_v7()` |
 | `recipient_id` | `uuid` | No | |
-| `actor_id` | `uuid` | Yes | Null for system notifications |
+| `actor_id` | `uuid` | Yes | Required for follow types. Always null for `moderation`, which never names who acted |
 | `type` | `notification_type` | No | |
-| `post_id` | `uuid` | Yes | |
-| `comment_id` | `uuid` | Yes | |
-| `conversation_id` | `uuid` | Yes | |
-| `data` | `jsonb` | No | Render details only. Default `{}` |
-| `read_at` | `timestamptz` | Yes | The one column a client may update |
+| `event_at` | `timestamptz` | Yes | The follow's `requested_at` or `accepted_at`. Required for follow types, null for `moderation` |
+| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (D8). Default `{}` |
+| `created_at` | `timestamptz` | No | Default `now()` |
+| `read_at` | `timestamptz` | Yes | Set by `mark_notifications_read` |
 
 - **Primary key:** `id`
-- **Foreign keys:** `recipient_id` → `profiles(id)` on delete cascade; `actor_id` → `profiles(id)` on delete set null; `post_id` → `posts(id)`, `comment_id` → `comments(id)`, `conversation_id` → `conversations(id)`, all on delete cascade
-- **Unique:** partial `NULLS NOT DISTINCT (recipient_id, actor_id, type, post_id, comment_id)` where `type IN ('like', 'follow')`, so repeatedly toggling a like can't spam someone
-- **Indexes:** `(recipient_id, id DESC)`; `(recipient_id, id DESC)` where `read_at IS NULL`; `actor_id`; `post_id`; `comment_id`; `conversation_id`
-- **Timestamps:** `created_at`, `read_at`
+- **Foreign keys:** `recipient_id` and `actor_id` → `profiles(id)`, both on delete cascade (D4), so nothing about a deleted account remains in anyone's notifications
+- **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict
+- **Checks:** the type, actor, event and data combinations above; the actor is never the recipient
+- **Indexes:** `(recipient_id, id DESC)`; `(recipient_id, id DESC)` where `read_at IS NULL`; `(actor_id, recipient_id)` where `actor_id` is not null
+- **Timestamps:** `created_at`, `read_at`. `event_at` is the time of the change that caused the notification
+- **Retention:** undecided (D10). Nothing removes rows except their owner, a block, or account deletion. That's an interim state, not a commitment
 
 ---
 
@@ -1302,7 +1303,7 @@ Rough sizing assumes 1 million users with an average of 300 items each. These ar
 | Table | Rough rows | Approach |
 | --- | --- | --- |
 | `collection_items` | 300M | Always queried by `owner_id`. UUIDv7 keeps inserts local. Hash partitioning by `owner_id` is the path if needed |
-| `likes`, `notifications` | Billions over time | Notifications are purged. Likes can be time-partitioned later |
+| `likes`, `notifications` | Billions over time | Notifications need a retention period (D10). Likes can be time-partitioned later |
 | `messages` | Billions over time | `(conversation_id, id DESC)` keeps reads narrow. Partition by time when needed |
 | `games`, `releases` | Millions | Read-heavy, so cache aggressively at the application layer |
 

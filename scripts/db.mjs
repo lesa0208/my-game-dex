@@ -60,6 +60,7 @@ const steps = {
   identity: () => runNode("db-identity-checks.mjs"),
   authorization: () => runNode("db-authorization-checks.mjs"),
   audit: () => runNode("db-audit-checks.mjs"),
+  notifications: () => runNode("db-notification-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -83,8 +84,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

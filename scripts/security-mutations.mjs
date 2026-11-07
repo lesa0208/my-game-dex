@@ -204,4 +204,45 @@ export const m4Mutations = [
   sql("staff changes not serialized", "api", rewrite("private.lock_staff_changes()", "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('staff-changes', 0));", "null;")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations };
+const NOTIFY = "private.notify(uuid, uuid, public.notification_type, timestamptz, jsonb)";
+const FOLLOW_CHANGE = "private.notify_follow_change()";
+const LIST = "public.get_my_notifications(integer, uuid)";
+const COUNT = "public.get_unread_notification_count()";
+const MARK = "public.mark_notifications_read(uuid)";
+const VISIBLE = "(n.actor_id is null or (a.handle is not null and a.account_status = 'active' and not (n.actor_id = any (v_peers))))";
+const LOCK_COMMENT = "\n  -- M4b: lock both accounts before the follow row. See the header.\n";
+
+export const m4bMutations = [
+  // Confidentiality
+  sql("notifications granted to clients", "both", "grant select, insert on public.notifications to authenticated;"),
+  sql("notification writer exposed", "pgtap", `grant execute on function ${NOTIFY} to authenticated;`),
+  sql("service_role may list notifications", "both", `grant execute on function ${LIST} to service_role;`),
+  sql("missing recipient filter", "both", rewrite(LIST, "where n.recipient_id = v_me\n      and (p_before", "where (p_before")),
+  sql("list ignores actor visibility", "both", rewrite(LIST, `\n      and ${VISIBLE}\n    order by`, "\n    order by")),
+  sql("count ignores actor visibility", "both", rewrite(COUNT, `\n        and ${VISIBLE}\n      limit 100`, "\n      limit 100")),
+  sql("mark read ignores actor visibility", "pgtap", rewrite(MARK, "\n          and (x.actor_id is null or", "\n          and (true or")),
+  sql("another user's notification can be deleted", "both", rewrite("public.delete_notification(uuid)", "where n.id = p_id and n.recipient_id = v_me", "where n.id = p_id")),
+  // M3 promises
+  sql("cooldown retry notifies", "both", rewrite(FOLLOW_CHANGE, "if new.status = 'pending' then", "if new.status in ('pending', 'rejected') then")),
+  sql("request notice not withdrawn", "both", rewrite(FOLLOW_CHANGE, "if tg_op <> 'INSERT' and old.status = 'pending' and (tg_op = 'DELETE' or new.status <> 'pending') then", "if false then")),
+  sql("block keeps notifications", "both", "drop trigger remove_notifications_on_block on public.blocked_users;"),
+  sql("block removes one direction only", "both", rewrite("private.remove_notifications_on_block()", "\n     or (n.recipient_id = new.blocked_id and n.actor_id = new.blocker_id)", "")),
+  // Idempotency and deduplication
+  sql("event key removed", "pgtap", `alter table public.notifications drop constraint notifications_event_key; ${rewrite(NOTIFY, "\n  on conflict (recipient_id, actor_id, type, event_at) do nothing;", ";")}`),
+  sql("24-hour window removed", "both", rewrite(NOTIFY, "and n.created_at > pg_catalog.now() - interval '24 hours'", "and false")),
+  sql("mark read ignores its bound", "pgtap", rewrite(MARK, "and (p_up_to is null or x.id <= p_up_to)", "")),
+  sql("mark read waits on locked rows", "api", rewrite(MARK, "for update of x skip locked", "for update of x")),
+  // Preferences
+  sql("preference ignored", "both", rewrite(NOTIFY, "and up.notification_settings ->> p_type::text = 'false'", "and false")),
+  sql("preference validation dropped", "both", "alter table public.user_preferences drop constraint user_preferences_notification_settings_valid;"),
+  // Moderation notices
+  sql("moderation notice names the staff member", "both", `alter table public.notifications drop constraint notifications_shape; ${rewrite("private.notify_account_status_change()", "perform private.notify(new.id, null, 'moderation'", "perform private.notify(new.id, (select auth.uid()), 'moderation'")}`),
+  sql("moderation notice skipped", "both", "drop trigger notify_account_status_change on public.profiles;"),
+  // Account deletion and lock order
+  sql("deleted actor's notices kept", "both", "alter table public.notifications drop constraint notifications_shape, drop constraint notifications_actor_id_fkey, add constraint notifications_actor_id_fkey foreign key (actor_id) references public.profiles (id) on delete set null;"),
+  sql("follow notices written as the caller", "both", `alter function ${FOLLOW_CHANGE} security invoker;`),
+  sql("accept locks the follow before the accounts", "both", rewrite("public.accept_follow_request(uuid)", `${LOCK_COMMENT}  perform 1 from public.profiles p where p.id in (v_me, p_requester) order by p.id for key share;\n`, "\n")),
+  sql("request locks the follow before the accounts", "both", rewrite("public.request_follow(uuid)", `${LOCK_COMMENT}  perform 1 from public.profiles p where p.id = v_me for key share;\n`, "\n")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations };
