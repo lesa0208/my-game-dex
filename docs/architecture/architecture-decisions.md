@@ -139,7 +139,7 @@ These are separate from D1 to D22 above. M4 documents cite them as M4-D1 to M4-D
 | **M4-D4** | Deleted accounts in notifications | **Approved.** Deleting the recipient or the actor deletes the notice |
 | **M4-D5** | Who suspends | **Approved.** Moderators suspend and reinstate accounts without a staff role. Admins handle staff accounts. Nobody suspends themselves |
 | **M4-D6** | Suspended users | **Approved.** They can still cancel, unfollow, reject, remove followers, block and unblock, as in M3 |
-| **M4-D7** | Auth-level bans | **Deferred.** Suspension doesn't end sessions or block sign-in. Every database path refuses a suspended user |
+| **M4-D7** | Auth-level bans | **Deferred.** Suspension does not invalidate existing Auth sessions or prevent sign-in. Protected operations enforce account status at the database level, while explicitly permitted access-reducing operations, such as unfollowing and blocking, remain available |
 | **M4-D8** | Moderation notices | **Approved.** Mandatory, and never include the staff member or their reason |
 | **M4-D9** | Notification preferences | **Approved.** In-app only, on by default, with no backfill when turned on |
 | **M4-D10** | Retention of notifications and audit events | **Undecided,** pending legal review and [D10](#needed-before-launch-may-need-legal-advice). M4 has no purge or scheduled deletion |
@@ -697,7 +697,7 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Why.** An audit trail is only useful if clients can't read, forge or erase it, and if no staff change can happen without a row. Keeping it out of `public` removes a whole class of policy mistakes. Plain IDs without foreign keys mean account deletion never rewrites history.
 
-**Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension doesn't end sessions or block sign-in at the Auth level (M4-D7), though every database path already refuses a suspended user. Retention is undecided (M4-D10), and nothing removes rows until a policy is approved.
+**Trade-offs.** The triggers don't constrain a database owner or superuser, so the log isn't immutable: trust there rests on credentials, backups and, later, export to write-once storage. Refused attempts aren't logged, because they roll back. One lock serializes every staff change, which is fine at staff volumes. Suspension does not invalidate existing Auth sessions or prevent sign-in (M4-D7). Protected operations enforce account status at the database level, while explicitly permitted access-reducing operations, such as unfollowing and blocking, remain available. Retention is undecided (M4-D10), and nothing removes rows until a policy is approved.
 
 ### ADR-044: Notifications come from state changes, in the same transaction
 
@@ -730,7 +730,7 @@ Most general game databases focus on games rather than physical releases. Expect
 | Two related accounts deleted at the same moment deadlock | Postgres aborts one, with nothing half-deleted, and a retry succeeds. Accepted as a known limitation. See [Notifications](security-rls.md#notifications) |
 | A user is deleted without the avatar workflow | Their public file stays behind. Route all deletion through `deleteAccountWithAvatars()` |
 | Someone with owner credentials edits the audit log | Triggers only stop application roles. Limit owner credentials, keep backups, and plan an export to write-once storage before launch |
-| A suspended user keeps a live session | Every database path refuses them. An Auth-level ban is deferred (M4-D7), and needed if non-database features are added |
+| A suspended user keeps a live session | Suspension does not invalidate existing Auth sessions or prevent sign-in. Protected operations enforce account status at the database level, while explicitly permitted access-reducing operations, such as unfollowing and blocking, remain available. An Auth-level ban is deferred (M4-D7), and needed if non-database features are added |
 | A new code path writes rows that notifications reference, in a different lock order | Lock the referenced profiles before the referencing rows, as the follow functions do. The API checks force this race for accept and request |
 | Notifications and audit events grow without limit | Nothing removes them until M4-D10 sets a retention period. Both tables are indexed for a later purge |
 
