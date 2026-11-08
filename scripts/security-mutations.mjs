@@ -245,4 +245,45 @@ export const m4bMutations = [
   sql("request locks the follow before the accounts", "both", rewrite("public.request_follow(uuid)", `${LOCK_COMMENT}  perform 1 from public.profiles p where p.id = v_me for key share;\n`, "\n")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations };
+const CATALOG_EDIT = "private.begin_catalog_edit()";
+const CATALOG_LOCK = "private.lock_catalog_edits()";
+const PUBLISH = "public.publish_release(uuid, text)";
+const VERIFY_RELEASE = "public.verify_release(uuid, text)";
+const CREATE_RELEASE = "public.create_release(uuid, uuid, text, text, jsonb, text)";
+const PUBLICATION_CHECK = "private.check_catalog_publication()";
+const SHARED_LOCK = "perform pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('staff-changes', 0));";
+
+export const m5aMutations = [
+  // Confidentiality: unpublished records and who handled them
+  sql("catalog writable by clients", "pgtap", "grant insert, update, delete on public.games to authenticated;"),
+  sql("unpublished games readable by anon", "both", "alter policy games_read_anon on public.games using (true);"),
+  sql("unpublished releases readable by any user", "both", "alter policy releases_read_authenticated on public.releases using (true);"),
+  sql("markets ignore release visibility", "pgtap", "alter policy release_markets_read on public.release_markets using (true);"),
+  sql("verifier visible to clients", "both", "grant select (verified_by) on public.releases to anon, authenticated;"),
+  sql("service_role reads the catalog", "both", "grant select on public.releases to service_role;"),
+  sql("provenance readable by clients", "pgtap", "grant select on private.provider_records to authenticated;"),
+  sql("editor function open to anon", "both", "grant execute on function public.create_game(text, public.game_kind, text, text, date, public.date_precision, text) to anon;"),
+  // Editor authorization and the shared staff lock
+  sql("anyone may edit the catalog", "both", rewrite(CATALOG_EDIT, "v_me := private.require_active_staff('catalog_editor');", "v_me := (select auth.uid());")),
+  sql("catalog edits skip the staff lock", "both", rewrite(CATALOG_LOCK, SHARED_LOCK, "null;")),
+  sql("catalog edits lock each other out", "both", rewrite(CATALOG_LOCK, SHARED_LOCK, "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('staff-changes', 0));")),
+  sql("editor checked before the lock", "both", rewrite(CATALOG_EDIT, "  perform private.lock_catalog_edits();\n  v_me := private.require_active_staff('catalog_editor');", "  v_me := private.require_active_staff('catalog_editor');\n  perform private.lock_catalog_edits();")),
+  sql("editor profile not locked first", "pgtap", rewrite(CATALOG_EDIT, "  perform 1 from public.profiles p where p.id = v_me for key share;\n", "")),
+  // Verification and publication
+  sql("unverified release published", "both", `alter table public.releases drop constraint releases_published_verified; ${rewrite(PUBLISH, "if v_release.verified_at is null then", "if false then")}`),
+  sql("unverified game published", "pgtap", `alter table public.games drop constraint games_published_verified; ${rewrite(PUBLISH, "if v_game.verified_at is null then", "if false then")}`),
+  sql("release published without its game", "pgtap", "drop trigger check_catalog_publication on public.releases;"),
+  sql("game published without a physical release", "pgtap", rewrite(PUBLICATION_CHECK, "if exists (select 1 from public.games g where g.id = v_game and g.status = 'published')\n     and not private.game_has_published_release(v_game) then", "if false then")),
+  sql("published release can be unpublished", "pgtap", "drop trigger guard_published_catalog_row on public.releases;"),
+  sql("edits keep a stale verification", "pgtap", rewrite("private.clear_release_verification(uuid)", "where r.id = p_release and r.status <> 'published' and r.verified_at is not null;", "where false;")),
+  sql("import defaults an edition", "pgtap", rewrite(CREATE_RELEASE, "v_row.edition_name,\n    v_row.edition_kind,", "coalesce(v_row.edition_name, 'Standard'),\n    coalesce(v_row.edition_kind, 'standard'),")),
+  sql("unknown region published unconfirmed", "pgtap", `alter table public.releases drop constraint releases_published_region; ${rewrite(VERIFY_RELEASE, "\n     or (v_release.region_code = 'unknown' and not v_release.region_unknown_confirmed) then", " then")}`),
+  sql("publication not audited", "both", rewrite(PUBLISH, "  perform private.record_catalog_audit(v_me, 'catalog_record_published', 'release'", "  perform pg_catalog.jsonb_build_array(v_me, 'catalog_record_published', 'release'")),
+  // Physical identity and provenance
+  sql("duplicate physical identity allowed", "both", "drop index public.releases_published_identity_key;"),
+  sql("format not tied to its platform", "pgtap", "alter table public.releases drop constraint releases_platform_id_media_format_code_fkey;"),
+  sql("game data counts as release evidence", "pgtap", "drop trigger validate_release_evidence on private.release_evidence;"),
+  sql("editor function without search_path", "pgtap", `alter function ${PUBLISH} set search_path = public;`),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations };

@@ -52,6 +52,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [042](#adr-042-follower-counts-are-live-and-count-visible-relationships) | Follower counts are live, and count visible relationships |
 | [043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) | The audit log is private, and append-only for application roles |
 | [044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) | Notifications come from state changes, in the same transaction |
+| [045](#adr-045-catalog-records-are-verified-before-they-are-published) | Catalog records are verified before they are published |
 
 ## Decisions requiring product-owner approval
 
@@ -145,6 +146,26 @@ These are separate from D1 to D22 above. M4 documents cite them as M4-D1 to M4-D
 | **M4-D10** | Retention of notifications and audit events | **Undecided,** pending legal review and [D10](#needed-before-launch-may-need-legal-advice). M4 has no purge or scheduled deletion |
 | **M4-D11** | Notification access | **Approved.** Only through `SECURITY DEFINER` functions. No API role has table access. See [ADR-044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) |
 | **M4-D12** | Granting `admin` | **Approved.** One active admin may grant `admin`, and the grant is audited |
+
+### M5 decisions: the catalog and its import
+
+Approved by the product owner on 2026-11-08, separate from the global decisions above.
+
+| Decision | Outcome |
+| --- | --- |
+| Product status | Treated as potentially commercial |
+| Sources | Wikidata and No-Intro for a limited SNES pilot, subject to each source's licensing check. Metadata permission never covers artwork or third-party content. Redump blocked until written commercial permission, and PS1 and PS2 support doesn't depend on it |
+| Neo Geo MVS | A separate platform, `platform_kind = 'other'`, with its own `neo-geo-mvs-cartridge` format. Cartridges only, never cabinets or boards. AES and MVS cartridges are physically different and incompatible |
+| Scope of candidates | Legitimate homebrew, aftermarket, unlicensed, demo and promotional releases are review candidates. Counterfeit and pirate copies are rejected |
+| Identity | Matching serials are evidence, never grounds to merge. ROM revisions aren't separate releases unless a distinct physical product is confirmed. Game candidates without a Wikidata id are allowed, under review |
+| Imports | A local operator tool. Source snapshots stay outside the repository, with provenance and hashes. Nothing is published automatically |
+| Batch approval | Allowed for game records. Releases only when every release's identity and required fields have independent source evidence |
+| Verification | Separate from publication, and required for it. Publishing a release also publishes its verified game and pairing (decisions 1 and 5) |
+| Defaults | None invented: an edition is required to publish, and an `unknown` region needs explicit confirmation (decision 2) |
+| Editors | Active catalog editors and administrators. One editor may verify and publish (decision 3). Shared staff lock. A reason for every change, including to verify and publish |
+| Lifecycle | Slugs freeze on publication. No unpublishing in M5 |
+| Search | Language-neutral PostgreSQL search, with 100 ms as a non-blocking local target (M5c) |
+| Images | Deferred until D15 |
 
 ### Needed before launch, may need legal advice
 
@@ -707,6 +728,14 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** Inserting a notice locks both profiles, so `request_follow` and `accept_follow_request` now take those locks before the follow row, matching account deletion and avoiding a deadlock. That redefines two M3 functions, with nothing else changed. The withdrawal trigger runs as its owner, because Auth's account deletion reaches it. Cancelling and re-requesting can show a request again, once per cycle. A recipient who deletes a follow notice can get another before 24 hours have passed. There's no delivery beyond the app: no email, push or realtime. Retention is undecided (M4-D10).
 
+### ADR-045: Catalog records are verified before they are published
+
+**Decision.** Approved by the product owner as the M5 decisions. Catalog editors and administrators write `games`, `game_platforms`, `game_relations`, `releases` and their details only through audited functions. Verifying a record is a separate step from publishing it, and publishing requires it. A release is published with its game and platform pairing in one transaction, and a commit-time trigger keeps the three consistent. Imports and their provenance live in `private`, and an imported entry is only a candidate. Nothing invents edition details, and a serial never identifies a release.
+
+**Why.** Imports will bring thousands of candidates, and a source's record isn't proof that a physical edition exists as described. Keeping verification apart from publication lets editors check identity in bulk where evidence supports it, without anything reaching the public catalog by default. The shared staff lock keeps M4a's guarantee that a revoked or suspended editor can't act afterwards, without making editors wait for each other.
+
+**Trade-offs.** Editing an identity field of an unpublished record clears its verification, so editors may verify twice. Descriptive edits don't. Every change needs a reason, a small cost to editors, so the audit log never holds one made up for them. Correcting a published record keeps it published, so a mistaken correction is fixed by another correction until M7 adds exclusion and merging. Relations and pairings can't be removed in M5. `service_role` has no catalog access until a job needs it.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -809,7 +838,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
 | **M4 Audit and notices** (done, verified on the local stack only) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
-| **M5 Catalog** | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
+| **M5 Catalog** (M5a schema and editor functions built locally) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
 
@@ -871,8 +900,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. Review and merge the M4 pull request.
-2. Build M5 to M7 locally, one reviewed step at a time.
+1. The product owner reviews M5a.
+2. Build M5b and M5c, then M6 and M7, locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

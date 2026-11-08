@@ -38,17 +38,17 @@ select is(
 );
 
 -- Platforms
-select is((select count(*)::int from public.platforms), 58, '58 platforms seeded');
+select is((select count(*)::int from public.platforms), 59, '58 platforms seeded, plus Neo Geo MVS in M5a');
 select is((select count(*)::int from public.platforms where base_platform_id is not null), 6, 'six add-on platforms');
-select is((select count(distinct slug)::int from public.platforms), 58, 'every slug is unique');
+select is((select count(distinct slug)::int from public.platforms), 59, 'every slug is unique');
 select is((select count(*)::int from public.platforms where manufacturer is null), 0, 'every seeded platform records a manufacturer');
 select is((select manufacturer from public.platforms where slug = 'nintendo-64dd'), 'Nintendo', 'manufacturer is the owner, not a contract assembler');
 select is((select count(*)::int from public.platforms where manufacturer ~* '(foxconn|hosiden|alps|flextronics|wistron)'), 0, 'no contract assembler is recorded as manufacturer');
 
 -- Physical-only scope, and no generation column
 select is(
-  (select count(*)::int from public.platforms where slug ~* '(stadia|ouya|zeebo|playdate|steam|mvs|arcade|game-watch|classic|mini)' or name ~* '(stadia|ouya|zeebo|playdate|steam deck)'),
-  0, 'no digital-only, arcade or built-in-game system is a platform'
+  (select count(*)::int from public.platforms where (slug ~* '(stadia|ouya|zeebo|playdate|steam|mvs|arcade|game-watch|classic|mini)' or name ~* '(stadia|ouya|zeebo|playdate|steam deck)') and slug <> 'neo-geo-mvs'),
+  0, 'no digital-only, arcade or built-in-game system is a platform, apart from MVS cartridges (M5a)'
 );
 select is((select count(*)::int from public.platforms where slug ~ '(pocket-|dsi|new-3ds|slim|lite|oled|-pro$|series-s)' and slug not in ('neo-geo-pocket-color')), 0, 'hardware revisions are not platforms');
 select hasnt_column('public', 'platforms', 'generation', 'generation was removed');
@@ -90,7 +90,7 @@ select is((select count(*)::int from public.platform_names where name ~* '(dendy
 select is((select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'platform_names' and column_name ~ 'compat'), 0, 'aliases carry no compatibility meaning');
 
 -- Media model
-select is((select count(*)::int from public.media_formats), 24, '24 media formats seeded');
+select is((select count(*)::int from public.media_formats), 25, '24 media formats seeded, plus the MVS cartridge in M5a');
 select enum_has_labels('public', 'media_category', array['cartridge', 'optical_disc', 'solid_state_card', 'magnetic_disk', 'magnetic_tape'], 'categories cover home-computer and PC media');
 select is((select count(*)::int from public.media_formats where code ~* '(^other$|digital|download|stream|cloud|entitlement)'), 0, 'no generic other or digital format exists');
 select throws_ok(

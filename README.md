@@ -68,6 +68,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 4. **Authorization checks** in `scripts/db-authorization-checks.mjs`, through the real API, with transactions held open to force races. These cover follows, blocks, lists, counts and permissions.
 5. **Audit checks** in `scripts/db-audit-checks.mjs`, through the real API, with held-open transactions. These cover staff roles, suspension, the audit log and its permissions.
 6. **Notification checks** in `scripts/db-notification-checks.mjs`, through the real API and Auth, with held-open transactions. These cover follow, request and moderation notices, preferences, visibility, blocks, account deletion and their permissions.
+7. **Catalog checks** in `scripts/db-catalog-checks.mjs`, through the real API and Auth, with held-open transactions. These cover catalog editor permissions, verification and publication, and races with revocation, suspension and account deletion.
 
 `npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 

@@ -403,15 +403,14 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | --- | --- | --- | --- |
 | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements` | R | R | **No client write path.** `service_role` has `SELECT` only. Staff tooling arrives later, through functions. Implemented in M1 |
 | `genres`, `franchises` | R | R | Catalog staff |
-| `release_hardware_requirements` | R: `can_read_release` | Same | Submission and staff functions only |
-| `release_markets`, `release_components` | R: `can_read_release` | Same | Submission and staff functions only |
-| `game_relations` | R: both games published | Same | Catalog staff only |
-| `games`, `releases`, `game_platforms` | R: `published`, `merged` | R: same, plus own submissions, and an `excluded` release the caller owns a preserved copy of. Catalog editors: all | Submission and staff functions only |
+| `release_markets`, `release_components`, `release_hardware_requirements` | R: `can_read_release` | Same | **No grant.** Editor functions only (M5a). Submission functions from M7 |
+| `game_relations` | R: both games published | Same. Catalog editors: all | **No grant.** `set_game_relation` only (M5a) |
+| `games`, `releases` | R: `published`, `merged` | R: same, plus own submissions (M7), and from M6 an `excluded` release the caller owns a preserved copy of. Catalog editors: all. `submitted_by` and `verified_by` aren't readable | **No grant.** Editor functions only (M5a). See [Catalog editing](#catalog-editing) |
+| `game_platforms` | R: `published` | R: same, plus own submissions (M7). Catalog editors: all | **No grant.** Editor functions only (M5a) |
 | `game_genres`, `game_franchises` | R | R | Catalog staff |
 | `catalog_images` | R: approved, `licensed` or `user_contributed` | Same, plus own uploads. Catalog editors: all | Submission and staff functions only |
 | `catalog_change_requests` | **No grant** | Catalog editors: R. Everyone else uses `my_catalog_submissions()` | Submission and staff functions only |
-| `external_providers`, `external_references`, `catalog_field_locks` | None | Catalog staff | Server jobs and catalog staff |
-| `private.provider_records` | None | None | Server jobs only |
+| `private.external_providers`, `external_references`, `provider_records`, `import_runs`, `release_evidence`, `catalog_field_locks` | None | None | The operator import tool, and editor functions for field locks (M5a) |
 
 ### User-submitted releases
 
@@ -832,6 +831,46 @@ All four take the recipient from `auth.uid()`, need a verified account, and work
 
 **Retention is undecided (M4-D10).** Nothing removes notifications except their recipient, a block, or account deletion. That's an interim state, not a commitment. The indexes support a later purge by age.
 
+## Catalog editing
+
+The catalog is written only by catalog editors and administrators, through audited functions (M5a). Every function needs the editor's own reason. No API role can insert, update or delete any catalog table, and `service_role` can't read it: no server job needs it yet. User submissions arrive in M7, and imports in M5b, as candidates for review.
+
+| Function | Rules |
+| --- | --- |
+| `create_game`, `update_game` | A game under review. Editing a published game is a correction |
+| `verify_game` | Records the editor and time |
+| `set_game_platform` | Records an unpublished pairing |
+| `set_game_relation` | Remake, remaster or compilation contents (ADR-026) |
+| `create_release`, `update_release` | A release candidate under review. Only what the editor gives is stored: no default edition, kind or medium count, and `unknown` region unless stated |
+| `set_release_markets`, `set_release_components`, `set_release_requirements` | Replace the set |
+| `verify_release` | Confirms the physical identity. Refused until the edition, kind and medium count are set, and an `unknown` region is explicitly confirmed |
+| `publish_release` | Needs a verified release and a verified game. Publishes the game and its platform pairing in the same transaction, if they aren't yet |
+| `set_catalog_field_lock` | Locks or unlocks a field against imports |
+
+**Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited.
+
+**Verification isn't publication.** Verifying records that an editor has checked a record's identity. Publishing makes it public, and requires that verification. Editing an identity field of an unpublished record clears its verification, because what was checked has changed. For a game that's the title, kind and first release date. For a release it's the region and its confirmation, edition name and kind, variant, packaging, product code, barcode, format, medium count and components. Descriptive fields, such as the summary, publisher, release date, languages, ratings, markets and hardware requirements, keep the verification. Editing a published record keeps it published and verified. There's no unpublishing in M5: a trigger refuses it even for the owner. Merging and exclusion come in M7.
+
+**Publication rules hold at commit.** A constraint trigger, deferred to commit, checks that a published release has a published game and pairing, that a published pairing has a published release, and that a published game has a published physical release of its own or through a compilation. So one call can publish a game with its first release, and no path, including the owner's, can publish one without the other. The trigger runs as its owner, because at commit it runs as the session's role, outside the editor function.
+
+**Physical identity.** A release's format must belong to its platform, through a composite foreign key, so a Neo Geo AES release can't be on an MVS cartridge. Two published releases can't share an identity (D6). A serial or barcode is never unique and never merges records.
+
+**Locking.** Every function first takes the staff-changes lock in **shared** mode, then checks the caller, each in its own statement. Staff-role and account-status changes take the same lock exclusively (M4a). So editors don't wait for each other, but an edit and a revocation or suspension never overlap: an edit after a revocation is refused, and a revocation during an edit waits for it. The caller's profile is then locked for key share before any catalog row, so deleting that account during an edit can't deadlock. Rows are locked game, then release, then pairing. Publishing two games with the same title takes a lock per slug base, so they get different slugs.
+
+**Audit.** Every change records an audit row in the same transaction, with the entity and id in `metadata` and the changed field names, never their values. Every call needs a reason from the editor, kept in the audit row as given, so the M4 rule that every audit row has a reason holds without one being made up. The M5b import tool will give the reason for its own changes.
+
+| Race, tested with a transaction held open | Result |
+| --- | --- |
+| Two editors publish the same identity | The second waits, then fails on the duplicate. Nothing of it is kept |
+| An edit during an editor's revocation | Waits, then is refused, and creates nothing |
+| A revocation during an edit | Waits, and the edit comes first |
+| Two editors edit at once | Neither waits |
+| A publication during the editor's suspension | Waits, then is refused, and publishes nothing |
+| Two games with the same title published at once | Both succeed, with different slugs |
+| An editor's account deleted through Auth during their edit | The deletion waits, then completes without a deadlock. The verification stays, without naming the account |
+
+**Not in M5a.** Removing a relation or a pairing, merging, exclusion, unpublishing, imports and search.
+
 ## Assigning the first administrator
 
 **No real administrator has been assigned, and nothing does this automatically.** There's no bootstrap endpoint, and no API role can write to `staff_roles`, including `service_role`. Staff status comes from this table only. It's never read from metadata or JWT claims. Tests confirm a signup, a JWT claim, a profile update, a direct write and an API request can't grant a role.
@@ -1021,6 +1060,9 @@ Upload rules, for the buckets still to be built. Avatars are stricter, and `cata
 | Notifications are private to their recipient (M4b) | No privileges on the table for any API role. Four functions that take the recipient from `auth.uid()` |
 | Notifications keep M3's promises (M4b) | Created from status transitions, so a cooldown retry notifies nobody. Withdrawn when a request leaves pending, removed on block, hidden while the actor isn't visible |
 | Notifications can't reveal staff reasons (M4b) | A check constraint allows only the status in a moderation notice, and it never names the actor |
+| Unpublished catalog records stay private (M5a) | Read policies check `status`, child tables check `can_read_release`, and column grants hide who submitted or verified a record |
+| Only catalog editors change the catalog (M5a) | No write grants. Audited functions that take the shared staff lock, then check the role |
+| Nothing is published unverified or invented (M5a) | Constraints require verification and a complete edition to publish, and a commit-time trigger requires the game, pairing and release to be published together |
 | Handles can't bypass the rules (M2) | `claim_handle()` is the only path, with no client grant on `handle`, `handle_changed_at` or `handle_correction_until`, no access to holds, and per-handle locks |
 | Avatars can't be written by clients (M2) | No storage policy for the bucket, server-only workflow, and a `CHECK` on the path |
 | Can't modify another user's collection items | RLS on owner; `WITH CHECK` prevents transfer; composite keys prevent cross-owner links |
