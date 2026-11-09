@@ -40,3 +40,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local catalog source datasets, snapshots and backups (kept outside the repo; never commit)
+/sources/
+*.dat
+*.dump
+/backups/
+wikidata-snes-*.json
+pilot-selection*.json
+pilot-reevaluation-*.json

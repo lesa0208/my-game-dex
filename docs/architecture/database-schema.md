@@ -42,7 +42,7 @@ The three core concepts stay separate:
 
 ## Table inventory
 
-The design has 53 tables: the 26 requested and 27 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+The design has 56 tables: the 26 requested and 30 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ The design has 53 tables: the 26 requested and 27 supporting tables. Each suppor
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
 | Moderation | `reports` | `private.audit_events` (M4) |
-| Metadata providers | None | `private.external_providers`, `private.external_references`, `private.provider_records`, `private.import_runs`, `private.release_evidence`, `private.catalog_field_locks` (M5a) |
+| Metadata providers | None | `private.external_providers`, `private.external_references`, `private.provider_records`, `private.import_runs`, `private.import_run_records`, `private.release_evidence`, `private.catalog_field_locks`, `private.game_title_keys`, `private.catalog_reclassifications` (M5a and M5b) |
 
 Why each supporting table is needed:
 
@@ -74,7 +74,7 @@ Why each supporting table is needed:
 | `staff_roles` | Staff status must not live anywhere a user can edit |
 | `handle_holds` | Reserved names and released handles must be enforced on the server, where no client can read or change them |
 | `private.audit_events` | Staff actions need an audit trail that no client can read or change |
-| `external_providers`, `external_references`, `provider_records`, `import_runs`, `release_evidence`, `catalog_field_locks` | Imports from metadata sources, with provenance for every record and field, and the internal catalog as the source of truth |
+| `external_providers`, `external_references`, `provider_records`, `import_runs`, `import_run_records`, `release_evidence`, `catalog_field_locks`, `game_title_keys`, `catalog_reclassifications` | Imports from metadata sources, with provenance for every record and field, and the internal catalog as the source of truth |
 
 ## Conventions
 
@@ -459,6 +459,7 @@ The underlying video game, with no platform, region or edition.
 | `merged_into_id` | `uuid` | Yes | `staff_only`. Set when `status = 'merged'` |
 | `submitted_by` | `uuid` | Yes | `system`. Cleared on approval or merge |
 | `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_game`. Required to publish |
+| `revision` | `bigint` | No | Default 1. Raised by every content change. Verification and publication require the revision reviewed (M5b) |
 | `verified_by` | `uuid` | Yes | `staff_only`. Not readable by clients |
 | `search_vector` | `tsvector` | No | Generated from `title`. Added with search in M5c |
 
@@ -531,6 +532,7 @@ One specific physical edition: platform, region code, physical format, packaging
 | `merged_into_id` | `uuid` | Yes | `staff_only` |
 | `submitted_by` | `uuid` | Yes | `system`. Cleared on approval or merge, so a public row never shows who owns a copy |
 | `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_release`. Required to publish |
+| `revision` | `bigint` | No | Default 1. Raised by every content change, and by changes to its markets, components and hardware requirements (M5b) |
 | `verified_by` | `uuid` | Yes | `staff_only`. Not readable by clients |
 
 - **Primary key:** `id`
@@ -1220,11 +1222,11 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 
 ## Metadata providers
 
-Built in M5a, for the imports in M5b. See [ADR-015](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters) and [ADR-045](architecture-decisions.md#adr-045-catalog-records-are-verified-before-they-are-published). **Every table here is in the `private` schema, with no access for any API role.** Imports run from an operator tool with a direct database connection. An imported entry is only a candidate: nothing here publishes anything, and a provider's record is never taken as a verified physical release.
+Built in M5a, with the importer in M5b. See [ADR-015](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters), [ADR-045](architecture-decisions.md#adr-045-catalog-records-are-verified-before-they-are-published) and [ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restricted-role-through-audited-functions). **Every table here is in the `private` schema, with no access for any API role or for the importer.** Imports run from an operator tool, connected as the restricted `catalog_importer` role, which can only call the `catalog_import` functions ([Catalog import](security-rls.md#catalog-import)). An imported entry is only a candidate: nothing here publishes anything, and a provider's record is never taken as a verified physical release.
 
 ### `external_providers`
 
-A data source. No source is used in production until its terms are reviewed and commercial use is cleared (D14). Clearing metadata never covers artwork (D15).
+A data source. No source is used in production until its terms are reviewed and commercial use is cleared (D14). Clearing metadata never covers artwork (D15). `wikidata` and `no-intro` are seeded uncleared. An operator records clearance with `private.record_provider_clearance`, which is audited, and every run must cite the same terms hash.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1257,10 +1259,29 @@ One import of one source snapshot. The snapshot stays outside the repository and
 | `status` | `text` | No | `running`, `completed`, `failed` or `abandoned` |
 | `checkpoint` | `jsonb` | No | Where to resume an interrupted run |
 | `stats` | `jsonb` | No | Counts for the pilot report |
+| `reason` | `text` | Yes | The operator's reason, used for every audit row of the run (M5b) |
+| `lease_id`, `lease_expires_at` | `uuid`, `timestamptz` | Yes | The process working on a running run. Set together (M5b) |
 
 - **Primary key:** `id`
 - **Foreign keys:** `provider_code` → `external_providers(code)`, `platform_id` → `public.platforms(id)`, both on delete restrict
+- **Unique:** `(provider_code, source_sha256)` where `status = 'running'`, so one snapshot has one run at a time (M5b)
 - **Timestamps:** `started_at`, `finished_at`, set exactly when the run isn't `running`
+- **Constraints:** only a running run holds a lease, and a running run names its platform
+
+### `import_run_records`
+
+The entries of each run's snapshot, in source order (M5b). An entry unchanged since an earlier snapshot is the same provider record, listed again, so a later run can retry entries still waiting for a match.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `import_run_id` | `uuid` | No | |
+| `provider_record_id` | `uuid` | No | |
+| `position` | `integer` | No | |
+
+- **Primary key:** `(import_run_id, provider_record_id)`
+- **Unique:** `(import_run_id, position)`
+- **Foreign keys:** both on delete cascade
+- **Timestamps:** none. The run's `started_at` dates its entries
 
 ### `provider_records`
 
@@ -1279,13 +1300,55 @@ One normalized source entry, as the source stated it. Re-importing an unchanged 
 | `match_tier` | `text` | Yes | `A`, `B` or `C` |
 | `match_notes` | `jsonb` | No | The matcher's reasons |
 | `matched_game_id`, `matched_release_id` | `uuid` | Yes | The matcher's proposal, never a decision |
+| `review_reason` | `text` | Yes | Why the entry is held for an editor and never applied, such as a Nintendo Power flash release (M5b) |
 
 - **Primary key:** `id`
 - **Foreign keys:** `provider_code` and `import_run_id` on delete restrict; `matched_game_id` → `public.games(id)` and `matched_release_id` → `public.releases(id)` on delete set null
 - **Unique:** `(provider_code, entity_type, external_id, payload_sha256)`
 - **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** a trigger keeps what the source said unchanged, and refuses to match a record that is evidence for one release to another (M5b)
+
+The database computes `payload_sha256`. `status` is `fetched` when staged, `ignored` for entries that are never applied (prototypes, pirate copies, hacks, bad dumps), `promoted` when it created a candidate, `matched` when it resolved to an existing record, `needs_review` when matching was ambiguous or found nothing, and `failed`. `match_tier` is `A` for one match, `B` for several and `C` for none.
 
 Retention depends on each provider's terms, which may limit how long data can be stored.
+
+### `game_title_keys`
+
+Every comparable title of a game, for matching (M5b): its own title, kept by a trigger, and each title a matched source record lists, such as an English alias or a romanization. Compared with `private.import_title_key`, which normalizes case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article, and turns roman numerals II to IX and "Part N" into numbers.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `game_id` | `uuid` | No | |
+| `title_key` | `text` | No | |
+| `origin` | `text` | No | `title` or `source` |
+| `provider_record_id` | `uuid` | Yes | Set exactly for `source` keys |
+| `id` | `uuid` | No | |
+| `compact_key` | `text` | No | Generated: the key without word breaks, so "ClayFighter" compares with "Clay Fighter" |
+
+- **Primary key:** `id`
+- **Unique:** `NULLS NOT DISTINCT (game_id, title_key, origin, provider_record_id)`
+- **Indexes:** `title_key`, `compact_key`
+- **Foreign keys:** `game_id` → `public.games(id)` and `provider_record_id` → `provider_records(id)`, both on delete cascade
+- **Timestamps:** none. The game and source record date it
+
+### `catalog_reclassifications`
+
+What an import did with an existing candidate when a later snapshot said it isn't a release to import, or held it (M5b). A `withdrawn` row records that the import set the candidate `rejected`. A `queued` row is an item in the editor review queue, open until an editor resolves it. Nothing is deleted.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `release_id` | `uuid` | No | |
+| `provider_record_id` | `uuid` | No | The source entry that reclassified it |
+| `import_run_id` | `uuid` | No | |
+| `action` | `text` | No | `withdrawn` or `queued` |
+| `reason` | `text` | No | The source's reason, and what blocked a withdrawal |
+| `resolved_at`, `resolved_by`, `resolution` | | Yes | Set together, by `resolve_catalog_review`, for queued items only |
+
+- **Primary key:** `id`
+- **Unique:** `(release_id, provider_record_id)`
+- **Foreign keys:** `release_id`, `provider_record_id` and `import_run_id` on delete cascade; `resolved_by` → `public.profiles(id)` on delete set null
+- **Timestamps:** `created_at`
 
 ### `external_references`
 
@@ -1318,7 +1381,7 @@ Which source records support which field of a release. Batch publication in M5b 
 - **Primary key:** `(release_id, field_name, provider_record_id)`
 - **Foreign keys:** `release_id` on delete cascade; `provider_record_id` on delete restrict
 - **Timestamps:** `created_at`
-- **Constraints:** a trigger accepts only release-level source records. Game-level data, such as Wikidata, never counts as evidence for a physical release
+- **Constraints:** a trigger accepts only release-level source records matched to that release (M5b). Game-level data, such as Wikidata, never counts as evidence for a physical release
 
 ### `catalog_field_locks`
 

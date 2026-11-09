@@ -247,8 +247,8 @@ export const m4bMutations = [
 
 const CATALOG_EDIT = "private.begin_catalog_edit()";
 const CATALOG_LOCK = "private.lock_catalog_edits()";
-const PUBLISH = "public.publish_release(uuid, text)";
-const VERIFY_RELEASE = "public.verify_release(uuid, text)";
+const PUBLISH = "public.publish_release(uuid, text, bigint)";
+const VERIFY_RELEASE = "public.verify_release(uuid, text, bigint)";
 const CREATE_RELEASE = "public.create_release(uuid, uuid, text, text, jsonb, text)";
 const PUBLICATION_CHECK = "private.check_catalog_publication()";
 const SHARED_LOCK = "perform pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('staff-changes', 0));";
@@ -282,8 +282,51 @@ export const m5aMutations = [
   // Physical identity and provenance
   sql("duplicate physical identity allowed", "both", "drop index public.releases_published_identity_key;"),
   sql("format not tied to its platform", "pgtap", "alter table public.releases drop constraint releases_platform_id_media_format_code_fkey;"),
+  sql("stale verification accepted", "both", rewrite(VERIFY_RELEASE, "if v_release.revision <> p_expected_revision then", "if false then")),
+  sql("stale publication accepted", "pgtap", rewrite(PUBLISH, "if v_release.revision <> p_expected_revision then", "if false then")),
+  sql("details don't raise the revision", "pgtap", "drop trigger bump_release_revision on public.release_markets;"),
   sql("game data counts as release evidence", "pgtap", "drop trigger validate_release_evidence on private.release_evidence;"),
   sql("editor function without search_path", "pgtap", `alter function ${PUBLISH} set search_path = public;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations };
+const CLEARANCE = "private.import_require_clearance(text, text)";
+const RUN_FOR = "private.import_run_for(uuid, uuid)";
+const APPLY_GAME = "private.import_apply_game(private.import_runs, private.provider_records)";
+const APPLY_RELEASE = "private.import_apply_release(private.import_runs, private.provider_records)";
+const RECLASSIFY = "private.import_reclassify(private.import_runs, private.provider_records)";
+const START_RUN = "catalog_import.start_run(text, text, text, text, timestamp with time zone, text, text, uuid)";
+
+export const m5bMutations = [
+  // Gate 1: clearance
+  sql("uncleared provider imported", "pgtap", rewrite(CLEARANCE, "if not found or not v_provider.commercial_use_cleared then", "if not found then")),
+  sql("terms not checked", "pgtap", rewrite(CLEARANCE, "if p_terms_sha256 is distinct from v_provider.terms_sha256 then", "if false then")),
+  sql("withdrawal doesn't wait for a batch", "api", rewrite(CLEARANCE, "where p.code = p_provider for share;", "where p.code = p_provider for key share;")),
+  // Gate 2: audit
+  sql("import not audited", "both", rewrite(APPLY_GAME, "perform private.record_catalog_audit(null, 'catalog_record_created', 'game'", "perform pg_catalog.jsonb_build_array(null, 'catalog_record_created', 'game'")),
+  // Gate 3: one run per snapshot, one process per run
+  sql("snapshot runs concurrently", "both", `drop index private.import_runs_one_running_snapshot; ${rewrite(START_RUN, "if exists (select 1 from private.import_runs r where r.provider_code = p_provider and r.source_sha256 = p_source_sha256 and r.status = 'running') then", "if false then")}`),
+  sql("lease not checked", "both", rewrite(RUN_FOR, "if p_lease is null or v_run.lease_id is distinct from p_lease then", "if false then")),
+  // Gate 4: locks and editorial data
+  sql("field locks ignored", "pgtap", rewrite("private.import_field_locked(uuid, uuid, text)", "select exists (", "select false and exists (")),
+  sql("verified release overwritten", "pgtap", rewrite(APPLY_RELEASE, " or v_release.status = 'published' or v_release.verified_at is not null then", " then")),
+  // Gate 5: evidence
+  sql("evidence from another release", "pgtap", rewrite("private.validate_release_evidence()", "where pr.id = new.provider_record_id and pr.matched_release_id = new.release_id", "where pr.id = new.provider_record_id")),
+  // Gate 6: source ids
+  sql("source id not resolved", "both", rewrite(APPLY_GAME, "where x.provider_code = p_record.provider_code and x.entity_type = 'game' and x.external_id = p_record.external_id;", "where false;")),
+  sql("source ids not serialized", "api", rewrite("private.import_lock_source_id(text, text, text)", "select pg_catalog.pg_advisory_xact_lock(", "select pg_catalog.pg_try_advisory_xact_lock(")),
+  // Reclassification safety
+  sql("withdrawal ignores verification", "pgtap", rewrite(RECLASSIFY, "  if v_release.verified_at is not null then", "  if false then")),
+  sql("withdrawal ignores editor changes", "pgtap", rewrite(RECLASSIFY, "and e.metadata ->> 'id' = v_id::text and e.actor_id is not null) then", "and false) then")),
+  sql("withdrawal ignores field locks", "pgtap", rewrite(RECLASSIFY, "  if exists (select 1 from private.catalog_field_locks l where l.release_id = v_id) then", "  if false then")),
+  sql("held entries withdraw candidates", "pgtap", rewrite(RECLASSIFY, "  if p_record.review_reason is not null then", "  if false then")),
+  sql("withdrawal deletes the candidate", "pgtap", rewrite(RECLASSIFY, "    update public.releases r set status = 'rejected' where r.id = v_id;", "    delete from public.releases r where r.id = v_id;")),
+  // Title matching
+  sql("word-break match ignores the platform", "pgtap", rewrite("private.import_games_by_compact(uuid, text)", "  join public.game_platforms gp on gp.game_id = g.id and gp.platform_id = p_platform\n", "")),
+  sql("short titles match ignoring word breaks", "pgtap", rewrite("private.import_compact_key(text)", ">= 6 then", ">= 0 then")),
+  // The restricted role
+  sql("importer can verify", "pgtap", "grant execute on function public.verify_release(uuid, text, bigint) to catalog_importer;"),
+  sql("importer reads the catalog", "both", "grant select on public.games to catalog_importer;"),
+  sql("importer inherits roles", "pgtap", "alter role catalog_importer inherit;"),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations };

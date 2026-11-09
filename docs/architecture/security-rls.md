@@ -75,6 +75,7 @@ These are accepted for M0 and stay open until each is resolved:
 | `authenticated` | Signed-in users | Publishable + user session | No |
 | `service_role` | Server jobs only | Secret | **Yes** |
 | Staff | Signed-in users with a `staff_roles` row | Publishable + user session | No |
+| `catalog_importer` | The operator's import tool only (M5b). A database login, never an API key | Its own password, set per environment | No. It has no table privileges at all |
 
 - Staff are normal `authenticated` users, and read policies check `staff_roles`. **Grants apply per role, not per user, so a column grant can't let staff write what users can't.** All staff writes therefore go through functions that check `private.require_active_staff()` and record a `private.audit_events` row in the same transaction, which also guarantees every staff change is audited. See [Staff actions](#staff-actions). Wherever this document says "Staff" or "Catalog staff" under writes, it means through those functions.
 - The secret key bypasses RLS, so server code using it can technically read anything, including private data. It's limited to the named jobs below and must not be used for general reads.
@@ -410,7 +411,7 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | `game_genres`, `game_franchises` | R | R | Catalog staff |
 | `catalog_images` | R: approved, `licensed` or `user_contributed` | Same, plus own uploads. Catalog editors: all | Submission and staff functions only |
 | `catalog_change_requests` | **No grant** | Catalog editors: R. Everyone else uses `my_catalog_submissions()` | Submission and staff functions only |
-| `private.external_providers`, `external_references`, `provider_records`, `import_runs`, `release_evidence`, `catalog_field_locks` | None | None | The operator import tool, and editor functions for field locks (M5a) |
+| `private.external_providers`, `external_references`, `provider_records`, `import_runs`, `import_run_records`, `release_evidence`, `catalog_field_locks` | None | None | The `catalog_import` functions, called by `catalog_importer` (M5b), and editor functions for field locks (M5a). The importer has no direct access |
 
 ### User-submitted releases
 
@@ -838,18 +839,20 @@ The catalog is written only by catalog editors and administrators, through audit
 | Function | Rules |
 | --- | --- |
 | `create_game`, `update_game` | A game under review. Editing a published game is a correction |
-| `verify_game` | Records the editor and time |
+| `verify_game` | Records the editor and time, for the revision the editor reviewed (M5b) |
 | `set_game_platform` | Records an unpublished pairing |
 | `set_game_relation` | Remake, remaster or compilation contents (ADR-026) |
 | `create_release`, `update_release` | A release candidate under review. Only what the editor gives is stored: no default edition, kind or medium count, and `unknown` region unless stated |
 | `set_release_markets`, `set_release_components`, `set_release_requirements` | Replace the set |
-| `verify_release` | Confirms the physical identity. Refused until the edition, kind and medium count are set, and an `unknown` region is explicitly confirmed |
-| `publish_release` | Needs a verified release and a verified game. Publishes the game and its platform pairing in the same transaction, if they aren't yet |
+| `verify_release` | Confirms the physical identity, for the revision the editor reviewed (M5b). Refused until the edition, kind and medium count are set, and an `unknown` region is explicitly confirmed |
+| `publish_release` | Needs a verified release, at the revision the editor reviewed (M5b), and a verified game. Publishes the game and its platform pairing in the same transaction, if they aren't yet |
 | `set_catalog_field_lock` | Locks or unlocks a field against imports |
 
 **Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited.
 
 **Verification isn't publication.** Verifying records that an editor has checked a record's identity. Publishing makes it public, and requires that verification. Editing an identity field of an unpublished record clears its verification, because what was checked has changed. For a game that's the title, kind and first release date. For a release it's the region and its confirmation, edition name and kind, variant, packaging, product code, barcode, format, medium count and components. Descriptive fields, such as the summary, publisher, release date, languages, ratings, markets and hardware requirements, keep the verification. Editing a published record keeps it published and verified. There's no unpublishing in M5: a trigger refuses it even for the owner. Merging and exclusion come in M7.
+
+**Reviewed revisions (M5b).** Every content change to a game or release, including an import filling an empty field and any change to a release's markets, components or hardware requirements, raises its `revision`. `verify_game`, `verify_release` and `publish_release` take the revision the editor reviewed, and refuse with `record changed` if it moved on. The check is made after the row is locked, so a change committed while the call waited is seen. Verifying doesn't change the revision. Clients can read `revision` but never write it, and a direct write can only raise it by one.
 
 **Publication rules hold at commit.** A constraint trigger, deferred to commit, checks that a published release has a published game and pairing, that a published pairing has a published release, and that a published game has a published physical release of its own or through a compilation. So one call can publish a game with its first release, and no path, including the owner's, can publish one without the other. The trigger runs as its owner, because at commit it runs as the session's role, outside the editor function.
 
@@ -866,10 +869,68 @@ The catalog is written only by catalog editors and administrators, through audit
 | A revocation during an edit | Waits, and the edit comes first |
 | Two editors edit at once | Neither waits |
 | A publication during the editor's suspension | Waits, then is refused, and publishes nothing |
+| A verification during an uncommitted change to the record (M5b) | Waits, then is refused with `record changed` |
 | Two games with the same title published at once | Both succeed, with different slugs |
 | An editor's account deleted through Auth during their edit | The deletion waits, then completes without a deadlock. The verification stays, without naming the account |
 
 **Not in M5a.** Removing a relation or a pairing, merging, exclusion, unpublishing, imports and search.
+
+## Catalog import
+
+Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restricted-role-through-audited-functions)). An operator runs `scripts/catalog-import.mjs` on a snapshot file kept outside the repository. The tool connects as `catalog_importer` and refuses any other role, and the role can't do anything except call the functions in the `catalog_import` schema. So every rule is in the database, and the tool's code doesn't need to be trusted.
+
+**The role.** No login until an operator sets one, no inheritance, no membership of any role, no privilege on any table, a connection limit of 4, and statement, lock and idle timeouts. It can use only the `catalog_import` schema, and execute only its eight functions. It can't call editor, verification or publication functions, read the catalog, the audit log or Auth, or clear a provider. No API role can use the schema, and PostgREST doesn't expose it.
+
+| Function | What it does |
+| --- | --- |
+| `start_run` | Starts a run of one snapshot, with its hash, the terms hash and the operator's reason, under a new lease |
+| `claim_run` | Takes over a running run whose lease has expired, from the same snapshot file, to resume it |
+| `stage_records` | Stores up to 500 entries as source records, in source order. The database computes each hash. An unchanged entry is found, not added |
+| `pending_records` | Lists the run's entries still to apply |
+| `apply_record` | Resolves, matches or creates a candidate for one entry |
+| `mark_record_failed` | Records an entry that couldn't be applied |
+| `finish_run` | Completes, fails or abandons a run, and releases its lease |
+| `run_report` | The pilot counts for a run |
+
+**The six gates.**
+
+| Gate | How it's enforced |
+| --- | --- |
+| 1. Only cleared sources | Each run cites the hash of the terms that were reviewed. Every call rechecks that the provider is still cleared against that hash. Withdrawing clearance waits for calls in progress, then stops the run |
+| 2. Audited | `catalog_import_run` rows for every start, resume and finish, and `catalog_record_created` or `catalog_record_updated` for every catalog change, with no actor, the run's id and the operator's reason. Clearance is audited as `catalog_provider_cleared` |
+| 3. One run per snapshot, one process per run | A unique index allows one running run per snapshot. Each call needs the run's lease, which lasts ten minutes from the last call. A stopped process's run can be taken over only after its lease expires |
+| 4. Field locks | Checked inside the functions. An import fills only empty, unlocked fields of a record no editor has verified, and never touches a published, merged, excluded or rejected record |
+| 5. Evidence consistency | Release evidence must come from a release-level source record matched to that release. A source record that is evidence can't be matched to another release, and a source record never changes |
+| 6. Source ids first | Each entry takes a lock on its provider and source id, then looks up the source id. A known id resolves to its record, and only an unknown one creates a candidate |
+
+**What an import creates.** Game candidates, and release candidates for an entry matching exactly one game on the run's platform, all `under_review` and unverified. A release stores only what the source states: its platform, a region when all of the entry's regions map to one region code, a serial when the source gives one, and languages. Each has its evidence. Edition, kind, medium count and packaging stay empty for an editor. Several matching games, or none, leave the entry `needs_review` and create nothing. A game whose title matches a game already on the platform, without this source's id, waits for review as a possible duplicate. A shared serial is noted for review, never used to merge. Prototypes, pirate copies, hacks and bad dumps are staged as `ignored`, and so are entries whose tag names a digital service (Virtual Console, Switch Online, Steam, GOG) or another platform (Switch, Wii, Evercade, Arcade), each with its reason. Only such explicit tags reject an entry, never a generic word. Nintendo Power flash releases, dumps from a later compilation, later publishers whose medium is unconfirmed, and any tag the tool doesn't recognise are held for an editor with a `review_reason`: staged and reported, never applied. The classification is part of the entry's hash, so a reclassified entry is always a changed one. Physical re-releases by a later publisher, such as Limited Run Games, are candidates marked `re-release`. Homebrew, aftermarket, unlicensed, demo and promotional entries are kept and flagged.
+
+**Matching.** Titles compare after normalizing case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article. Roman numerals II to IX and "Part N" become numbers; I, V and X don't, because they are often letters. A game's own title and every title its source lists, including romanizations, are indexed in `private.game_title_keys`. An entry matching no game exactly, but exactly one game on the run's platform ignoring word breaks ("ClayFighter", "Clay Fighter"), is matched and says so; several such games mean review, and titles under six characters never match this way. An entry whose main title before a subtitle matches a game is suggested for review, never matched. Several matches always wait for an editor: nothing is merged.
+
+**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. Rejecting or merging a queued candidate is an editor action that comes with M7.
+
+| Race, tested with a transaction held open | Result |
+| --- | --- |
+| Two runs of one snapshot start at once | The second waits, then is refused |
+| Another process uses a run with a live lease | Refused |
+| A stopped run is resumed | Refused while its lease is live, then resumes from its checkpoint, with each entry once |
+| Two runs apply one new source id at once | The second waits, then resolves to the first one's game |
+| Clearance is withdrawn during a batch | The withdrawal waits for it, then the run and new runs are refused |
+
+### Running an import
+
+1. **Choose the slice.** For a pilot, `select-pilot --wikidata <snapshot> --no-intro <snapshot> --out <selection.json>` picks title groups in an order fixed by a seed, so the same snapshots always give the same selection. Keep the selection outside the repository and import with `--ids <selection.json>`.
+2. **Clear the source**, as an operator in SQL, after reviewing its terms and saving a copy. Use the SHA-256 of the saved copy:
+   ```sql
+   select private.record_provider_clearance('no-intro', true, '<terms URL>', '<sha256 of the saved terms>', '<who reviewed it, and the basis>');
+   ```
+   Clearing `false` withdraws it. A change of terms needs a new review.
+3. **Enable the importer's login.** Locally: `CATALOG_IMPORTER_PASSWORD=<generated> node scripts/catalog-import-role.mjs enable`. It sends only a SCRAM verifier, because the database logs DDL statements. On a hosted project, run `alter role catalog_importer login password '<SCRAM verifier>'` in the SQL editor, with a verifier computed offline, never a plain password. Disable it after the import.
+4. **Import.** Set `CATALOG_IMPORTER_DATABASE_URL` in the shell, never in a file in the repository, then run `npm run catalog:import -- import --provider no-intro --platform snes --file <snapshot> --terms-file <saved terms> --reason "<why>" [--letters S]`. `--dry-run` parses without connecting.
+5. **If it stops**, run `resume --run <id>` with the same file and `--letters` or `--ids`, after the lease expires. To give up on a run, resume it and let it finish, or finish it as `abandoned`.
+6. **Review** the report, then candidates, through the editor functions. Nothing is verified or published by an import.
+
+**Not in M5b.** Images, search, other platforms and sources, user submissions, and batch verification or publication. Editors verify and publish one release at a time, with `verify_release` and `publish_release`.
 
 ## Assigning the first administrator
 
@@ -1062,6 +1123,8 @@ Upload rules, for the buckets still to be built. Avatars are stricter, and `cata
 | Notifications can't reveal staff reasons (M4b) | A check constraint allows only the status in a moderation notice, and it never names the actor |
 | Unpublished catalog records stay private (M5a) | Read policies check `status`, child tables check `can_read_release`, and column grants hide who submitted or verified a record |
 | Only catalog editors change the catalog (M5a) | No write grants. Audited functions that take the shared staff lock, then check the role |
+| Imports can't bypass the import rules (M5b) | The tool connects only as `catalog_importer`, which can only call the `catalog_import` functions, and those enforce clearance, audit, one run per snapshot, field locks, evidence and source ids |
+| Imports never verify, publish or overwrite editorial work (M5b) | Candidates are created under review. Only empty, unlocked fields of unverified records are filled |
 | Nothing is published unverified or invented (M5a) | Constraints require verification and a complete edition to publish, and a commit-time trigger requires the game, pairing and release to be published together |
 | Handles can't bypass the rules (M2) | `claim_handle()` is the only path, with no client grant on `handle`, `handle_changed_at` or `handle_correction_until`, no access to holds, and per-handle locks |
 | Avatars can't be written by clients (M2) | No storage policy for the bucket, server-only workflow, and a `CHECK` on the path |

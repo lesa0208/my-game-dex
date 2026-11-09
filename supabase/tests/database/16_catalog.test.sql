@@ -3,7 +3,7 @@
 -- with SET CONSTRAINTS ALL IMMEDIATE, because this file runs in one transaction.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(139);
+select plan(160);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
@@ -26,6 +26,12 @@ begin
 exception when others then
   return 'error: ' || sqlerrm;
 end $t$;
+
+-- What a client does: read the record's revision, then act on it.
+create function pg_temp.verify_game(p uuid, r text) returns boolean language sql as $$ select public.verify_game(p, r, (select revision from public.games where id = p)) $$;
+create function pg_temp.verify_release(p uuid, r text) returns boolean language sql as $$ select public.verify_release(p, r, (select revision from public.releases where id = p)) $$;
+create function pg_temp.publish_release(p uuid, r text) returns boolean language sql as $$ select public.publish_release(p, r, (select revision from public.releases where id = p)) $$;
+grant execute on function pg_temp.verify_game(uuid, text), pg_temp.verify_release(uuid, text), pg_temp.publish_release(uuid, text) to authenticated, anon;
 
 create temp table ids (name text primary key, id uuid not null);
 create function pg_temp.id(p text) returns uuid language sql stable as $$ select id from ids where name = p $$;
@@ -73,11 +79,11 @@ select is((select count(*)::int from unnest(array['anon', 'authenticated']) r wh
 
 create temp table editor_functions (sig text);
 insert into editor_functions values
-  ('public.create_game(text,public.game_kind,text,text,date,public.date_precision,text)'), ('public.update_game(uuid,jsonb,text)'), ('public.verify_game(uuid,text)'),
+  ('public.create_game(text,public.game_kind,text,text,date,public.date_precision,text)'), ('public.update_game(uuid,jsonb,text)'), ('public.verify_game(uuid,text,bigint)'),
   ('public.set_game_platform(uuid,uuid,text)'), ('public.set_game_relation(uuid,uuid,public.game_relation_type,smallint,text,text)'),
   ('public.create_release(uuid,uuid,text,text,jsonb,text)'), ('public.update_release(uuid,jsonb,text)'), ('public.set_release_markets(uuid,text[],text)'),
-  ('public.set_release_components(uuid,jsonb,text)'), ('public.set_release_requirements(uuid,jsonb,text)'), ('public.verify_release(uuid,text)'),
-  ('public.publish_release(uuid,text)'), ('public.set_catalog_field_lock(text,uuid,text,boolean,text)');
+  ('public.set_release_components(uuid,jsonb,text)'), ('public.set_release_requirements(uuid,jsonb,text)'), ('public.verify_release(uuid,text,bigint)'),
+  ('public.publish_release(uuid,text,bigint)'), ('public.set_catalog_field_lock(text,uuid,text,boolean,text)');
 select is((select count(*)::int from editor_functions f, unnest(array['anon', 'service_role']) r where has_function_privilege(r, f.sig, 'execute')), 0, 'anon and service_role can execute no editor function');
 select is((select count(*)::int from editor_functions f where has_function_privilege('authenticated', f.sig, 'execute')), 13, 'signed-in users can call the 13 editor functions, which check the role');
 select is((select count(*)::int from editor_functions f where (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure) not like '%v_me := private.begin_catalog_edit();%'),
@@ -152,37 +158,37 @@ select ok(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"bar
 select ok(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"languages": ["English"]}', p_reason => 'Fixture')::text$$, pg_temp.id('r1'))) like 'error: %releases_languages_check%', 'languages must be language tags');
 select ok(pg_temp.as_user('e1', format($$select public.create_release(%L, %L, 'rom-cartridge', 'pal', '{"region_unknown_confirmed": true}', p_reason => 'Fixture')::text$$, pg_temp.id('g1'), pg_temp.platform('snes')))
   like 'error: %releases_region_confirmation%', 'only an unknown region can be confirmed as unknown');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked')::text$$, pg_temp.id('r1'))), 'error: release incomplete', 'a release without an edition can''t be verified');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, '')::text$$, pg_temp.id('r1'))), 'error: reason required', 'verification needs a reason');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Checked')::text$$, pg_temp.id('r1'))), 'error: release incomplete', 'a release without an edition can''t be verified');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, '')::text$$, pg_temp.id('r1'))), 'error: reason required', 'verification needs a reason');
 select is(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', p_reason => 'Fixture')::text$$, pg_temp.id('r1'))),
   'true', 'an editor sets the edition and medium count');
 select is(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', p_reason => 'Fixture')::text$$, pg_temp.id('r1'))),
   'false', 'repeating the same edit changes nothing');
 select is(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', p_reason => 'Fixture')::text$$, pg_temp.id('r2'))),
   'true', 'the second candidate gets an edition too');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked')::text$$, pg_temp.id('r2'))), 'error: release incomplete', 'an unknown region needs explicit confirmation');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Checked')::text$$, pg_temp.id('r2'))), 'error: release incomplete', 'an unknown region needs explicit confirmation');
 select is(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"region_unknown_confirmed": true}', p_reason => 'Fixture')::text$$, pg_temp.id('r2'))), 'true', 'an editor confirms the region is unknown');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Region genuinely unknown')::text$$, pg_temp.id('r2'))), 'true', 'then it can be verified');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Region genuinely unknown')::text$$, pg_temp.id('r2'))), 'true', 'then it can be verified');
 
 -- ---------------------------------------------------------------------------
 -- Verification, then publication
 -- ---------------------------------------------------------------------------
-select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'Publish')::text$$, pg_temp.id('r1'))), 'error: release not verified', 'an unverified release can''t be published');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Serial and region checked')::text$$, pg_temp.id('r1'))), 'true', 'an editor verifies the release');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Again')::text$$, pg_temp.id('r1'))), 'false', 'verifying twice changes nothing');
+select is(pg_temp.as_user('e1', format($$select pg_temp.publish_release(%L, 'Publish')::text$$, pg_temp.id('r1'))), 'error: release not verified', 'an unverified release can''t be published');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Serial and region checked')::text$$, pg_temp.id('r1'))), 'true', 'an editor verifies the release');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Again')::text$$, pg_temp.id('r1'))), 'false', 'verifying twice changes nothing');
 select is((select status::text from public.releases where id = pg_temp.id('r1')), 'under_review', 'verification doesn''t publish');
-select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, '')::text$$, pg_temp.id('r1'))), 'error: reason required', 'publication needs a reason');
-select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'Publish')::text$$, pg_temp.id('r1'))), 'error: game not verified', 'a release can''t be published before its game is verified');
-select is(pg_temp.as_user('e1', format($$select public.verify_game(%L, 'Title and date checked')::text$$, pg_temp.id('g1'))), 'true', 'an editor verifies the game');
+select is(pg_temp.as_user('e1', format($$select pg_temp.publish_release(%L, '')::text$$, pg_temp.id('r1'))), 'error: reason required', 'publication needs a reason');
+select is(pg_temp.as_user('e1', format($$select pg_temp.publish_release(%L, 'Publish')::text$$, pg_temp.id('r1'))), 'error: game not verified', 'a release can''t be published before its game is verified');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_game(%L, 'Title and date checked')::text$$, pg_temp.id('g1'))), 'true', 'an editor verifies the game');
 select is((select status::text from public.games where id = pg_temp.id('g1')), 'under_review', 'a verified game stays unpublished until a release is');
-select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'First release published')::text$$, pg_temp.id('r1'))), 'true', 'the editor publishes the release');
+select is(pg_temp.as_user('e1', format($$select pg_temp.publish_release(%L, 'First release published')::text$$, pg_temp.id('r1'))), 'true', 'the editor publishes the release');
 select lives_ok('set constraints all immediate', 'the publication rules hold at commit');
 set constraints all deferred;
 select is((select g.status::text || '/' || g.slug || '/' || gp.status::text || '/' || r.status::text from public.games g
   join public.game_platforms gp on gp.game_id = g.id join public.releases r on r.game_id = g.id and r.platform_id = gp.platform_id
   where r.id = pg_temp.id('r1')), 'published/super-metroid/published/published', 'its game and platform were published with it, and the game has a slug');
 select is((select count(*)::int from public.releases where id = pg_temp.id('r2') and status = 'published'), 0, 'other releases of the game stay unpublished');
-select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'Again')::text$$, pg_temp.id('r1'))), 'false', 'publishing twice changes nothing');
+select is(pg_temp.as_user('e1', format($$select pg_temp.publish_release(%L, 'Again')::text$$, pg_temp.id('r1'))), 'false', 'publishing twice changes nothing');
 select is(pg_temp.as_user(null, format($$select count(*)::text from public.games g join public.releases r on r.game_id = g.id join public.release_markets m on m.release_id = r.id where r.id = %L$$, pg_temp.id('r1'))),
   '2', 'anon now sees the game, release and markets');
 select is(pg_temp.as_user(null, format($$select count(*)::text from public.releases where id = %L$$, pg_temp.id('r2'))), '0', 'but not the unpublished candidate');
@@ -191,7 +197,7 @@ select is(pg_temp.as_user(null, format($$select count(*)::text from public.relea
 select ok(pg_temp.keep('g3', pg_temp.as_user('e1', $$select public.create_game('Super Metroid', 'game', p_reason => 'Fixture')::text$$)) not like 'error%', 'an editor creates a second game with the same title');
 select ok(pg_temp.keep('r4', pg_temp.as_user('e1', format($$select public.create_release(%L, %L, 'rom-cartridge', 'ntsc-j', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', p_reason => 'Fixture')::text$$,
   pg_temp.id('g3'), pg_temp.platform('snes')))) not like 'error%', 'with a complete release');
-select is(pg_temp.as_user('e1', format($$select public.verify_game(%L, 'Checked')::text || public.verify_release(%L, 'Checked')::text || public.publish_release(%L, 'Checked')::text$$,
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_game(%L, 'Checked')::text || pg_temp.verify_release(%L, 'Checked')::text || pg_temp.publish_release(%L, 'Checked')::text$$,
   pg_temp.id('g3'), pg_temp.id('r4'), pg_temp.id('r4'))), 'truetruetrue', 'verified and published');
 select is((select slug from public.games where id = pg_temp.id('g3')), 'super-metroid-2', 'its slug doesn''t collide');
 
@@ -214,7 +220,7 @@ select throws_ok(format($$update public.releases set status = 'under_review' whe
 select throws_ok(format($$update public.releases set verified_at = null where id = %L$$, pg_temp.id('r1')), '23514', null, 'a published release stays verified');
 
 -- Only identity edits clear a verification
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Box checked')::text$$, pg_temp.id('r2'))), 'true', 'an editor verifies the edited release again');
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Box checked')::text$$, pg_temp.id('r2'))), 'true', 'an editor verifies the edited release again');
 select is(pg_temp.as_user('e1', format($$select public.update_release(%L, '{"publisher_name": "Nintendo", "languages": ["en"], "release_date": "1994-04-18", "release_date_precision": "day"}', 'From the box')::text || public.set_release_markets(%L, array['GB'], 'From the box')::text || public.set_release_requirements(%L, '[]', 'None needed')::text$$,
   pg_temp.id('r2'), pg_temp.id('r2'), pg_temp.id('r2'))), 'truetruefalse', 'an editor edits only descriptive fields');
 select is((select verified_at is not null from public.releases where id = pg_temp.id('r2')), true, 'which keeps the verification');
@@ -222,7 +228,7 @@ select is((select count(*)::int from private.audit_events where action = 'catalo
   1, 'and the audit rows say nothing was cleared');
 select is(pg_temp.as_user('e1', format($$select public.set_release_components(%L, '[{"kind": "map", "label": "Fold-out map"}]', 'From the box')::text$$, pg_temp.id('r2'))), 'true', 'an editor changes what''s in the box');
 select is((select verified_at is null from public.releases where id = pg_temp.id('r2')), true, 'which is identity, and clears the verification');
-select is(pg_temp.as_user('e1', format($$select public.verify_game(%L, 'Checked')::text || public.update_game(%L, '{"sort_title": "Pulstar"}', 'Description')::text$$, pg_temp.id('g2'), pg_temp.id('g2'))),
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_game(%L, 'Checked')::text || public.update_game(%L, '{"sort_title": "Pulstar"}', 'Description')::text$$, pg_temp.id('g2'), pg_temp.id('g2'))),
   'truefalse', 'a descriptive game edit that changes nothing returns false');
 select is(pg_temp.as_user('e1', format($$select public.update_game(%L, '{"summary": "A side-scrolling shooter."}', 'Description')::text$$, pg_temp.id('g2'))), 'true', 'an editor describes a verified game');
 select is((select verified_at is not null from public.games where id = pg_temp.id('g2')), true, 'which keeps its verification');
@@ -232,7 +238,7 @@ select is((select verified_at is null from public.games where id = pg_temp.id('g
 -- More releases for a game that is already published
 select ok(pg_temp.keep('r5', pg_temp.as_user('e1', format($$select public.create_release(%L, %L, 'rom-cartridge', 'pal', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', 'From the box')::text$$,
   pg_temp.id('g1'), pg_temp.platform('snes')))) not like 'error%', 'an editor adds another release to a published game');
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked')::text || public.publish_release(%L, 'Second release')::text$$, pg_temp.id('r5'), pg_temp.id('r5'))),
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Checked')::text || pg_temp.publish_release(%L, 'Second release')::text$$, pg_temp.id('r5'), pg_temp.id('r5'))),
   'truetrue', 'and verifies and publishes it on its own');
 select lives_ok('set constraints all immediate', 'the publication rules hold at commit without the game changing');
 set constraints all deferred;
@@ -240,7 +246,7 @@ select ok(pg_temp.keep('r6', pg_temp.as_user('e1', format($$select public.create
   pg_temp.id('g1'), pg_temp.platform('nes')))) not like 'error%', 'an editor adds a release on a new platform for a published game');
 select lives_ok('set constraints all immediate', 'a published game may have an unpublished pairing');
 set constraints all deferred;
-select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked')::text || public.publish_release(%L, 'New platform')::text$$, pg_temp.id('r6'), pg_temp.id('r6'))),
+select is(pg_temp.as_user('e1', format($$select pg_temp.verify_release(%L, 'Checked')::text || pg_temp.publish_release(%L, 'New platform')::text$$, pg_temp.id('r6'), pg_temp.id('r6'))),
   'truetrue', 'and publishes it');
 select lives_ok('set constraints all immediate', 'its pairing is published with it, at commit');
 set constraints all deferred;
@@ -301,8 +307,8 @@ select is((select count(*)::int from private.audit_events where action::text lik
 -- ---------------------------------------------------------------------------
 insert into private.external_providers (code, name) values ('fixture', 'Fixture source');
 select throws_ok($$update private.external_providers set commercial_use_cleared = true where code = 'fixture'$$, '23514', null, 'commercial use can''t be cleared without recorded terms');
-insert into private.import_runs (id, provider_code, source_name, source_sha256, source_fetched_at)
-values (pg_temp.u('91'), 'fixture', 'fixture.dat', repeat('a', 64), now());
+insert into private.import_runs (id, provider_code, platform_id, source_name, source_sha256, source_fetched_at)
+values (pg_temp.u('91'), 'fixture', pg_temp.platform('snes'), 'fixture.dat', repeat('a', 64), now());
 insert into private.provider_records (id, provider_code, entity_type, external_id, payload, payload_sha256, import_run_id) values
   (pg_temp.u('92'), 'fixture', 'game', 'Q1', '{"title": "Super Metroid"}', repeat('b', 64), pg_temp.u('91')),
   (pg_temp.u('93'), 'fixture', 'release', 'R1', '{"serial": "SNS-RI-USA"}', repeat('c', 64), pg_temp.u('91'));
@@ -310,8 +316,11 @@ select throws_ok(format($$insert into private.provider_records (provider_code, e
   '23505', null, 'the same source entry is stored once');
 select throws_ok(format($$insert into private.release_evidence (release_id, field_name, provider_record_id) values (%L, 'product_code', %L)$$, pg_temp.id('r1'), pg_temp.u('92')),
   '23514', 'release evidence must come from a release-level source record', 'game-level data never counts as release evidence');
+select throws_ok(format($$insert into private.release_evidence (release_id, field_name, provider_record_id) values (%L, 'product_code', %L)$$, pg_temp.id('r1'), pg_temp.u('93')),
+  '23514', 'release evidence must come from a source record matched to that release', 'an unmatched source record isn''t evidence (M5b)');
+update private.provider_records set matched_release_id = pg_temp.id('r1') where id = pg_temp.u('93');
 select lives_ok(format($$insert into private.release_evidence (release_id, field_name, provider_record_id) values (%L, 'product_code', %L)$$, pg_temp.id('r1'), pg_temp.u('93')),
-  'a release-level record can support a release field');
+  'a release-level record matched to the release can support its fields');
 select throws_ok(format($$insert into private.external_references (provider_code, external_id, game_id, release_id) values ('fixture', 'Q1', %L, %L)$$, pg_temp.id('g1'), pg_temp.id('r1')),
   '23514', null, 'an external reference identifies one record');
 
@@ -326,6 +335,51 @@ select is(private.can_use_release(pg_temp.id('r2')), false, 'an unpublished cand
 select is(private.can_read_release(pg_temp.id('r2')), false, 'and an ordinary user can''t read it');
 select ok(has_function_privilege('authenticated', 'private.can_use_release(uuid)', 'execute') and not has_function_privilege('anon', 'private.can_use_release(uuid)', 'execute'),
   'only signed-in users can use the helper, through policies');
+
+-- ---------------------------------------------------------------------------
+-- Verification against the reviewed revision (M5b)
+-- ---------------------------------------------------------------------------
+select ok(pg_temp.keep('r7', pg_temp.as_user('e1', format($$select public.create_release(%L, %L, 'rom-cartridge', 'ntsc-j', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}', 'From the box')::text$$,
+  pg_temp.id('g1'), pg_temp.platform('snes')))) not like 'error%', 'an editor adds a release to review');
+create temp table seen (name text primary key, revision bigint not null);
+insert into seen select 'r7', revision from public.releases where id = pg_temp.id('r7');
+select is(pg_temp.as_user('e1', format($$select revision::text from public.releases where id = %L$$, pg_temp.id('r7'))), (select revision::text from seen where name = 'r7'), 'the editor reads its revision with it');
+-- An import fills an empty field after the editor read the record.
+update public.releases set publisher_name = 'Nintendo' where id = pg_temp.id('r7');
+select is((select revision from public.releases where id = pg_temp.id('r7')), (select revision + 1 from seen where name = 'r7'), 'any change raises the revision');
+select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked', %s)::text$$, pg_temp.id('r7'), (select revision from seen where name = 'r7'))), 'error: record changed',
+  'verifying a release that changed since it was reviewed is refused');
+select is((select (verified_at is null)::text || '/' || (select count(*) from private.audit_events where action = 'catalog_record_verified' and metadata ->> 'id' = pg_temp.id('r7')::text)
+  from public.releases where id = pg_temp.id('r7')), 'true/0', 'and verifies and audits nothing');
+select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked', null)::text$$, pg_temp.id('r7'))), 'error: invalid changes', 'a revision is required');
+update seen set revision = (select revision from public.releases where id = pg_temp.id('r7')) where name = 'r7';
+select is(pg_temp.as_user('e1', format($$select public.set_release_markets(%L, array['JP'], 'From the box')::text$$, pg_temp.id('r7'))), 'true', 'an editor records markets');
+select is((select revision from public.releases where id = pg_temp.id('r7')) > (select revision from seen where name = 'r7'), true, 'which raises the release''s revision too');
+select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked', %s)::text$$, pg_temp.id('r7'), (select revision from seen where name = 'r7'))), 'error: record changed', 'so a review from before it is stale');
+update seen set revision = (select revision from public.releases where id = pg_temp.id('r7')) where name = 'r7';
+select is(pg_temp.as_user('e1', format($$select public.verify_release(%L, 'Checked', %s)::text$$, pg_temp.id('r7'), (select revision from seen where name = 'r7'))), 'true', 'verifying the reviewed, current revision works');
+select is((select revision from public.releases where id = pg_temp.id('r7')), (select revision from seen where name = 'r7'), 'verifying doesn''t change the revision');
+select is((select (metadata ->> 'revision')::bigint from private.audit_events where action = 'catalog_record_verified' and metadata ->> 'id' = pg_temp.id('r7')::text), (select revision from seen where name = 'r7'),
+  'the audit row records the revision verified');
+-- A descriptive change after verification keeps it, but publishing needs a new review.
+update public.releases set local_title = 'Super Metroid JP' where id = pg_temp.id('r7');
+select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'Publish', %s)::text$$, pg_temp.id('r7'), (select revision from seen where name = 'r7'))), 'error: record changed',
+  'publishing a release that changed since it was reviewed is refused');
+select is((select status::text from public.releases where id = pg_temp.id('r7')), 'under_review', 'and publishes nothing');
+update seen set revision = (select revision from public.releases where id = pg_temp.id('r7')) where name = 'r7';
+select is(pg_temp.as_user('e1', format($$select public.publish_release(%L, 'Publish', %s)::text$$, pg_temp.id('r7'), (select revision from seen where name = 'r7'))), 'true', 'publishing the current revision works');
+select lives_ok('set constraints all immediate', 'and the publication rules hold at commit');
+set constraints all deferred;
+update public.releases set revision = 1 where id = pg_temp.id('r7');
+select is((select revision from public.releases where id = pg_temp.id('r7')) > (select revision from seen where name = 'r7'), true, 'a revision can''t be set back');
+insert into seen select 'g2', revision from public.games where id = pg_temp.id('g2');
+update public.games set summary = 'Changed after review.' where id = pg_temp.id('g2');
+select is(pg_temp.as_user('e1', format($$select public.verify_game(%L, 'Checked', %s)::text$$, pg_temp.id('g2'), (select revision from seen where name = 'g2'))), 'error: record changed',
+  'a game that changed since it was reviewed can''t be verified either');
+select is((select count(*)::int from unnest(array['public.verify_game(uuid,text)', 'public.verify_release(uuid,text)', 'public.publish_release(uuid,text)']) f where to_regprocedure(f) is not null), 0,
+  'the unchecked versions no longer exist');
+select is((select count(*)::int from unnest(array['anon', 'authenticated']) r where has_column_privilege(r, 'public.releases', 'revision', 'select') and has_column_privilege(r, 'public.games', 'revision', 'select')
+  and not has_column_privilege(r, 'public.releases', 'revision', 'update')), 2, 'clients can read revisions, never write them');
 
 select * from finish();
 rollback;

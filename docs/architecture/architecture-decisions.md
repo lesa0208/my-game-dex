@@ -53,6 +53,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) | The audit log is private, and append-only for application roles |
 | [044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) | Notifications come from state changes, in the same transaction |
 | [045](#adr-045-catalog-records-are-verified-before-they-are-published) | Catalog records are verified before they are published |
+| [046](#adr-046-imports-run-as-a-restricted-role-through-audited-functions) | Imports run as a restricted role through audited functions |
 
 ## Decisions requiring product-owner approval
 
@@ -736,6 +737,14 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** Editing an identity field of an unpublished record clears its verification, so editors may verify twice. Descriptive edits don't. Every change needs a reason, a small cost to editors, so the audit log never holds one made up for them. Correcting a published record keeps it published, so a mistaken correction is fixed by another correction until M7 adds exclusion and merging. Relations and pairings can't be removed in M5. `service_role` has no catalog access until a job needs it.
 
+### ADR-046: Imports run as a restricted role through audited functions
+
+**Decision.** Approved by the product owner as the M5b security gates. The import tool connects as `catalog_importer`, a role without inheritance, membership or table privileges, which can call only the functions in the `catalog_import` schema. Those functions run as their owner and enforce every import rule: a provider's commercial use must be cleared against the exact terms reviewed, rechecked on every call; one run per snapshot and one process per run, through a lease; field locks and verified records are never overwritten; release evidence must come from a source record matched to that release; and a known source id resolves to its record, under a lock per id, before anything is created. Every run event and catalog change is audited, with no actor and the operator's reason. Imports only create candidates under review.
+
+**Why.** An import tool with `postgres` credentials could bypass every rule, and a bug in it could publish or overwrite editorial work. Putting the rules in the database means the tool's code doesn't need to be trusted, and the tests can prove each gate against the real role.
+
+**Trade-offs.** Matching is by title on the run's platform, so titles that differ between sources leave entries for review rather than guessing. An import fills only empty fields of unverified records, so a source's later correction to a filled field needs an editor. The role's login is set per environment by an operator, and hosted setup is still to be verified.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -838,7 +847,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
 | **M4 Audit and notices** (done, verified on the local stack only) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
-| **M5 Catalog** (M5a schema and editor functions built locally) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
+| **M5 Catalog** (M5a schema and editor functions committed; M5b importer built locally) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
 | **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
 | **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
 
@@ -900,8 +909,8 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M5a.
-2. Build M5b and M5c, then M6 and M7, locally, one reviewed step at a time.
+1. The product owner reviews M5b, confirms each source's permissions, and approves the SNES pilot dataset.
+2. Run the pilot, then build M5c, M6 and M7, locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
 4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

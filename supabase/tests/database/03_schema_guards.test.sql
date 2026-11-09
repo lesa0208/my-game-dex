@@ -55,7 +55,7 @@ insert into approved_function_grants values
   -- M5a: catalog editor functions. Each checks the role itself.
   ('create_game(text,game_kind,text,text,date,date_precision,text)', 'authenticated'),
   ('update_game(uuid,jsonb,text)', 'authenticated'),
-  ('verify_game(uuid,text)', 'authenticated'),
+  ('verify_game(uuid,text,bigint)', 'authenticated'),
   ('set_game_platform(uuid,uuid,text)', 'authenticated'),
   ('set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'authenticated'),
   ('create_release(uuid,uuid,text,text,jsonb,text)', 'authenticated'),
@@ -63,9 +63,11 @@ insert into approved_function_grants values
   ('set_release_markets(uuid,text[],text)', 'authenticated'),
   ('set_release_components(uuid,jsonb,text)', 'authenticated'),
   ('set_release_requirements(uuid,jsonb,text)', 'authenticated'),
-  ('verify_release(uuid,text)', 'authenticated'),
-  ('publish_release(uuid,text)', 'authenticated'),
+  ('verify_release(uuid,text,bigint)', 'authenticated'),
+  ('publish_release(uuid,text,bigint)', 'authenticated'),
   ('set_catalog_field_lock(text,uuid,text,boolean,text)', 'authenticated'),
+  -- M5b: the editor review queue.
+  ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

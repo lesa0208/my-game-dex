@@ -694,6 +694,8 @@ erDiagram
   external_providers ||--o{ provider_records : "supplies"
   external_providers ||--o{ external_references : "identifies"
   import_runs ||--o{ provider_records : "stages"
+  import_runs ||--o{ import_run_records : "lists"
+  provider_records ||--o{ import_run_records : "listed in"
   provider_records o|--o{ release_evidence : "supports"
   provider_records }o--o| games : "proposes"
   provider_records }o--o| releases : "proposes"
@@ -701,6 +703,10 @@ erDiagram
   games ||--o{ external_references : "linked by"
   releases ||--o{ external_references : "linked by"
   games ||--o{ catalog_field_locks : "protected by"
+  games ||--o{ game_title_keys : "compared by"
+  releases ||--o{ catalog_reclassifications : "reconsidered in"
+  provider_records ||--o{ catalog_reclassifications : "reclassifies"
+  provider_records o|--o{ game_title_keys : "lists"
   releases ||--o{ catalog_field_locks : "protected by"
 
   external_providers {
@@ -714,6 +720,12 @@ erDiagram
     text source_sha256
     text status
     jsonb checkpoint
+    uuid lease_id
+  }
+  import_run_records {
+    uuid import_run_id PK, FK
+    uuid provider_record_id PK, FK
+    integer position
   }
   provider_records {
     uuid id PK
@@ -737,6 +749,18 @@ erDiagram
     uuid release_id PK, FK
     text field_name PK
     uuid provider_record_id PK, FK
+  }
+  catalog_reclassifications {
+    uuid id PK
+    uuid release_id FK
+    uuid provider_record_id FK
+    text action
+  }
+  game_title_keys {
+    uuid id PK
+    uuid game_id FK
+    text title_key
+    uuid provider_record_id FK
   }
   catalog_field_locks {
     uuid id PK
