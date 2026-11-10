@@ -70,6 +70,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 6. **Notification checks** in `scripts/db-notification-checks.mjs`, through the real API and Auth, with held-open transactions. These cover follow, request and moderation notices, preferences, visibility, blocks, account deletion and their permissions.
 7. **Catalog checks** in `scripts/db-catalog-checks.mjs`, through the real API and Auth, with held-open transactions. These cover catalog editor permissions, verification and publication, and races with revocation, suspension and account deletion.
 8. **Import checks** in `scripts/db-import-checks.mjs`. They log in as the restricted `catalog_importer` role, run the import tool on synthetic snapshots outside the repository, and force races between runs. `npm run catalog:test` covers the snapshot parsers. The import tool and its runbook are in [security-rls.md](docs/architecture/security-rls.md#catalog-import).
+9. **Search checks** in `scripts/db-search-checks.mjs`. They install the catalog search fixture, call search, the release picker and the platform list through the API as anon, a user, an editor and `service_role`, and remove the fixture and every test account after. `npm run catalog:test` also covers the app's response parser. See [Catalog search](docs/architecture/security-rls.md#catalog-search).
 
 `npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 
@@ -80,6 +81,8 @@ To add a migration, run `npx supabase migration new <name>`, then `npm run db:ve
 ### Configuration
 
 No environment variables are needed for local development. Local URLs and development keys come from `npx supabase status`. **That command prints keys, so use `npm run db:status`, which redacts them.**
+
+To see Explore and game pages with data, set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`), and install the fictional test catalog with `npm run catalog:fixture -- install` (`remove` takes it out). It runs only against the local stack. `node supabase/benchmarks/m5c_catalog_search.mjs` measures search on a synthetic 50,000-game catalog, in a transaction it always rolls back.
 
 Real secrets never go in the repository, or in `NEXT_PUBLIC_` variables. To block commits containing them, run `npm run hooks:install` once per clone.
 
@@ -165,8 +168,8 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 
 ## Current limitations
 
-- Explore, My Collection, Community, Notifications, Messages, My Profile and Settings are placeholder pages
-- Global search reports that it isn't available
+- My Collection, Community, Notifications, Messages, My Profile and Settings are placeholder pages
+- Search covers the published game catalog only, not collectors; a release can be selected but not yet added to a collection
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review
 - There are no automated tests in the repository

@@ -54,6 +54,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) | Notifications come from state changes, in the same transaction |
 | [045](#adr-045-catalog-records-are-verified-before-they-are-published) | Catalog records are verified before they are published |
 | [046](#adr-046-imports-run-as-a-restricted-role-through-audited-functions) | Imports run as a restricted role through audited functions |
+| [047](#adr-047-catalog-search-reads-published-records-through-read-only-functions) | Catalog search reads published records through read-only functions |
 
 ## Decisions requiring product-owner approval
 
@@ -744,6 +745,14 @@ Most general game databases focus on games rather than physical releases. Expect
 **Why.** An import tool with `postgres` credentials could bypass every rule, and a bug in it could publish or overwrite editorial work. Putting the rules in the database means the tool's code doesn't need to be trusted, and the tests can prove each gate against the real role.
 
 **Trade-offs.** Matching is by title on the run's platform, so titles that differ between sources leave entries for review rather than guessing. An import fills only empty fields of unverified records, so a source's later correction to a filled field needs an editor. The role's login is set per environment by an operator, and hosted setup is still to be verified.
+
+### ADR-047: Catalog search reads published records through read-only functions
+
+**Decision.** Approved by the product owner for M5c. Search, the release picker and the platform list are `STABLE` `SECURITY DEFINER` functions that anyone may call, which filter every source to published, verified records and build each response from a fixed list of fields. Results are games; an exact product code or barcode is the release it identifies. Matching uses stored normalized keys with published-only indexes, so search stays in PostgreSQL as ADR-019 planned. Other titles are an editor-curated, audited `game_aliases` table: titles found by imports stay private until an editor adds them. The UI is submit-only, server-rendered, and keeps the selected release in the URL for M6.
+
+**Why.** The read policies were written for owners and editors as well as the public, so search can't rely on them alone. Explicit filters and allowlists make what's public a property of the functions, which the tests and mutations check directly. Stored keys were needed for speed: computing them per row made a prefix search over 50,000 games take about a second.
+
+**Trade-offs.** The keys are generated columns, so the M5b revision trigger was replaced to ignore them; otherwise every update would raise a revision. Trigram thresholds are fixed by the function for each query, whatever the session has set, and aren't tuned per query. Japanese and other non-Latin titles match by prefix and trigram similarity only. The platform list counts the whole catalog on each call, about 170 ms at 150,000 releases, so the app caches it. Editors can't search unpublished records here; that comes with M7.
 
 ## Risks to watch
 

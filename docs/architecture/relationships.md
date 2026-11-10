@@ -704,6 +704,7 @@ erDiagram
   releases ||--o{ external_references : "linked by"
   games ||--o{ catalog_field_locks : "protected by"
   games ||--o{ game_title_keys : "compared by"
+  games ||--o{ game_aliases : "also titled"
   releases ||--o{ catalog_reclassifications : "reconsidered in"
   provider_records ||--o{ catalog_reclassifications : "reclassifies"
   provider_records o|--o{ game_title_keys : "lists"
@@ -755,6 +756,12 @@ erDiagram
     uuid release_id FK
     uuid provider_record_id FK
     text action
+  }
+  game_aliases {
+    uuid id PK
+    uuid game_id FK
+    text title
+    text kind
   }
   game_title_keys {
     uuid id PK

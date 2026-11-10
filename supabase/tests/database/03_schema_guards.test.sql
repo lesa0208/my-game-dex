@@ -21,6 +21,8 @@ insert into approved_relation_grants values
 insert into approved_relation_grants
   select t, r from unnest(array['games', 'game_platforms', 'game_relations', 'releases', 'release_markets', 'release_components', 'release_hardware_requirements']) as t
   cross join unnest(array['anon', 'authenticated']) as r;
+-- M5c: editor-curated aliases, readable under RLS when their game is published.
+insert into approved_relation_grants values ('game_aliases', 'anon'), ('game_aliases', 'authenticated');
 create temp table approved_function_grants (fn text, grantee text);
 insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
@@ -68,6 +70,11 @@ insert into approved_function_grants values
   ('set_catalog_field_lock(text,uuid,text,boolean,text)', 'authenticated'),
   -- M5b: the editor review queue.
   ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
+  -- M5c: editor aliases, and the public search, which anyone may call.
+  ('add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'authenticated'), ('remove_game_alias(uuid,text)', 'authenticated'),
+  ('search_catalog(text,text[],integer,text)', 'anon'), ('search_catalog(text,text[],integer,text)', 'authenticated'),
+  ('get_release_picker(text,text,text,uuid)', 'anon'), ('get_release_picker(text,text,text,uuid)', 'authenticated'),
+  ('list_catalog_platforms()', 'anon'), ('list_catalog_platforms()', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

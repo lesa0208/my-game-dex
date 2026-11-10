@@ -2,18 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
 import { isActivePath, navigationItems } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 
-export function SidebarNav() {
-  const pathname = usePathname();
-
+function SidebarNavLinks({ pathname }: { pathname: string | null }) {
   return (
     <nav aria-label="Main">
       <ul className="flex flex-col gap-1">
         {navigationItems.map(({ href, icon: Icon, label }) => {
-          const isActive = isActivePath(pathname, href);
+          const isActive = pathname !== null && isActivePath(pathname, href);
           return (
             <li key={href}>
               <Link
@@ -39,5 +38,21 @@ export function SidebarNav() {
         })}
       </ul>
     </nav>
+  );
+}
+
+function ActiveSidebarNav() {
+  return <SidebarNavLinks pathname={usePathname()} />;
+}
+
+/**
+ * Below a route with a runtime param, such as /games/[slug], the pathname is only
+ * known at request time, so the links render without an active item first.
+ */
+export function SidebarNav() {
+  return (
+    <Suspense fallback={<SidebarNavLinks pathname={null} />}>
+      <ActiveSidebarNav />
+    </Suspense>
   );
 }

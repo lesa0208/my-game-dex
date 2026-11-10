@@ -42,12 +42,12 @@ The three core concepts stay separate:
 
 ## Table inventory
 
-The design has 56 tables: the 26 requested and 30 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+The design has 57 tables: the 26 requested and 31 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
-| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
+| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
@@ -66,6 +66,7 @@ Why each supporting table is needed:
 | `release_components` | Inserts, maps, artwork and other original materials that came with an edition |
 | `collection_item_components` | Which of those materials a user's copy has, and their condition |
 | `game_relations` | Explicit links between originals, remakes and remasters, and between compilations and the games they contain |
+| `game_aliases` | Other titles a game is known by, regional, romanized, translated or abbreviated, confirmed by an editor, so search finds them (M5c) |
 | `game_genres`, `game_franchises` | A game can have several genres and belong to several franchises |
 | `catalog_images` | Every image needs a recorded source and license status |
 | `catalog_change_requests` | User submissions and corrections need a moderation workflow and history |
@@ -118,6 +119,7 @@ Why each supporting table is needed:
 | `hardware_requirement_kind` | `revision`, `add_on`, `compatibility_mode` |
 | `requirement_level` | `required`, `partial`, `not_compatible`, `compatible`. Added in M5 |
 | `game_relation_type` | `remake_of`, `remaster_of`, `contains` |
+| `game_alias_kind` | `alternate`, `regional`, `romanized`, `translated`, `abbreviation`. Added in M5c |
 | `component_kind` | `insert`, `map`, `artwork`, `other`, plus `game_media` for additional media pieces, added in M5. No value for a box or manual |
 | `media_playability` | `playable_from_media`, `download_required`, `unknown` |
 | `collection_record_status` | `active`, `invalid_preserved` |
@@ -461,12 +463,14 @@ The underlying video game, with no platform, region or edition.
 | `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_game`. Required to publish |
 | `revision` | `bigint` | No | Default 1. Raised by every content change. Verification and publication require the revision reviewed (M5b) |
 | `verified_by` | `uuid` | Yes | `staff_only`. Not readable by clients |
-| `search_vector` | `tsvector` | No | Generated from `title`. Added with search in M5c |
+| `search_key` | `text` | Yes | Generated from `title`: the normalized key search compares, keeping letters of every script (M5c). Not readable by clients |
+| `search_compact` | `text` | Yes | Generated: the key without word breaks (M5c) |
+| `search_words` | `tsvector` | Yes | Generated: the key's words, with the `simple` configuration (M5c) |
 
 - **Primary key:** `id`
 - **Foreign keys:** `merged_into_id` → `games(id)` on delete restrict; `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:** partial `slug` where not null
-- **Indexes:** GIN on `search_vector` and trigram GIN on `title`, both where `status = 'published'`; `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
+- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words` and trigram GIN on `search_key`, all where `status = 'published'`; `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK ((status = 'merged') = (merged_into_id IS NOT NULL))`
@@ -500,6 +504,28 @@ A submission can create a pairing that isn't in the catalog yet, so this table n
 - **Constraints:** `CHECK (status IN ('unverified', 'under_review', 'rejected', 'excluded') OR submitted_by IS NULL)`
 - **Timestamps:** `created_at`, `updated_at`
 
+### `game_aliases`
+
+Another title a game is known by, which an editor confirmed (M5c). Public when its game is published. Titles that imports found stay private in `private.game_title_keys` until an editor adds them here.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `game_id` | `uuid` | No | |
+| `title` | `text` | No | The other title, as written |
+| `kind` | `game_alias_kind` | No | |
+| `language_code` | `text` | Yes | BCP 47, such as `ja-Latn` for a romanization. Null when unknown |
+| `region_code` | `text` | Yes | Where the title is used. Null means everywhere or unknown; never `unknown` |
+| `search_key`, `search_compact`, `search_words` | | No | Generated from `title`, as on `games`. Not readable by clients |
+
+- **Primary key:** `id`
+- **Foreign keys:** `game_id` → `games(id)` on delete cascade; `region_code` → `region_codes(code)` on delete restrict
+- **Unique:** `(game_id, search_key, language_code, region_code)` nulls not distinct
+- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words`, trigram GIN on `search_key`; `region_code` where not null
+- **Timestamps:** `created_at`, `updated_at`
+
+Only `add_game_alias` and `remove_game_alias` write it, for catalog editors, with a reason, and each records an audit row (`catalog_alias_added`, `catalog_alias_removed`).
+
 ### `releases`
 
 One specific physical edition: platform, region code, physical format, packaging and other identifying characteristics. Markets are in `release_markets`, and included materials in `release_components`. **Different physical editions, packaging, regions and print variants are separate Releases**, and a product whose medium holds no actual game data isn't a Release at all.
@@ -519,6 +545,7 @@ One specific physical edition: platform, region code, physical format, packaging
 | `product_code` | `text` | Yes | "SLUS-00594" |
 | `barcode` | `text` | Yes | UPC or EAN. Not unique: reprints can reuse one |
 | `local_title` | `text` | Yes | Title in this market when it differs, such as "Biohazard" |
+| `local_title_key` | `text` | Yes | Generated: the search key of `local_title` (M5c). Not readable by clients |
 | `publisher_name` | `text` | Yes | Plain text until `companies` exists |
 | `media_format_code` | `text` | No | The primary format. Required: a Release is always on a physical medium |
 | `media_count` | `smallint` | Yes | No default. Required to publish. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
@@ -551,7 +578,7 @@ One specific physical edition: platform, region code, physical format, packaging
   - `(platform_id, region_code, release_date DESC)`
   - `barcode` where not null, for scanning
   - `product_code` where not null
-  - trigram GIN on `local_title` where not null
+  - `local_title_key` (pattern ops) and trigram GIN on it, `upper(product_code)`, `(game_id, platform_id)` and `(platform_id, game_id)`, all where `status = 'published'` (M5c)
   - `(status, created_at)` where `status IN ('unverified', 'under_review')`, for the review queue
   - `merged_into_id` where not null
   - `submitted_by` where not null
@@ -1423,7 +1450,7 @@ Deliberate exceptions to normalization, each maintained by a trigger:
 
 Aggregates such as Trending Games are computed by scheduled jobs into rollup tables, added when that feature is built. They count public activity only, and very small counts may be suppressed so a rare release doesn't identify its owner.
 
-**Search** starts in PostgreSQL with full-text search and trigram indexes. Trigram matching is weak for Japanese and other non-Latin scripts, so a dedicated search engine is the likely next step. See [ADR-019](architecture-decisions.md#adr-019-search-starts-in-postgresql).
+**Search** is in PostgreSQL (M5c): stored normalized keys with prefix, word and trigram indexes, partial on published records, read through `search_catalog`. With a synthetic 50,000-game, 150,000-release catalog, every search shape measured under 100 ms at p95 locally; the platform list, a whole-catalog count, is cached by the app. Trigram matching is weaker for Japanese and other non-Latin scripts than for Latin titles, so a dedicated search engine is the likely next step. See [ADR-019](architecture-decisions.md#adr-019-search-starts-in-postgresql).
 
 ## Not in this design
 

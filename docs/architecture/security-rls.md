@@ -405,6 +405,7 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements` | R | R | **No client write path.** `service_role` has `SELECT` only. Staff tooling arrives later, through functions. Implemented in M1 |
 | `genres`, `franchises` | R | R | Catalog staff |
 | `release_markets`, `release_components`, `release_hardware_requirements` | R: `can_read_release` | Same | **No grant.** Editor functions only (M5a). Submission functions from M7 |
+| `game_aliases` | R: game published | Same. Catalog editors: all | **No grant.** `add_game_alias` and `remove_game_alias` only (M5c) |
 | `game_relations` | R: both games published | Same. Catalog editors: all | **No grant.** `set_game_relation` only (M5a) |
 | `games`, `releases` | R: `published`, `merged` | R: same, plus own submissions (M7), and from M6 an `excluded` release the caller owns a preserved copy of. Catalog editors: all. `submitted_by` and `verified_by` aren't readable | **No grant.** Editor functions only (M5a). See [Catalog editing](#catalog-editing) |
 | `game_platforms` | R: `published` | R: same, plus own submissions (M7). Catalog editors: all | **No grant.** Editor functions only (M5a) |
@@ -931,6 +932,26 @@ Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restr
 6. **Review** the report, then candidates, through the editor functions. Nothing is verified or published by an import.
 
 **Not in M5b.** Images, search, other platforms and sources, user submissions, and batch verification or publication. Editors verify and publish one release at a time, with `verify_release` and `publish_release`.
+
+## Catalog search
+
+Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included: editor search comes with M7.
+
+**Three functions, read-only.** `search_catalog(query, platforms, limit, cursor)`, `get_release_picker(game, platform, region, release)` and `list_catalog_platforms()` are granted to `anon` and `authenticated` only. Each is `STABLE`, so it can't write, and `SECURITY DEFINER` with an empty `search_path`, so it can read the stored search keys, which clients can't. The app calls them on the server, as anon, so no session is sent and results can be cached.
+
+**Published means published everywhere.** The read policies also return merged records and a user's own submissions, so the functions filter every source explicitly. A game is a result only when it is published and has at least one published, verified release on a published platform pairing; only such releases are counted, listed or matched by product code, barcode or local title. Aliases and similar-title matches go through the same published-game filter. Unpublished, rejected, excluded and unknown games all return the same `null` from the picker.
+
+**Strict response fields.** Each function builds its response from a fixed list of fields. None includes who submitted, verified or edited a record, provenance, evidence, audit data, revisions, field locks or review state. Unknown details are `null`, never a default, and dates are given only to the precision recorded. The app's parser also copies only known fields.
+
+**Merged games.** A merged game resolves to the game it was merged into only when it was itself public once (it has a slug) and that game is public now. Otherwise it is `null`, like any game that isn't public, so a link can't reveal an unpublished record.
+
+**Matching.** Titles, editor-confirmed aliases and local release titles are compared by a normalized key (accents, articles, Roman numerals and word breaks ignored; letters of every script kept). In order: an exact product code or barcode, which is the release itself; the same key; a key the query begins; every query word; then trigram similarity of at least 0.5, or word similarity of at least 0.6, for typos, from five Latin letters or two of another script. The function sets pg_trgm's thresholds to those values for its own query and restores the caller's afterwards, so a session's settings never change the results; both settings are user-settable, so no superuser is involved. Two games with the same title are two results: nothing is merged.
+
+**Limits and pages.** A query has at most 100 characters and needs two letters or digits, or one character of a script without Latin letters. Pages hold at most 50 results, a query at most 200. A page cursor is opaque, tied to its query and filter, and refused with `invalid cursor` otherwise. The function plans each call for its own values, so a prefix is an index range, and gives each match condition its own indexed branch; otherwise the planner decides as usual. Turning sequential scans off was measured and rejected: title searches got the same plans, and only code lookups and browsing changed, by 10 to 25 ms at 50,000 games.
+
+**Aliases.** `game_aliases` is readable under RLS when its game is published, with column grants that leave out the stored keys. Only catalog editors write it, through `add_game_alias` and `remove_game_alias`, with a reason and an audit row. Titles that imports found are never public until an editor adds them.
+
+**Testing.** `20_catalog_search.test.sql` checks visibility for anon, a user, a submitter and an editor, every match tier, response fields, pages, cursors, limits, the picker and aliases. `scripts/db-search-checks.mjs` checks the same through the API with the dev fixture, and the `m5c` mutation suite proves the tests catch each violation. `scripts/catalog-fixture.mjs` installs a fictional, verified test catalog in the local database only, and `supabase/benchmarks/m5c_catalog_search.mjs` measures a synthetic 50,000-game catalog in a transaction it always rolls back.
 
 ## Assigning the first administrator
 

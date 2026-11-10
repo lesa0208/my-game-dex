@@ -329,4 +329,43 @@ export const m5bMutations = [
   sql("importer inherits roles", "pgtap", "alter role catalog_importer inherit;"),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations };
+const SEARCH = "public.search_catalog(text, text[], integer, text)";
+const PICKER = "public.get_release_picker(text, text, text, uuid)";
+const PUBLIC_RELEASES = "private.catalog_public_releases(uuid)";
+const GAME_PLATFORMS = "private.catalog_game_platforms_json(uuid)";
+const GAME_JSON = "private.catalog_game_json(public.games)";
+const RELEASE_JSON = "private.catalog_release_json(public.releases)";
+const ADD_ALIAS = "public.add_game_alias(uuid, text, public.game_alias_kind, text, text, text)";
+
+export const m5cMutations = [
+  // Publication. Search filters games, pairings and releases in several places; each
+  // of these removes a filter everywhere it applies in one function.
+  sql("search shows unpublished releases", "both", rewrite(SEARCH, "r.status = 'published' and r.verified_at is not null", "true")),
+  sql("picker shows unpublished releases", "both", rewrite(PUBLIC_RELEASES, "r.status = 'published' and r.verified_at is not null", "true")),
+  sql("results count unpublished releases", "both", rewrite(GAME_PLATFORMS, "r.status = 'published' and r.verified_at is not null", "true")),
+  sql("platform list counts unpublished releases", "pgtap", rewrite("public.list_catalog_platforms()", "where r.status = 'published' and r.verified_at is not null", "where true")),
+  sql("never-public merged game resolves", "pgtap", rewrite(PICKER, "if v_game.slug is null or v_depth > 10 then", "if v_depth > 10 then")),
+  // Response allowlists
+  sql("picker shows the verifier", "both", rewrite(RELEASE_JSON, "'variant_name', p_release.variant_name,", "'variant_name', p_release.variant_name, 'verified_by', p_release.verified_by,")),
+  sql("results show verification", "both", rewrite(GAME_JSON, "'title', p_game.title,", "'title', p_game.title, 'verified_at', p_game.verified_at,")),
+  // Pages and limits
+  sql("cursor continues another query", "both", rewrite(SEARCH, "if v_cursor ->> 0 is distinct from v_hash or", "if")),
+  sql("cursor skips equal titles", "pgtap", rewrite(SEARCH,
+    "(x.tier, -x.score, x.sort_title, x.game_id, coalesce(x.release_id, c_zero)) > (c_tier, -c_score, c_sort, c_game, c_release)",
+    "(x.tier, -x.score, x.sort_title) > (c_tier, -c_score, c_sort)")),
+  sql("results not capped", "pgtap", rewrite(SEARCH, "c_max_results constant integer := 200;", "c_max_results constant integer := 100000;")),
+  sql("page size not capped", "pgtap", rewrite(SEARCH, "least(greatest(coalesce(p_limit, 20), 1), 50)", "greatest(coalesce(p_limit, 20), 1)")),
+  // Matching
+  sql("search key drops non-Latin titles", "pgtap", rewrite("private.catalog_search_key(text)", "'[^[:alnum:]]+'", "'[^a-z0-9]+'")),
+  sql("trigram thresholds follow the session", "pgtap", rewrite(SEARCH,
+    "  perform pg_catalog.set_config('pg_trgm.similarity_threshold', '0.5', true);\n  perform pg_catalog.set_config('pg_trgm.word_similarity_threshold', '0.6', true);\n", "")),
+  // Revisions: the stored search keys must not count as content.
+  sql("revision counts search columns", "pgtap", rewrite("private.bump_catalog_revision()", ", 'search_key', 'search_compact', 'search_words', 'local_title_key'", "")),
+  // Aliases and access
+  sql("alias needs no editor", "both", rewrite(ADD_ALIAS, "v_me := private.begin_catalog_edit();", "v_me := auth.uid();")),
+  sql("alias not audited", "both", rewrite(ADD_ALIAS, "perform private.record_catalog_audit(v_me, 'catalog_alias_added',", "perform pg_catalog.jsonb_build_array(v_me, 'catalog_alias_added',")),
+  sql("anon may write aliases", "pgtap", "grant insert on public.game_aliases to anon; create policy x on public.game_aliases for insert to anon with check (true);"),
+  sql("search granted to service_role", "both", `grant execute on function ${SEARCH} to service_role;`),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations };
