@@ -683,6 +683,44 @@ stateDiagram-v2
 
 `email_sent = 100` in the local configuration exists only so tests can run. It isn't a production value.
 
+### Web sessions (M6a)
+
+The app signs users in with `@supabase/ssr` and `@supabase/supabase-js`, following the package's documented server pattern for Next.js. It was tested on the local stack only; nothing has been deployed or configured on a hosted project. See [ADR-048](architecture-decisions.md#adr-048-web-sessions-are-handled-only-on-the-server).
+
+| Part | How it works |
+| --- | --- |
+| Clients | Only server clients, one per request: `src/proxy.ts`, and `createSupabaseServerClient()` in `src/features/auth/server.ts` for Server Components and Server Actions. There's no browser client |
+| Session refresh | `src/proxy.ts` runs before every page and Server Action. It calls `getClaims()`, which refreshes an expired access token, and writes the new cookies to both the request and the response, with Auth's no-store cache headers. Server Components can't set cookies, so they rely on this |
+| Verification | Identity comes only from `getClaims()`, which checks the token's signature against the project's published keys (ES256 locally). `getSession()` is never used for identity, because anyone can forge the cookie |
+| Account | `getCurrentViewer()` reads `get_my_account()` (M2) as the user, so account status and handle come from the database on every request, not from the token |
+| Cookies | `sb-<ref>-auth-token`, possibly in chunks: `httpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` in production builds. `httpOnly` works only because no browser client exists. Adding one would need it removed |
+| Keys | `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are server-only variables, never `NEXT_PUBLIC_`. No secret key is used. `npm run secrets:bundle` checks the browser bundles |
+| Protected pages | `/collection`, `/profile`, `/settings` and `/welcome`. The proxy redirects signed-out visitors as an early check. Each page checks again with `requireViewer()` or `requireViewerWithHandle()`, which send an account without a handle to `/welcome` |
+| Server Actions | Sign-in, sign-out and the handle claim. Each reads the session itself, and Next.js refuses an action posted from another origin. They return only fixed messages, and on success call `refresh()` so the browser doesn't reuse pages rendered before the change. That refreshes only the client router, not server caches |
+| Refresh cost | Only an access token within 90 seconds of expiry is refreshed. Otherwise `getClaims()` verifies the signature against keys cached for 10 minutes per server process, so ordinary requests make no Auth call and write no cookies. Static files and images skip the proxy |
+| Redirects | `safeNextPath()` accepts only a path on this site. Absolute URLs, `//host`, backslashes, control characters and over-long values fall back to `/home` |
+| Caching | Session reads call `connection()` first, so they're never prerendered, prefetched or cached. Nothing per-user is in `'use cache'`, `'use cache: private'` or a shared cache |
+| Pages | Sign in, choose a handle, and Settings, which shows the account, changes the handle under the M2 rules, and signs out. **There's no sign-up or password-reset page.** Local users are created by tests, or in local Studio |
+
+**Known limits of this design:**
+
+- **A signed-out access token stays valid until it expires.** Sign-out revokes the refresh token in Auth and clears the cookies, but `getClaims()` verifies access tokens locally, so a copied token keeps working for up to `jwt_expiry` (an hour locally). The account and its status are still read from the database on each request.
+- **Refresh tokens are single use.** If two requests refresh the same expired session at once, one may see no session until the browser has the new cookie. The proxy refreshing once per navigation makes this rare.
+- **No sign-in throttling in the app.** It remains blocker 1 below.
+
+Tested by `npm run auth:test` (redirect rules, account parsing and handle rules) and `npm run app:auth-checks`. The second drives the built app over HTTP against the local stack, submitting the forms as a browser without JavaScript would:
+
+- signed-out redirects;
+- refused, unverified and cross-site sign-ins;
+- the cookie attributes;
+- claiming a handle;
+- session refresh;
+- a forged cookie;
+- a session-less Server Action;
+- sign-out, including revocation of the refresh token;
+- a suspended account;
+- no tokens, keys or emails in pages.
+
 ### Blockers before public authentication
 
 **Public authentication must not open until every one of these is resolved:**
@@ -708,7 +746,8 @@ Registration stays closed. `enable_signup = true` applies to the local stack onl
 | Application-level login throttling, per account and per IP | No throttling was observed locally |
 | Leaked-password protection, if the plan supports it | Then test it |
 | Email templates that say what the message is for | The defaults are generic |
-| A session-verification approach for the server, using `getClaims` or an equivalent | Connects to `getCurrentViewer()` |
+| Re-run `npm run app:auth-checks` against the hosted project's settings | The [web session](#web-sessions-m6a) design was verified locally only. Confirm the hosted project uses asymmetric signing keys, which `getClaims()` verifies locally; with a shared secret it calls Auth instead |
+| Sign-up and password-reset pages, designed with the blockers above | M6a has none, deliberately |
 | Decisions on JWT expiry | A token stays cryptographically valid until it expires, including after deletion. On the local stack it found no data, and Auth refused it |
 
 ## Staff actions

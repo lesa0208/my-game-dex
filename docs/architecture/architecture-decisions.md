@@ -55,6 +55,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [045](#adr-045-catalog-records-are-verified-before-they-are-published) | Catalog records are verified before they are published |
 | [046](#adr-046-imports-run-as-a-restricted-role-through-audited-functions) | Imports run as a restricted role through audited functions |
 | [047](#adr-047-catalog-search-reads-published-records-through-read-only-functions) | Catalog search reads published records through read-only functions |
+| [048](#adr-048-web-sessions-are-handled-only-on-the-server) | Web sessions are handled only on the server |
 
 ## Decisions requiring product-owner approval
 
@@ -754,6 +755,29 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** The keys are generated columns, so the M5b revision trigger was replaced to ignore them; otherwise every update would raise a revision. Trigram thresholds are fixed by the function for each query, whatever the session has set, and aren't tuned per query. Japanese and other non-Latin titles match by prefix and trigram similarity only. The platform list counts the whole catalog on each call, about 170 ms at 150,000 releases, so the app caches it. Editors can't search unpublished records here; that comes with M7.
 
+### ADR-048: Web sessions are handled only on the server
+
+**Decision.** Approved by the product owner for M6a, local only. The app uses `@supabase/ssr` 0.12.7 and `@supabase/supabase-js` 2.118.0, pinned, in the package's documented Next.js pattern:
+
+- `src/proxy.ts` refreshes the session before each request.
+- Server code takes identity only from `getClaims()`.
+- `getCurrentViewer()` reads the account through the existing `get_my_account()`.
+
+There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions that work without JavaScript. The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
+
+There's no sign-up or password-reset page, and nothing on a hosted project changed. The seed viewer no longer appears in the header; seed content stays limited to the development preview feed. The design is in [security-rls.md](security-rls.md#web-sessions-m6a).
+
+**Why.**
+- Server-only sessions keep tokens away from page scripts, and keep one place, the proxy, responsible for refreshing them.
+- Reusing the M2 functions means no new database function or privilege.
+- Leaving out sign-up and reset keeps hosted registration closed until the [public-authentication blockers](security-rls.md#blockers-before-public-authentication) are resolved.
+
+**Trade-offs.**
+- Any later client-side Supabase use, such as Realtime, needs a browser client and non-`httpOnly` cookies, so this decision would need revisiting.
+- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out.
+- Pages that read the session render per request and can't be prefetched.
+- Avatars aren't shown yet, because the image component would need the storage host configured.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -921,5 +945,5 @@ M0 creates no application tables and changes no application code. It stops there
 1. The product owner reviews M5b, confirms each source's permissions, and approves the SNES pilot dataset.
 2. Run the pilot, then build M5c, M6 and M7, locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
-4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
+4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

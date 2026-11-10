@@ -1,11 +1,19 @@
+import { Suspense } from "react";
+
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { UserMenu, UserMenuPlaceholder } from "@/components/layout/user-menu";
 import { getCurrentViewer } from "@/features/account/queries";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const viewer = getCurrentViewer();
+/** Reads the session, so it streams in on its own and the rest of the page doesn't wait. */
+async function AccountMenu() {
+  // If the account can't be read, offering sign-in is safe: it shows nothing private.
+  const viewer = await getCurrentViewer().catch(() => null);
+  return <UserMenu viewer={viewer} />;
+}
 
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <a
@@ -16,7 +24,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </a>
       <AppSidebar />
       <div className="flex min-h-dvh flex-col md:pl-18 lg:pl-60">
-        <AppHeader viewer={viewer} />
+        <AppHeader
+          account={
+            <Suspense fallback={<UserMenuPlaceholder />}>
+              <AccountMenu />
+            </Suspense>
+          }
+        />
         <main
           id="main-content"
           className="flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
