@@ -28,8 +28,8 @@ select is(
 
 -- Hardware requirements can't become a hardware collection
 select is(
-  (select count(*)::int from pg_constraint c where c.contype = 'f' and c.confrelid = 'public.hardware_requirements'::regclass),
-  0, 'nothing references hardware_requirements yet'
+  (select coalesce(array_agg(c.conrelid::regclass::text), '{}') from pg_constraint c where c.contype = 'f' and c.confrelid = 'public.hardware_requirements'::regclass),
+  array['release_hardware_requirements'], 'only release requirements reference hardware_requirements, never a collection (M5a)'
 );
 select is(
   (select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'hardware_requirements' and column_name ~ '(owner|user|profile|collection)'),
@@ -44,9 +44,9 @@ select is(
 set local role anon;
 select is((select count(*)::int from public.region_codes), 11, 'anon reads region codes');
 select is((select count(*)::int from public.markets), 249, 'anon reads markets');
-select is((select count(*)::int from public.platforms), 58, 'anon reads platforms');
+select is((select count(*)::int from public.platforms), 59, 'anon reads platforms');
 select cmp_ok((select count(*)::int from public.platform_names), '>', 0, 'anon reads platform names');
-select is((select count(*)::int from public.media_formats), 24, 'anon reads media formats');
+select is((select count(*)::int from public.media_formats), 25, 'anon reads media formats');
 select cmp_ok((select count(*)::int from public.platform_media_formats), '>=', 58, 'anon reads platform formats');
 select is((select count(*)::int from public.hardware_requirements), 11, 'anon reads hardware requirements');
 select throws_ok($$insert into public.region_codes (code, label, description, position) values ('x', 'X', 'x', 99)$$, '42501', null, 'anon can''t insert a region code');
@@ -61,7 +61,7 @@ reset role;
 
 -- Authenticated
 set local role authenticated;
-select is((select count(*)::int from public.platforms), 58, 'authenticated reads platforms');
+select is((select count(*)::int from public.platforms), 59, 'authenticated reads platforms');
 select is((select count(*)::int from public.hardware_requirements), 11, 'authenticated reads hardware requirements');
 select throws_ok($$insert into public.region_codes (code, label, description, position) values ('x', 'X', 'x', 99)$$, '42501', null, 'authenticated can''t insert a region code');
 select throws_ok($$update public.markets set name = 'Hacked'$$, '42501', null, 'authenticated can''t update a market');
@@ -74,7 +74,7 @@ reset role;
 
 -- service_role reads, and doesn't write without an explicit grant
 set local role service_role;
-select is((select count(*)::int from public.platforms), 58, 'service_role reads platforms');
+select is((select count(*)::int from public.platforms), 59, 'service_role reads platforms');
 select throws_ok($$update public.platforms set name = 'Hacked'$$, '42501', null, 'service_role bypasses RLS but can''t write without a grant');
 select throws_ok($$delete from public.markets$$, '42501', null, 'service_role can''t delete a market');
 select throws_ok($$insert into public.hardware_requirements (code, platform_id, label, kind, description) select 'x', id, 'X', 'revision', 'x' from public.platforms limit 1$$, '42501', null, 'service_role can''t add a hardware requirement');

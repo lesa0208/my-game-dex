@@ -2,15 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
 import { isActivePath, navigationItems } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 
 const mobileItems = navigationItems.filter((item) => item.inMobileNav);
 
-export function MobileNav() {
-  const pathname = usePathname();
-
+function MobileNavLinks({ pathname }: { pathname: string | null }) {
   return (
     <nav
       aria-label="Main"
@@ -18,7 +17,7 @@ export function MobileNav() {
     >
       <ul className="grid grid-cols-5">
         {mobileItems.map(({ href, icon: Icon, label, shortLabel }) => {
-          const isActive = isActivePath(pathname, href);
+          const isActive = pathname !== null && isActivePath(pathname, href);
           return (
             <li key={href}>
               <Link
@@ -41,5 +40,21 @@ export function MobileNav() {
         })}
       </ul>
     </nav>
+  );
+}
+
+function ActiveMobileNav() {
+  return <MobileNavLinks pathname={usePathname()} />;
+}
+
+/**
+ * Below a route with a runtime param, such as /games/[slug], the pathname is only
+ * known at request time, so the links render without an active item first.
+ */
+export function MobileNav() {
+  return (
+    <Suspense fallback={<MobileNavLinks pathname={null} />}>
+      <ActiveMobileNav />
+    </Suspense>
   );
 }

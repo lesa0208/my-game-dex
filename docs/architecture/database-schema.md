@@ -42,17 +42,17 @@ The three core concepts stay separate:
 
 ## Table inventory
 
-The design has 51 tables: the 26 requested and 25 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+The design has 57 tables: the 26 requested and 31 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
-| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
+| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
 | Moderation | `reports` | `private.audit_events` (M4) |
-| Metadata providers | None | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks` |
+| Metadata providers | None | `private.external_providers`, `private.external_references`, `private.provider_records`, `private.import_runs`, `private.import_run_records`, `private.release_evidence`, `private.catalog_field_locks`, `private.game_title_keys`, `private.catalog_reclassifications` (M5a and M5b) |
 
 Why each supporting table is needed:
 
@@ -66,6 +66,7 @@ Why each supporting table is needed:
 | `release_components` | Inserts, maps, artwork and other original materials that came with an edition |
 | `collection_item_components` | Which of those materials a user's copy has, and their condition |
 | `game_relations` | Explicit links between originals, remakes and remasters, and between compilations and the games they contain |
+| `game_aliases` | Other titles a game is known by, regional, romanized, translated or abbreviated, confirmed by an editor, so search finds them (M5c) |
 | `game_genres`, `game_franchises` | A game can have several genres and belong to several franchises |
 | `catalog_images` | Every image needs a recorded source and license status |
 | `catalog_change_requests` | User submissions and corrections need a moderation workflow and history |
@@ -74,7 +75,7 @@ Why each supporting table is needed:
 | `staff_roles` | Staff status must not live anywhere a user can edit |
 | `handle_holds` | Reserved names and released handles must be enforced on the server, where no client can read or change them |
 | `private.audit_events` | Staff actions need an audit trail that no client can read or change |
-| `external_providers`, `external_references`, `provider_records`, `catalog_field_locks` | Metadata provider adapters, with the internal catalog as the source of truth |
+| `external_providers`, `external_references`, `provider_records`, `import_runs`, `import_run_records`, `release_evidence`, `catalog_field_locks`, `game_title_keys`, `catalog_reclassifications` | Imports from metadata sources, with provenance for every record and field, and the internal catalog as the source of truth |
 
 ## Conventions
 
@@ -118,6 +119,7 @@ Why each supporting table is needed:
 | `hardware_requirement_kind` | `revision`, `add_on`, `compatibility_mode` |
 | `requirement_level` | `required`, `partial`, `not_compatible`, `compatible`. Added in M5 |
 | `game_relation_type` | `remake_of`, `remaster_of`, `contains` |
+| `game_alias_kind` | `alternate`, `regional`, `romanized`, `translated`, `abbreviation`. Added in M5c |
 | `component_kind` | `insert`, `map`, `artwork`, `other`, plus `game_media` for additional media pieces, added in M5. No value for a box or manual |
 | `media_playability` | `playable_from_media`, `download_required`, `unknown` |
 | `collection_record_status` | `active`, `invalid_preserved` |
@@ -350,7 +352,7 @@ Phase 1 values map as `NA` to `ntsc-uc`, `EU` to `pal` and `JP` to `ntsc-j`.
 
 ### `platforms`
 
-A software platform, not collectible hardware. **Identity is the slug, which can't change.** Regional names go in `platform_names`, and hardware revisions don't create rows. Add-ons with their own software library, such as Mega-CD, are separate platforms with `base_platform_id` set. M1 seeds 58.
+A software platform, not collectible hardware. **Identity is the slug, which can't change.** Regional names go in `platform_names`, and hardware revisions don't create rows. Add-ons with their own software library, such as Mega-CD, are separate platforms with `base_platform_id` set. M1 seeds 58, and M5a adds Neo Geo MVS.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -392,7 +394,7 @@ Official regional names and common collector aliases. Clones, codenames and unre
 
 ### `media_formats`
 
-The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24.
+The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24, and M5a adds the Neo Geo MVS cartridge.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -458,17 +460,26 @@ The underlying video game, with no platform, region or edition.
 | `status` | `catalog_status` | No | `staff_only`. Default `unverified`. Published only with a qualifying physical edition |
 | `merged_into_id` | `uuid` | Yes | `staff_only`. Set when `status = 'merged'` |
 | `submitted_by` | `uuid` | Yes | `system`. Cleared on approval or merge |
-| `search_vector` | `tsvector` | No | Generated from `title` |
+| `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_game`. Required to publish |
+| `revision` | `bigint` | No | Default 1. Raised by every content change. Verification and publication require the revision reviewed (M5b) |
+| `verified_by` | `uuid` | Yes | `staff_only`. Not readable by clients |
+| `search_key` | `text` | Yes | Generated from `title`: the normalized key search compares, keeping letters of every script (M5c). Not readable by clients |
+| `search_compact` | `text` | Yes | Generated: the key without word breaks (M5c) |
+| `search_words` | `tsvector` | Yes | Generated: the key's words, with the `simple` configuration (M5c) |
 
 - **Primary key:** `id`
-- **Foreign keys:** `merged_into_id` → `games(id)` on delete restrict; `submitted_by` → `profiles(id)` on delete set null
+- **Foreign keys:** `merged_into_id` → `games(id)` on delete restrict; `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:** partial `slug` where not null
-- **Indexes:** GIN on `search_vector` and trigram GIN on `title`, both where `status = 'published'`; `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
+- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words` and trigram GIN on `search_key`, all where `status = 'published'`; `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK ((status = 'merged') = (merged_into_id IS NOT NULL))`
   - `CHECK (status <> 'published' OR slug IS NOT NULL)`
   - `CHECK (status IN ('unverified', 'under_review', 'rejected', 'excluded') OR submitted_by IS NULL)`
+  - `CHECK (status <> 'published' OR verified_at IS NOT NULL)`
+  - A trigger refuses unpublishing, and any change to a published game's slug
+
+**Verified, then published.** An editor verifies a game's identity, and it's published only together with its first published release (M5 decisions 1 and 5). Its slug is generated from the title then, and never changes after.
 
 **A digital-only game isn't cataloged.** The approval function publishes a game only if it has at least one published physical Release, or is contained in a published compilation that has one. A game that exists only digitally has no record here.
 
@@ -493,6 +504,28 @@ A submission can create a pairing that isn't in the catalog yet, so this table n
 - **Constraints:** `CHECK (status IN ('unverified', 'under_review', 'rejected', 'excluded') OR submitted_by IS NULL)`
 - **Timestamps:** `created_at`, `updated_at`
 
+### `game_aliases`
+
+Another title a game is known by, which an editor confirmed (M5c). Public when its game is published. Titles that imports found stay private in `private.game_title_keys` until an editor adds them here.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `game_id` | `uuid` | No | |
+| `title` | `text` | No | The other title, as written |
+| `kind` | `game_alias_kind` | No | |
+| `language_code` | `text` | Yes | BCP 47, such as `ja-Latn` for a romanization. Null when unknown |
+| `region_code` | `text` | Yes | Where the title is used. Null means everywhere or unknown; never `unknown` |
+| `search_key`, `search_compact`, `search_words` | | No | Generated from `title`, as on `games`. Not readable by clients |
+
+- **Primary key:** `id`
+- **Foreign keys:** `game_id` → `games(id)` on delete cascade; `region_code` → `region_codes(code)` on delete restrict
+- **Unique:** `(game_id, search_key, language_code, region_code)` nulls not distinct
+- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words`, trigram GIN on `search_key`; `region_code` where not null
+- **Timestamps:** `created_at`, `updated_at`
+
+Only `add_game_alias` and `remove_game_alias` write it, for catalog editors, with a reason, and each records an audit row (`catalog_alias_added`, `catalog_alias_removed`).
+
 ### `releases`
 
 One specific physical edition: platform, region code, physical format, packaging and other identifying characteristics. Markets are in `release_markets`, and included materials in `release_components`. **Different physical editions, packaging, regions and print variants are separate Releases**, and a product whose medium holds no actual game data isn't a Release at all.
@@ -505,15 +538,17 @@ One specific physical edition: platform, region code, physical format, packaging
 | `game_id` | `uuid` | No | |
 | `platform_id` | `uuid` | No | |
 | `region_code` | `text` | No | Collector-facing classification. `unknown` when not known |
-| `edition_name` | `text` | No | Default `Standard`. "Greatest Hits", "Collector's Edition" |
-| `edition_kind` | `edition_kind` | No | Default `standard` |
+| `region_unknown_confirmed` | `boolean` | No | Default `false`. An editor's confirmation that the region really is unknown. Required to publish with `unknown` |
+| `edition_name` | `text` | Yes | "Standard", "Greatest Hits", "Collector's Edition". No default, so an import never invents one. Required to publish (M5 decision 2) |
+| `edition_kind` | `edition_kind` | Yes | No default. Required to publish |
 | `variant_name` | `text` | Yes | "Gold cartridge", "Black label", "German packaging". Distinguishes packages that would otherwise look identical |
 | `product_code` | `text` | Yes | "SLUS-00594" |
 | `barcode` | `text` | Yes | UPC or EAN. Not unique: reprints can reuse one |
 | `local_title` | `text` | Yes | Title in this market when it differs, such as "Biohazard" |
+| `local_title_key` | `text` | Yes | Generated: the search key of `local_title` (M5c). Not readable by clients |
 | `publisher_name` | `text` | Yes | Plain text until `companies` exists |
 | `media_format_code` | `text` | No | The primary format. Required: a Release is always on a physical medium |
-| `media_count` | `smallint` | No | Default 1. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
+| `media_count` | `smallint` | Yes | No default. Required to publish. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
 | `media_playability` | `media_playability` | No | Default `unknown`. Whether the game plays from the medium, subject to normal installation, or needs additional downloads for essential gameplay (Q8). `staff_only` once published |
 | `packaging` | `text` | Yes | "Big box", "Jewel case", "Steelbook" |
 | `languages` | `text[]` | Yes | BCP 47 tags, as printed on the package |
@@ -523,7 +558,9 @@ One specific physical edition: platform, region code, physical format, packaging
 | `status` | `catalog_status` | No | `staff_only`. Default `unverified` |
 | `merged_into_id` | `uuid` | Yes | `staff_only` |
 | `submitted_by` | `uuid` | Yes | `system`. Cleared on approval or merge, so a public row never shows who owns a copy |
-| `verified_at` | `timestamptz` | Yes | `staff_only` |
+| `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_release`. Required to publish |
+| `revision` | `bigint` | No | Default 1. Raised by every content change, and by changes to its markets, components and hardware requirements (M5b) |
+| `verified_by` | `uuid` | Yes | `staff_only`. Not readable by clients |
 
 - **Primary key:** `id`
 - **Foreign keys:**
@@ -531,17 +568,17 @@ One specific physical edition: platform, region code, physical format, packaging
   - `(platform_id, media_format_code)` → `platform_media_formats(platform_id, media_format_code)`, so a release can't use a format its platform doesn't have
   - `region_code` → `region_codes(code)` on delete restrict
   - `merged_into_id` → `releases(id)` on delete restrict
-  - `submitted_by` → `profiles(id)` on delete set null
+  - `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:**
   - `(id, game_id)`, so other tables can use a composite foreign key that keeps game and release consistent
   - Partial `NULLS NOT DISTINCT (game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status = 'published'`. Packaging is part of the identity under D6
-  - Partial `NULLS NOT DISTINCT (submitted_by, game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status IN ('unverified', 'under_review')`, so one user can't submit the same release twice
+  - Partial `NULLS NOT DISTINCT (submitted_by, game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status IN ('unverified', 'under_review')` and `submitted_by` is set, so one user can't submit the same release twice. Imported and editor candidates have no submitter, and review deduplicates them
 - **Indexes:**
   - `(game_id, platform_id, region_code)`
   - `(platform_id, region_code, release_date DESC)`
   - `barcode` where not null, for scanning
   - `product_code` where not null
-  - trigram GIN on `local_title` where not null
+  - `local_title_key` (pattern ops) and trigram GIN on it, `upper(product_code)`, `(game_id, platform_id)` and `(platform_id, game_id)`, all where `status = 'published'` (M5c)
   - `(status, created_at)` where `status IN ('unverified', 'under_review')`, for the review queue
   - `merged_into_id` where not null
   - `submitted_by` where not null
@@ -549,7 +586,13 @@ One specific physical edition: platform, region code, physical format, packaging
 - **Constraints:**
   - `CHECK ((status = 'merged') = (merged_into_id IS NOT NULL))`
   - `CHECK (status IN ('unverified', 'under_review', 'rejected', 'excluded') OR submitted_by IS NULL)`
-  - A trigger rejects `published` unless its game and game-platform pairing are also `published`
+  - `CHECK (status <> 'published' OR verified_at IS NOT NULL)`
+  - `CHECK (status <> 'published' OR (edition_name, edition_kind and media_count are set))`
+  - `CHECK (status <> 'published' OR region_code <> 'unknown' OR region_unknown_confirmed)`
+  - A constraint trigger, checked at commit, rejects `published` unless its game and game-platform pairing are also `published`. The same trigger requires a published game to have a published physical release, and a published pairing to have one on that platform
+  - A trigger refuses unpublishing
+
+**A serial is evidence, never identity.** `product_code` and `barcode` aren't unique, and matching values never merge two releases. A ROM revision isn't a separate release unless an editor confirms a distinct physical product.
 
 The uniqueness rule deliberately doesn't span unverified records. If it did, a second user submitting the same release would get an error revealing that someone else had. Duplicates are resolved by review. The workflow is in [relationships.md](relationships.md#submission-and-approval-workflow).
 
@@ -1206,93 +1249,183 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 
 ## Metadata providers
 
-See [ADR-015](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters) for the adapter architecture.
+Built in M5a, with the importer in M5b. See [ADR-015](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters), [ADR-045](architecture-decisions.md#adr-045-catalog-records-are-verified-before-they-are-published) and [ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restricted-role-through-audited-functions). **Every table here is in the `private` schema, with no access for any API role or for the importer.** Imports run from an operator tool, connected as the restricted `catalog_importer` role, which can only call the `catalog_import` functions ([Catalog import](security-rls.md#catalog-import)). An imported entry is only a candidate: nothing here publishes anything, and a provider's record is never taken as a verified physical release.
 
 ### `external_providers`
 
+A data source. No source is used in production until its terms are reviewed and commercial use is cleared (D14). Clearing metadata never covers artwork (D15). `wikidata` and `no-intro` are seeded uncleared. An operator records clearance with `private.record_provider_clearance`, which is audited, and every run must cite the same terms hash.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `code` | `text` | No | For example `igdb` |
+| `code` | `text` | No | For example `wikidata`, `no-intro` |
 | `name` | `text` | No | |
-| `is_enabled` | `boolean` | No | Default `false` |
-| `commercial_use_cleared` | `boolean` | No | Default `false`. No sync runs until this is `true` |
-| `images_cleared` | `boolean` | No | Default `false`. No images import until this is `true` |
-| `attribution_text` | `text` | Yes | |
 | `terms_url` | `text` | Yes | |
-| `terms_reviewed_at` | `date` | Yes | |
-| `rate_limit_per_minute` | `integer` | Yes | |
+| `terms_sha256` | `text` | Yes | Hash of the saved copy of the terms as reviewed |
+| `terms_reviewed_at` | `timestamptz` | Yes | |
+| `commercial_use_cleared` | `boolean` | No | Default `false` |
+| `cleared_note` | `text` | Yes | Who cleared it, and on what basis |
 
 - **Primary key:** `code`
+- **Unique:** `name`
 - **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** clearing commercial use requires the terms hash, review time and note
 
-### `external_references`
+### `import_runs`
 
-Links our records to a provider's IDs. Our IDs never depend on a provider's.
-
-| Column | Type | Null | Notes |
-| --- | --- | --- | --- |
-| `id` | `uuid` | No | |
-| `provider_code` | `text` | No | |
-| `external_id` | `text` | No | |
-| `game_id` | `uuid` | Yes | Exactly one of these three |
-| `release_id` | `uuid` | Yes | |
-| `platform_id` | `uuid` | Yes | |
-| `match_confidence` | `numeric(3,2)` | Yes | 0 to 1 |
-| `matched_by` | `uuid` | Yes | Null when matched automatically |
-| `last_synced_at` | `timestamptz` | Yes | |
-
-- **Primary key:** `id`
-- **Foreign keys:** `provider_code` → `external_providers(code)` on delete restrict; `game_id` → `games(id)`, `release_id` → `releases(id)`, `platform_id` → `platforms(id)`, all on delete cascade; `matched_by` → `profiles(id)` on delete set null
-- **Unique:** `(provider_code, entity_type, external_id)`, where `entity_type` is a generated column naming the target
-- **Indexes:** `game_id`, `release_id`, `platform_id`, `matched_by`, each where not null; `(provider_code, last_synced_at)`
-- **Timestamps:** `created_at`, `updated_at`
-- **Constraints:** `CHECK (num_nonnulls(game_id, release_id, platform_id) = 1)`
-
-### `provider_records` (in the `private` schema)
-
-Raw provider payloads awaiting matching. The application never reads this directly.
+One import of one source snapshot. The snapshot stays outside the repository and the database. This records which file it was, so every candidate traces to it.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` (v7) | No | |
 | `provider_code` | `text` | No | |
-| `entity_type` | `text` | No | `game`, `release`, `platform` |
-| `external_id` | `text` | No | |
-| `payload` | `jsonb` | No | Exactly as received |
-| `normalized` | `jsonb` | Yes | Adapter output |
-| `payload_hash` | `text` | No | Skips unchanged records |
-| `status` | `provider_record_status` | No | Default `fetched` |
-| `error` | `text` | Yes | |
-| `fetched_at` | `timestamptz` | No | |
+| `platform_id` | `uuid` | Yes | When the snapshot covers one platform |
+| `source_name` | `text` | No | The file or query |
+| `source_sha256` | `text` | No | |
+| `source_fetched_at` | `timestamptz` | No | |
+| `terms_sha256` | `text` | Yes | The terms in force for this snapshot |
+| `status` | `text` | No | `running`, `completed`, `failed` or `abandoned` |
+| `checkpoint` | `jsonb` | No | Where to resume an interrupted run |
+| `stats` | `jsonb` | No | Counts for the pilot report |
+| `reason` | `text` | Yes | The operator's reason, used for every audit row of the run (M5b) |
+| `lease_id`, `lease_expires_at` | `uuid`, `timestamptz` | Yes | The process working on a running run. Set together (M5b) |
 
 - **Primary key:** `id`
-- **Foreign keys:** `provider_code` → `public.external_providers(code)` on delete restrict
-- **Unique:** `(provider_code, entity_type, external_id, payload_hash)`
-- **Indexes:** `(status, fetched_at)`; `(provider_code, entity_type, external_id, fetched_at DESC)`
-- **Timestamps:** `fetched_at`, `updated_at`
+- **Foreign keys:** `provider_code` → `external_providers(code)`, `platform_id` → `public.platforms(id)`, both on delete restrict
+- **Unique:** `(provider_code, source_sha256)` where `status = 'running'`, so one snapshot has one run at a time (M5b)
+- **Timestamps:** `started_at`, `finished_at`, set exactly when the run isn't `running`
+- **Constraints:** only a running run holds a lease, and a running run names its platform
 
-Retention depends on each provider's terms, which may limit how long raw data can be stored.
+### `import_run_records`
 
-### `catalog_field_locks`
+The entries of each run's snapshot, in source order (M5b). An entry unchanged since an earlier snapshot is the same provider record, listed again, so a later run can retry entries still waiting for a match.
 
-Stops a provider sync from overwriting a human correction.
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `import_run_id` | `uuid` | No | |
+| `provider_record_id` | `uuid` | No | |
+| `position` | `integer` | No | |
+
+- **Primary key:** `(import_run_id, provider_record_id)`
+- **Unique:** `(import_run_id, position)`
+- **Foreign keys:** both on delete cascade
+- **Timestamps:** none. The run's `started_at` dates its entries
+
+### `provider_records`
+
+One normalized source entry, as the source stated it. Re-importing an unchanged entry matches the unique key and adds nothing. A changed entry is a new row, for review.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `provider_code` | `text` | No | |
+| `entity_type` | `text` | No | `game` or `release` |
+| `external_id` | `text` | No | |
+| `payload` | `jsonb` | No | Normalized, up to 32 KB |
+| `payload_sha256` | `text` | No | |
+| `import_run_id` | `uuid` | No | |
+| `status` | `provider_record_status` | No | Default `fetched` |
+| `match_tier` | `text` | Yes | `A`, `B` or `C` |
+| `match_notes` | `jsonb` | No | The matcher's reasons |
+| `matched_game_id`, `matched_release_id` | `uuid` | Yes | The matcher's proposal, never a decision |
+| `review_reason` | `text` | Yes | Why the entry is held for an editor and never applied, such as a Nintendo Power flash release (M5b) |
+
+- **Primary key:** `id`
+- **Foreign keys:** `provider_code` and `import_run_id` on delete restrict; `matched_game_id` → `public.games(id)` and `matched_release_id` → `public.releases(id)` on delete set null
+- **Unique:** `(provider_code, entity_type, external_id, payload_sha256)`
+- **Timestamps:** `created_at`, `updated_at`
+- **Constraints:** a trigger keeps what the source said unchanged, and refuses to match a record that is evidence for one release to another (M5b)
+
+The database computes `payload_sha256`. `status` is `fetched` when staged, `ignored` for entries that are never applied (prototypes, pirate copies, hacks, bad dumps), `promoted` when it created a candidate, `matched` when it resolved to an existing record, `needs_review` when matching was ambiguous or found nothing, and `failed`. `match_tier` is `A` for one match, `B` for several and `C` for none.
+
+Retention depends on each provider's terms, which may limit how long data can be stored.
+
+### `game_title_keys`
+
+Every comparable title of a game, for matching (M5b): its own title, kept by a trigger, and each title a matched source record lists, such as an English alias or a romanization. Compared with `private.import_title_key`, which normalizes case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article, and turns roman numerals II to IX and "Part N" into numbers.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `game_id` | `uuid` | No | |
+| `title_key` | `text` | No | |
+| `origin` | `text` | No | `title` or `source` |
+| `provider_record_id` | `uuid` | Yes | Set exactly for `source` keys |
+| `id` | `uuid` | No | |
+| `compact_key` | `text` | No | Generated: the key without word breaks, so "ClayFighter" compares with "Clay Fighter" |
+
+- **Primary key:** `id`
+- **Unique:** `NULLS NOT DISTINCT (game_id, title_key, origin, provider_record_id)`
+- **Indexes:** `title_key`, `compact_key`
+- **Foreign keys:** `game_id` → `public.games(id)` and `provider_record_id` → `provider_records(id)`, both on delete cascade
+- **Timestamps:** none. The game and source record date it
+
+### `catalog_reclassifications`
+
+What an import did with an existing candidate when a later snapshot said it isn't a release to import, or held it (M5b). A `withdrawn` row records that the import set the candidate `rejected`. A `queued` row is an item in the editor review queue, open until an editor resolves it. Nothing is deleted.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `release_id` | `uuid` | No | |
+| `provider_record_id` | `uuid` | No | The source entry that reclassified it |
+| `import_run_id` | `uuid` | No | |
+| `action` | `text` | No | `withdrawn` or `queued` |
+| `reason` | `text` | No | The source's reason, and what blocked a withdrawal |
+| `resolved_at`, `resolved_by`, `resolution` | | Yes | Set together, by `resolve_catalog_review`, for queued items only |
+
+- **Primary key:** `id`
+- **Unique:** `(release_id, provider_record_id)`
+- **Foreign keys:** `release_id`, `provider_record_id` and `import_run_id` on delete cascade; `resolved_by` → `public.profiles(id)` on delete set null
+- **Timestamps:** `created_at`
+
+### `external_references`
+
+A source's identifier for one of our games or releases, such as a Wikidata item. Our IDs never depend on a source's.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
-| `game_id` | `uuid` | Yes | Exactly one of these three |
+| `provider_code` | `text` | No | |
+| `external_id` | `text` | No | |
+| `game_id` | `uuid` | Yes | Exactly one of these two |
 | `release_id` | `uuid` | Yes | |
-| `platform_id` | `uuid` | Yes | |
-| `field_name` | `text` | No | |
-| `locked_by` | `uuid` | Yes | |
-| `reason` | `text` | Yes | |
+| `entity_type` | `text` | No | Generated from which target is set |
 
 - **Primary key:** `id`
-- **Foreign keys:** `game_id` → `games(id)`, `release_id` → `releases(id)`, `platform_id` → `platforms(id)`, all on delete cascade; `locked_by` → `profiles(id)` on delete set null
-- **Unique:** `NULLS NOT DISTINCT (game_id, release_id, platform_id, field_name)`
-- **Indexes:** `release_id`, `platform_id`, `locked_by`, each where not null
+- **Foreign keys:** `provider_code` on delete restrict; `game_id` and `release_id` on delete cascade
+- **Unique:** `(provider_code, entity_type, external_id)`, so one external entry identifies at most one record. A record can have several, such as two ROM revisions of one release
 - **Timestamps:** `created_at`
-- **Constraints:** `CHECK (num_nonnulls(game_id, release_id, platform_id) = 1)`
+
+### `release_evidence`
+
+Which source records support which field of a release. Batch publication in M5b requires every required field to be supported here.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `release_id` | `uuid` | No | |
+| `field_name` | `text` | No | One of the release's identifying or descriptive fields, or `game`, `platform` or `markets` |
+| `provider_record_id` | `uuid` | No | |
+
+- **Primary key:** `(release_id, field_name, provider_record_id)`
+- **Foreign keys:** `release_id` on delete cascade; `provider_record_id` on delete restrict
+- **Timestamps:** `created_at`
+- **Constraints:** a trigger accepts only release-level source records matched to that release (M5b). Game-level data, such as Wikidata, never counts as evidence for a physical release
+
+### `catalog_field_locks`
+
+Fields an editor has fixed. Imports never overwrite them. Editors set and clear locks with `set_catalog_field_lock`, which records an audit row.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` | No | |
+| `game_id` | `uuid` | Yes | Exactly one of these two |
+| `release_id` | `uuid` | Yes | |
+| `field_name` | `text` | No | |
+| `locked_by` | `uuid` | Yes | |
+
+- **Primary key:** `id`
+- **Foreign keys:** `game_id` and `release_id` on delete cascade; `locked_by` → `public.profiles(id)` on delete set null
+- **Unique:** `NULLS NOT DISTINCT (game_id, release_id, field_name)`
+- **Timestamps:** `locked_at`
 
 ---
 
@@ -1317,7 +1450,7 @@ Deliberate exceptions to normalization, each maintained by a trigger:
 
 Aggregates such as Trending Games are computed by scheduled jobs into rollup tables, added when that feature is built. They count public activity only, and very small counts may be suppressed so a rare release doesn't identify its owner.
 
-**Search** starts in PostgreSQL with full-text search and trigram indexes. Trigram matching is weak for Japanese and other non-Latin scripts, so a dedicated search engine is the likely next step. See [ADR-019](architecture-decisions.md#adr-019-search-starts-in-postgresql).
+**Search** is in PostgreSQL (M5c): stored normalized keys with prefix, word and trigram indexes, partial on published records, read through `search_catalog`. With a synthetic 50,000-game, 150,000-release catalog, every search shape measured under 100 ms at p95 locally; the platform list, a whole-catalog count, is cached by the app. Trigram matching is weaker for Japanese and other non-Latin scripts than for Latin titles, so a dedicated search engine is the likely next step. See [ADR-019](architecture-decisions.md#adr-019-search-starts-in-postgresql).
 
 ## Not in this design
 

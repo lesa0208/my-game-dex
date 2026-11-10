@@ -16,6 +16,13 @@ insert into approved_relation_grants
 insert into approved_relation_grants values
   ('profiles', 'anon'), ('profiles', 'authenticated'),
   ('user_preferences', 'authenticated'), ('staff_roles', 'authenticated');
+-- M5a: the catalog is publicly readable under RLS, with column grants that leave out
+-- who submitted or verified a record. No API role can write it.
+insert into approved_relation_grants
+  select t, r from unnest(array['games', 'game_platforms', 'game_relations', 'releases', 'release_markets', 'release_components', 'release_hardware_requirements']) as t
+  cross join unnest(array['anon', 'authenticated']) as r;
+-- M5c: editor-curated aliases, readable under RLS when their game is published.
+insert into approved_relation_grants values ('game_aliases', 'anon'), ('game_aliases', 'authenticated');
 create temp table approved_function_grants (fn text, grantee text);
 insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
@@ -47,6 +54,31 @@ insert into approved_function_grants values
   ('get_unread_notification_count()', 'authenticated'),
   ('mark_notifications_read(uuid)', 'authenticated'),
   ('delete_notification(uuid)', 'authenticated'),
+  -- M5a: catalog editor functions. Each checks the role itself.
+  ('create_game(text,game_kind,text,text,date,date_precision,text)', 'authenticated'),
+  ('update_game(uuid,jsonb,text)', 'authenticated'),
+  ('verify_game(uuid,text,bigint)', 'authenticated'),
+  ('set_game_platform(uuid,uuid,text)', 'authenticated'),
+  ('set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'authenticated'),
+  ('create_release(uuid,uuid,text,text,jsonb,text)', 'authenticated'),
+  ('update_release(uuid,jsonb,text)', 'authenticated'),
+  ('set_release_markets(uuid,text[],text)', 'authenticated'),
+  ('set_release_components(uuid,jsonb,text)', 'authenticated'),
+  ('set_release_requirements(uuid,jsonb,text)', 'authenticated'),
+  ('verify_release(uuid,text,bigint)', 'authenticated'),
+  ('publish_release(uuid,text,bigint)', 'authenticated'),
+  ('set_catalog_field_lock(text,uuid,text,boolean,text)', 'authenticated'),
+  -- M5b: the editor review queue.
+  ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
+  -- M5c: editor aliases, and the public search, which anyone may call.
+  ('add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'authenticated'), ('remove_game_alias(uuid,text)', 'authenticated'),
+  ('search_catalog(text,text[],integer,text)', 'anon'), ('search_catalog(text,text[],integer,text)', 'authenticated'),
+  ('get_release_picker(text,text,text,uuid)', 'anon'), ('get_release_picker(text,text,text,uuid)', 'authenticated'),
+  ('list_catalog_platforms()', 'anon'), ('list_catalog_platforms()', 'authenticated'),
+  -- M5a: called by catalog read policies.
+  ('private.is_catalog_editor()', 'authenticated'),
+  ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),
+  ('private.can_use_release(uuid)', 'authenticated'),
   -- M3: called by policies during reads. No role has USAGE on private.
   ('private.block_peers()', 'authenticated'),
   ('private.is_blocked_between(uuid)', 'anon'), ('private.is_blocked_between(uuid)', 'authenticated'),

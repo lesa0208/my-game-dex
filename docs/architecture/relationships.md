@@ -686,23 +686,58 @@ erDiagram
 
 ## Metadata providers
 
+Built in M5a, in the `private` schema. An import run stages source records, and the matcher proposes games and releases for them. Evidence links source records to the release fields they support. Catalog images arrive with D15.
+
 ```mermaid
 erDiagram
-  external_providers ||--o{ external_references : "identifies"
+  external_providers ||--o{ import_runs : "snapshot"
   external_providers ||--o{ provider_records : "supplies"
-  external_providers ||--o{ catalog_images : "sources"
+  external_providers ||--o{ external_references : "identifies"
+  import_runs ||--o{ provider_records : "stages"
+  import_runs ||--o{ import_run_records : "lists"
+  provider_records ||--o{ import_run_records : "listed in"
+  provider_records o|--o{ release_evidence : "supports"
+  provider_records }o--o| games : "proposes"
+  provider_records }o--o| releases : "proposes"
+  releases ||--o{ release_evidence : "evidenced by"
   games ||--o{ external_references : "linked by"
   releases ||--o{ external_references : "linked by"
-  platforms ||--o{ external_references : "linked by"
   games ||--o{ catalog_field_locks : "protected by"
+  games ||--o{ game_title_keys : "compared by"
+  games ||--o{ game_aliases : "also titled"
+  releases ||--o{ catalog_reclassifications : "reconsidered in"
+  provider_records ||--o{ catalog_reclassifications : "reclassifies"
+  provider_records o|--o{ game_title_keys : "lists"
   releases ||--o{ catalog_field_locks : "protected by"
-  platforms ||--o{ catalog_field_locks : "protected by"
 
   external_providers {
     text code PK
-    boolean is_enabled
     boolean commercial_use_cleared
-    boolean images_cleared
+    text terms_sha256
+  }
+  import_runs {
+    uuid id PK
+    text provider_code FK
+    text source_sha256
+    text status
+    jsonb checkpoint
+    uuid lease_id
+  }
+  import_run_records {
+    uuid import_run_id PK, FK
+    uuid provider_record_id PK, FK
+    integer position
+  }
+  provider_records {
+    uuid id PK
+    text provider_code FK
+    uuid import_run_id FK
+    text entity_type
+    text external_id
+    jsonb payload
+    text payload_sha256
+    uuid matched_game_id FK
+    uuid matched_release_id FK
   }
   external_references {
     uuid id PK
@@ -710,20 +745,34 @@ erDiagram
     text external_id
     uuid game_id FK
     uuid release_id FK
-    uuid platform_id FK
   }
-  provider_records {
+  release_evidence {
+    uuid release_id PK, FK
+    text field_name PK
+    uuid provider_record_id PK, FK
+  }
+  catalog_reclassifications {
     uuid id PK
-    text provider_code FK
-    text external_id
-    jsonb payload
-    provider_record_status status
+    uuid release_id FK
+    uuid provider_record_id FK
+    text action
+  }
+  game_aliases {
+    uuid id PK
+    uuid game_id FK
+    text title
+    text kind
+  }
+  game_title_keys {
+    uuid id PK
+    uuid game_id FK
+    text title_key
+    uuid provider_record_id FK
   }
   catalog_field_locks {
     uuid id PK
     uuid game_id FK
     uuid release_id FK
-    uuid platform_id FK
     text field_name
   }
 ```

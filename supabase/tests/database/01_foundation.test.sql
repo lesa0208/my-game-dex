@@ -18,7 +18,7 @@ select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'p
 -- Only approved objects exist. Later steps add to this list deliberately.
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
-  array['audit_events', 'blocked_users', 'follows', 'handle_holds', 'hardware_requirements', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'region_codes', 'staff_roles', 'user_preferences'],
+  array['audit_events', 'blocked_users', 'catalog_field_locks', 'catalog_reclassifications', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'staff_roles', 'user_preferences'],
   'only the approved tables exist, with no views or sequences'
 );
 
@@ -39,7 +39,7 @@ select hasnt_type('public', 'media_format', 'the M0 media_format enum was replac
 select enum_has_labels('public', 'media_category', array['cartridge', 'optical_disc', 'solid_state_card', 'magnetic_disk', 'magnetic_tape']);
 select enum_has_labels('public', 'hardware_requirement_kind', array['revision', 'add_on', 'compatibility_mode']);
 select enum_has_labels('public', 'game_relation_type', array['remake_of', 'remaster_of', 'contains']);
-select enum_has_labels('public', 'component_kind', array['insert', 'map', 'artwork', 'other']);
+select enum_has_labels('public', 'component_kind', array['insert', 'map', 'artwork', 'other', 'game_media']);
 select enum_has_labels('public', 'media_playability', array['playable_from_media', 'download_required', 'unknown']);
 select enum_has_labels('public', 'collection_record_status', array['active', 'invalid_preserved']);
 select enum_has_labels('public', 'edition_kind', array['standard', 'limited', 'collector', 'reprint', 'bundle', 'promotional', 'other']);
@@ -65,7 +65,7 @@ select is(
 );
 select is(
   (select count(*)::int from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typtype = 'e'),
-  31, 'exactly the 31 approved enum types exist'
+  33, 'exactly the 33 approved enum types exist'
 );
 
 select * from finish();
