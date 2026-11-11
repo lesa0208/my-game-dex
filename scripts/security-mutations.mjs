@@ -226,7 +226,7 @@ export const m4bMutations = [
   sql("cooldown retry notifies", "both", rewrite(FOLLOW_CHANGE, "if new.status = 'pending' then", "if new.status in ('pending', 'rejected') then")),
   sql("request notice not withdrawn", "both", rewrite(FOLLOW_CHANGE, "if tg_op <> 'INSERT' and old.status = 'pending' and (tg_op = 'DELETE' or new.status <> 'pending') then", "if false then")),
   sql("block keeps notifications", "both", "drop trigger remove_notifications_on_block on public.blocked_users;"),
-  sql("block removes one direction only", "both", rewrite("private.remove_notifications_on_block()", "\n     or (n.recipient_id = new.blocked_id and n.actor_id = new.blocker_id)", "")),
+  sql("block removes notifications in one direction only", "both", rewrite("private.remove_notifications_on_block()", "\n     or (n.recipient_id = new.blocked_id and n.actor_id = new.blocker_id)", "")),
   // Idempotency and deduplication
   sql("event key removed", "pgtap", `alter table public.notifications drop constraint notifications_event_key; ${rewrite(NOTIFY, "\n  on conflict (recipient_id, actor_id, type, event_at) do nothing;", ";")}`),
   sql("24-hour window removed", "both", rewrite(NOTIFY, "and n.created_at > pg_catalog.now() - interval '24 hours'", "and false")),
