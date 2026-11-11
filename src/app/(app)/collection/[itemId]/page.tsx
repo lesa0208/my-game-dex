@@ -7,6 +7,7 @@ import { Suspense } from "react";
 
 import { EditCopyForm } from "@/components/collection/edit-copy-form";
 import { RemoveCopyForm } from "@/components/collection/remove-copy-form";
+import { RemovePieceRecordForm } from "@/components/collection/remove-piece-record-form";
 import { CatalogCover } from "@/components/games/catalog-cover";
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -149,13 +150,30 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
       </Section>
 
       {listed.length || unlisted.length ? (
-        <Section id="copy-pieces" title="Pieces listed for this release">
-          <Facts
-            rows={[
-              ...listed.map((p) => ({ label: componentLabel({ kind: p.kind, label: p.label, quantity: p.quantity ?? 1 }), value: pieceStateLabel(p) })),
-              ...unlisted.map((p) => ({ label: `${p.label ?? p.kind} (no longer listed)`, value: pieceStateLabel(p) })),
-            ]}
-          />
+        <Section id="copy-pieces" title={listed.length ? "Pieces listed for this release" : "Pieces"}>
+          {listed.length ? (
+            <Facts rows={listed.map((p) => ({ label: componentLabel({ kind: p.kind, label: p.label, quantity: p.quantity ?? 1 }), value: pieceStateLabel(p) }))} />
+          ) : null}
+          {unlisted.length ? (
+            <div className={listed.length ? "mt-4 border-t pt-4" : undefined}>
+              <h3 className="text-sm font-medium">No longer listed for this release</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">The catalog changed this release&apos;s pieces. What you recorded is kept until you remove it.</p>
+              <ul className="mt-3 flex flex-col gap-3">
+                {unlisted.map((p) => {
+                  const name = p.label ?? p.kind;
+                  return (
+                    <li key={`${p.kind}-${name}`} className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                      <div>
+                        <p>{name}</p>
+                        <p className="text-muted-foreground">{pieceStateLabel(p)}</p>
+                      </div>
+                      {viewer.isActive && p.label ? <RemovePieceRecordForm itemId={copy.id} kind={p.kind} label={p.label} name={name} /> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
         </Section>
       ) : null}
 

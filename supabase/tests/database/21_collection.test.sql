@@ -4,7 +4,7 @@
 -- Races and the API boundary are in db-collection-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(149);
+select plan(174);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
@@ -302,6 +302,35 @@ select is(pg_temp.item('c1', 'a1') -> 'components',
           '[{"kind": "insert", "label": "Poster (reprint)", "listed": true, "quantity": 1, "recorded": false, "condition": null}, {"kind": "map", "label": "World map", "listed": true, "quantity": 1, "recorded": true, "condition": "not_included"}, {"kind": "insert", "label": "Poster", "listed": false, "quantity": null, "recorded": true, "condition": null}]'::jsonb,
           'a piece the editor renamed is kept, and marked as no longer listed');
 
+-- Records of pieces the release no longer lists (M6d follow-up). a1 records the old
+-- "Poster", now unlisted. a2, a second copy of the same release, gets one too.
+select pg_temp.as_user('e5', format('select public.set_release_components(%L, ''[{"kind": "insert", "label": "Poster"}, {"kind": "insert", "label": "Poster (reprint)"}, {"kind": "map", "label": "World map"}]'', ''Collection tests'')::text', pg_temp.id('pub')));
+select is(pg_temp.upd('c1', 'a2', '{"components": [{"kind": "insert", "label": "Poster"}]}'), 'true', 'a second copy records the old poster while it is listed');
+select pg_temp.as_user('e5', format('select public.set_release_components(%L, ''[{"kind": "insert", "label": "Poster (reprint)"}, {"kind": "map", "label": "World map"}]'', ''Collection tests'')::text', pg_temp.id('pub')));
+select is(pg_temp.upd('c1', 'a1', '{"components": [{"kind": "map", "label": "World map", "condition": "good"}, {"kind": "insert", "label": "Poster (reprint)"}]}'), 'true', 'listed pieces can be changed');
+select is((select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a1')), 'Poster=-,Poster (reprint)=-,World map=good', 'changing listed pieces keeps the record of an unlisted one');
+select is(pg_temp.upd('c1', 'a1', '{"components": []}'), 'true', 'listed pieces can be cleared');
+select is((select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a1')), 'Poster=-', 'clearing listed pieces keeps the record of an unlisted one');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": {"kind": "insert", "label": "Poster"}}'), 'error: invalid details', 'removals are a list');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": []}'), 'error: invalid details', 'an empty removal is refused');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert"}]}'), 'error: invalid details', 'a removal names the piece''s label');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": "Poster", "condition": null}]}'), 'error: invalid details', 'a removal has only a kind and a label');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": 7}]}'), 'error: invalid details', 'a removal''s label is text');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "sticker", "label": "Poster"}]}'), 'error: invalid details', 'a removal''s kind must exist');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": "Poster"}, {"kind": "insert", "label": "Poster"}]}'), 'error: invalid details', 'a piece is removed once');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "map", "label": "World map"}]}'), 'error: invalid details', 'a listed piece is changed through components, not removed');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": "Sticker"}]}'), 'error: component unavailable', 'only a recorded piece can be removed');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": "poster"}]}'), 'error: component unavailable', 'a removal names the piece exactly');
+select is(pg_temp.upd('c1', 'a1', '{"completeness": "sealed", "remove_components": [{"kind": "insert", "label": "Poster"}], "components": [{"kind": "insert", "label": "Sticker"}]}'), 'error: component unavailable', 'a change that fails partway is refused');
+select is((select completeness::text from public.collection_items where id = pg_temp.id('a1')) || ' ' || (select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a1')), 'complete Poster=-', 'and none of it is applied');
+select is(pg_temp.upd('c2', 'a1', '{"remove_components": [{"kind": "insert", "label": "Poster"}]}'), 'error: item unavailable', 'another user can''t remove the owner''s records');
+select is(pg_temp.as_user('c2', format('delete from public.collection_item_components where item_id = %L returning label', pg_temp.id('a1'))), '', 'or delete them directly');
+select is((select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a1')), 'Poster=-', 'the owner''s record is kept');
+select is(pg_temp.upd('c1', 'a1', '{"remove_components": [{"kind": "insert", "label": "Poster"}]}'), 'true', 'the owner can remove a record on purpose');
+select is((select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a1')) || ' | ' || (select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a2')), ' | Poster=-', 'which removes it from that copy only');
+select is(pg_temp.upd('c1', 'a2', '{"remove_components": [{"kind": "insert", "label": "Poster"}], "components": [{"kind": "map", "label": "World map"}]}'), 'true', 'a removal and a change of listed pieces can go together');
+select is((select coalesce(string_agg(label || '=' || coalesce(condition::text, '-'), ',' order by label), '') from public.collection_item_components where item_id = pg_temp.id('a2')), 'World map=-', 'and both apply');
+
 -- ---------------------------------------------------------------------------
 -- Editing and removing
 -- ---------------------------------------------------------------------------
@@ -342,6 +371,7 @@ select is(pg_temp.upd('c1', 'p1', '{"completeness": "incomplete"}'), 'error: ite
 select ok(pg_temp.as_user('c1', format('update public.collection_items set completeness = ''incomplete'' where id = %L returning id::text', pg_temp.id('p1'))) like 'error: item preserved%', 'a preserved copy can''t be edited directly');
 select ok(pg_temp.as_user('c1', format('update public.collection_item_private set notes = ''x'' where item_id = %L returning item_id::text', pg_temp.id('p1'))) like 'error: item preserved%', 'a preserved copy''s details can''t be edited');
 select ok(pg_temp.as_user('c1', format('update public.collection_item_components set condition = ''poor'' where item_id = %L returning label', pg_temp.id('p1'))) like 'error: item preserved%', 'a preserved copy''s pieces can''t be edited');
+select is(pg_temp.upd('c1', 'p1', '{"remove_components": [{"kind": "map", "label": "World map"}]}'), 'error: item preserved', 'a preserved copy''s records can''t be removed either');
 select is(pg_temp.item('c1', 'p1') ->> 'status', 'invalid', 'a preserved copy shows as invalid');
 update public.collection_items set release_id = pg_temp.id('pub-eu') where id = pg_temp.id('p1');
 select is((select record_status::text || ' ' || coalesce(invalidated_at::text, 'none') from public.collection_items where id = pg_temp.id('p1')), 'active none', 'moving a preserved copy to a usable release clears the flag');

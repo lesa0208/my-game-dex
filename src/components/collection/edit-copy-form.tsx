@@ -41,9 +41,6 @@ export function EditCopyForm({
   maxDate: string;
 }) {
   const [state, action, pending] = useActionState(saveFromPage, { status: "idle", message: null });
-  // Changing pieces would delete records of pieces the release no longer lists, so a
-  // copy with such records shows its pieces read-only (above, on the page) instead.
-  const editablePieces = unlistedPieces.length ? [] : pieces;
 
   return (
     <form
@@ -58,12 +55,12 @@ export function EditCopyForm({
       className="flex flex-col gap-5"
     >
       <input type="hidden" name="item_id" value={itemId} />
-      <input type="hidden" name="components" value={JSON.stringify(editablePieces.map(({ kind, label }) => ({ kind, label })))} />
-      <CopyFields values={values} mediumLabel={mediumLabel} pieces={editablePieces} currencies={currencies} maxDate={maxDate} />
+      <input type="hidden" name="components" value={JSON.stringify(pieces.map(({ kind, label }) => ({ kind, label })))} />
+      <CopyFields values={values} mediumLabel={mediumLabel} pieces={pieces} currencies={currencies} maxDate={maxDate} />
       {unlistedPieces.length ? (
         <p className="text-xs text-muted-foreground">
-          The release no longer lists {unlistedPieces.join(", ")}. To keep what you recorded for {unlistedPieces.length === 1 ? "it" : "them"}, this
-          copy&apos;s pieces can&apos;t be changed for now. Everything else can.
+          The release no longer lists {unlistedPieces.join(", ")}. Saving keeps what you recorded for {unlistedPieces.length === 1 ? "it" : "them"}. To
+          remove a record, use “Remove this record” under the copy&apos;s pieces.
         </p>
       ) : null}
 

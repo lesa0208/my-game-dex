@@ -24,6 +24,7 @@ import {
   deleteUsers,
   formById,
   formWith,
+  forms,
   isRedirect,
   location,
   psql,
@@ -361,19 +362,51 @@ async function privacy({ owner }) {
 async function unlistedPieces() {
   section("Pieces the release no longer lists");
   const owner = await collector();
-  const item = await add(owner, starfallCe, { components: [{ kind: "insert", label: "Art book", condition: null }, { kind: "map", label: "Cloth map", condition: "not_included" }] });
+  const recorded = { components: [{ kind: "insert", label: "Art book", condition: null }, { kind: "map", label: "Cloth map", condition: "not_included" }] };
+  const item = await add(owner, starfallCe, recorded);
+  const twin = await add(owner, starfallCe, recorded);
   // A catalog editor drops a piece from the release's listing.
   psql(`delete from public.release_components where release_id = '${starfallCe}' and label = 'Cloth map';`);
-  const pieces = () => psql(`select string_agg(label || '=' || coalesce(condition::text, 'included'), ',' order by label) from public.collection_item_components where item_id = '${item}';`);
+  const pieces = (id) => psql(`select string_agg(label || '=' || coalesce(condition::text, 'included'), ',' order by label) from public.collection_item_components where item_id = '${id}';`) || "none";
   const path = `/collection/${item}`;
+  const recordForm = (html, label) => forms(html).find((f) => f.hidden.label === label && "kind" in f.hidden);
+
   const page = await owner.browser.get(path);
-  check("the copy keeps its record of the piece, marked as no longer listed", text(page.html).includes("Cloth map (no longer listed)") && pieces() === "Art book=included,Cloth map=not_included");
+  check("the copy shows its record of the piece as no longer listed", plain(page.html).includes("No longer listed for this release") && plain(page.html).includes("Cloth map") && pieces(item) === "Art book=included,Cloth map=not_included");
+  const removeRecord = recordForm(page.html, "Cloth map");
+  check("with a control to remove that record, and no other", Boolean(removeRecord) && removeRecord.hidden.kind === "map" && !recordForm(page.html, "Art book") && page.html.includes('aria-label="Remove this record: Cloth map"'));
   const form = formById(page.html, "edit-copy");
-  check("its pieces are read-only in the edit form, with the reason", !form.names.some((n) => n.startsWith("component_")) && form.hidden.components === "[]" && text(page.html).includes("this copy's pieces can't be changed for now"));
-  await owner.browser.submit(path, form, editFields(form, { notes: "Edited", completeness: "complete" }));
-  check("editing everything else still saves, and keeps every piece record", psql(`select completeness from public.collection_items where id = '${item}';`) === "complete" && pieces() === "Art book=included,Cloth map=not_included");
-  await owner.browser.submit(path, form, editFields(form, { components: JSON.stringify([{ kind: "insert", label: "Art book" }]), component_0: "missing", completeness: "sealed" }));
-  check("a forged piece change is refused, and nothing is deleted", pieces() === "Art book=included,Cloth map=not_included" && psql(`select completeness from public.collection_items where id = '${item}';`) === "complete");
+  check("listed pieces are editable again", form.names.includes("component_0") && !form.names.includes("component_1"));
+
+  await owner.browser.submit(path, form, editFields(form, { component_0: "missing", notes: "Edited" }));
+  check("editing a listed piece keeps the record of the unlisted one", pieces(item) === "Art book=not_included,Cloth map=not_included" && psql(`select notes from public.collection_item_private where item_id = '${item}';`) === "Edited");
+  await owner.browser.submit(path, form, editFields(form, { notes: "Edited" }));
+  check("clearing the listed pieces keeps it too", pieces(item) === "Cloth map=not_included");
+  await owner.browser.submit(path, form, editFields(form, { components: JSON.stringify([{ kind: "insert", label: "Art book" }, { kind: "map", label: "Cloth map" }]), component_0: "included", component_1: "" }));
+  check("a forged form can't clear it through the edit", pieces(item) === "Art book=included,Cloth map=not_included");
+
+  await owner.browser.submit(path, removeRecord, { label: "Art book", kind: "insert" });
+  check("the removal control can't remove a listed piece", pieces(item) === "Art book=included,Cloth map=not_included");
+  await owner.browser.submit(path, removeRecord, { kind: "map';--" });
+  check("or take a malformed piece", pieces(item) === "Art book=included,Cloth map=not_included");
+  const someone = await collector();
+  await someone.browser.submit(`/collection/${twin}`, removeRecord, { item_id: twin });
+  check("another user can't remove the owner's record", pieces(twin) === "Art book=included,Cloth map=not_included");
+
+  psql(`update public.profiles set account_status = 'suspended' where id = '${owner.id}';`);
+  const suspended = await owner.browser.get(path);
+  check("a suspended owner sees the record but no control to remove it", plain(suspended.html).includes("Cloth map") && !recordForm(suspended.html, "Cloth map"));
+  await owner.browser.submit(path, removeRecord, {});
+  check("and a removal from an earlier page is refused", pieces(item) === "Art book=included,Cloth map=not_included");
+  psql(`update public.profiles set account_status = 'active' where id = '${owner.id}';`);
+
+  await owner.browser.submit(path, removeRecord, {});
+  check("the owner removes the record on purpose", pieces(item) === "Art book=included");
+  check("from that copy only", pieces(twin) === "Art book=included,Cloth map=not_included");
+  const after = await owner.browser.get(path);
+  check("and the page no longer shows it", !plain(after.html).includes("Cloth map") && !plain(after.html).includes("No longer listed"));
+  const again = await owner.browser.submit(path, removeRecord, {});
+  check("removing it again is safe", again.response.status === 200 && pieces(item) === "Art book=included" && pieces(twin) === "Art book=included,Cloth map=not_included");
 }
 
 async function numbering() {

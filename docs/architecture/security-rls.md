@@ -479,7 +479,7 @@ An editor excludes an out-of-scope release through a staff function. That functi
 | Function | Purpose |
 | --- | --- |
 | `add_collection_item(p_item_id, p_release, p_details)` | Adds a copy and, optionally, its details and pieces, in one transaction. Idempotent per `p_item_id` |
-| `update_collection_item(p_item, p_changes)` | Sets the given fields; null clears. `components` replaces the recorded pieces. A row of details is removed when every value is cleared |
+| `update_collection_item(p_item, p_changes)` | Sets the given fields; null clears. `components` replaces the recorded pieces the release lists now, and keeps records of pieces it no longer lists; `remove_components` removes those records by exact kind and label (each must be recorded for this copy, unlisted and named once, or the whole change is refused). A row of details is removed when every value is cleared. Changed by `20261111100200_m6_keep_unlisted_pieces.sql` |
 | `remove_collection_item(p_item)` | Removes a copy, with its details and pieces |
 | `get_my_collection(...)` | One page of the caller's copies. Filters: title, platform, completeness (`not_recorded` included) and status. Sorts: added, title, platform, acquired. Opaque keyset cursors bound to the filters |
 | `get_my_collection_item(p_item)` | One copy in full, with notes and the release's pieces |
@@ -503,16 +503,16 @@ The catalog details in these responses are read through the catalog's own RLS, a
 - **Reads** go through `get_my_collection_summary`, `get_my_collection` (search, filters, sorts and keyset cursors in the database; one page of 50 at a time), `get_my_collection_item` and `get_my_release_copies`. Numbering copies of one release ("Copy 2 of 3") reads `collection_items` directly, through its owner-only policy, in one request whose exact count must equal the rows returned; otherwise nothing is numbered and the list shows "N copies of this release", so a number is never wrong. Both numbers come from that one read. List parameters from the URL are checked against what the functions accept before they're sent.
 - **Someone else's copy reads as missing.** `get_my_collection_item` returns null for it, and the page shows the same "This copy isn't available" as for a removed copy or a malformed address.
 - **Editing** (`updateCopy`) reads the copy again as the user, takes the release's pieces from the catalog rather than the form, applies the M6c rules and sends every field to `update_collection_item`, so an emptied field is cleared. Pieces are sent only when they change, and each field is matched to its piece by kind and label. The release, owner and status aren't fields; extra form fields are ignored.
-- **Pieces the release no longer lists are kept.** Sending pieces replaces every recorded piece, and the M6b trigger won't record an unlisted piece again, so changing pieces would delete those records. A copy that has them shows its pieces read-only, and `updateCopy` refuses a piece change for it. Changing that needs a database change (see the M6d report). A suspended account sees no edit form, and the function refuses it anyway.
+- **Records of pieces the release no longer lists are kept.** Editing the listed pieces leaves them, because `update_collection_item` replaces only listed pieces. They're shown under "No longer listed for this release", each with a "Remove this record" control (`removePieceRecord`), the only way to remove one: it sends `remove_components` with that piece's exact kind and label. A suspended account sees no edit form or removal control, and the function refuses both anyway.
 - **Removing** (`removeCopy`) needs a confirmation that names the copy, deletes only it through `remove_collection_item` (allowed when suspended), and redirects back to the list as the user left it. A copy that's already gone, or isn't theirs, gets the same "already removed" answer, so removing is safe to repeat and reveals nothing. It works without JavaScript, because success is a redirect.
 - **Private details** (acquisition date, price, location, notes) appear only on these owner-only pages, never on game pages or in the browser bundle.
 
 **Tested by:**
-- `21_collection.test.sql` (149 assertions);
+- `21_collection.test.sql` (174 assertions);
 - `scripts/db-collection-checks.mjs` (58 checks through the API, including concurrent repeats and the limit under concurrency);
 - the `m6` suite in `scripts/security-mutations.mjs`;
 - `npm run collection:test` (the add form's rules) and `npm run app:collection-checks` (46 checks of the built app over HTTP: signed out, no handle, active, suspended and forged sessions, retries, deliberate duplicates, refusals and leaks);
-- `npm run app:my-collection-checks` (98 checks of the built app over HTTP: listing, pagination, search, filters and sorts, details, editing and clearing, removing one of several copies, empty collections, unavailable copies, kept records of unlisted pieces, copy numbers beyond the read limit, other users, suspended and forged sessions, privacy and the bundle).
+- `npm run app:my-collection-checks` (109 checks of the built app over HTTP: listing, pagination, search, filters and sorts, details, editing and clearing, removing one of several copies, empty collections, unavailable copies, kept and deliberately removed records of unlisted pieces, copy numbers beyond the read limit, other users, suspended and forged sessions, privacy and the bundle).
 
 `supabase/benchmarks/m6_collection.mjs` measures the reads and writes for a 50,000-copy collection among about a million copies, as the signed-in user. Measured locally (p95, 25 warm runs):
 

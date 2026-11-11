@@ -105,9 +105,6 @@ export async function addCopyFromForm(formData: FormData): Promise<void> {
 // Editing and removing (M6d)
 // ---------------------------------------------------------------------------
 
-const UNLISTED_PIECES_KEPT =
-  "This copy has records of pieces its release no longer lists. To keep them, its pieces can't be changed for now. Your other changes weren't saved either: set the pieces back and save again.";
-
 export type EditCopyState = { status: "idle" | "saved" | "error" | "signed_out"; message: string | null };
 
 /**
@@ -116,9 +113,9 @@ export type EditCopyState = { status: "idle" | "saved" | "error" | "signed_out";
  * The copy is read again first, as the user, through `get_my_collection_item`: a copy
  * that isn't theirs reads as missing, and the release's current pieces come from the
  * catalog, not the form. The form's fields are matched to those pieces by kind and
- * label; a piece the form didn't show keeps what was recorded. A copy with records of
- * pieces its release no longer lists can't have its pieces changed, so those records
- * are never deleted. `update_collection_item`
+ * label; a piece the form didn't show keeps what was recorded. Records of pieces the
+ * release no longer lists aren't fields: `update_collection_item` keeps them when the
+ * listed pieces change, and only `removePieceRecord` removes one. `update_collection_item`
  * (M6b) then checks the account, the copy's owner and every rule again. The release,
  * owner and status aren't fields at all.
  */
@@ -150,12 +147,6 @@ export async function updateCopy(_state: EditCopyState, formData: FormData): Pro
 
   const result = readCopyChanges(read, pieces, latestAcquisitionDate());
   if ("error" in result) return { status: "error", message: result.error };
-  // Sending pieces replaces every recorded piece, and a piece the release no longer lists
-  // can't be recorded again (M6b), so changing pieces would delete those records. Until
-  // the database can keep them, pieces can't change on such a copy.
-  if (result.changes.components && current.data.components.some((p) => !p.listed && p.recorded)) {
-    return { status: "error", message: UNLISTED_PIECES_KEPT };
-  }
 
   const { error } = await supabase.rpc("update_collection_item", { p_item: itemId, p_changes: result.changes });
   if (error) {
@@ -169,6 +160,41 @@ export async function updateCopy(_state: EditCopyState, formData: FormData): Pro
 /** The same action for a native form post. The page rendered afterwards shows the saved details, without a message. */
 export async function updateCopyFromForm(formData: FormData): Promise<void> {
   await updateCopy({ status: "idle", message: null }, formData);
+}
+
+export type RemoveRecordState = { status: "idle" | "error"; message: string | null };
+
+/**
+ * Removes the owner's record of one piece their copy's release no longer lists, when
+ * they ask for it. `update_collection_item` (M6b, updated) checks the account and the
+ * copy's owner, and that the piece is recorded for this copy and no longer listed: a
+ * listed piece is changed through the edit form instead. A record that's already gone
+ * counts as removed.
+ */
+export async function removePieceRecord(_state: RemoveRecordState, formData: FormData): Promise<RemoveRecordState> {
+  const itemId = field(formData, "item_id");
+  const kind = field(formData, "kind");
+  const label = field(formData, "label");
+  if (!UUID.test(itemId) || !/^[a-z_]{1,40}$/.test(kind) || !label || label.length > 120) {
+    return { status: "error", message: "The record couldn't be removed. Reload the page and try again." };
+  }
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { status: "error", message: "Your collection isn't available right now. Try again later." };
+  const { data: auth } = await supabase.auth.getClaims();
+  if (!auth?.claims?.sub) return { status: "error", message: "Sign in to change your copies." };
+
+  const { error } = await supabase.rpc("update_collection_item", { p_item: itemId, p_changes: { remove_components: [{ kind, label }] } });
+  if (error && error.message !== "component unavailable") {
+    if (error.message === "invalid details") return { status: "error", message: "That piece is listed for this release. Change it in the edit form instead." };
+    return { status: "error", message: editErrorMessage(error.message) };
+  }
+  refresh();
+  return { status: "idle", message: null };
+}
+
+/** The same action for a native form post. The page rendered afterwards no longer shows the record. */
+export async function removePieceRecordFromForm(formData: FormData): Promise<void> {
+  await removePieceRecord({ status: "idle", message: null }, formData);
 }
 
 export type RemoveCopyState = { status: "idle" | "error"; message: string | null };

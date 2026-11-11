@@ -372,6 +372,7 @@ const ADD_ITEM = "public.add_collection_item(uuid, uuid, jsonb)";
 const ITEM = "public.get_my_collection_item(uuid)";
 const NEW_ITEM = "private.check_new_collection_item()";
 const ITEM_UPDATE = "private.guard_collection_item_update()";
+const UPDATE = "public.update_collection_item(uuid, jsonb)";
 const COMPONENT = "private.check_collection_item_component()";
 const OWNER = "owner_id = (select auth.uid())";
 const ACTIVE = "(select private.is_active_user())";
@@ -403,6 +404,14 @@ export const m6Mutations = [
   // Pieces and preserved copies
   sql("unlisted pieces accepted", "both", rewrite(COMPONENT, "if tg_op = 'INSERT' and not exists (", "if false and not exists (")),
   sql("preserved copies editable", "pgtap", rewrite(ITEM_UPDATE, "    raise exception 'item preserved' using errcode = 'P0001';", "    null;")),
+  // Records of pieces the release no longer lists (M6d follow-up)
+  sql("edit drops records of unlisted pieces", "pgtap", rewrite(UPDATE,
+    "      where c.item_id = p_item\n        and exists (select 1 from public.release_components rc\n                    where rc.release_id = v_item.release_id and rc.kind = c.kind and rc.label = c.label);",
+    "      where c.item_id = p_item;")),
+  sql("listed pieces removable", "pgtap", rewrite(UPDATE, '      -- A piece the release lists is changed through "components", never removed here.\n      if exists (', "      if false and exists (")),
+  sql("unrecorded pieces removable", "pgtap", rewrite(UPDATE, "      -- Each must be a record of this copy's.\n      if exists (", "      if false and exists (")),
+  sql("removal reaches the owner's other copies", "pgtap", rewrite(UPDATE, "c.item_id = p_item and c.owner_id = v_me and c.kind = x.kind", "c.owner_id = v_me and c.kind = x.kind")),
+  sql("removal not validated", "pgtap", rewrite(UPDATE, "pg_catalog.jsonb_array_length(p_changes -> 'remove_components') not between 1 and 60", "false")),
 ];
 
 export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations };
