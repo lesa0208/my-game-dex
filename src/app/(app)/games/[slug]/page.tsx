@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { gameHref, ReleasePickerSkeleton, ReleasePickerView } from "@/components/catalog/release-picker";
+import { AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getReleasePicker } from "@/features/catalog/queries";
@@ -37,7 +38,19 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   // A merged game, or a link by id, goes to the game's own address.
   if (picker.game.slug !== slug) redirect(gameHref(picker.game.slug, selection));
 
-  return <ReleasePickerView picker={picker} />;
+  // The catalog above is public and cached. Adding reads the session, so it streams in
+  // on its own, and returns here after signing in.
+  return (
+    <ReleasePickerView
+      picker={picker}
+      requestedRelease={selection.release !== null}
+      renderAdd={(release) => (
+        <Suspense fallback={<AddToCollectionSkeleton />}>
+          <AddToCollection release={release} returnPath={gameHref(picker.game.slug, { ...selection, release: release.id })} />
+        </Suspense>
+      )}
+    />
+  );
 }
 
 export default function GamePage(props: PageProps<"/games/[slug]">) {

@@ -1,5 +1,6 @@
-import { CircleCheck } from "lucide-react";
+import { CircleCheck, Info } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { CatalogCover } from "@/components/games/catalog-cover";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +19,7 @@ import { cn } from "@/lib/utils";
 
 type Selection = { platform: string | null; region: string | null; release: string | null };
 
-/** The page's URL for a selection. The selected release is the future input to M6. */
+/** The page's URL for a selection. The selected release is what "Add to collection" adds (M6c). */
 export function gameHref(slug: string, { platform, region, release }: Selection) {
   const params = new URLSearchParams();
   if (platform) params.set("platform", platform);
@@ -117,10 +118,26 @@ function ReleaseCard({ release, href, selected, varying }: { release: PickerRele
   );
 }
 
-export function ReleasePickerView({ picker }: { picker: ReleasePicker }) {
+/**
+ * The game, its releases, and the selected one. `renderAdd` renders the add action for
+ * the release to add: the selected one, or the only one when there's just one. It's
+ * rendered separately because it reads the session, while this view is public.
+ * `requestedRelease` is set when the address named a release that isn't shown.
+ */
+export function ReleasePickerView({
+  picker,
+  renderAdd,
+  requestedRelease = false,
+}: {
+  picker: ReleasePicker;
+  renderAdd?: (release: PickerRelease) => ReactNode;
+  requestedRelease?: boolean;
+}) {
   const { game, selection } = picker;
   const meta = [game.firstRelease ? formatCatalogDate(game.firstRelease) : null, gameKindLabel(game.kind)].filter(Boolean);
   const selected = picker.releases.find((r) => r.id === selection.releaseId) ?? null;
+  const only = !selected && picker.releases.length === 1 ? picker.releases[0] : null;
+  const target = selected ?? only;
   // Details that differ between the releases shown are what tell them apart.
   const varying = new Set<string>();
   const shown = picker.releases.map((r) => new Map(details(r).map((row) => [row.key, row.value])));
@@ -188,23 +205,34 @@ export function ReleasePickerView({ picker }: { picker: ReleasePicker }) {
           />
         ) : null}
 
-        {selected ? (
-          <div role="status" className="rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-            <p className="font-medium">
-              Selected: {selected.platform.shortName} · {regionLabel(selected.region)}
-              {selected.edition?.name ? ` · ${selected.edition.name}` : ""}
-            </p>
-            <p className="mt-1 text-muted-foreground">
-              Adding a release to your collection arrives with My Collection.{" "}
-              <Link
-                href={gameHref(game.slug, { platform: selection.platform, region: selection.region, release: null })}
-                scroll={false}
-                className="text-primary-text underline underline-offset-4"
-              >
-                Clear selection
-              </Link>
-            </p>
-          </div>
+        {requestedRelease && !selected ? (
+          <p className="flex gap-2 rounded-lg border p-3 text-sm text-muted-foreground">
+            <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            That release isn&apos;t available. Choose one of the releases below.
+          </p>
+        ) : null}
+
+        {target ? (
+          <section aria-labelledby="add-release" className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+            <h3 id="add-release" className="text-sm font-medium">
+              {selected ? "Selected" : "The only release"}: {target.platform.shortName} · {regionLabel(target.region)}
+              {target.edition?.name ? ` · ${target.edition.name}` : ""}
+            </h3>
+            {renderAdd ? renderAdd(target) : null}
+            {selected ? (
+              <p className="text-sm">
+                <Link
+                  href={gameHref(game.slug, { platform: selection.platform, region: selection.region, release: null })}
+                  scroll={false}
+                  className="text-primary-text underline underline-offset-4"
+                >
+                  Clear selection
+                </Link>
+              </p>
+            ) : null}
+          </section>
+        ) : picker.releases.length > 1 ? (
+          <p className="text-sm text-muted-foreground">Choose the release you have to add it to your collection.</p>
         ) : null}
 
         <ul aria-label="Releases" className="flex flex-col gap-2">
@@ -219,6 +247,9 @@ export function ReleasePickerView({ picker }: { picker: ReleasePicker }) {
             </li>
           ))}
         </ul>
+        <p className="text-sm text-muted-foreground">
+          Can&apos;t find your release? Submitting missing games and releases to the catalog is coming in a later update.
+        </p>
       </section>
     </article>
   );

@@ -23,7 +23,9 @@
     "catalog:import": "node scripts/catalog-import.mjs",
     "catalog:fixture": "node scripts/catalog-fixture.mjs",
     "auth:test": "node --experimental-strip-types --no-warnings --test src/features/auth/auth.test.mjs",
+    "collection:test": "node --experimental-strip-types --no-warnings --test src/features/collection/collection.test.mjs",
     "app:auth-checks": "node scripts/app-auth-checks.mjs",
+    "app:collection-checks": "node scripts/app-collection-checks.mjs",
     "hooks:install": "git config core.hooksPath .githooks"
   },
   "dependencies": {

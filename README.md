@@ -42,8 +42,10 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run hooks:install` | Enable the pre-commit secret check |
 | `npm run auth:test` | Test the sign-in redirect, account and handle rules |
 | `npm run app:auth-checks` | After a build, test sign-in, sessions, the handle claim and sign-out in the running app against the local stack |
+| `npm run collection:test` | Test the add form's rules: copy ids and details |
+| `npm run app:collection-checks` | After a build, test adding copies from a game page in the running app against the local stack and catalog fixture |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks` for changes to sign-in or sessions.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks` or `app:collection-checks` for changes to sign-in, sessions or adding copies.
 
 ## Local database
 
@@ -179,7 +181,8 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 
 - Sign-in, sign-out and the handle claim work against the local stack only. There are no sign-up or password-reset pages, and avatars aren't shown yet
 - My Collection, Community, Notifications, Messages and My Profile are placeholder pages, and Settings has only the account and handle
-- Search covers the published game catalog only, not collectors; a release can be selected but not yet added to a collection
+- Search covers the published game catalog only, not collectors. A selected release can be added to your collection, but My Collection doesn't list copies yet
+- JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review
 - Frontend tests cover the catalog parser and the sign-in rules, plus an HTTP check of the auth flow. There are no component or browser tests

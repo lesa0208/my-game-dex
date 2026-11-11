@@ -488,10 +488,21 @@ An editor excludes an out-of-scope release through a staff function. That functi
 
 The catalog details in these responses are read through the catalog's own RLS, as the caller, so they show published records and the caller's own submissions only.
 
+**Adding from a game page (M6c).** The selected release on `/games/[slug]` gets an "Add to collection" action, rendered per request in its own Suspense boundary, so the public catalog around it stays cached and identical for everyone:
+
+- **Signed out:** a sign-in link that returns to the same release. **No handle:** a link to choose one, returning there. **Inactive:** a message, and no form.
+- **Active:** one button adds a copy with completeness unrecorded. A collapsed "More details" section holds the optional fields, including the release's listed pieces from the catalog.
+- **Duplicates:** the page renders a UUIDv7 into the form, and every repeat of that submission sends it, so the M6b function returns the same copy. After an addition the action returns a fresh id for "Add another copy". A second click while a request is pending is ignored in the browser. If a request fails on the way (say the connection drops after the copy was added), the form keeps the id it sent and asks the user to try again, so the retry gets the same copy back. Reloading the page renders a new id: each rendered page is one intended copy, and the reloaded page shows the updated count.
+- **The owner is never sent by the browser.** The Server Action `addCopy` reads the verified session with `getClaims()`, and `add_collection_item` takes the owner from `auth.uid()`.
+- **Only fixed messages.** The action returns the user's own count and nothing else from the database.
+- **Private details stay out of pages.** Neither the game page nor its caches show acquisition data, notes or locations, even to the owner. The browser bundle contains no Supabase client and no collection function names.
+- **Without JavaScript,** the form posts to `addCopyFromForm`, which runs the same action. The copy is still added or refused, but the re-rendered page shows no message, so JavaScript is required for the form's feedback.
+
 **Tested by:**
 - `21_collection.test.sql` (149 assertions);
 - `scripts/db-collection-checks.mjs` (58 checks through the API, including concurrent repeats and the limit under concurrency);
-- the `m6` suite in `scripts/security-mutations.mjs`.
+- the `m6` suite in `scripts/security-mutations.mjs`;
+- `npm run collection:test` (the add form's rules) and `npm run app:collection-checks` (46 checks of the built app over HTTP: signed out, no handle, active, suspended and forged sessions, retries, deliberate duplicates, refusals and leaks).
 
 `supabase/benchmarks/m6_collection.mjs` measures the reads and writes for a 50,000-copy collection among about a million copies, as the signed-in user. Measured locally (p95, 25 warm runs):
 

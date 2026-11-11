@@ -8,8 +8,8 @@ import { safeNextPath, signInHref } from "./redirect";
 import { createSupabaseServerClient } from "./server";
 
 /**
- * Sign-in, sign-out and the handle claim. Each action works without JavaScript,
- * verifies what it needs itself rather than trusting the page that rendered it, and
+ * Sign-in, sign-out and the handle claim. Each action also runs without JavaScript,
+ * though its messages then don't show (the page is rendered afresh). Each verifies what it needs itself rather than trusting the page that rendered it, and
  * returns only fixed messages: nothing from Auth or the database reaches the page.
  * Next.js checks that a Server Action request comes from this site.
  *

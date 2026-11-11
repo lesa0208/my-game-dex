@@ -764,7 +764,7 @@ Most general game databases focus on games rather than physical releases. Expect
 - Server code takes identity only from `getClaims()`.
 - `getCurrentViewer()` reads the account through the existing `get_my_account()`.
 
-There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions that work without JavaScript. The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
+There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
 
 There's no sign-up or password-reset page, and nothing on a hosted project changed. The seed viewer no longer appears in the header; seed content stays limited to the development preview feed. The design is in [security-rls.md](security-rls.md#web-sessions-m6a).
 
