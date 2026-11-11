@@ -44,13 +44,18 @@ export function installFixture() {
   return psql(readFileSync(join(root, "scripts", "fixtures", "catalog-search-fixture.sql"), "utf8"));
 }
 
-/** Removes everything the fixture made: its records, its audit rows and its editor. */
+/**
+ * Removes everything the fixture made: its records, its audit rows and its editor.
+ * Local copies of its fictional releases (M6) are removed first, because a copy keeps
+ * its release from being deleted.
+ */
 export function removeFixture() {
   assertLocal();
   psql(`begin;
 create temp table fx_games on commit drop as
   select distinct (metadata ->> 'id')::uuid as id from private.audit_events
   where actor_id = '${FIXTURE_EDITOR}' and action = 'catalog_record_created' and metadata ->> 'entity' = 'game';
+delete from public.collection_items where release_id in (select r.id from public.releases r where r.game_id in (select id from fx_games));
 delete from public.releases where game_id in (select id from fx_games) and merged_into_id is not null;
 delete from public.releases where game_id in (select id from fx_games);
 delete from public.games where id in (select id from fx_games) and merged_into_id is not null;

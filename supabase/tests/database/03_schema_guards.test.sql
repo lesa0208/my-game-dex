@@ -23,6 +23,10 @@ insert into approved_relation_grants
   cross join unnest(array['anon', 'authenticated']) as r;
 -- M5c: editor-curated aliases, readable under RLS when their game is published.
 insert into approved_relation_grants values ('game_aliases', 'anon'), ('game_aliases', 'authenticated');
+-- M6b: owner-only collections. Signed-in users only, under owner-only RLS; no anon
+-- or service_role access. Test 21 asserts the column grants.
+insert into approved_relation_grants values
+  ('collection_items', 'authenticated'), ('collection_item_private', 'authenticated'), ('collection_item_components', 'authenticated');
 create temp table approved_function_grants (fn text, grantee text);
 insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
@@ -75,6 +79,11 @@ insert into approved_function_grants values
   ('search_catalog(text,text[],integer,text)', 'anon'), ('search_catalog(text,text[],integer,text)', 'authenticated'),
   ('get_release_picker(text,text,text,uuid)', 'anon'), ('get_release_picker(text,text,text,uuid)', 'authenticated'),
   ('list_catalog_platforms()', 'anon'), ('list_catalog_platforms()', 'authenticated'),
+  -- M6b: the collection functions. Each is SECURITY INVOKER, so RLS applies.
+  ('add_collection_item(uuid,uuid,jsonb)', 'authenticated'), ('update_collection_item(uuid,jsonb)', 'authenticated'),
+  ('remove_collection_item(uuid)', 'authenticated'), ('get_my_collection(text,text,text,text,text,integer,text)', 'authenticated'),
+  ('get_my_collection_item(uuid)', 'authenticated'), ('get_my_release_copies(uuid)', 'authenticated'),
+  ('get_my_collection_summary()', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

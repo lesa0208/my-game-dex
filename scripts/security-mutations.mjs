@@ -368,4 +368,41 @@ export const m5cMutations = [
   sql("search granted to service_role", "both", `grant execute on function ${SEARCH} to service_role;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations };
+const ADD_ITEM = "public.add_collection_item(uuid, uuid, jsonb)";
+const ITEM = "public.get_my_collection_item(uuid)";
+const NEW_ITEM = "private.check_new_collection_item()";
+const ITEM_UPDATE = "private.guard_collection_item_update()";
+const COMPONENT = "private.check_collection_item_component()";
+const OWNER = "owner_id = (select auth.uid())";
+const ACTIVE = "(select private.is_active_user())";
+
+export const m6Mutations = [
+  // Owner-only access
+  sql("copies readable by every user", "both",
+    `drop policy collection_items_read_own on public.collection_items; create policy collection_items_read_own on public.collection_items for select to authenticated using (true);`),
+  sql("private details readable by every user", "both",
+    `drop policy collection_item_private_read_own on public.collection_item_private; create policy collection_item_private_read_own on public.collection_item_private for select to authenticated using (true);`),
+  sql("private details granted to service_role", "both", "grant select on public.collection_item_private to service_role;"),
+  sql("copy read bypasses the owner", "both", `alter function ${ITEM} security definer; ${rewrite(ITEM, "where c.id = p_item and c.owner_id = (select auth.uid())", "where c.id = p_item")}`),
+  // Writes
+  sql("copies added for any owner", "pgtap",
+    `drop policy collection_items_insert_own on public.collection_items; create policy collection_items_insert_own on public.collection_items for insert to authenticated with check (${ACTIVE} and private.can_use_release(release_id));`),
+  sql("details written for another owner", "pgtap",
+    `drop policy collection_item_private_insert_own on public.collection_item_private; create policy collection_item_private_insert_own on public.collection_item_private for insert to authenticated with check (${ACTIVE});`),
+  sql("any release can be attached", "both",
+    `drop policy collection_items_insert_own on public.collection_items; create policy collection_items_insert_own on public.collection_items for insert to authenticated with check (${OWNER} and ${ACTIVE});`),
+  sql("suspended owners may edit copies", "api",
+    `drop policy collection_items_update_own on public.collection_items; create policy collection_items_update_own on public.collection_items for update to authenticated using (${OWNER}) with check (${OWNER} and private.can_use_release(release_id));`),
+  sql("suspended owners may add", "both", rewrite(ADD_ITEM, "if not coalesce((select a.is_active from public.get_my_account() a), false) then", "if false then")),
+  sql("client may move a copy", "both", "grant update (release_id) on public.collection_items to authenticated;"),
+  sql("client may publish a copy", "both", "grant update (visibility) on public.collection_items to authenticated;"),
+  // Idempotency, ids and the limit
+  sql("repeat ignores the release", "both", rewrite(ADD_ITEM, "    if v_existing = p_release then\n      return", "    if true then\n      return")),
+  sql("id age not checked", "pgtap", rewrite(NEW_ITEM, "if v_ms < v_now_ms - 86400000 or v_ms > v_now_ms + 300000 then", "if false then")),
+  sql("limit check not locked", "api", rewrite(NEW_ITEM, "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('collection_items:' || new.owner_id::text, 0));", "")),
+  // Pieces and preserved copies
+  sql("unlisted pieces accepted", "both", rewrite(COMPONENT, "if tg_op = 'INSERT' and not exists (", "if false and not exists (")),
+  sql("preserved copies editable", "pgtap", rewrite(ITEM_UPDATE, "    raise exception 'item preserved' using errcode = 'P0001';", "    null;")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations };

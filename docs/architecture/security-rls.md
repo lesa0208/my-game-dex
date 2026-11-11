@@ -99,7 +99,7 @@ These live in the `private` schema, which the Data API doesn't expose. They use 
 | `private.block_peers()` | Everyone in a block with the caller, for use once per query |
 | `private.can_view_post(post_id)` | Caller can read that post under its policy |
 | `private.is_published_release(release)`, `private.is_published_game(game)` | The record is `published` |
-| `private.owns_copy_of(release)` | Caller owns a collection item on that release |
+| `private.owns_copy_of(release)` | Caller owns a collection item on that release. Not built yet: M7 needs it to let owners of preserved copies read an excluded release |
 | `private.can_read_release(release)` | The record is `published` or `merged`, or the caller submitted it or is a catalog editor, or it's `excluded` and the caller owns a preserved copy |
 | `private.can_use_release(release)` | The record is `published`, or the caller submitted it and it's `unverified`, `under_review` or `rejected`. Never `excluded` |
 | `private.is_conversation_member(conversation)` | Caller is a current member (`left_at IS NULL`) |
@@ -447,43 +447,72 @@ An editor excludes an out-of-scope release through a staff function. That functi
 
 ### Collection system
 
-| Table | `anon` | `authenticated` | Update columns |
-| --- | --- | --- | --- |
-| `collection_items` | R: passes all checks, and `record_status = 'active'` | R: same, or own. I, U: own, active, `release_id` passes `can_use_release`. D: own | `release_id`, `completeness`, the four conditions, `visibility` |
-| `collection_item_private` | **No grant** | R, I, U, D: own only | All except keys |
-| `shelves` | R: visible | R: visible, or own. I, U, D: own | `name`, `description`, `visibility`, `sort_rank` |
-| `shelf_items` | R: shelf and item both readable | Same, or own. I, U, D: own | `sort_rank` |
-| `collection_item_components` | R: parent item readable | Same, or own. I, U, D: own | `kind`, `label`, `condition` |
-| `wantlist_items` | R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | `minimum_completeness`, `priority`, `visibility` |
+**Implemented in M6b, owner-only** ([ADR-049](architecture-decisions.md#adr-049-collections-are-owner-only-copies-added-idempotently)). Nobody but the owner can read a copy, its details or its pieces: not followers, not staff, not `service_role`, and not anon. The layered visibility policy described in [Collections: three checks](#collections-three-checks) comes with public collections, together with shelves and wantlists.
 
-```sql
--- Illustrative
-create policy collection_items_read on public.collection_items
-for select to anon, authenticated using (
-  owner_id = (select auth.uid())
-  or (
-    record_status = 'active'
-    and visibility <> 'private'
-    and private.can_view_collection(owner_id)
-    and (visibility = 'public' or private.is_accepted_follower(owner_id))
-  )
-);
+| Table | `anon` | `authenticated` | Insert columns | Update columns |
+| --- | --- | --- | --- | --- |
+| `collection_items` | **No grant** | R, D: own. I: own, active account, `release_id` passes `can_use_release`. U: own, active account, `release_id` still passes `can_use_release` | `id`, `owner_id`, `release_id`, `completeness`, the four conditions | `completeness` and the four conditions |
+| `collection_item_private` | **No grant** | R, D: own. I, U: own, active account | All but timestamps | All except keys and timestamps |
+| `collection_item_components` | **No grant** | R, D: own. I, U: own, active account | `item_id`, `owner_id`, `kind`, `label`, `condition` | `condition` |
+| `shelves`, `shelf_items` | Deferred (D3) | | | |
+| `wantlist_items` | Later (L1). R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | | `minimum_completeness`, `priority`, `visibility` |
 
-create policy collection_items_update on public.collection_items
-for update to authenticated
-using (owner_id = (select auth.uid()) and private.is_active_user())
-with check (
-  owner_id = (select auth.uid())
-  and private.can_use_release(release_id)
-);
+`service_role` has no privilege on any collection table. Deleting an account through Auth still removes everything: the foreign keys cascade from `auth.users` through `profiles`, and cascades don't check the caller's privileges. This was tested through the Auth admin API.
 
--- Column grants do what the policy can't.
-grant update (release_id, completeness, overall_condition, box_condition,
-              media_condition, manual_condition, visibility)
-  on public.collection_items to authenticated;
-```
+**What clients can't do, and what stops them:**
 
-`WITH CHECK` plus the column grant means an owner can't transfer an item to someone else, or attach it to another user's submission.
+| Attempt | Stopped by |
+| --- | --- |
+| Read, edit or delete someone else's copy | Owner-only policies. An edit or delete changes no row, and the functions answer `item unavailable`, the same as for a missing copy |
+| Give a copy away, or move its details or pieces to another copy | No update grant on `owner_id`, `item_id` or `id`. Composite foreign keys on `(item_id, owner_id)` |
+| Attach a copy to an unpublished, rejected, excluded or merged release, or to another user's submission | `can_use_release()` in the insert and update policies, because foreign keys ignore RLS |
+| Move a copy to another release, publish it, or clear its preserved status | No update grant on `release_id`, `visibility` or `record_status` |
+| Add or edit while suspended, unverified or without a handle | `is_active_user()` in the policies, and the functions check first so the answer is `account not active`. Reading and removing stay available |
+| Duplicate a copy by retrying | The client's UUIDv7 is the primary key. A repeat returns the same copy |
+| Choose arbitrary or back-dated ids | A trigger accepts only a UUIDv7 made within the last 24 hours |
+| Exceed 100,000 copies, including with concurrent requests | A trigger counts under a per-owner advisory lock |
+| Record a piece the release doesn't list | A trigger checks the release's components |
+| Edit a preserved copy | A trigger refuses any change except a move to a usable release, which M7 makes |
+
+**The functions** are all `SECURITY INVOKER`. They give nothing a direct request couldn't do; they write several rows atomically, return fixed shapes, and turn database errors into fixed messages.
+
+| Function | Purpose |
+| --- | --- |
+| `add_collection_item(p_item_id, p_release, p_details)` | Adds a copy and, optionally, its details and pieces, in one transaction. Idempotent per `p_item_id` |
+| `update_collection_item(p_item, p_changes)` | Sets the given fields; null clears. `components` replaces the recorded pieces. A row of details is removed when every value is cleared |
+| `remove_collection_item(p_item)` | Removes a copy, with its details and pieces |
+| `get_my_collection(...)` | One page of the caller's copies. Filters: title, platform, completeness (`not_recorded` included) and status. Sorts: added, title, platform, acquired. Opaque keyset cursors bound to the filters |
+| `get_my_collection_item(p_item)` | One copy in full, with notes and the release's pieces |
+| `get_my_release_copies(p_release)` | How many copies of a release the caller has. `count` is exact; `copies` lists the newest 100 only |
+| `get_my_collection_summary()` | Counts by status (A1) and by platform, for the caller only |
+
+The catalog details in these responses are read through the catalog's own RLS, as the caller, so they show published records and the caller's own submissions only.
+
+**Tested by:**
+- `21_collection.test.sql` (149 assertions);
+- `scripts/db-collection-checks.mjs` (58 checks through the API, including concurrent repeats and the limit under concurrency);
+- the `m6` suite in `scripts/security-mutations.mjs`.
+
+`supabase/benchmarks/m6_collection.mjs` measures the reads and writes for a 50,000-copy collection among about a million copies, as the signed-in user. Measured locally (p95, 25 warm runs):
+
+| Shape | 50,000 copies | 1,000 copies |
+| --- | --- | --- |
+| Newest first, any page; one platform; completeness not recorded | 4 to 9 ms | |
+| By acquisition date | 46 ms | |
+| By title, by platform | 124 to 173 ms | 29 ms by title |
+| Title search | 105 ms with matches, 357 ms with none | |
+| One copy; copies of a release; add; edit | 0.4 to 12 ms | |
+| Summary | 65 ms | 15 ms |
+
+Sorting by title or platform, and a title search, read every copy's title, so they grow with the collection and miss the 100 ms goal near the 100,000 limit. The product owner accepted this for M6, with no duplicated catalog titles and no extra caching.
+
+**When to optimize.** Revisit these shapes if any of these becomes true, measured with this benchmark or with production metrics:
+
+- Collections of 5,000 copies or fewer take more than 100 ms at p95 for any shape.
+- A meaningful share of real collections, around 1% of active collectors, holds more than 20,000 copies.
+- Title search or title sorting becomes a common, latency-sensitive action rather than an occasional one.
+
+The options, in order of preference: tune the existing queries and indexes first; then a trigram index over the catalog's own stored keys, reachable without a privileged function; and only then a stored, trigger-maintained title key on copies, which duplicates catalog data and needs a new decision.
 
 ### Social system
 
@@ -546,13 +575,13 @@ RLS handles simple ownership. These need trusted server code because they span s
 | Publish a review | Writes `posts` and `reviews` atomically |
 | File a report, list own reports | Captures a snapshot of content, verifying the reporter could see it. Listing returns only safe fields |
 | Staff actions: hide content, set catalog status, review change requests | Column grants block direct writes, and each action records an audit row |
-| Add an item with purchase data | Writes both item tables atomically |
+| Add an item with purchase data | Writes both item tables atomically. Built in M6b as `SECURITY INVOKER`, since RLS already allows every step |
 | Submit a release or game | Creates `unverified` rows the caller can't otherwise insert, plus the review record. Rate limited |
 | List own submissions | `my_catalog_submissions()` returns status and reviewer note, never the reviewer's identity |
 | Publish a shelf or a collection | Changes several visibility settings together after explicit confirmation |
 | Catalog review: approve, request changes, merge, reject, exclude | Crosses several tables atomically and records an audit row. Requires `catalog_editor` |
 | Reverse an exclusion, or relink a preserved record for an owner | Restores valid state across owners. Requires `admin`, with an audit row |
-| Collection statistics | One shared function, so every count uses the same definition of a counted copy. A separate summary function returns pending, not approved and invalid preserved, for the caller only (A1) |
+| Collection statistics | One shared function, so every count uses the same definition of a counted copy. A separate summary function returns pending, not approved and invalid preserved, for the caller only (A1). M6b built the caller-only summary, as `SECURITY INVOKER`. The shared count for other viewers comes with public collections |
 | Classify games: write `game_relations` | Requires `catalog_editor`. Never automatic, and never based on marketing terms alone |
 | Leave a conversation | Sets `left_at` |
 
