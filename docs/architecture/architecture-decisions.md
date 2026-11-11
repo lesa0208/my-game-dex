@@ -55,6 +55,8 @@ This records why the database is designed as it is, what each choice costs, and 
 | [045](#adr-045-catalog-records-are-verified-before-they-are-published) | Catalog records are verified before they are published |
 | [046](#adr-046-imports-run-as-a-restricted-role-through-audited-functions) | Imports run as a restricted role through audited functions |
 | [047](#adr-047-catalog-search-reads-published-records-through-read-only-functions) | Catalog search reads published records through read-only functions |
+| [048](#adr-048-web-sessions-are-handled-only-on-the-server) | Web sessions are handled only on the server |
+| [049](#adr-049-collections-are-owner-only-copies-added-idempotently) | Collections are owner-only copies, added idempotently |
 
 ## Decisions requiring product-owner approval
 
@@ -754,6 +756,69 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Trade-offs.** The keys are generated columns, so the M5b revision trigger was replaced to ignore them; otherwise every update would raise a revision. Trigram thresholds are fixed by the function for each query, whatever the session has set, and aren't tuned per query. Japanese and other non-Latin titles match by prefix and trigram similarity only. The platform list counts the whole catalog on each call, about 170 ms at 150,000 releases, so the app caches it. Editors can't search unpublished records here; that comes with M7.
 
+### ADR-048: Web sessions are handled only on the server
+
+**Decision.** Approved by the product owner for M6a, local only. The app uses `@supabase/ssr` 0.12.7 and `@supabase/supabase-js` 2.118.0, pinned, in the package's documented Next.js pattern:
+
+- `src/proxy.ts` refreshes the session before each request.
+- Server code takes identity only from `getClaims()`.
+- `getCurrentViewer()` reads the account through the existing `get_my_account()`.
+
+There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
+
+There's no sign-up or password-reset page, and nothing on a hosted project changed. The seed viewer no longer appears in the header; seed content stays limited to the development preview feed. The design is in [security-rls.md](security-rls.md#web-sessions-m6a).
+
+**Why.**
+- Server-only sessions keep tokens away from page scripts, and keep one place, the proxy, responsible for refreshing them.
+- Reusing the M2 functions means no new database function or privilege.
+- Leaving out sign-up and reset keeps hosted registration closed until the [public-authentication blockers](security-rls.md#blockers-before-public-authentication) are resolved.
+
+**Trade-offs.**
+- Any later client-side Supabase use, such as Realtime, needs a browser client and non-`httpOnly` cookies, so this decision would need revisiting.
+- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out.
+- Pages that read the session render per request and can't be prefetched.
+- Avatars aren't shown yet, because the image component would need the storage host configured.
+
+### ADR-049: Collections are owner-only copies, added idempotently
+
+**Decision.** Approved by the product owner for M6b (decisions D2 to D10 and B1 to B7). Each physical copy is one `collection_items` row.
+
+- **Completeness may be left unrecorded.** It's null until the owner records it. The physical-copy rules are unchanged: a copy always has its medium, and each completeness value's rule applies once it's set.
+- **Owner-only details.** Acquisition date, price and currency, notes and storage location are in `collection_item_private`. No other user, staff role or `service_role` has any privilege on it.
+- **Pieces.** `collection_item_components` records which of the release's listed pieces a copy has. Pieces are identified by kind and label and checked by a trigger.
+- **Owner-only in M6.** There's no read path for anyone else, and `visibility` stays `private`.
+- **Idempotent adding.** The client generates each new copy's UUIDv7, so repeating a request returns the same copy. A trigger requires the id to be recent.
+- **A limit.** Each owner can have 100,000 copies, checked under a per-owner lock.
+- **Only usable releases.** A copy attaches only to a published release or the owner's own submission, checked by `can_use_release()` in the policies.
+- **Writes and reads run as the caller.** The seven functions are all `SECURITY INVOKER`, so the policies, column grants, constraints and triggers apply exactly as they would to a direct request. No new privileged function was added.
+- **Ready for M7.** `record_status` and a guard on preserved copies are in place, so M7's merge and exclusion need no change to these tables.
+
+**Why.**
+- **Unrecorded completeness keeps adding to one step without inventing data.** A default would assert something about the copy, and a new enum value would be counted as if it were real.
+- **Caller's rights are the least privilege.** The owner-only policies are cheap (`owner_id = auth.uid()`, indexed), unlike the per-viewer visibility checks that pushed follows into privileged functions (ADR-040).
+- **A client-chosen id is enough for idempotency.** It needs no extra column or table, and the primary key resolves concurrent repeats.
+
+**Trade-offs.**
+- **Replays and stale tabs.** A repeated request doesn't apply its details again. A stale tab that resends an addition after the copy was removed would add it back.
+- **Sorting large collections.** Sorting by title, platform or acquisition date reads the whole collection, so it slows as a collection nears the limit. See the [M6b benchmark](security-rls.md#collection-system).
+- **Title search.** The collection's title filter ignores case and Latin accents, but doesn't use the catalog's search keys, which callers can't reach.
+- **Preserved copies.** A copy whose release is no longer readable, such as an excluded one in M7, shows no release details. Letting the owners of preserved copies read the release comes with M7.
+- **Wrong release.** A copy can't be moved to another release in M6; the owner removes it and adds the right one. M7 adds a proper relink.
+- **The limit costs a count.** Each addition counts the owner's copies.
+- **A capped list.** `get_my_release_copies` lists the newest 100 copies of one release; its count is always exact.
+
+**M7 compatibility.** M7 needs no change to these tables. `21_collection.test.sql` covers each step as M7 will take it:
+
+| M7 step | What happens to copies |
+| --- | --- |
+| Submission | The submitter attaches copies at once, through `can_use_release`. They count as pending |
+| Approval | The release becomes published, and its copies count as owned, unchanged |
+| Rejection | The copies stay, counted as not approved |
+| Merge | While merging, copies count as pending. Moving them to the target (`release_id`, by a staff function) keeps their details, and drops pieces the target doesn't list. A stale retry of the original request then gets `request conflict`, not a new copy |
+| Exclusion | Copies become `invalid_preserved` and can't be edited, but can be removed. Moving one to a usable release clears the flag |
+
+M7 still has to add a staff function for each step, owners' read access to an excluded release they hold copies of, and an owner's relink.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -857,8 +922,8 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
 | **M4 Audit and notices** (done, verified on the local stack only) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
 | **M5 Catalog** (M5a schema and editor functions committed; M5b importer built locally) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
-| **M6 Collection** | `collection_items`, `collection_item_private`, `collection_item_components`, `shelves`, `shelf_items`, statistics function | Needs the catalog and visibility helpers |
-| **M7 Catalog workflow** | `catalog_change_requests`, and functions to submit, approve, request changes, reject, merge, exclude, reverse and publish | Exclusion and merge change collection items, so they follow M6 |
+| **M6 Collection** (M6a sessions and M6b database built locally) | `collection_items`, `collection_item_private`, `collection_item_components`, and the collection functions ([ADR-049](#adr-049-collections-are-owner-only-copies-added-idempotently)). Shelves are deferred (D3) | Needs the catalog and visibility helpers |
+| **M7 Catalog workflow** | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
 
 Later groups, in order:
 
@@ -921,5 +986,5 @@ M0 creates no application tables and changes no application code. It stops there
 1. The product owner reviews M5b, confirms each source's permissions, and approves the SNES pilot dataset.
 2. Run the pilot, then build M5c, M6 and M7, locally, one reviewed step at a time.
 3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
-4. Connect authentication and replace `getCurrentViewer()`, keeping the query functions as the only seam.
+4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.

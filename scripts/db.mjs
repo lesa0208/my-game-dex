@@ -64,6 +64,7 @@ const steps = {
   catalog: () => runNode("db-catalog-checks.mjs"),
   imports: () => runNode("db-import-checks.mjs"),
   search: () => runNode("db-search-checks.mjs"),
+  collection: () => runNode("db-collection-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -87,8 +88,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

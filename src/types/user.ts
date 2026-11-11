@@ -10,3 +10,19 @@ export type SuggestedCollector = Collector & {
   gamesCataloged: number;
   focus: string;
 };
+
+/**
+ * The signed-in account, from a verified session. `handle` is null until one is
+ * claimed, and only an active account with a handle can use account features.
+ */
+export type Viewer = {
+  id: string;
+  handle: string | null;
+  displayName: string;
+  avatarUrl?: string;
+  accountStatus: "active" | "suspended" | "deactivated";
+  /** `private.is_active_user()`: active, verified email and a claimed handle. */
+  isActive: boolean;
+  handleChangedAt: string | null;
+  handleCorrectionUntil: string | null;
+};

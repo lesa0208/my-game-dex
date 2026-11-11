@@ -99,7 +99,7 @@ These live in the `private` schema, which the Data API doesn't expose. They use 
 | `private.block_peers()` | Everyone in a block with the caller, for use once per query |
 | `private.can_view_post(post_id)` | Caller can read that post under its policy |
 | `private.is_published_release(release)`, `private.is_published_game(game)` | The record is `published` |
-| `private.owns_copy_of(release)` | Caller owns a collection item on that release |
+| `private.owns_copy_of(release)` | Caller owns a collection item on that release. Not built yet: M7 needs it to let owners of preserved copies read an excluded release |
 | `private.can_read_release(release)` | The record is `published` or `merged`, or the caller submitted it or is a catalog editor, or it's `excluded` and the caller owns a preserved copy |
 | `private.can_use_release(release)` | The record is `published`, or the caller submitted it and it's `unverified`, `under_review` or `rejected`. Never `excluded` |
 | `private.is_conversation_member(conversation)` | Caller is a current member (`left_at IS NULL`) |
@@ -447,43 +447,93 @@ An editor excludes an out-of-scope release through a staff function. That functi
 
 ### Collection system
 
-| Table | `anon` | `authenticated` | Update columns |
-| --- | --- | --- | --- |
-| `collection_items` | R: passes all checks, and `record_status = 'active'` | R: same, or own. I, U: own, active, `release_id` passes `can_use_release`. D: own | `release_id`, `completeness`, the four conditions, `visibility` |
-| `collection_item_private` | **No grant** | R, I, U, D: own only | All except keys |
-| `shelves` | R: visible | R: visible, or own. I, U, D: own | `name`, `description`, `visibility`, `sort_rank` |
-| `shelf_items` | R: shelf and item both readable | Same, or own. I, U, D: own | `sort_rank` |
-| `collection_item_components` | R: parent item readable | Same, or own. I, U, D: own | `kind`, `label`, `condition` |
-| `wantlist_items` | R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | `minimum_completeness`, `priority`, `visibility` |
+**Implemented in M6b, owner-only** ([ADR-049](architecture-decisions.md#adr-049-collections-are-owner-only-copies-added-idempotently)). Nobody but the owner can read a copy, its details or its pieces: not followers, not staff, not `service_role`, and not anon. The layered visibility policy described in [Collections: three checks](#collections-three-checks) comes with public collections, together with shelves and wantlists.
 
-```sql
--- Illustrative
-create policy collection_items_read on public.collection_items
-for select to anon, authenticated using (
-  owner_id = (select auth.uid())
-  or (
-    record_status = 'active'
-    and visibility <> 'private'
-    and private.can_view_collection(owner_id)
-    and (visibility = 'public' or private.is_accepted_follower(owner_id))
-  )
-);
+| Table | `anon` | `authenticated` | Insert columns | Update columns |
+| --- | --- | --- | --- | --- |
+| `collection_items` | **No grant** | R, D: own. I: own, active account, `release_id` passes `can_use_release`. U: own, active account, `release_id` still passes `can_use_release` | `id`, `owner_id`, `release_id`, `completeness`, the four conditions | `completeness` and the four conditions |
+| `collection_item_private` | **No grant** | R, D: own. I, U: own, active account | All but timestamps | All except keys and timestamps |
+| `collection_item_components` | **No grant** | R, D: own. I, U: own, active account | `item_id`, `owner_id`, `kind`, `label`, `condition` | `condition` |
+| `shelves`, `shelf_items` | Deferred (D3) | | | |
+| `wantlist_items` | Later (L1). R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | | `minimum_completeness`, `priority`, `visibility` |
 
-create policy collection_items_update on public.collection_items
-for update to authenticated
-using (owner_id = (select auth.uid()) and private.is_active_user())
-with check (
-  owner_id = (select auth.uid())
-  and private.can_use_release(release_id)
-);
+`service_role` has no privilege on any collection table. Deleting an account through Auth still removes everything: the foreign keys cascade from `auth.users` through `profiles`, and cascades don't check the caller's privileges. This was tested through the Auth admin API.
 
--- Column grants do what the policy can't.
-grant update (release_id, completeness, overall_condition, box_condition,
-              media_condition, manual_condition, visibility)
-  on public.collection_items to authenticated;
-```
+**What clients can't do, and what stops them:**
 
-`WITH CHECK` plus the column grant means an owner can't transfer an item to someone else, or attach it to another user's submission.
+| Attempt | Stopped by |
+| --- | --- |
+| Read, edit or delete someone else's copy | Owner-only policies. An edit or delete changes no row, and the functions answer `item unavailable`, the same as for a missing copy |
+| Give a copy away, or move its details or pieces to another copy | No update grant on `owner_id`, `item_id` or `id`. Composite foreign keys on `(item_id, owner_id)` |
+| Attach a copy to an unpublished, rejected, excluded or merged release, or to another user's submission | `can_use_release()` in the insert and update policies, because foreign keys ignore RLS |
+| Move a copy to another release, publish it, or clear its preserved status | No update grant on `release_id`, `visibility` or `record_status` |
+| Add or edit while suspended, unverified or without a handle | `is_active_user()` in the policies, and the functions check first so the answer is `account not active`. Reading and removing stay available |
+| Duplicate a copy by retrying | The client's UUIDv7 is the primary key. A repeat returns the same copy |
+| Choose arbitrary or back-dated ids | A trigger accepts only a UUIDv7 made within the last 24 hours |
+| Exceed 100,000 copies, including with concurrent requests | A trigger counts under a per-owner advisory lock |
+| Record a piece the release doesn't list | A trigger checks the release's components |
+| Edit a preserved copy | A trigger refuses any change except a move to a usable release, which M7 makes |
+
+**The functions** are all `SECURITY INVOKER`. They give nothing a direct request couldn't do; they write several rows atomically, return fixed shapes, and turn database errors into fixed messages.
+
+| Function | Purpose |
+| --- | --- |
+| `add_collection_item(p_item_id, p_release, p_details)` | Adds a copy and, optionally, its details and pieces, in one transaction. Idempotent per `p_item_id` |
+| `update_collection_item(p_item, p_changes)` | Sets the given fields; null clears. `components` replaces the recorded pieces the release lists now, and keeps records of pieces it no longer lists; `remove_components` removes those records by exact kind and label (each must be recorded for this copy, unlisted and named once, or the whole change is refused). A row of details is removed when every value is cleared. Changed by `20261111100200_m6_keep_unlisted_pieces.sql` |
+| `remove_collection_item(p_item)` | Removes a copy, with its details and pieces |
+| `get_my_collection(...)` | One page of the caller's copies. Filters: title, platform, completeness (`not_recorded` included) and status. Sorts: added, title, platform, acquired. Opaque keyset cursors bound to the filters |
+| `get_my_collection_item(p_item)` | One copy in full, with notes and the release's pieces |
+| `get_my_release_copies(p_release)` | How many copies of a release the caller has. `count` is exact; `copies` lists the newest 100 only |
+| `get_my_collection_summary()` | Counts by status (A1) and by platform, for the caller only |
+
+The catalog details in these responses are read through the catalog's own RLS, as the caller, so they show published records and the caller's own submissions only.
+
+**Adding from a game page (M6c).** The selected release on `/games/[slug]` gets an "Add to collection" action, rendered per request in its own Suspense boundary, so the public catalog around it stays cached and identical for everyone:
+
+- **Signed out:** a sign-in link that returns to the same release. **No handle:** a link to choose one, returning there. **Inactive:** a message, and no form.
+- **Active:** one button adds a copy with completeness unrecorded. A collapsed "More details" section holds the optional fields, including the release's listed pieces from the catalog.
+- **Duplicates:** the page renders a UUIDv7 into the form, and every repeat of that submission sends it, so the M6b function returns the same copy. After an addition the action returns a fresh id for "Add another copy". A second click while a request is pending is ignored in the browser. If a request fails on the way (say the connection drops after the copy was added), the form keeps the id it sent and asks the user to try again, so the retry gets the same copy back. Reloading the page renders a new id: each rendered page is one intended copy, and the reloaded page shows the updated count.
+- **The owner is never sent by the browser.** The Server Action `addCopy` reads the verified session with `getClaims()`, and `add_collection_item` takes the owner from `auth.uid()`.
+- **Only fixed messages.** The action returns the user's own count and nothing else from the database.
+- **Private details stay out of pages.** Neither the game page nor its caches show acquisition data, notes or locations, even to the owner. The browser bundle contains no Supabase client and no collection function names.
+- **Without JavaScript,** the form posts to `addCopyFromForm`, which runs the same action. The copy is still added or refused, but the re-rendered page shows no message, so JavaScript is required for the form's feedback.
+
+**My Collection (M6d).** `/collection` lists the signed-in user's copies and `/collection/[itemId]` shows one, with edit and remove. Both are protected pages: the proxy sends visitors to sign in, and each page verifies the session itself. Each reads the session inside its own Suspense boundary, so nothing private is in a prerendered shell or a shared cache.
+
+- **Reads** go through `get_my_collection_summary`, `get_my_collection` (search, filters, sorts and keyset cursors in the database; one page of 50 at a time), `get_my_collection_item` and `get_my_release_copies`. Numbering copies of one release ("Copy 2 of 3") reads `collection_items` directly, through its owner-only policy, in one request whose exact count must equal the rows returned; otherwise nothing is numbered and the list shows "N copies of this release", so a number is never wrong. Both numbers come from that one read. List parameters from the URL are checked against what the functions accept before they're sent.
+- **Someone else's copy reads as missing.** `get_my_collection_item` returns null for it, and the page shows the same "This copy isn't available" as for a removed copy or a malformed address.
+- **Editing** (`updateCopy`) reads the copy again as the user, takes the release's pieces from the catalog rather than the form, applies the M6c rules and sends every field to `update_collection_item`, so an emptied field is cleared. Pieces are sent only when they change, and each field is matched to its piece by kind and label. The release, owner and status aren't fields; extra form fields are ignored.
+- **Records of pieces the release no longer lists are kept.** Editing the listed pieces leaves them, because `update_collection_item` replaces only listed pieces. They're shown under "No longer listed for this release", each with a "Remove this record" control (`removePieceRecord`), the only way to remove one: it sends `remove_components` with that piece's exact kind and label. A suspended account sees no edit form or removal control, and the function refuses both anyway.
+- **Removing** (`removeCopy`) needs a confirmation that names the copy, deletes only it through `remove_collection_item` (allowed when suspended), and redirects back to the list as the user left it. A copy that's already gone, or isn't theirs, gets the same "already removed" answer, so removing is safe to repeat and reveals nothing. It works without JavaScript, because success is a redirect.
+- **Private details** (acquisition date, price, location, notes) appear only on these owner-only pages, never on game pages or in the browser bundle.
+
+**Tested by:**
+- `21_collection.test.sql` (174 assertions);
+- `scripts/db-collection-checks.mjs` (58 checks through the API, including concurrent repeats and the limit under concurrency);
+- the `m6` suite in `scripts/security-mutations.mjs`;
+- `npm run collection:test` (the add form's rules) and `npm run app:collection-checks` (46 checks of the built app over HTTP: signed out, no handle, active, suspended and forged sessions, retries, deliberate duplicates, refusals and leaks);
+- `npm run app:my-collection-checks` (109 checks of the built app over HTTP: listing, pagination, search, filters and sorts, details, editing and clearing, removing one of several copies, empty collections, unavailable copies, kept and deliberately removed records of unlisted pieces, copy numbers beyond the read limit, other users, suspended and forged sessions, privacy and the bundle).
+
+`supabase/benchmarks/m6_collection.mjs` measures the reads and writes for a 50,000-copy collection among about a million copies, as the signed-in user. Measured locally (p95, 25 warm runs):
+
+| Shape | 50,000 copies | 1,000 copies |
+| --- | --- | --- |
+| Newest first, any page; one platform; completeness not recorded | 4 to 9 ms | |
+| By acquisition date | 46 ms | |
+| By title, by platform | 124 to 173 ms | 29 ms by title |
+| Title search | 105 ms with matches, 357 ms with none | |
+| One copy; copies of a release; add; edit | 0.4 to 12 ms | |
+| Summary | 65 ms | 15 ms |
+
+Sorting by title or platform, and a title search, read every copy's title, so they grow with the collection and miss the 100 ms goal near the 100,000 limit. The product owner accepted this for M6, with no duplicated catalog titles and no extra caching.
+
+**When to optimize.** Revisit these shapes if any of these becomes true, measured with this benchmark or with production metrics:
+
+- Collections of 5,000 copies or fewer take more than 100 ms at p95 for any shape.
+- A meaningful share of real collections, around 1% of active collectors, holds more than 20,000 copies.
+- Title search or title sorting becomes a common, latency-sensitive action rather than an occasional one.
+
+The options, in order of preference: tune the existing queries and indexes first; then a trigram index over the catalog's own stored keys, reachable without a privileged function; and only then a stored, trigger-maintained title key on copies, which duplicates catalog data and needs a new decision.
 
 ### Social system
 
@@ -546,13 +596,13 @@ RLS handles simple ownership. These need trusted server code because they span s
 | Publish a review | Writes `posts` and `reviews` atomically |
 | File a report, list own reports | Captures a snapshot of content, verifying the reporter could see it. Listing returns only safe fields |
 | Staff actions: hide content, set catalog status, review change requests | Column grants block direct writes, and each action records an audit row |
-| Add an item with purchase data | Writes both item tables atomically |
+| Add an item with purchase data | Writes both item tables atomically. Built in M6b as `SECURITY INVOKER`, since RLS already allows every step |
 | Submit a release or game | Creates `unverified` rows the caller can't otherwise insert, plus the review record. Rate limited |
 | List own submissions | `my_catalog_submissions()` returns status and reviewer note, never the reviewer's identity |
 | Publish a shelf or a collection | Changes several visibility settings together after explicit confirmation |
 | Catalog review: approve, request changes, merge, reject, exclude | Crosses several tables atomically and records an audit row. Requires `catalog_editor` |
 | Reverse an exclusion, or relink a preserved record for an owner | Restores valid state across owners. Requires `admin`, with an audit row |
-| Collection statistics | One shared function, so every count uses the same definition of a counted copy. A separate summary function returns pending, not approved and invalid preserved, for the caller only (A1) |
+| Collection statistics | One shared function, so every count uses the same definition of a counted copy. A separate summary function returns pending, not approved and invalid preserved, for the caller only (A1). M6b built the caller-only summary, as `SECURITY INVOKER`. The shared count for other viewers comes with public collections |
 | Classify games: write `game_relations` | Requires `catalog_editor`. Never automatic, and never based on marketing terms alone |
 | Leave a conversation | Sets `left_at` |
 
@@ -683,6 +733,44 @@ stateDiagram-v2
 
 `email_sent = 100` in the local configuration exists only so tests can run. It isn't a production value.
 
+### Web sessions (M6a)
+
+The app signs users in with `@supabase/ssr` and `@supabase/supabase-js`, following the package's documented server pattern for Next.js. It was tested on the local stack only; nothing has been deployed or configured on a hosted project. See [ADR-048](architecture-decisions.md#adr-048-web-sessions-are-handled-only-on-the-server).
+
+| Part | How it works |
+| --- | --- |
+| Clients | Only server clients, one per request: `src/proxy.ts`, and `createSupabaseServerClient()` in `src/features/auth/server.ts` for Server Components and Server Actions. There's no browser client |
+| Session refresh | `src/proxy.ts` runs before every page and Server Action. It calls `getClaims()`, which refreshes an expired access token, and writes the new cookies to both the request and the response, with Auth's no-store cache headers. Server Components can't set cookies, so they rely on this |
+| Verification | Identity comes only from `getClaims()`, which checks the token's signature against the project's published keys (ES256 locally). `getSession()` is never used for identity, because anyone can forge the cookie |
+| Account | `getCurrentViewer()` reads `get_my_account()` (M2) as the user, so account status and handle come from the database on every request, not from the token |
+| Cookies | `sb-<ref>-auth-token`, possibly in chunks: `httpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` in production builds. `httpOnly` works only because no browser client exists. Adding one would need it removed |
+| Keys | `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are server-only variables, never `NEXT_PUBLIC_`. No secret key is used. `npm run secrets:bundle` checks the browser bundles |
+| Protected pages | `/collection`, `/profile`, `/settings` and `/welcome`. The proxy redirects signed-out visitors as an early check. Each page checks again with `requireViewer()` or `requireViewerWithHandle()`, which send an account without a handle to `/welcome` |
+| Server Actions | Sign-in, sign-out and the handle claim. Each reads the session itself, and Next.js refuses an action posted from another origin. They return only fixed messages, and on success call `refresh()` so the browser doesn't reuse pages rendered before the change. That refreshes only the client router, not server caches |
+| Refresh cost | Only an access token within 90 seconds of expiry is refreshed. Otherwise `getClaims()` verifies the signature against keys cached for 10 minutes per server process, so ordinary requests make no Auth call and write no cookies. Static files and images skip the proxy |
+| Redirects | `safeNextPath()` accepts only a path on this site. Absolute URLs, `//host`, backslashes, control characters and over-long values fall back to `/home` |
+| Caching | Session reads call `connection()` first, so they're never prerendered, prefetched or cached. Nothing per-user is in `'use cache'`, `'use cache: private'` or a shared cache |
+| Pages | Sign in, choose a handle, and Settings, which shows the account, changes the handle under the M2 rules, and signs out. **There's no sign-up or password-reset page.** Local users are created by tests, or in local Studio |
+
+**Known limits of this design:**
+
+- **A signed-out access token stays valid until it expires.** Sign-out revokes the refresh token in Auth and clears the cookies, but `getClaims()` verifies access tokens locally, so a copied token keeps working for up to `jwt_expiry` (an hour locally). The account and its status are still read from the database on each request.
+- **Refresh tokens are single use.** If two requests refresh the same expired session at once, one may see no session until the browser has the new cookie. The proxy refreshing once per navigation makes this rare.
+- **No sign-in throttling in the app.** It remains blocker 1 below.
+
+Tested by `npm run auth:test` (redirect rules, account parsing and handle rules) and `npm run app:auth-checks`. The second drives the built app over HTTP against the local stack, submitting the forms as a browser without JavaScript would:
+
+- signed-out redirects;
+- refused, unverified and cross-site sign-ins;
+- the cookie attributes;
+- claiming a handle;
+- session refresh;
+- a forged cookie;
+- a session-less Server Action;
+- sign-out, including revocation of the refresh token;
+- a suspended account;
+- no tokens, keys or emails in pages.
+
 ### Blockers before public authentication
 
 **Public authentication must not open until every one of these is resolved:**
@@ -708,7 +796,8 @@ Registration stays closed. `enable_signup = true` applies to the local stack onl
 | Application-level login throttling, per account and per IP | No throttling was observed locally |
 | Leaked-password protection, if the plan supports it | Then test it |
 | Email templates that say what the message is for | The defaults are generic |
-| A session-verification approach for the server, using `getClaims` or an equivalent | Connects to `getCurrentViewer()` |
+| Re-run `npm run app:auth-checks` against the hosted project's settings | The [web session](#web-sessions-m6a) design was verified locally only. Confirm the hosted project uses asymmetric signing keys, which `getClaims()` verifies locally; with a shared secret it calls Auth instead |
+| Sign-up and password-reset pages, designed with the blockers above | M6a has none, deliberately |
 | Decisions on JWT expiry | A token stays cryptographically valid until it expires, including after deletion. On the local stack it found no data, and Auth refused it |
 
 ## Staff actions

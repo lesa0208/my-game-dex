@@ -40,8 +40,13 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run secrets:bundle` | Scan browser bundles for secrets, after a build |
 | `npm run secrets:test` | Test the secret scanner |
 | `npm run hooks:install` | Enable the pre-commit secret check |
+| `npm run auth:test` | Test the sign-in redirect, account and handle rules |
+| `npm run app:auth-checks` | After a build, test sign-in, sessions, the handle claim and sign-out in the running app against the local stack |
+| `npm run collection:test` | Test the add form's rules: copy ids and details |
+| `npm run app:collection-checks` | After a build, test adding copies from a game page in the running app against the local stack and catalog fixture |
+| `npm run app:my-collection-checks` | After a build, test My Collection (listing, filters, details, editing and removing) in the running app against the local stack and catalog fixture |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes. The frontend has no automated tests yet.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection.
 
 ## Local database
 
@@ -71,6 +76,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 7. **Catalog checks** in `scripts/db-catalog-checks.mjs`, through the real API and Auth, with held-open transactions. These cover catalog editor permissions, verification and publication, and races with revocation, suspension and account deletion.
 8. **Import checks** in `scripts/db-import-checks.mjs`. They log in as the restricted `catalog_importer` role, run the import tool on synthetic snapshots outside the repository, and force races between runs. `npm run catalog:test` covers the snapshot parsers. The import tool and its runbook are in [security-rls.md](docs/architecture/security-rls.md#catalog-import).
 9. **Search checks** in `scripts/db-search-checks.mjs`. They install the catalog search fixture, call search, the release picker and the platform list through the API as anon, a user, an editor and `service_role`, and remove the fixture and every test account after. `npm run catalog:test` also covers the app's response parser. See [Catalog search](docs/architecture/security-rls.md#catalog-search).
+10. **Collection checks** in `scripts/db-collection-checks.mjs`. Through the API, as the owner, another collector, an editor, a suspended owner, anon and `service_role`, they add, edit, read and remove copies of fixture releases. They also send concurrent repeats and concurrent additions at a lowered limit, and delete an account that has copies. See [Collection system](docs/architecture/security-rls.md#collection-system). `node supabase/benchmarks/m6_collection.mjs` measures a 50,000-copy collection among about a million copies, in a transaction it always rolls back.
 
 `npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 
@@ -83,6 +89,8 @@ To add a migration, run `npx supabase migration new <name>`, then `npm run db:ve
 No environment variables are needed for local development. Local URLs and development keys come from `npx supabase status`. **That command prints keys, so use `npm run db:status`, which redacts them.**
 
 To see Explore and game pages with data, set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `.env.local` (see `.env.example`), and install the fictional test catalog with `npm run catalog:fixture -- install` (`remove` takes it out). It runs only against the local stack. `node supabase/benchmarks/m5c_catalog_search.mjs` measures search on a synthetic 50,000-game catalog, in a transaction it always rolls back.
+
+To sign in locally, set the same two variables, then create a user in local Studio (Authentication, Add user, with the email marked as confirmed), sign in at `/sign-in` and choose a handle. There's deliberately no sign-up page: see [Web sessions](docs/architecture/security-rls.md#web-sessions-m6a).
 
 Real secrets never go in the repository, or in `NEXT_PUBLIC_` variables. To block commits containing them, run `npm run hooks:install` once per clone.
 
@@ -119,12 +127,14 @@ src/
     layout/         Sidebar, header, mobile navigation, page layout
     feed/           Post cards, feed filters, feed sidebar
     games/          Cover art and release display
+    auth/           Sign-in, handle and sign-out forms, protected-page wrapper
     shared/         Avatar, empty state, placeholder page
   config/           Site details, navigation, feature flags
   dev/seed/         Development-only seed data
   features/         Data access and feature logic
   lib/              Utilities
   types/            Domain types
+  proxy.ts          Refreshes the session before each request
 ```
 
 ## How it fits together
@@ -138,6 +148,8 @@ src/
 **Game, Release and Collection Item are separate types.** A game is the underlying title, a release is a specific platform and physical edition, and a collection item is one copy owned by one collector. The database schema must keep this separation.
 
 **Artwork is original.** Everything in `public/seed/` is drawn by `scripts/generate-seed-art.mjs`. Game titles in the seed data refer to real games, but the covers are not their real box art. Check licensing and attribution terms before integrating any cover art provider.
+
+**Sessions stay on the server.** `src/proxy.ts` refreshes the Supabase session before each request, and server code reads the signed-in account only through `getCurrentViewer()` in `src/features/account/queries.ts`, which verifies the token with `getClaims()`. There's no browser Supabase client, so the session cookies are `httpOnly`. Anything that reads the session sits inside `<Suspense>` and is never cached. See [ADR-048](docs/architecture/architecture-decisions.md#adr-048-web-sessions-are-handled-only-on-the-server).
 
 **Feed filters live in the URL.** `/home?feed=following` is read by a server component inside `<Suspense>`, so filters are linkable and the rest of the page is prerendered. Reading the request or the clock outside `<Suspense>` fails under Cache Components.
 
@@ -168,11 +180,14 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 
 ## Current limitations
 
-- My Collection, Community, Notifications, Messages, My Profile and Settings are placeholder pages
-- Search covers the published game catalog only, not collectors; a release can be selected but not yet added to a collection
+- Sign-in, sign-out and the handle claim work against the local stack only. There are no sign-up or password-reset pages, and avatars aren't shown yet
+- Community, Notifications, Messages and My Profile are placeholder pages, and Settings has only the account and handle
+- Search covers the published game catalog only, not collectors
+- My Collection is private: there are no public collections, shelves, valuation, import or bulk editing yet, and the catalog has no cover artwork
+- JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review
-- There are no automated tests in the repository
+- Frontend tests cover the catalog parser and the sign-in rules, plus an HTTP check of the auth flow. There are no component or browser tests
 - Seed artwork in `public/seed/` is still served by production builds, although nothing links to it while seed data is off
 - `npm audit` reports low and moderate advisories in `deepmerge` and `minimatch`, through the shadcn CLI's own dependencies. The app doesn't run that code at runtime; only the CLI uses it. Don't run `npm audit fix --force`, which proposes downgrading to `shadcn@1.0.0`
 
@@ -181,9 +196,9 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 Phase 2 replaces the seed viewer with real accounts:
 
 1. **Supabase setup:** project, environment variables and typed clients
-2. **Authentication:** sign up, sign in, sign out, and protected routes
+2. **Authentication:** sign in, sign out and protected routes are done locally (M6a). Sign-up and password reset wait for the public-authentication blockers
 3. **Profiles:** schema with Row Level Security, profile page and profile editing
-4. **Account UI:** connect the account menu and Settings, and replace `getCurrentViewer()`
+4. **Account UI:** the account menu and `getCurrentViewer()` use the real session (M6a). Profile editing and the remaining settings are still to do
 5. **Light mode:** add the switcher and review the light theme
 
 Later phases:

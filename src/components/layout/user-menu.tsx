@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings, UserRound } from "lucide-react";
+import { AtSign, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -13,52 +13,80 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Collector } from "@/types/user";
+import { signOut } from "@/features/auth/actions";
+import type { Viewer } from "@/types/user";
 
-export function UserMenu({ viewer }: { viewer: Collector | null }) {
+/** Shown while the session is read, with the same size as the menu. */
+export function UserMenuPlaceholder() {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Account menu"
-          className="size-10 rounded-full"
-        >
-          {viewer ? (
+    <span aria-hidden="true" className="flex size-10 items-center justify-center text-muted-foreground">
+      <UserRound className="size-5" />
+    </span>
+  );
+}
+
+export function UserMenu({ viewer }: { viewer: Viewer | null }) {
+  if (!viewer) {
+    return (
+      <Button asChild variant="ghost" size="lg" className="h-10">
+        <Link href="/sign-in">
+          <LogIn aria-hidden="true" />
+          Sign in
+        </Link>
+      </Button>
+    );
+  }
+
+  return (
+    <>
+      {/* Outside the menu, which unmounts its content when it closes. */}
+      <form id="sign-out-form" action={signOut} hidden />
+      {/* Non-modal: a modal menu hides the rest of the page from assistive technology
+          while it still has focusable elements, which axe reports. */}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="Account menu" className="size-10 rounded-full">
             <UserAvatar collector={viewer} size={32} />
-          ) : (
-            <UserRound aria-hidden="true" className="size-5" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="font-normal">
-          {viewer ? (
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel className="font-normal">
+            <span className="block truncate text-sm font-medium text-foreground">{viewer.displayName}</span>
+            <span className="block truncate text-xs">{viewer.handle ? `@${viewer.handle}` : "No handle yet"}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {viewer.handle ? (
             <>
-              <span className="block text-sm font-medium text-foreground">
-                {viewer.displayName}
-              </span>
-              <span className="block text-xs">Development preview account</span>
+              <DropdownMenuItem asChild>
+                <Link href="/profile">
+                  <UserRound aria-hidden="true" />
+                  My Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/settings">
+                  <Settings aria-hidden="true" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
             </>
           ) : (
-            <span className="block text-xs">Accounts aren&apos;t available yet</span>
+            <DropdownMenuItem asChild>
+              <Link href="/welcome">
+                <AtSign aria-hidden="true" />
+                Choose your handle
+              </Link>
+            </DropdownMenuItem>
           )}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/profile">
-            <UserRound aria-hidden="true" />
-            My Profile
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/settings">
-            <Settings aria-hidden="true" />
-            Settings
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <button type="submit" form="sign-out-form" className="w-full">
+              <LogOut aria-hidden="true" />
+              Sign out
+            </button>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }

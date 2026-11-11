@@ -1,13 +1,12 @@
 import { Bell, Mail, Search, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { LogoMark, LogoWordmark } from "@/components/layout/logo";
 import { SearchForm } from "@/components/layout/search-form";
-import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 import { cn } from "@/lib/utils";
-import type { Collector } from "@/types/user";
 
 function HeaderIconLink({
   href,
@@ -34,7 +33,8 @@ function HeaderIconLink({
   );
 }
 
-export function AppHeader({ viewer }: { viewer: Collector | null }) {
+/** `account` is the account menu, rendered separately because it reads the session. */
+export function AppHeader({ account }: { account: ReactNode }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/90 px-4 backdrop-blur md:h-16 md:px-6">
       <Link
@@ -62,7 +62,7 @@ export function AppHeader({ viewer }: { viewer: Collector | null }) {
           className="md:hidden"
         />
         <HeaderIconLink href="/notifications" label="Notifications" icon={Bell} />
-        <UserMenu viewer={viewer} />
+        {account}
       </div>
     </header>
   );

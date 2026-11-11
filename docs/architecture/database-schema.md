@@ -777,19 +777,21 @@ The moderation queue and permanent record for submissions and corrections. It ho
 
 ### `collection_items`
 
-One actual physical game owned by one user. Owning two copies of a release means two rows. **The game medium is always part of a Collection Item**, so a box or manual alone can't be recorded. **Every column here is visible to anyone who can read the row.**
+Implemented in M6b, owner-only (see [ADR-049](architecture-decisions.md#adr-049-collections-are-owner-only-copies-added-idempotently)).
+
+One actual physical game owned by one user. Owning two copies of a release means two rows. **The game medium is always part of a Collection Item**, so a box or manual alone can't be recorded. **Every column here is visible to anyone who can read the row**, which in M6 is only the owner.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` (v7) | No | |
+| `id` | `uuid` (v7) | No | **Chosen by the client** for each copy it means to add, which makes adding idempotent. No default. A trigger requires a UUIDv7 made within the last 24 hours, or up to 5 minutes ahead |
 | `owner_id` | `uuid` | No | |
-| `release_id` | `uuid` | No | On creation, a `published` release or the owner's own submission. Never an `excluded` one |
-| `completeness` | `completeness` | No | |
+| `release_id` | `uuid` | No | On creation, a `published` release or the owner's own submission. Never an `excluded` or `merged` one. Clients can't change it |
+| `completeness` | `completeness` | Yes | Null means not recorded. Nothing is assumed (M6 decision B1) |
 | `overall_condition` | `condition_grade` | Yes | Null means not assessed |
 | `box_condition` | `condition_grade` | Yes | `not_included` means there's no box |
 | `media_condition` | `condition_grade` | Yes | Disc or cartridge |
 | `manual_condition` | `condition_grade` | Yes | |
-| `visibility` | `visibility_level` | No | Default `private` (D2) |
+| `visibility` | `visibility_level` | No | Default `private` (D2). No client can change it in M6 |
 | `record_status` | `collection_record_status` | No | `system`. Default `active`. `invalid_preserved` when its release was excluded (Q9) |
 | `invalidated_at` | `timestamptz` | Yes | `system`. Set with `invalid_preserved` |
 
@@ -797,21 +799,21 @@ One actual physical game owned by one user. Owning two copies of a release means
 - **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)` on delete restrict
 - **Unique:** `(id, owner_id)`, the target for composite foreign keys. There's deliberately no unique `(owner_id, release_id)`
 - **Indexes:**
-  - `(owner_id, id DESC)` for collection browsing
-  - `(owner_id, release_id)` where `record_status = 'active'`, for statistics
-  - `(release_id)` where `record_status = 'invalid_preserved'`, for the resolution queue
-  - `(owner_id, release_id)` for "do I already own this?"
-  - `(owner_id, visibility, id DESC)` for public views
-  - `(release_id, owner_id)` for "who owns this release"
+  - `(owner_id, created_at DESC, id DESC)` for browsing, newest first
+  - `(owner_id, release_id)` for "how many copies of this release do I have?" and statistics
+  - `(release_id)` for merging and excluding a release (M7)
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
+  - `CHECK (media_condition IS DISTINCT FROM 'not_included')`. A Collection Item is a physical game, so it always includes the medium
   - `CHECK (overall_condition IS DISTINCT FROM 'not_included')`
   - `completeness = 'loose'` requires `box_condition` and `manual_condition` to be null or `not_included`
-  - `CHECK (media_condition IS DISTINCT FROM 'not_included')`. A Collection Item is a physical game, so it always includes the medium
   - `completeness = 'complete'` requires `box_condition` to not be `not_included`
   - `completeness = 'sealed'` requires `media_condition` and `manual_condition` to be null, because they can't be assessed without opening it
   - `CHECK ((record_status = 'invalid_preserved') = (invalidated_at IS NOT NULL))`
-  - The insert and update policies check `release_id`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission
+  - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission
+- **Triggers** (all run with the caller's rights):
+  - On insert: the id check, then the owner's limit of 100,000 copies, under a per-owner advisory lock so concurrent additions can't pass it together
+  - On update: a preserved copy can't be edited, except by moving it to another release, which clears the flag. Moving a copy drops recorded pieces its new release doesn't list
 
 What each `completeness` value means, with details in [relationships.md](relationships.md#collection-item-completeness-and-components):
 
@@ -821,62 +823,67 @@ What each `completeness` value means, with details in [relationships.md](relatio
 | `incomplete` | The game with some of its packaging, materials or media pieces, such as one disc of two | Yes |
 | `complete` | Complete in Box (CIB) | Yes |
 | `sealed` | Factory sealed, on the declared edition and condition | Yes |
+| null | Not recorded. The owner can add it later | Yes |
 
-**A counted copy** is a row with `record_status = 'active'` whose release is `published`. Under A1, only counted copies make up official owned-game statistics, through one shared function, and components never add to a count. Everything else is shown separately and only to its owner:
+**A counted copy** is a row with `record_status = 'active'` whose release is `published`. Under A1, only counted copies make up official owned-game statistics, and components never add to a count. Everything else is shown separately and only to its owner:
 
 | Category | Rule | Counts as owned? | Shown to |
 | --- | --- | --- | --- |
-| **Owned** | `active`, release `published` | Yes | The owner. Others see the rows they can read |
-| **Pending** | `active`, release `unverified` or `under_review` | No | The owner |
+| **Owned** | `active`, release `published` | Yes | The owner |
+| **Pending** | `active`, release `unverified`, `under_review` or (briefly, during M7's merge) `merged` | No | The owner |
 | **Not approved** | `active`, release `rejected` | No | The owner |
-| **Invalid preserved** | `invalid_preserved` | No | The owner |
+| **Invalid preserved** | `invalid_preserved`, or a release the owner can no longer read | No | The owner |
 
-The categories are returned separately by a summary function that only ever describes the caller, so they can't be confused with one another.
+`get_my_collection_summary()` returns the categories separately and only ever describes the caller. A shared counting function for other viewers comes with public collections.
 
 Disposal history (sold, traded) is deferred. For now, deleting a row means the copy is gone.
 
 ### `collection_item_private`
 
-The owner-only part of a collection item. Only the owner can read it, whatever the item's visibility. A row exists only when the owner has entered at least one of these values.
+The owner-only part of a collection item. Only the owner can read it, whatever the item's visibility: no other user, no staff role and not `service_role` has any privilege on it. A row exists only when the owner has entered at least one of these values.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `item_id` | `uuid` | No | |
 | `owner_id` | `uuid` | No | |
+| `acquired_on` | `date` | Yes | Bought, given or traded. Not before 1970, and not in the future (a day's leeway for time zones) |
 | `purchase_price` | `numeric(14,4)` | Yes | Handles currencies with 0 to 4 decimal places |
-| `currency` | `char(3)` | Yes | ISO 4217 |
-| `purchase_date` | `date` | Yes | |
-| `personal_rating` | `numeric(3,1)` | Yes | 0.5 to 10 in half-point steps, matching `ReviewPost.score` |
+| `currency` | `text` | Yes | ISO 4217, uppercase |
 | `notes` | `text` | Yes | Up to 5,000 characters |
+| `storage_location` | `text` | Yes | Up to 120 characters, trimmed. Owner-only, because where valuable items are kept is sensitive (M6 decision D5) |
+
+`personal_rating` was deferred under M6 decision D7, because reviews (L3) would overlap.
 
 - **Primary key:** `item_id`
 - **Foreign keys:** `(item_id, owner_id)` → `collection_items(id, owner_id)` on delete cascade
-- **Indexes:** `(owner_id, purchase_date DESC)` for spending views
+- **Indexes:** `(owner_id, acquired_on DESC)` for sorting by acquisition
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK ((purchase_price IS NULL) = (currency IS NULL))`
   - `CHECK (purchase_price >= 0)`
   - `CHECK (currency ~ '^[A-Z]{3}$')`
-  - `CHECK (personal_rating BETWEEN 0.5 AND 10 AND personal_rating * 2 = floor(personal_rating * 2))`
+  - `CHECK (num_nonnulls(acquired_on, purchase_price, notes, storage_location) > 0)`
+- **Triggers:** refuses changes on a preserved copy, and a future acquisition date
 
 ### `collection_item_components`
 
-Which original materials or additional media pieces this copy has, such as an insert, a map or "Disc 2", and their condition. **This table can't hold a standalone component:** `item_id` is required, a foreign key requires a real item, and deleting the item deletes its components. Readable only by those who can read the parent item, and the owner alone can write. Rows never count towards statistics.
+Which of its release's listed pieces this copy has, such as an insert, a map or "Disc 2", and their condition. **This table can't hold a standalone component:** `item_id` is required, a foreign key requires a real item, and deleting the item deletes its components. Only the owner can read or write it. Rows never count towards statistics.
+
+A piece is identified by its release component's `kind` and `label`, not by an id with a foreign key, because editors replace a release's component rows when they edit them (`set_release_components`). A trigger checks that the release lists the piece when it's recorded. If an editor later renames a piece, the copy keeps its record, shown as no longer listed.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` | No | |
 | `item_id` | `uuid` | No | |
 | `owner_id` | `uuid` | No | |
 | `kind` | `component_kind` | No | |
-| `label` | `text` | No | |
-| `condition` | `condition_grade` | Yes | `not_included` means this copy is missing it |
+| `label` | `text` | No | As the release lists it |
+| `condition` | `condition_grade` | Yes | Null: present, not assessed. `not_included`: this copy is missing it |
 
-- **Primary key:** `id`
+- **Primary key:** `(item_id, kind, label)`
 - **Foreign keys:** `(item_id, owner_id)` → `collection_items(id, owner_id)` on delete cascade
-- **Unique:** `(item_id, kind, label)`
-- **Indexes:** covered by the unique constraint; `(owner_id, item_id)`
+- **Indexes:** `(owner_id, item_id)`
 - **Timestamps:** `created_at`, `updated_at`
+- **Triggers:** the release must list the piece, and a preserved copy's pieces can't change
 
 ### `shelves`
 
