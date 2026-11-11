@@ -44,8 +44,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run app:auth-checks` | After a build, test sign-in, sessions, the handle claim and sign-out in the running app against the local stack |
 | `npm run collection:test` | Test the add form's rules: copy ids and details |
 | `npm run app:collection-checks` | After a build, test adding copies from a game page in the running app against the local stack and catalog fixture |
+| `npm run app:my-collection-checks` | After a build, test My Collection (listing, filters, details, editing and removing) in the running app against the local stack and catalog fixture |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks` or `app:collection-checks` for changes to sign-in, sessions or adding copies.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection.
 
 ## Local database
 
@@ -180,8 +181,9 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 ## Current limitations
 
 - Sign-in, sign-out and the handle claim work against the local stack only. There are no sign-up or password-reset pages, and avatars aren't shown yet
-- My Collection, Community, Notifications, Messages and My Profile are placeholder pages, and Settings has only the account and handle
-- Search covers the published game catalog only, not collectors. A selected release can be added to your collection, but My Collection doesn't list copies yet
+- Community, Notifications, Messages and My Profile are placeholder pages, and Settings has only the account and handle
+- Search covers the published game catalog only, not collectors
+- My Collection is private: there are no public collections, shelves, valuation, import or bulk editing yet, and the catalog has no cover artwork
 - JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review

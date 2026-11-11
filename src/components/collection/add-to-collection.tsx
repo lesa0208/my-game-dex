@@ -7,7 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentViewer } from "@/features/account/queries";
 import { signInHref, welcomeHref } from "@/features/auth/redirect";
 import type { PickerRelease } from "@/features/catalog/types";
-import { latestAcquisitionDate } from "@/features/collection/details";
+import { CURRENCIES } from "@/features/collection/currencies";
+import { latestAcquisitionDate, mediumLabel } from "@/features/collection/details";
 import { getMyDefaultCurrency, getMyReleaseCopyCount } from "@/features/collection/queries";
 import { uuidv7 } from "@/features/collection/uuid";
 
@@ -60,32 +61,10 @@ export async function AddToCollection({ release, returnPath }: { release: Picker
       defaultCurrency={currency}
       currencies={CURRENCIES}
       maxDate={latestAcquisitionDate()}
-      mediumLabel={mediumLabel(release)}
+      mediumLabel={mediumLabel(release.format?.category)}
       components={release.components.filter((c): c is typeof c & { label: string } => c.label !== null).map((c) => ({ kind: c.kind, label: c.label, quantity: c.quantity }))}
     />
   );
-}
-
-/** ISO 4217 currencies, with English names, made once on the server so the browser renders the same list. */
-const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" });
-const CURRENCIES = Intl.supportedValuesOf("currency").map((code) => ({ code, name: currencyNames.of(code) ?? code }));
-
-/** "Cartridge" or "Disc", from the catalog's format. Generic when the catalog doesn't say. */
-function mediumLabel(release: PickerRelease) {
-  switch (release.format?.category) {
-    case "cartridge":
-      return "Cartridge";
-    case "optical_disc":
-      return "Disc";
-    case "solid_state_card":
-      return "Game card";
-    case "magnetic_disk":
-      return "Disk";
-    case "magnetic_tape":
-      return "Tape";
-    default:
-      return "Medium";
-  }
 }
 
 export function AddToCollectionSkeleton() {

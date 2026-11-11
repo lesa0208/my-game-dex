@@ -4,54 +4,17 @@ import { CircleAlert, CircleCheck, Plus } from "lucide-react";
 import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef } from "react";
 
+import { CopyFields, EMPTY_COPY } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { addCopy, addCopyFromForm, type AddCopyState } from "@/features/collection/actions";
-import { COMPLETENESS, componentField, CONDITIONS, NOT_INCLUDED } from "@/features/collection/details";
 import { keepingIdOnFailure } from "@/features/collection/retry";
-import { cn } from "@/lib/utils";
 
 type Component = { kind: string; label: string; quantity: number };
-
-const selectClassName =
-  "h-10 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring dark:bg-input/30";
 
 function countText(count: number | null) {
   if (count === null) return null;
   if (count === 0) return "Not in your collection yet";
   return `You have ${count} ${count === 1 ? "copy" : "copies"} of this release`;
-}
-
-function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium">
-        {label}
-      </label>
-      {children}
-      {hint ? (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function Grade({ id, label, absent }: { id: string; label: string; absent: boolean }) {
-  return (
-    <Field id={id} label={label}>
-      <select id={id} name={id} defaultValue="" className={selectClassName}>
-        <option value="">Not assessed</option>
-        {CONDITIONS.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-        {absent ? <option value={NOT_INCLUDED.value}>{NOT_INCLUDED.label}</option> : null}
-      </select>
-    </Field>
-  );
 }
 
 const addCopyFromPage = keepingIdOnFailure(addCopy);
@@ -160,70 +123,13 @@ export function AddCopyForm({
           More details <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
         </summary>
         <div className="flex flex-col gap-5 border-t p-3">
-          <fieldset className="flex flex-col gap-3">
-            <legend className="mb-1 text-sm font-semibold">This copy</legend>
-            <Field id="completeness" label="Completeness" hint="Leave as not recorded if you're not sure.">
-              <select id="completeness" name="completeness" defaultValue="" aria-describedby="completeness-hint" className={selectClassName}>
-                <option value="">Not recorded</option>
-                {COMPLETENESS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Grade id="media_condition" label={`${mediumLabel} condition`} absent={false} />
-              <Grade id="box_condition" label="Box or case condition" absent />
-              <Grade id="manual_condition" label="Manual condition" absent />
-              <Grade id="overall_condition" label="Overall condition" absent={false} />
-            </div>
-          </fieldset>
-
-          {components.length ? (
-            <fieldset className="flex flex-col gap-3">
-              <legend className="mb-1 text-sm font-semibold">Pieces listed for this release</legend>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {components.map((component, index) => (
-                  <Field key={`${component.kind}-${component.label}`} id={componentField(index)} label={component.quantity > 1 ? `${component.quantity} × ${component.label}` : component.label}>
-                    <select id={componentField(index)} name={componentField(index)} defaultValue="" className={selectClassName}>
-                      <option value="">Not recorded</option>
-                      <option value="included">Included</option>
-                      <option value="missing">Missing</option>
-                    </select>
-                  </Field>
-                ))}
-              </div>
-            </fieldset>
-          ) : null}
-
-          <fieldset className="flex flex-col gap-3">
-            <legend className="mb-1 text-sm font-semibold">Only you can see these</legend>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field id="acquired_on" label="Acquired on">
-                <Input id="acquired_on" name="acquired_on" type="date" min="1970-01-01" max={maxDate} className="h-10" />
-              </Field>
-              <Field id="storage_location" label="Storage location">
-                <Input id="storage_location" name="storage_location" maxLength={120} autoComplete="off" className="h-10" />
-              </Field>
-              <Field id="purchase_price" label="Price paid">
-                <Input id="purchase_price" name="purchase_price" inputMode="decimal" autoComplete="off" placeholder="0.00" className="h-10" />
-              </Field>
-              <Field id="currency" label="Currency">
-                <select id="currency" name="currency" defaultValue={defaultCurrency ?? ""} className={selectClassName}>
-                  <option value="">Choose a currency</option>
-                  {currencies.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code} · {c.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-            <Field id="notes" label="Notes">
-              <textarea id="notes" name="notes" maxLength={5000} rows={3} className={cn(selectClassName, "h-auto py-2")} />
-            </Field>
-          </fieldset>
+          <CopyFields
+            values={{ ...EMPTY_COPY, currency: defaultCurrency }}
+            mediumLabel={mediumLabel}
+            pieces={components.map((c) => ({ ...c, value: "" }))}
+            currencies={currencies}
+            maxDate={maxDate}
+          />
         </div>
       </details>
     </form>
