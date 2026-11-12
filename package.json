@@ -29,7 +29,9 @@
     "hooks:install": "git config core.hooksPath .githooks",
     "app:my-collection-checks": "node scripts/app-my-collection-checks.mjs",
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
-    "app:submission-checks": "node scripts/app-submission-checks.mjs"
+    "app:submission-checks": "node scripts/app-submission-checks.mjs",
+    "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",
+    "app:review-checks": "node scripts/app-review-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

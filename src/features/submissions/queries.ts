@@ -70,6 +70,11 @@ export type Submission = {
   game_id: string | null;
   game_slug: string | null;
   editable: boolean;
+  /** Changes were requested, or it was rejected and not yet resubmitted (M7b-1). */
+  resubmittable: boolean;
+  /** The rejected request this one resubmits, and the one that resubmitted this. */
+  previous_id: string | null;
+  next_id: string | null;
   my_copies: number;
 };
 

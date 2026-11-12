@@ -411,7 +411,7 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | `game_platforms` | R: `published` | R: same. Catalog editors: all. Submitters don't read unpublished pairings, even ones they made, because a pairing is shared ([M7a](#catalog-submissions-m7a)) | **No grant.** Editor functions only (M5a) |
 | `game_genres`, `game_franchises` | R | R | Catalog staff |
 | `catalog_images` | R: approved, `licensed` or `user_contributed` | Same, plus own uploads. Catalog editors: all | Submission and staff functions only |
-| `catalog_change_requests` | **No grant** | **No grant** (M7a). Submitters use `my_catalog_submissions()` and `get_my_submission()`. Catalog editors read it from M7b | The [submission functions](#catalog-submissions-m7a), and staff functions from M7b |
+| `catalog_change_requests` | **No grant** | **No grant.** Submitters use `my_catalog_submissions()` and `get_my_submission()` (M7a). Catalog editors use `get_submission_queue()` and `get_submission_review()` (M7b-1) | The [submission functions](#catalog-submissions-m7a) and the [review functions](#catalog-review-m7b-1) |
 | `private.external_providers`, `external_references`, `provider_records`, `import_runs`, `import_run_records`, `release_evidence`, `catalog_field_locks` | None | None | The `catalog_import` functions, called by `catalog_importer` (M5b), and editor functions for field locks (M5a). The importer has no direct access |
 
 ### User-submitted releases
@@ -1069,36 +1069,93 @@ A signed-in collector with an active account submits a physical release the cata
 
 **Withdrawing.** Only an unreviewed submission, and never while a copy is linked to its release, so a copy is never removed implicitly. It deletes the release and its pieces, and the pairing and game only when they're the caller's own unreviewed records and nothing else uses them, so a shared or someone else's record is never deleted. Each is locked before that check. The request stays, as `withdrawn`, with a snapshot of what was submitted, and an audit row records it.
 
-**Review starts in M7b.** Once a request is in review its submitter can't change or withdraw it, and a rejected submission is read-only. Editing and resubmitting after rejection comes with M7b.
+**Review.** Once a request is in review its submitter can't change or withdraw it. After changes are requested they can change it again, and withdraw it, then send it back; a rejected submission is read-only, and can be resubmitted as a new, linked request. See [Catalog review (M7b-1)](#catalog-review-m7b-1).
 
-**M7b must keep copy data through merges.** The M6 trigger `drop_unlisted_components` runs when a copy's release changes, and deletes the copy's records of pieces the new release doesn't list. M7b's merge moves copies to the target release, so as it stands a merge would delete those records. M7b must replace that behaviour, in a forward-only migration with tests and an `m6` mutation run, so the records stay as "no longer listed" and are removed only on request (`remove_components`, M6d follow-up). M7a doesn't change the trigger. Submitted pieces use the same kind and label identity as catalog pieces, and copies record pieces by kind and label, not by catalog row id, so those records stay meaningful after a merge.
+**M7b-2 must keep copy data through merges.** Release merges must never silently delete user-owned collection information. The M6 trigger `drop_unlisted_components` runs when a copy's release changes, and deletes the copy's records of pieces the new release doesn't list. A merge moves copies to the target release, so as it stands a merge would delete those records. M7b-2 must correct the trigger before implementing any operation that moves copies between releases, in a forward-only migration with tests and an `m6` mutation run, so the records stay as "no longer listed" and are removed only on request (`remove_components`, M6d follow-up). M7a and M7b-1 don't change the trigger, and nothing in them moves a copy. Submitted pieces use the same kind and label identity as catalog pieces, and copies record pieces by kind and label, not by catalog row id, so those records stay meaningful after a merge.
 
 **When the submitter's account is deleted.** The foreign keys set `submitted_by` to null on the request and on the pending game, pairing and release, and cascade the account's copies away. Nothing is left that breaks a rule:
 - `releases_submitter_cleared` allows a null submitter on an unpublished release, and the pending-submission key ignores rows without one.
 - The records are readable only by catalog editors. Nobody else can attach a copy (`can_use_release()` needs the submitter), and nobody can change or withdraw the request, because every submitter function matches `submitted_by` to the caller.
 - The request keeps its history and its snapshot.
 
-M7b must handle these "unowned" submissions explicitly:
-- **Self-review.** Compare the reviewer with the request's `submitted_by`, not the catalog rows' (publication clears those), using `is not distinct from`. A null submitter is no conflict: a deleted account can't review. A plain `=` or `<>` returns null and silently allows or refuses, depending on how it's written.
-- **Outcomes.** Publish (with an editor's corrections), reject, exclude or merge, as for any submission. "Changes requested" must be refused, since nobody can answer it.
+How review handles these "unowned" submissions (M7b-1; M7b-2 adds exclusion and merging):
+- **Self-review.** The reviewer is compared with the request's `submitted_by`, not the catalog rows' (publication clears those), using `is not distinct from`. A null submitter is no conflict: a deleted account can't review. A plain `=` or `<>` would return null and silently allow or refuse, depending on how it's written; pgTAP and a mutation check the null case.
+- **Outcomes.** Approve (with an editor's corrections) or reject, as for any submission. "Changes requested" is refused, since nobody can answer it.
 - **Notifications.** Skipped: there's no recipient.
-- **Copies.** None exist, so a merge or rejection has none to move or keep.
-- **Shared pairings.** Rejecting or excluding one must keep a pairing that another release uses, as withdrawal does.
-- **Queue.** The queue shows them as from a deleted account, never with a guessed name.
+- **Copies.** None exist, so a rejection has none to keep.
+- **Shared pairings.** Rejection never touches a pairing; exclusion in M7b-2 must keep one that another release uses, as withdrawal does.
+- **Queue.** It shows them as from a deleted account, never with a guessed name.
 
 **Personal data in submissions (for D10 and the account-deletion workflow).** What outlives an account today:
 - the request's free-text note (`reason`) and its snapshot (`details`), including free-text fields such as edition, packaging, publisher, title on the package and piece labels, any of which a person could fill with personal information;
 - the same free text in the pending catalog rows;
 - creation and update times;
-- audit rows (`catalog_submission_created`, `_updated`, `_withdrawn`), whose `actor_id` is the deleted account's id and whose metadata names the request. They have no foreign key by design, so they still link that id to the submission. The id is pseudonymous, but it's personal data wherever it can be matched to the person, for example in backups or server logs.
+- the editors' notes to the submitter (`reviewer_note`), which may quote what they sent;
+- audit rows (`catalog_submission_created`, `_updated`, `_withdrawn`, `_resubmitted`), whose `actor_id` is the deleted account's id and whose metadata names the request. They have no foreign key by design, so they still link that id to the submission. The id is pseudonymous, but it's personal data wherever it can be matched to the person, for example in backups or server logs.
 
-Withdrawn requests are kept too, and a user can't delete their own submission history. None of this is decided yet. Before real user data is processed (A2, D10, M4-D10), the retention policy must say how long requests and their notes are kept, whether account deletion clears `reason` or the audit `actor_id`, and how an erasure request reaches submission notes. M7a deliberately changes none of it.
+Withdrawn requests are kept too, and a user can't delete their own submission history. None of this is decided yet. Before real user data is processed (A2, D10, M4-D10), the retention policy must say how long requests and their notes are kept, whether account deletion clears `reason` or the audit `actor_id`, and how an erasure request reaches submission notes. M7a and M7b-1 deliberately change none of it, and add no new personal field. The submitter's notifications are deleted with their account (M4-D4). This is a production-launch blocker, not an M7b blocker: see [Legal and age blockers](#legal-and-age-blockers).
 
 **Tested by:**
 - `22_catalog_submissions.test.sql`: who can submit, every field rule, the visibility matrix, hidden records, shared pairings, copies of a pending release, withdrawal, edits, locking after review starts, the limit, rollback and the record outliving the account;
 - `scripts/db-submission-checks.mjs` (the API boundary, and 15 concurrent submissions of which exactly 10 are accepted);
 - `npm run submissions:test` and `npm run app:submission-checks` (the built app over HTTP);
 - the `m7a` suite in `scripts/security-mutations.mjs`.
+
+## Catalog review (M7b-1)
+
+Catalog editors review submissions: they start a review, correct the records, then approve (verify and publish), ask for changes or reject. A submitter answers requested changes, and may resubmit a rejected submission. Merging, exclusion, restoration and relinking copies come with M7b-2.
+
+**Who.** Active catalog editors and administrators only, through `private.begin_catalog_edit()` like every M5a editor function: the shared staff lock, the active-role check, then the caller's profile. Visitors, collectors, moderators, suspended or revoked editors and `service_role` can't review. The app's `/review` pages show anyone else the same unavailable page as an address that doesn't exist, and only editors see what the page is.
+
+**Functions.** All `SECURITY DEFINER` with an empty `search_path`, executable by `authenticated` only, and checking the role themselves. The review record still has no client grant.
+
+| Function | Does |
+| --- | --- |
+| `get_submission_queue(status, after, limit)` | The queue, oldest first. The submitter appears as a handle and account status, or as a deleted account; never an email or anything from a collection |
+| `get_submission_review(id)` | One submission: the request, the records as they are now with the revisions approval needs, its earlier and later rounds, and possible duplicates across the whole catalog, published or not: releases of the same game and platform, the same product code or barcode, and games with a similar title. Editors only |
+| `start_submission_review(id, version, reason)` | Open to in review. The release, and a new game, become `under_review`, and the submitter can no longer change or withdraw it |
+| `approve_submission(id, version, release revision, game revision, reason, note)` | Marks the request approved, then verifies and publishes with the M5 functions at the revisions the editor reviewed, so every publication rule applies: an edition, a medium count, and an unknown region confirmed by an editor. A new game needs its revision too. An identical published release gets `already published` |
+| `request_submission_changes(id, version, note, reason)` | Back to the submitter with a note; the records return to unverified, and the snapshot becomes the record as it is now, with any corrections, so the submitter's edit can't undo them. Refused for a deleted account |
+| `reject_submission(id, version, reason, note)` | For a genuine physical product whose data or evidence isn't good enough. The release stays, as rejected, and so do the submitter's copies, shown as not approved. A new game is rejected too, unless another release of it is pending or published. Nothing is deleted, and a shared pairing is untouched |
+| `resubmit_my_submission(id, note)` | The submitter's: after changes were requested, the same request, not counted again; after a rejection, a new request linked by `previous_request_id`, which counts toward the daily limit (product owner decision 3). Only the latest request of a chain can be resubmitted |
+| `can_review_submissions()` | Whether the caller may review, for the account menu |
+
+Corrections use the existing, audited M5a editor functions (`update_release`, `update_game` and the others), and only while the request is in review (decision 4).
+
+**No self-review.** Every review action refuses a caller who is the request's `submitted_by`, which the request keeps after publication clears it from the catalog rows. It's compared with `is not distinct from`: a null submitter, from a deleted account, is no conflict, because a deleted account can't review. On top of that, the guard below refuses verifying or publishing a game or release to anyone who ever submitted it, by the permanent request history, whatever happened to the request since: withdrawn, rejected or resubmitted.
+
+**No bypass.** Found while building M7b-1: the M5 functions verify and publish any unpublished record, so an editor could have published a submission, their own included, without a review. The trigger `private.guard_submitted_record()` runs before every update of `games` and `releases`:
+- Verifying or publishing a record is refused while a review request for it is active (open, in review or changes requested), whoever asks. Approval marks its request approved first, then publishes, so approving is the only way.
+- It's refused to anyone who submitted the record, as above.
+- While a request is active, a signed-in caller may change the record only as its submitter while it's theirs to change, and never to confirm an unknown region, or as an editor while it's in review.
+- Sessions that aren't a client role, such as tests and operators, skip only the caller rules, never the first two.
+A trigger covers every write path: the M5 functions, imports, and anything added later.
+
+**Stale pages.** The request has a `version` that any change raises, including an account deletion clearing its submitter. Every action needs it, and approval also needs the M5b revisions of the release and a new game. A stale page gets `request conflict` or `record changed`, and nothing changes. The app's correction forms also refuse a record that changed since the page was read.
+
+**Locks.** Always in this order: the staff lock, profiles (the caller's, then the submitter's), the request, the game, the release, the platform pairing. Account deletion locks the profile first, so a review and a deletion wait for each other rather than deadlock. Two M7a fixes, made in M7b-1:
+- `begin_submission` now locks the caller's profile first, as the editor functions do.
+- `lock_open_submission` now locks the game before the release. Withdrawal used to lock the release, the pairing and then the game, the reverse of `publish_release`, so a withdrawal and an approval on the same game and pairing could deadlock.
+The M6 collection functions lock only the owner's copies and take no review row, so they needed no change.
+
+**One active request per release.** A unique index, `catalog_change_requests_active_release_key`, allows at most one open, in-review or changes-requested request per release.
+
+**Submissions from deleted accounts.** They stay in the queue, shown as from a deleted account. They can be started, corrected, approved or rejected; "changes requested" is refused (`submitter unavailable`), since nobody could answer. Nobody is notified. The account's copies were deleted with it, and nobody else can attach one, so there are none to keep or move.
+
+**Notifications.** A `catalog_submission` notice tells the submitter their submission was published, sent back for changes, or rejected. Like a moderation notice it has no actor, so the reviewer is never named, and its data is only the status and the submission's id; the `notifications_shape` constraint enforces that. It's always on: the preferences can't hold this type. The note to the submitter is read on the submission's page; the editor's reason stays in the audit log. Starting a review doesn't notify. The app's notifications page is still a placeholder, so for now the submission's page is where the outcome shows.
+
+**Audit.** `catalog_submission_review_started`, `_approved`, `_changes_requested`, `_rejected` (with the editor's reason) and `catalog_submission_resubmitted`, besides the M5 rows for each correction, verification and publication.
+
+**Not in M7b-1.**
+- Merging, exclusion, restoration and owners relinking copies: M7b-2.
+- Editing a submission's listed pieces from the review page. `set_release_components` works in review, but has no form yet.
+- Imports and pending submissions: the M5b importer matches games by title in every status, so an operator's import could attach candidates to a pending submitted game, or fill its empty fields. It can't publish it: the guard refuses that. Excluding pending submissions from import matching needs an importer change and an `m5b` mutation run.
+
+**Tested by:**
+- `23_catalog_review.test.sql`: who may review, the queue and review page, starting, the bypass, approval and its rules, requested changes and answers, rejection and resubmission, the limit on resubmissions, self-review including after a withdrawal, deleted accounts, and the notification shape;
+- `scripts/db-review-checks.mjs`: the API boundary, and races: two editors approving at once, approval against rejection, concurrent corrections, a review against a withdrawal and against an edit, a review against an account deletion through Auth, and a withdrawal against an approval on the same game and pairing;
+- `npm run review:test` and `npm run app:review-checks` (the built app over HTTP, without JavaScript);
+- the `m7b1` suite in `scripts/security-mutations.mjs`.
 
 ## Assigning the first administrator
 
@@ -1242,6 +1299,7 @@ These are legal and product questions. They need qualified legal advice, and **n
 | Whether a parental consent flow is needed in any market | Open |
 | Retention of unverified accounts | Seven days proposed, not approved |
 | Retention and deletion of user content (D10) | Open |
+| Retention of catalog submissions, review history and audit rows (A2, D10, M4-D10) | Open. **Blocks production launch, not development.** The policy must decide how long submission requests, their free-text notes and snapshots, editors' notes and withdrawn requests are kept; whether account deletion clears `reason` and the audit `actor_id`; and how an erasure request reaches submission notes, the free text in catalog rows, and backups. Until then the history is kept and the submitter set to null. Nothing invents a policy or deletes audit history. See [Personal data in submissions](#catalog-submissions-m7a) |
 | How long deleted public files may remain in caches and backups | Open |
 | Lawful basis, privacy notice and terms | Not written |
 | Data region and processors (D13) | See [Data region and legal review](#data-region-and-legal-review) |

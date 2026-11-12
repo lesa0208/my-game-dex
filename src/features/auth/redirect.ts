@@ -7,7 +7,7 @@
 export const DEFAULT_AFTER_SIGN_IN = "/home";
 
 /** Pages that need a signed-in account. The proxy and each page both check. */
-export const PROTECTED_PATHS = ["/collection", "/profile", "/settings", "/submissions", "/submit", "/welcome"] as const;
+export const PROTECTED_PATHS = ["/collection", "/profile", "/review", "/settings", "/submissions", "/submit", "/welcome"] as const;
 
 const BASE = "http://next.invalid";
 

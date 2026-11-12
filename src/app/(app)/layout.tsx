@@ -5,12 +5,14 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { UserMenu, UserMenuPlaceholder } from "@/components/layout/user-menu";
 import { getCurrentViewer } from "@/features/account/queries";
+import { canReview } from "@/features/review/queries";
 
 /** Reads the session, so it streams in on its own and the rest of the page doesn't wait. */
 async function AccountMenu() {
   // If the account can't be read, offering sign-in is safe: it shows nothing private.
   const viewer = await getCurrentViewer().catch(() => null);
-  return <UserMenu viewer={viewer} />;
+  const reviewer = viewer?.isActive ? await canReview().catch(() => false) : false;
+  return <UserMenu viewer={viewer} canReview={reviewer} />;
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

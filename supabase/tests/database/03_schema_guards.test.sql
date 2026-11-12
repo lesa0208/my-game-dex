@@ -91,6 +91,14 @@ insert into approved_function_grants values
   ('update_my_submission(uuid,jsonb)', 'authenticated'), ('withdraw_my_submission(uuid)', 'authenticated'),
   ('my_catalog_submissions(uuid,integer)', 'authenticated'), ('get_my_submission(uuid)', 'authenticated'),
   ('my_submission_for_release(uuid)', 'authenticated'),
+  -- M7b-1: answering requested changes and resubmitting, and catalog review. Review
+  -- functions check for an active catalog editor themselves.
+  ('resubmit_my_submission(uuid,text)', 'authenticated'),
+  ('start_submission_review(uuid,integer,text)', 'authenticated'),
+  ('approve_submission(uuid,integer,bigint,bigint,text,text)', 'authenticated'),
+  ('request_submission_changes(uuid,integer,text,text)', 'authenticated'), ('reject_submission(uuid,integer,text,text)', 'authenticated'),
+  ('can_review_submissions()', 'authenticated'), ('get_submission_queue(text,uuid,integer)', 'authenticated'),
+  ('get_submission_review(uuid)', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),
