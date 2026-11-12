@@ -73,7 +73,7 @@ async function signedOut() {
   check("the game page stays public", response.status === 200 && html.includes("Starfall Odyssey") && html.includes('aria-label="Releases"'));
   check("it offers sign-in, returning to the selected release", html.includes(`/sign-in?next=${encodeURIComponent(page(published))}`));
   check("it has no add form and no count", !addForm(html) && !html.includes("Not in your collection yet") && !/You have \d+ cop/.test(html));
-  check("it says that submitting missing releases is coming", text(html).includes("Can't find your release? Submitting missing games and releases"));
+  check("it links to submitting a missing release", text(html).includes("Can't find your release?") && html.includes(`href="/submit?game=${SLUG}"`));
   const missing = await visitor.get(page(randomUUID()));
   check("an unknown release says it isn't available", missing.response.status === 200 && text(missing.html).includes("That release isn't available."));
 

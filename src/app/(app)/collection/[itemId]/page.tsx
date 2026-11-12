@@ -30,6 +30,7 @@ import {
 } from "@/features/collection/details";
 import { collectionHref, type CollectionParams, copyHref, readCollectionParams } from "@/features/collection/list-params";
 import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyReleaseCopies } from "@/features/collection/queries";
+import { getMySubmissionForRelease } from "@/features/submissions/queries";
 import type { CopyDetail } from "@/features/collection/types";
 import { UUID } from "@/features/collection/uuid";
 import { componentLabel, regionLabel } from "@/features/catalog/format";
@@ -88,10 +89,11 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const copy: CopyDetail = outcome.data;
   const { release, game } = copy;
 
-  const [category, siblings, defaultCurrency] = await Promise.all([
+  const [category, siblings, defaultCurrency, submissionId] = await Promise.all([
     getMediaCategory(release?.format.code ?? null),
     release && copy.copies_of_release > 1 ? getMyReleaseCopies(release.id) : null,
     copy.price ? null : getMyDefaultCurrency(),
+    release && copy.status !== "owned" ? getMySubmissionForRelease(release.id) : null,
   ]);
   const medium = mediumLabel(category);
   // The number and the total both come from get_my_release_copies, one read, so they
@@ -126,6 +128,13 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             {number && siblings ? `Copy ${number} of ${siblings.count} of this release` : "Your copy of this release"} · Added {formatDay(copy.added_at)}
           </p>
           {status ? <p className="mt-1.5 inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{status}</p> : null}
+          {submissionId ? (
+            <p className="mt-2 text-sm">
+              <Link href={`/submissions/${submissionId}`} className="text-primary-text underline underline-offset-4">
+                See your submission of this release
+              </Link>
+            </p>
+          ) : null}
           {game && release && copy.status === "owned" ? (
             <p className="mt-2 text-sm">
               <Link href={`/games/${game.slug}?release=${release.id}`} className="text-primary-text underline underline-offset-4">

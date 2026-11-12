@@ -749,6 +749,8 @@ Replaces the single `coverUrl` in the Phase 1 types, and records where each imag
 
 The moderation queue and permanent record for submissions and corrections. It holds who submitted what, so that link can be removed from public catalog rows. **Only staff read this table.** Submitters use a function that returns safe fields, because a read policy would also expose the reviewer's identity.
 
+**As built in M7a** (`20261112100100_m7a_submissions.sql`), for new games and releases. No client role has any grant yet; catalog editors get read access with M7b. It differs from the design below in three ways: `game_id` and `release_id` are set null, not cascaded, on delete, so a withdrawal, which deletes the release it made, keeps the request; `platform_id` is always set, which satisfies the target check after a withdrawal; and it adds `details` (a snapshot of what was submitted, as last saved), `physical_confirmed`, `created_game` and `created_pairing` (never shown to the submitter). `catalog_review_status` gains `withdrawn`.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |

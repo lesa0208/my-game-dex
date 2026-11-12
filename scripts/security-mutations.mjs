@@ -414,4 +414,34 @@ export const m6Mutations = [
   sql("removal not validated", "pgtap", rewrite(UPDATE, "pg_catalog.jsonb_array_length(p_changes -> 'remove_components') not between 1 and 60", "false")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations };
+const BEGIN_SUBMISSION = "private.begin_submission(boolean)";
+const SUBMIT_RELEASE = "public.submit_release(uuid, text, text, text, jsonb, jsonb, text, boolean)";
+const CREATE_SUBMITTED = "private.create_submitted_release(uuid, uuid, text, text, text, jsonb, jsonb)";
+const LOCK_SUBMISSION = "private.lock_open_submission(uuid, uuid)";
+const WITHDRAW = "public.withdraw_my_submission(uuid)";
+
+export const m7aMutations = [
+  // Owner-only history
+  sql("review record readable by clients", "both",
+    "grant select on public.catalog_change_requests to authenticated; create policy __m on public.catalog_change_requests for select to authenticated using (true);"),
+  sql("reused pairing detectable", "both", "alter table public.catalog_change_requests disable row level security; grant select (id, created_pairing) on public.catalog_change_requests to authenticated;"),
+  sql("clients may write the review record", "both",
+    "grant insert on public.catalog_change_requests to authenticated; create policy __m on public.catalog_change_requests for insert to authenticated with check (true);"),
+  // Who may submit, and what
+  sql("suspended accounts may submit", "both", rewrite(BEGIN_SUBMISSION, "if not coalesce((select a.is_active from public.get_my_account() a), false) then", "if false then")),
+  sql("hidden games accepted", "both", rewrite(SUBMIT_RELEASE, "and (g.status = 'published' or (g.submitted_by = v_me and g.status = 'unverified'))", "and true")),
+  sql("physical confirmation skipped", "pgtap", rewrite(SUBMIT_RELEASE, "if not coalesce(p_physical, false) or ", "if ")),
+  sql("unknown region confirmed", "pgtap", rewrite(CREATE_SUBMITTED, "p_game, create_submitted_release.platform_id, p_region, false,", "p_game, create_submitted_release.platform_id, p_region, p_region = 'unknown',")),
+  // The rate limit
+  sql("rate limit not locked", "api", rewrite(BEGIN_SUBMISSION, "perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('catalog_submissions:' || v_me::text, 0));", "")),
+  sql("rate limit off by one", "both", rewrite(BEGIN_SUBMISSION, "interval '24 hours') >= 10 then", "interval '24 hours') > 10 then")),
+  sql("withdrawn submissions don't count", "pgtap", rewrite(BEGIN_SUBMISSION, "where s.submitted_by = v_me and s.request_type", "where s.submitted_by = v_me and s.status <> 'withdrawn' and s.request_type")),
+  // Changing and withdrawing
+  sql("another user's submission editable", "pgtap", rewrite(LOCK_SUBMISSION, "where s.id = p_submission and s.submitted_by = p_me and", "where s.id = p_submission and")),
+  sql("withdrawal ignores copies", "both", rewrite(WITHDRAW, "if exists (select 1 from public.collection_items c where c.release_id = v_release.id) then", "if false then")),
+  sql("withdrawal deletes a shared pairing", "both", rewrite(WITHDRAW,
+    "     and not exists (select 1 from public.releases r where r.game_id = v_release.game_id and r.platform_id = v_release.platform_id) then\n    delete from public.game_platforms",
+    "     or true then\n    delete from public.game_platforms")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations };

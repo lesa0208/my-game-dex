@@ -96,11 +96,16 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
         icon={SearchX}
         title={params.query ? "No games found" : `No games on ${platformName ?? "this platform"} yet`}
         action={
-          params.query && params.platform ? (
+          <div className="flex flex-wrap justify-center gap-2">
+            {params.query && params.platform ? (
+              <Button asChild variant="secondary" size="lg">
+                <Link href={exploreHref({ query: params.query, platform: null, cursor: null })}>Search all platforms</Link>
+              </Button>
+            ) : null}
             <Button asChild variant="secondary" size="lg">
-              <Link href={exploreHref({ query: params.query, platform: null, cursor: null })}>Search all platforms</Link>
+              <Link href="/submit">Submit a missing game</Link>
             </Button>
-          ) : null
+          </div>
         }
       >
         {params.query

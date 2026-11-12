@@ -18,7 +18,7 @@ select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'p
 -- Only approved objects exist. Later steps add to this list deliberately.
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
-  array['audit_events', 'blocked_users', 'catalog_field_locks', 'catalog_reclassifications', 'collection_item_components', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'staff_roles', 'user_preferences'],
+  array['audit_events', 'blocked_users', 'catalog_change_requests', 'catalog_field_locks', 'catalog_reclassifications', 'collection_item_components', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'staff_roles', 'user_preferences'],
   'only the approved tables exist, with no views or sequences'
 );
 
@@ -31,7 +31,7 @@ select enum_has_labels('public', 'staff_role', array['moderator', 'catalog_edito
 select enum_has_labels('public', 'account_status', array['active', 'suspended', 'deactivated']);
 select enum_has_labels('public', 'catalog_status', array['unverified', 'under_review', 'published', 'rejected', 'excluded', 'merged']);
 select enum_has_labels('public', 'catalog_request_type', array['new_game', 'new_release', 'correction']);
-select enum_has_labels('public', 'catalog_review_status', array['open', 'in_review', 'approved', 'changes_requested', 'rejected', 'excluded', 'merged']);
+select enum_has_labels('public', 'catalog_review_status', array['open', 'in_review', 'approved', 'changes_requested', 'rejected', 'excluded', 'merged', 'withdrawn']);
 select enum_has_labels('public', 'date_precision', array['day', 'month', 'year', 'unknown']);
 select enum_has_labels('public', 'game_kind', array['game', 'compilation', 'expansion']);
 select enum_has_labels('public', 'platform_kind', array['console', 'handheld', 'hybrid', 'computer', 'other']);

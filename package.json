@@ -27,7 +27,9 @@
     "app:auth-checks": "node scripts/app-auth-checks.mjs",
     "app:collection-checks": "node scripts/app-collection-checks.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
-    "app:my-collection-checks": "node scripts/app-my-collection-checks.mjs"
+    "app:my-collection-checks": "node scripts/app-my-collection-checks.mjs",
+    "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
+    "app:submission-checks": "node scripts/app-submission-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

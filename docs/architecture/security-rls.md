@@ -411,7 +411,7 @@ R = read, I = insert, U = update, D = delete. "Own" means the row's owner column
 | `game_platforms` | R: `published` | R: same, plus own submissions (M7). Catalog editors: all | **No grant.** Editor functions only (M5a) |
 | `game_genres`, `game_franchises` | R | R | Catalog staff |
 | `catalog_images` | R: approved, `licensed` or `user_contributed` | Same, plus own uploads. Catalog editors: all | Submission and staff functions only |
-| `catalog_change_requests` | **No grant** | Catalog editors: R. Everyone else uses `my_catalog_submissions()` | Submission and staff functions only |
+| `catalog_change_requests` | **No grant** | **No grant** (M7a). Submitters use `my_catalog_submissions()` and `get_my_submission()`. Catalog editors read it from M7b | The [submission functions](#catalog-submissions-m7a), and staff functions from M7b |
 | `private.external_providers`, `external_references`, `provider_records`, `import_runs`, `import_run_records`, `release_evidence`, `catalog_field_locks` | None | None | The `catalog_import` functions, called by `catalog_importer` (M5b), and editor functions for field locks (M5a). The importer has no direct access |
 
 ### User-submitted releases
@@ -1041,6 +1041,43 @@ Design for M5c. Anyone, signed in or not, can search the published catalog and c
 **Aliases.** `game_aliases` is readable under RLS when its game is published, with column grants that leave out the stored keys. Only catalog editors write it, through `add_game_alias` and `remove_game_alias`, with a reason and an audit row. Titles that imports found are never public until an editor adds them.
 
 **Testing.** `20_catalog_search.test.sql` checks visibility for anon, a user, a submitter and an editor, every match tier, response fields, pages, cursors, limits, the picker and aliases. `scripts/db-search-checks.mjs` checks the same through the API with the dev fixture, and the `m5c` mutation suite proves the tests catch each violation. `scripts/catalog-fixture.mjs` installs a fictional, verified test catalog in the local database only, and `supabase/benchmarks/m5c_catalog_search.mjs` measures a synthetic 50,000-game catalog in a transaction it always rolls back.
+
+## Catalog submissions (M7a)
+
+A signed-in collector with an active account submits a physical release the catalog is missing: of a game it has published, or as a new game with its first release. Nobody else sees it until an editor publishes it (M7b), and the submitter can add their own copy at once.
+
+**What a submission is.** It writes the existing catalog records, never copies of them: a game (for a new game), its platform pairing, a release and its listed pieces, all `unverified` and marked with `submitted_by`. The M5 policies already let only the submitter and catalog editors read those, and keep them out of search, the release picker and counts. `can_use_release()` already lets the submitter attach a copy, which counts as pending (A1). `catalog_change_requests` is the review record: who submitted what, kept after publication clears `submitted_by` from the catalog rows, so M7b can refuse self-review. Its `submitted_by` is set to null, not deleted, when the account is deleted.
+
+**Functions.** Catalog tables have no client write grants, so the submission functions are `SECURITY DEFINER`, like the M5a editor functions: an empty `search_path`, explicit fields and fixed errors.
+
+| Function | Does |
+| --- | --- |
+| `submit_release(game, platform, media format, region, details, pieces, note, physical)` | A missing release of a published game, or of the caller's own pending game. An identical published release is pointed to instead, since it's public |
+| `submit_game(title, kind, year, …)` | A new game with its first release, in one transaction |
+| `update_my_submission(id, changes)` | Changes an unreviewed submission. The platform can't change |
+| `withdraw_my_submission(id)` | Withdraws an unreviewed submission (below) |
+| `my_catalog_submissions(before, limit)`, `get_my_submission(id)`, `my_submission_for_release(release)` | The caller's own submissions: safe fields only. The reviewer's note is shown, the reviewer never |
+
+**Boundaries.**
+- **Who.** A signed-in user with an active, verified account and a handle. Visitors, suspended accounts and `service_role` can't call them.
+- **What a submitter can set.** Required: platform, a physical format the platform has, and a region, which may be "unknown". Optional: the edition and its type, variant, product code and barcode (unverified evidence), title on the package, publisher, number of discs or cartridges, packaging, release year, listed pieces (inserts, maps, artwork, other) and a note. Never: a status, verification, a slug, a merge, the "region unknown" confirmation, media playability, a submitter, or anything staff-only. An unknown region stays unconfirmed, so the existing publication rule still needs an editor to confirm it.
+- **Physical only.** The format must be one of the platform's physical formats, and the submitter confirms a physical game release: not a download code, an empty box or a manual alone. Media playability stays unknown, so a download-only product can't be declared.
+- **Hidden records stay hidden.** An unpublished game reads exactly like a missing one. Someone else's identical pending submission isn't checked or revealed; review deduplicates. A pairing that already exists, in any state and from anyone, is reused as it is, and the answer is the same as when it's created. Whether a submission created its pairing is stored, but never returned.
+- **The review record has no client grant.** Not even the submitter reads it directly, so staff columns can't leak through a read policy.
+- **The limit.** 10 submissions per user in any rolling 24 hours, withdrawn ones included; edits don't count. A per-user lock, then a count in its own statement, so concurrent submissions can't pass it.
+- **Atomic.** Each function is one transaction: a submission that fails partway leaves nothing behind.
+
+**Withdrawing.** Only an unreviewed submission, and never while a copy is linked to its release, so a copy is never removed implicitly. It deletes the release and its pieces, and the pairing and game only when they're the caller's own unreviewed records and nothing else uses them, so a shared or someone else's record is never deleted. Each is locked before that check. The request stays, as `withdrawn`, with a snapshot of what was submitted, and an audit row records it.
+
+**Review starts in M7b.** Once a request is in review its submitter can't change or withdraw it, and a rejected submission is read-only. Editing and resubmitting after rejection comes with M7b.
+
+**M7b must keep copy data through merges.** The M6 trigger `drop_unlisted_components` runs when a copy's release changes, and deletes the copy's records of pieces the new release doesn't list. M7b's merge moves copies to the target release, so as it stands a merge would delete those records. M7b must replace that behaviour, in a forward-only migration with tests and an `m6` mutation run, so the records stay as "no longer listed" and are removed only on request (`remove_components`, M6d follow-up). M7a doesn't change the trigger. Submitted pieces use the same kind and label identity as catalog pieces, and copies record pieces by kind and label, not by catalog row id, so those records stay meaningful after a merge.
+
+**Tested by:**
+- `22_catalog_submissions.test.sql`: who can submit, every field rule, the visibility matrix, hidden records, shared pairings, copies of a pending release, withdrawal, edits, locking after review starts, the limit, rollback and the record outliving the account;
+- `scripts/db-submission-checks.mjs` (the API boundary, and 15 concurrent submissions of which exactly 10 are accepted);
+- `npm run submissions:test` and `npm run app:submission-checks` (the built app over HTTP);
+- the `m7a` suite in `scripts/security-mutations.mjs`.
 
 ## Assigning the first administrator
 

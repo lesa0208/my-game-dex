@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, LogIn, LogOut, Settings, UserRound } from "lucide-react";
+import { AtSign, FilePlus2, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -61,6 +61,12 @@ export function UserMenu({ viewer }: { viewer: Viewer | null }) {
                 <Link href="/profile">
                   <UserRound aria-hidden="true" />
                   My Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/submissions">
+                  <FilePlus2 aria-hidden="true" />
+                  My submissions
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>

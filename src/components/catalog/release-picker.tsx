@@ -248,7 +248,11 @@ export function ReleasePickerView({
           ))}
         </ul>
         <p className="text-sm text-muted-foreground">
-          Can&apos;t find your release? Submitting missing games and releases to the catalog is coming in a later update.
+          Can&apos;t find your release?{" "}
+          <Link href={`/submit?game=${game.slug}`} className="text-primary-text underline underline-offset-4">
+            Submit it to the catalog
+          </Link>
+          .
         </p>
       </section>
     </article>
