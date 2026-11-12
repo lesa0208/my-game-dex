@@ -425,6 +425,8 @@ export const m7aMutations = [
   sql("review record readable by clients", "both",
     "grant select on public.catalog_change_requests to authenticated; create policy __m on public.catalog_change_requests for select to authenticated using (true);"),
   sql("reused pairing detectable", "both", "alter table public.catalog_change_requests disable row level security; grant select (id, created_pairing) on public.catalog_change_requests to authenticated;"),
+  sql("submitters read the pairings they made", "both",
+    "alter policy game_platforms_read_authenticated on public.game_platforms using (status = 'published' or (submitted_by = (select auth.uid()) and status in ('unverified', 'under_review', 'rejected')) or (select private.is_catalog_editor()));"),
   sql("clients may write the review record", "both",
     "grant insert on public.catalog_change_requests to authenticated; create policy __m on public.catalog_change_requests for insert to authenticated with check (true);"),
   // Who may submit, and what

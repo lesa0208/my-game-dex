@@ -830,7 +830,8 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 
 **Trade-offs.**
 - **New definer functions.** Necessary, because catalog tables have no client write grants by design. They're explicit, audited and tested by the `m7a` mutation suite.
-- **Shared pairings.** A game's platform pairing is one row. A submission reuses an existing one silently, whoever made it, so its existence never leaks. A withdrawal never deletes one that anything else uses, and M7b's review must do the same.
+- **Shared pairings.** A game's platform pairing is one row. A submission reuses an existing one silently, whoever made it. So that its existence never leaks, only catalog editors read an unpublished pairing, including its maker: otherwise not seeing it after submitting would reveal someone else's. This narrowed the M5 read policy, found in the pre-PR review. A withdrawal never deletes one that anything else uses, and M7b's review must do the same.
+- **Personal data.** The request's note and snapshot, and audit rows naming the account's id, outlive the account. Their retention is left to D10 (see [Personal data in submissions](security-rls.md#catalog-submissions-m7a)).
 - **Unowned records after account deletion.** Deleting an account sets `submitted_by` to null on its pending records, which stay unverified for review, and keeps the request's history.
 - **Merges in M7b.** The M6 trigger `drop_unlisted_components` would delete copies' piece records during a merge. M7b must replace it so those records are kept.
 

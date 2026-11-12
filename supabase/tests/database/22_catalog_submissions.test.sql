@@ -4,7 +4,7 @@
 -- API boundary are in db-submission-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(109);
+select plan(118);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
@@ -226,6 +226,12 @@ select is(pg_temp.sub_as('c', 'a1', pg_temp.id('g'), 'nes', 'rom-cartridge', 'pa
 select is((select array_agg(k order by k) from jsonb_object_keys(pg_temp.sub('a1', pg_temp.id('g'), 'nes', 'rom-cartridge', 'ntsc-uc')::jsonb) k),
           array['game_id', 'outcome', 'release_id', 'submission_id'], 'with the same answer as for a pairing that didn''t exist');
 select is((select created_pairing::text from public.catalog_change_requests where id = pg_temp.id('c')), 'false', 'the pairing was reused, which only the database knows');
+select is(pg_temp.as_user('a1', format('select count(*)::text from public.game_platforms where game_id = %L and platform_id = (select id from public.platforms where slug = ''nes'')', pg_temp.id('g'))),
+          '0', 'reading the pairing doesn''t tell the reuser it was there');
+select is(pg_temp.as_user('b2', format('select count(*)::text from public.game_platforms where game_id = %L and platform_id = (select id from public.platforms where slug = ''nes'')', pg_temp.id('g'))),
+          '0', 'because its maker can''t read it either');
+select is(pg_temp.as_user('e5', format('select count(*)::text from public.game_platforms where game_id = %L and platform_id = (select id from public.platforms where slug = ''nes'')', pg_temp.id('g'))),
+          '1', 'only catalog editors can');
 select is(pg_temp.withdraw('b2', 'b'), 'true', 'the other user withdraws theirs');
 select is((select count(*)::int from public.game_platforms where game_id = pg_temp.id('g') and platform_id = (select id from public.platforms where slug = 'nes')), 1,
           'and the shared pairing stays, because the first user''s release uses it');
@@ -304,8 +310,16 @@ update public.catalog_change_requests set created_at = now() - interval '25 hour
 select is(pg_temp.sub('f6', pg_temp.id('g'), 'snes', 'rom-cartridge', 'pal', '{"edition_name": "Run 11"}')::jsonb ->> 'outcome', 'submitted', 'a submission older than 24 hours no longer counts');
 
 select is((select status::text from public.catalog_change_requests where id = pg_temp.id('a')), 'withdrawn', 'a withdrawn request stays, as withdrawn');
+select is(pg_temp.as_user('f6', format('select public.add_collection_item(%L, %L, ''{}'') ->> ''created''', (select private.uuid_v7()), pg_temp.id('rl2-r'))), 'true',
+          'the submitter holds a copy of a pending release');
 delete from auth.users where id = pg_temp.u('f6');
 select is((select count(*)::int from public.catalog_change_requests where id = pg_temp.id('rl2') and submitted_by is null), 1, 'and the record outlives the submitter''s account');
+select is((select row(status, submitted_by is null)::text from public.releases where id = pg_temp.id('rl2-r')), '(unverified,t)', 'its pending release stays unverified, with no submitter');
+select is((select count(*)::int from public.collection_items where release_id = pg_temp.id('rl2-r')), 0, 'and the account''s copy went with the account');
+select is(pg_temp.as_user('b2', format('select count(*)::text from public.releases where id = %L', pg_temp.id('rl2-r'))), '0', 'the unowned release stays hidden from other users');
+select is(pg_temp.as_user('b2', format('select public.add_collection_item(%L, %L, ''{}'')::text', (select private.uuid_v7()), pg_temp.id('rl2-r'))), 'error: release unavailable',
+          'who can''t attach a copy to it');
+select is(pg_temp.as_user('e5', format('select count(*)::text from public.releases where id = %L', pg_temp.id('rl2-r'))), '1', 'while catalog editors still see it, for review');
 
 select * from finish();
 rollback;

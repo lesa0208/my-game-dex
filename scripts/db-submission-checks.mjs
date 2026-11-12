@@ -185,6 +185,8 @@ try {
   check("reusing a hidden pairing answers like making one", makes.status === reuses.status && Object.keys(makes.body).sort().join() === Object.keys(reuses.body).sort().join() && reuses.body.outcome === "submitted");
   check("and the pairing stays hidden from the second submitter",
     JSON.stringify((await table(other.headers, `game_platforms?game_id=eq.${starfall}&select=platform_id,status`)).body?.filter((p) => p.status !== "published")) === "[]");
+  check("and from the submitter who made it, so reading it can't tell the two apart",
+    JSON.stringify((await table(submitter.headers, `game_platforms?game_id=eq.${starfall}&select=platform_id,status`)).body?.filter((p) => p.status !== "published")) === "[]");
 
   section("A copy of a pending release");
   const copyId = uuidv7();
