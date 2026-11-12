@@ -139,6 +139,32 @@ try {
   check("they have a notification", count(`select count(*) from public.notifications where recipient_id = '${owner.id}' and type = 'catalog_submission' and data ->> 'status' = 'published';`) === 1);
   check("and anyone can find the release", (await visitor.get("/games/starfall-odyssey")).html.includes(productCode));
 
+  section("Correcting the listed pieces");
+  const pieced = await submitRelease(owner, { piece_label_0: "Instruction manual", piece_kind_0: "insert" });
+  const piecedPage = await owner.browser.get(`/submissions/${pieced}`);
+  await owner.browser.submit(`/submissions/${pieced}`, formWith(piecedPage.html, "release_id"), { component_0: "included" });
+  const recorded = () => count(`select count(*) from public.collection_item_components c join public.collection_items i on i.id = c.item_id
+    where i.owner_id = '${owner.id}' and i.release_id = '${releaseOf(pieced)}' and c.label = 'Instruction manual';`);
+  check("the submitter's copy records the listed manual", recorded() === 1);
+  check("the pieces can't be corrected before the review starts", !formById((await editor.browser.get(`/review/${pieced}`)).html, "correct-pieces"));
+  await decide(editor, pieced, "start", { reason: "Checking it" });
+  let piecesPage = await editor.browser.get(`/review/${pieced}`);
+  let piecesForm = formById(piecesPage.html, "correct-pieces");
+  check("in review, the pieces form lists them, with room to add", Boolean(piecesForm) && piecesForm.hidden.piece_rows === "6" && piecesPage.html.includes('value="Instruction manual"'));
+  const listed = () => psql(`select coalesce(string_agg(kind || ':' || label || 'x' || quantity, ',' order by label), '') from public.release_components where release_id = '${releaseOf(pieced)}';`);
+  const twice = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "insert", piece_label_1: "Instruction manual", reason: "Twice" });
+  check("a piece listed twice is refused, and nothing changes", twice.response.status !== 303 && listed() === "insert:Instruction manualx1");
+  const noReason = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "artwork", piece_label_1: "Poster" });
+  check("so is a change without a reason", noReason.response.status !== 303 && listed() === "insert:Instruction manualx1");
+  const someoneElse = await collector.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "artwork", piece_label_0: "Forged", reason: "Mine" });
+  check("a collector's forged change is refused", someoneElse.response.status !== 303 && listed() === "insert:Instruction manualx1");
+  const saved = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "", piece_kind_1: "artwork", piece_label_1: "Poster", piece_quantity_1: "2", reason: "From the photos" });
+  check("an editor replaces the manual with two posters", location(saved.response) === `/review/${pieced}?notice=corrected` && listed() === "artwork:Posterx2");
+  check("the change is audited with the reason", count(`select count(*) from private.audit_events where action = 'catalog_record_updated' and metadata ->> 'id' = '${releaseOf(pieced)}' and reason = 'From the photos' and actor_id = '${editor.id}';`) === 1);
+  check("the submitter's copy keeps its record of the manual", recorded() === 1);
+  const stalePieces = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "map", piece_label_0: "Map", reason: "Old page" });
+  check("a pieces form from before the change is refused", stalePieces.response.status !== 303 && listed() === "artwork:Posterx2");
+
   section("Asking for changes, and answering them");
   const second = await submitRelease(owner);
   await decide(editor, second, "start", { reason: "Checking it" });

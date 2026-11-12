@@ -848,7 +848,7 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Verification and publication happen together** for a submission, inside approval. Editors can't verify a submission ahead of approving it.
 - **Lock order.** M7a's submitter functions now lock the caller's profile, then the game before the release, so withdrawal can't deadlock with publication. That redefined two M7a helpers, with their checks unchanged.
 - **Deleted accounts.** Their submissions can be approved or rejected, but not sent back for changes.
-- **Imports.** The M5b importer can still match a pending submitted game by title. The guard stops it publishing one; excluding pending submissions from matching is left for an importer change.
+- **Imports.** Private submissions are invisible to import title matching (M7b-1 follow-up), so an import with the same title creates its own candidate instead, and editors resolve the duplicate in review.
 
 ## Risks to watch
 

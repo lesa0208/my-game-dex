@@ -7,7 +7,7 @@ import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { correctSubmission, correctSubmissionFromForm, type ReviewState } from "@/features/review/actions";
-import type { GameRecord, ReleaseRecord } from "@/features/review/form";
+import { type GameRecord, type Piece, PIECE_LIMIT, pieceRows, type ReleaseRecord } from "@/features/review/form";
 import { EDITION_KINDS, GAME_KINDS } from "@/features/submissions/form";
 
 function keepOnFailure(action: (state: ReviewState, formData: FormData) => Promise<ReviewState>) {
@@ -40,6 +40,83 @@ function Reason({ id }: { id: string }) {
     <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Only editors see it.">
       <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className="h-10" />
     </Field>
+  );
+}
+
+/**
+ * Corrects the pieces a submission's release lists, with the M5a editor function: the
+ * same kinds, names, quantities and limit as the submission form. Starts from the list
+ * as it is now; clearing a name removes that piece from the release. Copies keep their
+ * records of it, as no longer listed. Works without JavaScript.
+ */
+export function PiecesForm({ requestId, revision, pieces, kinds }: { requestId: string; revision: number; pieces: Piece[]; kinds: readonly { value: string; label: string }[] }) {
+  const [state, action, pending] = useActionState(correct, { status: "idle", message: null });
+  const id = "correct-pieces";
+  const rows = pieceRows(pieces.length);
+  return (
+    <form
+      id={id}
+      action={correctSubmissionFromForm}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (pending) return;
+        const data = new FormData(event.currentTarget);
+        startTransition(() => action(data));
+      }}
+      className="flex flex-col gap-3"
+    >
+      <input type="hidden" name="target" value="pieces" />
+      <input type="hidden" name="request_id" value={requestId} />
+      <input type="hidden" name="revision" value={revision} />
+      <input type="hidden" name="piece_rows" value={rows} />
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-sm font-semibold">Pieces in the box</legend>
+        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+          Manuals, maps, posters and other original materials, up to {PIECE_LIMIT}. Clear a name to remove that piece; collectors&apos; copies keep their record of it.
+        </p>
+        {Array.from({ length: rows }, (_, i) => {
+          const piece = pieces[i];
+          return (
+            <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_4.5rem] gap-2">
+              <label className="sr-only" htmlFor={`${id}-kind-${i}`}>
+                Piece {i + 1} type
+              </label>
+              <select id={`${id}-kind-${i}`} name={`piece_kind_${i}`} defaultValue={piece?.kind ?? "insert"} className={selectClassName}>
+                {kinds.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+              <label className="sr-only" htmlFor={`${id}-label-${i}`}>
+                Piece {i + 1} name
+              </label>
+              <Input id={`${id}-label-${i}`} name={`piece_label_${i}`} maxLength={120} defaultValue={piece?.label ?? ""} autoComplete="off" aria-describedby={`${id}-hint`} className="h-10" />
+              <label className="sr-only" htmlFor={`${id}-quantity-${i}`}>
+                Piece {i + 1} quantity
+              </label>
+              <Input
+                id={`${id}-quantity-${i}`}
+                name={`piece_quantity_${i}`}
+                inputMode="numeric"
+                maxLength={2}
+                defaultValue={piece ? String(piece.quantity) : ""}
+                placeholder="1"
+                autoComplete="off"
+                className="h-10"
+              />
+            </div>
+          );
+        })}
+      </fieldset>
+      <Reason id={id} />
+      <div>
+        <Button type="submit" variant="outline" size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+          {pending ? "Saving…" : "Save the pieces"}
+        </Button>
+      </div>
+      <Errors state={state} />
+    </form>
   );
 }
 

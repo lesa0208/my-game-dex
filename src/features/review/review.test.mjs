@@ -3,13 +3,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { EDITION_KINDS, GAME_KINDS } from "../submissions/form.ts";
+import { EDITION_KINDS, GAME_KINDS, PIECE_KINDS } from "../submissions/form.ts";
 import {
   EDITION_KIND_VALUES,
   GAME_KIND_VALUES,
+  PIECE_KIND_VALUES,
+  pieceRows,
+  piecesEditable,
   queueFilter,
   readGameCorrections,
   readNote,
+  readPieceCorrections,
   readReason,
   readReleaseCorrections,
   reviewErrorMessage,
@@ -39,6 +43,41 @@ const asShown = { product_code: "SNS-QZ", region_code: "pal", release_year: "199
 test("the allowed values match the submission form's", () => {
   assert.deepEqual([...EDITION_KIND_VALUES], EDITION_KINDS.map((k) => k.value));
   assert.deepEqual([...GAME_KIND_VALUES], GAME_KINDS.map((k) => k.value));
+  assert.deepEqual([...PIECE_KIND_VALUES], PIECE_KINDS.map((k) => k.value));
+});
+
+const listed = [{ kind: "insert", label: "Manual", quantity: 1 }, { kind: "map", label: "World map", quantity: 1 }];
+const rows = (pieces) => Object.fromEntries(pieces.flatMap((p, i) => [[`piece_kind_${i}`, p.kind], [`piece_label_${i}`, p.label], [`piece_quantity_${i}`, String(p.quantity)]]));
+
+test("an unchanged pieces form sends nothing, in any order", () => {
+  assert.deepEqual(readPieceCorrections(form(rows(listed)), 6, listed), { value: null });
+  assert.deepEqual(readPieceCorrections(form(rows([...listed].reverse())), 6, listed), { value: null });
+});
+
+test("pieces are added, changed and removed by clearing a name", () => {
+  const changed = readPieceCorrections(form({ ...rows(listed), piece_label_1: "", piece_kind_2: "artwork", piece_label_2: " Poster ", piece_quantity_2: "" }), 6, listed);
+  assert.deepEqual(changed.value, [{ kind: "insert", label: "Manual", quantity: 1 }, { kind: "artwork", label: "Poster", quantity: 1 }]);
+  assert.deepEqual(readPieceCorrections(form({}), 6, listed).value, [], "clearing every name lists nothing");
+});
+
+test("pieces follow the submission form's rules", () => {
+  assert.equal(readPieceCorrections(form({ piece_label_0: "x".repeat(121) }), 6, []).error, "A piece's name can be up to 120 characters.");
+  assert.equal(readPieceCorrections(form({ piece_label_0: "Disc", piece_kind_0: "game_media" }), 6, []).error, "Choose a type for each piece from the list.");
+  assert.equal(readPieceCorrections(form({ piece_label_0: "Manual", piece_quantity_0: "0" }), 6, []).error, "A piece's quantity is between 1 and 99.");
+  assert.equal(readPieceCorrections(form({ piece_label_0: "Manual", piece_quantity_0: "1.5" }), 6, []).error, "A piece's quantity is between 1 and 99.");
+  assert.equal(readPieceCorrections(form({ piece_label_0: "Manual", piece_label_1: "Manual" }), 6, []).error, "“Manual” is listed twice.");
+});
+
+test("rows beyond the limit are never read, and the form shows room to add", () => {
+  assert.deepEqual(readPieceCorrections(form({ piece_label_30: "Extra" }), 99, []).value, null);
+  assert.equal(pieceRows(0), 6);
+  assert.equal(pieceRows(5), 8);
+  assert.equal(pieceRows(29), 30);
+});
+
+test("a release listing a kind the form can't show isn't offered for editing", () => {
+  assert.equal(piecesEditable(listed), true);
+  assert.equal(piecesEditable([...listed, { kind: "game_media", label: "Disc 1", quantity: 1 }]), false);
 });
 
 test("a reason is always typed, never supplied", () => {

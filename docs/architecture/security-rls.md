@@ -1022,6 +1022,14 @@ Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restr
 
 **Not in M5b.** Images, search, other platforms and sources, user submissions, and batch verification or publication. Editors verify and publish one release at a time, with `verify_release` and `publish_release`.
 
+### Imports and private submissions (M7b-1 follow-up)
+
+An import finds an existing game in two ways: through its own external references, which only ever point to records an import created, and by title (exactly, ignoring word breaks, or by main title, as a suggestion). Until `20261112200200_m7b1_import_privacy.sql`, the title paths searched every game on the platform except merged, excluded and rejected ones, including a collector's pending submitted game. A source entry with the same title was then held as a possible duplicate of the submission, or, for a release, created on it, adding a release to someone's private submission. A shared serial was also noted with the ids of every release with that product code.
+
+Now a private submission is invisible to import matching: an unpublished game or release that a collector submitted, with `submitted_by` set or created by a review request, which covers a submitter whose account was deleted. A game entry with the same title creates its own candidate, under review; a release entry matches only other games, or none. Editors see both in review, where possible duplicates are listed. Games have no unique title, so this needs no change to any constraint. Once published, a submission is an ordinary catalog record and is matched as before. Nothing else in the importer changed, and the review guard still refuses verifying or publishing a submission outside review, whatever the path.
+
+Tested by `24_import_submission_privacy.test.sql` (title, word-break, main-title and serial collisions, an unowned submission, an editor's unpublished game still matched, and a submission matched once published) and four mutations in the `m5b` suite.
+
 ## Catalog search
 
 Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included: editor search comes with M7.
@@ -1120,7 +1128,7 @@ Catalog editors review submissions: they start a review, correct the records, th
 | `resubmit_my_submission(id, note)` | The submitter's: after changes were requested, the same request, not counted again; after a rejection, a new request linked by `previous_request_id`, which counts toward the daily limit (product owner decision 3). Only the latest request of a chain can be resubmitted |
 | `can_review_submissions()` | Whether the caller may review, for the account menu |
 
-Corrections use the existing, audited M5a editor functions (`update_release`, `update_game` and the others), and only while the request is in review (decision 4).
+Corrections use the existing, audited M5a editor functions (`update_release`, `update_game`, `set_release_components`), and only while the request is in review (decision 4). The review page has forms for the release's details, a new game's title, type and year, and the listed pieces. The pieces form uses the submission form's kinds, name length, quantities and limit of 30, and isn't offered when the release lists a kind it can't show, such as game media, so saving never drops one. Removing a listed piece never touches a collector's copy: copies record pieces by kind and label, so the record stays, as no longer listed (M6d follow-up).
 
 **No self-review.** Every review action refuses a caller who is the request's `submitted_by`, which the request keeps after publication clears it from the catalog rows. It's compared with `is not distinct from`: a null submitter, from a deleted account, is no conflict, because a deleted account can't review. On top of that, the guard below refuses verifying or publishing a game or release to anyone who ever submitted it, by the permanent request history, whatever happened to the request since: withdrawn, rejected or resubmitted.
 
@@ -1146,10 +1154,9 @@ The M6 collection functions lock only the owner's copies and take no review row,
 
 **Audit.** `catalog_submission_review_started`, `_approved`, `_changes_requested`, `_rejected` (with the editor's reason) and `catalog_submission_resubmitted`, besides the M5 rows for each correction, verification and publication.
 
-**Not in M7b-1.**
-- Merging, exclusion, restoration and owners relinking copies: M7b-2.
-- Editing a submission's listed pieces from the review page. `set_release_components` works in review, but has no form yet.
-- Imports and pending submissions: the M5b importer matches games by title in every status, so an operator's import could attach candidates to a pending submitted game, or fill its empty fields. It can't publish it: the guard refuses that. Excluding pending submissions from import matching needs an importer change and an `m5b` mutation run.
+**Imports and private submissions.** Imports never match, change or take over a collector's pending submission. See [Catalog import](#catalog-import).
+
+**Not in M7b-1.** Merging, exclusion, restoration and owners relinking copies: M7b-2.
 
 **Tested by:**
 - `23_catalog_review.test.sql`: who may review, the queue and review page, starting, the bypass, approval and its rules, requested changes and answers, rejection and resubmission, the limit on resubmissions, self-review including after a withdrawal, deleted accounts, and the notification shape;

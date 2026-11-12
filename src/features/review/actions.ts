@@ -7,7 +7,7 @@ import { createSupabaseServerClient } from "@/features/auth/server";
 import { UUID } from "@/features/collection/uuid";
 import { getSubmissionOptions } from "@/features/submissions/queries";
 
-import { readGameCorrections, readNote, readReason, readReleaseCorrections, reviewErrorMessage } from "./form";
+import { piecesEditable, readGameCorrections, readNote, readPieceCorrections, readReason, readReleaseCorrections, reviewErrorMessage } from "./form";
 import { getSubmissionReview } from "./queries";
 
 /**
@@ -89,7 +89,8 @@ export async function decideSubmissionFromForm(formData: FormData): Promise<void
  * it is now are sent, and only if the record is still at the revision the page showed.
  */
 export async function correctSubmission(_state: ReviewState, formData: FormData): Promise<ReviewState> {
-  const target = field(formData, "target") === "game" ? "game" : "release";
+  const targetText = field(formData, "target");
+  const target = targetText === "game" || targetText === "pieces" ? targetText : "release";
   const id = field(formData, "request_id");
   const revision = whole(field(formData, "revision"));
   if (!UUID.test(id) || revision === null) return { status: "error", message: reviewErrorMessage("submission unavailable") };
@@ -111,6 +112,14 @@ export async function correctSubmission(_state: ReviewState, formData: FormData)
     if ("error" in changes) return { status: "error", message: changes.error };
     if (Object.keys(changes.value).length === 0) return { status: "error", message: "Nothing has changed." };
     const { error } = await supabase.rpc("update_game", { p_game: item.game.id, p_changes: changes.value, p_reason: reason.value });
+    if (error) return { status: "error", message: reviewErrorMessage(error.message) };
+  } else if (target === "pieces") {
+    if (item.release.revision !== revision) return { status: "error", message: reviewErrorMessage("record changed") };
+    if (!piecesEditable(item.release.components)) return { status: "error", message: "This release lists pieces this form can't show, so it can't change them." };
+    const pieces = readPieceCorrections(read, whole(field(formData, "piece_rows")) ?? 0, item.release.components);
+    if ("error" in pieces) return { status: "error", message: pieces.error };
+    if (!pieces.value) return { status: "error", message: "Nothing has changed." };
+    const { error } = await supabase.rpc("set_release_components", { p_release: item.release.id, p_components: pieces.value, p_reason: reason.value });
     if (error) return { status: "error", message: reviewErrorMessage(error.message) };
   } else {
     if (item.release.revision !== revision) return { status: "error", message: reviewErrorMessage("record changed") };

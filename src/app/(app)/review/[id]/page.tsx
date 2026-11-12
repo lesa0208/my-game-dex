@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { PageLayout } from "@/components/layout/page-layout";
-import { CorrectionForm } from "@/components/review/correction-form";
+import { CorrectionForm, PiecesForm } from "@/components/review/correction-form";
 import { DecisionForm } from "@/components/review/decision-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,10 +14,10 @@ import { requireViewerWithHandle } from "@/features/account/queries";
 import { componentLabel, editionKindLabel } from "@/features/catalog/format";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
-import { catalogStatusLabel, requestStatusLabel, submitterLabel } from "@/features/review/form";
+import { catalogStatusLabel, piecesEditable, requestStatusLabel, submitterLabel } from "@/features/review/form";
 import { canReview, getSubmissionReview } from "@/features/review/queries";
 import { formatWhen } from "@/features/submissions/display";
-import { GAME_KINDS } from "@/features/submissions/form";
+import { GAME_KINDS, PIECE_KINDS } from "@/features/submissions/form";
 import { getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
@@ -283,6 +283,13 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
               <CorrectionForm target="release" requestId={request.id} revision={release.revision} release={release} regions={options.regions} />
             </Disclosure>
           ) : null}
+          <Disclosure title="Correct the listed pieces">
+            {piecesEditable(release.components) ? (
+              <PiecesForm requestId={request.id} revision={release.revision} pieces={release.components} kinds={PIECE_KINDS} />
+            ) : (
+              <p className="text-sm text-muted-foreground">This release lists pieces this form can&apos;t show, so it can&apos;t change them here.</p>
+            )}
+          </Disclosure>
           {request.created_game && game && game.status !== "published" ? (
             <Disclosure title="Correct the game">
               <CorrectionForm target="game" requestId={request.id} revision={game.revision} game={game} />

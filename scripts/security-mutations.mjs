@@ -327,6 +327,13 @@ export const m5bMutations = [
   sql("importer can verify", "pgtap", "grant execute on function public.verify_release(uuid, text, bigint) to catalog_importer;"),
   sql("importer reads the catalog", "both", "grant select on public.games to catalog_importer;"),
   sql("importer inherits roles", "pgtap", "alter role catalog_importer inherit;"),
+  // Private submissions (M7b-1 follow-up)
+  sql("imports match a pending submission by title", "pgtap", rewrite("private.import_games_by_key(uuid, text)", "\n    and not private.import_private_game(g)", "")),
+  sql("imports match a pending submission ignoring word breaks", "pgtap", rewrite("private.import_games_by_compact(uuid, text)", "\n    and not private.import_private_game(g)", "")),
+  sql("imports note a pending submission's serial", "pgtap",
+    rewrite("private.import_apply_release(private.import_runs, private.provider_records)", "\n      and not private.import_private_release(r);", ";")),
+  sql("an unowned submitted game is matched", "pgtap",
+    rewrite("private.import_private_game(public.games)", "or exists (select 1 from public.catalog_change_requests s where s.game_id = p_game.id and s.created_game)", "or false")),
 ];
 
 const SEARCH = "public.search_catalog(text, text[], integer, text)";

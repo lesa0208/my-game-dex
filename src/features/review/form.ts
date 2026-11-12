@@ -177,6 +177,53 @@ export function readGameCorrections(read: Read, current: GameRecord, currentYear
   return { value: changes };
 }
 
+/** The piece kinds the submission form offers; a unit test keeps them the same. */
+export const PIECE_KIND_VALUES = ["insert", "map", "artwork", "other"] as const;
+/** As many listed pieces as a submission may have. */
+export const PIECE_LIMIT = 30;
+
+export type Piece = { kind: string; label: string; quantity: number };
+
+/**
+ * Whether the pieces form can show every piece the release lists. A kind it doesn't
+ * offer, such as game media an editor recorded, would otherwise be dropped on save, so
+ * the form isn't offered then.
+ */
+export function piecesEditable(pieces: Piece[]): boolean {
+  return pieces.length <= PIECE_LIMIT && pieces.every((p) => oneOf(PIECE_KIND_VALUES, p.kind));
+}
+
+/** How many rows the pieces form shows: every listed piece and a few empty rows. */
+export function pieceRows(count: number): number {
+  return Math.min(Math.max(count + 3, 6), PIECE_LIMIT);
+}
+
+const pieceKey = (p: Piece) => `${p.kind}\u0000${p.label}\u0000${p.quantity}`;
+
+/**
+ * The listed pieces for set_release_components, with the submission form's rules: a
+ * kind from the list, a name of up to 120 characters, a quantity from 1 to 99, no piece
+ * twice. An emptied name removes the piece from the release (copies keep their record
+ * of it, as no longer listed). Null when nothing changed.
+ */
+export function readPieceCorrections(read: Read, rows: number, current: Piece[]): Result<Piece[] | null> {
+  const pieces: Piece[] = [];
+  for (let i = 0; i < Math.min(Math.max(rows, 0), PIECE_LIMIT); i += 1) {
+    const label = read(`piece_label_${i}`).trim();
+    if (!label) continue;
+    if (label.length > 120) return { error: "A piece's name can be up to 120 characters." };
+    const kind = read(`piece_kind_${i}`).trim() || "insert";
+    if (!oneOf(PIECE_KIND_VALUES, kind)) return { error: "Choose a type for each piece from the list." };
+    const quantityText = read(`piece_quantity_${i}`).trim();
+    const quantity = quantityText ? Number(quantityText) : 1;
+    if (!/^\d*$/.test(quantityText) || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) return { error: "A piece's quantity is between 1 and 99." };
+    if (pieces.some((p) => p.kind === kind && p.label === label)) return { error: `“${label}” is listed twice.` };
+    pieces.push({ kind, label, quantity });
+  }
+  const same = pieces.length === current.length && pieces.map(pieceKey).sort().join("\n") === current.map(pieceKey).sort().join("\n");
+  return { value: same ? null : pieces };
+}
+
 /** The database's fixed errors, as messages for editors. Nothing else from the database is shown. */
 export function reviewErrorMessage(message: unknown): string {
   switch (message) {
