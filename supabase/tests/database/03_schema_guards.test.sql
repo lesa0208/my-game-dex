@@ -84,6 +84,13 @@ insert into approved_function_grants values
   ('remove_collection_item(uuid)', 'authenticated'), ('get_my_collection(text,text,text,text,text,integer,text)', 'authenticated'),
   ('get_my_collection_item(uuid)', 'authenticated'), ('get_my_release_copies(uuid)', 'authenticated'),
   ('get_my_collection_summary()', 'authenticated'),
+  -- M7a: catalog submissions. SECURITY DEFINER, like the editor functions, because
+  -- catalog tables have no client write grants.
+  ('submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  ('submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  ('update_my_submission(uuid,jsonb)', 'authenticated'), ('withdraw_my_submission(uuid)', 'authenticated'),
+  ('my_catalog_submissions(uuid,integer)', 'authenticated'), ('get_my_submission(uuid)', 'authenticated'),
+  ('my_submission_for_release(uuid)', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

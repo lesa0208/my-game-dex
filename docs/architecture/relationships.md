@@ -809,7 +809,7 @@ Storage files don't cascade with database rows. Account deletion must also remov
 | `games` | `releases` (through `game_platforms`) | Restrict | Deleting history by accident must be impossible |
 | `games` | `game_genres`, `game_franchises` | Cascade | Links only |
 | `games` | `user_favorite_games`, `wantlist_items`, `reviews` | Restrict | User data depends on it. Merge instead |
-| `releases` | `catalog_change_requests` | Cascade | Rejected and merged records stay, so this is reached only by retention jobs |
+| `releases`, `games` | `catalog_change_requests` | Set null (as built in M7a) | A withdrawal deletes the release it made, and the request stays as history, with its snapshot |
 | `releases` | `collection_items` | Restrict | Users own physical copies of it. Merge instead |
 | `releases` | `wantlist_items`, `posts`, `reviews` | Restrict | Merge instead |
 | `region_codes`, `markets`, `genres`, `franchises`, `media_formats`, `hardware_requirements` | All children | Restrict | Reference data |

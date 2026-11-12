@@ -35,7 +35,7 @@ update public.profiles set handle = 'user_' || right(id::text, 2), handle_change
 -- Schema and access
 select has_table('private', 'audit_events', 'audit_events exists in private');
 select is((select string_agg(e.enumlabel, ',' order by e.enumsortorder) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'audit_action'),
-  'staff_role_granted,staff_role_revoked,account_suspended,account_reinstated,operator_action,catalog_record_created,catalog_record_updated,catalog_record_verified,catalog_record_published,catalog_field_locked,catalog_field_unlocked,catalog_import_run,catalog_provider_cleared,catalog_record_withdrawn,catalog_review_queued,catalog_review_resolved,catalog_alias_added,catalog_alias_removed', 'the M4, M5a, M5b and M5c audit actions exist');
+  'staff_role_granted,staff_role_revoked,account_suspended,account_reinstated,operator_action,catalog_record_created,catalog_record_updated,catalog_record_verified,catalog_record_published,catalog_field_locked,catalog_field_unlocked,catalog_import_run,catalog_provider_cleared,catalog_record_withdrawn,catalog_review_queued,catalog_review_resolved,catalog_alias_added,catalog_alias_removed,catalog_submission_created,catalog_submission_updated,catalog_submission_withdrawn', 'the M4, M5a, M5b, M5c and M7a audit actions exist');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) p
   where has_table_privilege(r, 'private.audit_events', p)), 0, 'no API role has any privilege on audit_events');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array[

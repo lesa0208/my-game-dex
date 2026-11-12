@@ -814,10 +814,26 @@ There's no sign-up or password-reset page, and nothing on a hosted project chang
 | Submission | The submitter attaches copies at once, through `can_use_release`. They count as pending |
 | Approval | The release becomes published, and its copies count as owned, unchanged |
 | Rejection | The copies stay, counted as not approved |
-| Merge | While merging, copies count as pending. Moving them to the target (`release_id`, by a staff function) keeps their details, and drops pieces the target doesn't list. A stale retry of the original request then gets `request conflict`, not a new copy |
+| Merge | While merging, copies count as pending. Moving them to the target (`release_id`, by a staff function) keeps their details. A stale retry of the original request then gets `request conflict`, not a new copy. **Correction (M7a):** the trigger `drop_unlisted_components` would delete the copy's records of pieces the target doesn't list. M7b must change it to keep them, as the M6d follow-up requires (see ADR-050) |
 | Exclusion | Copies become `invalid_preserved` and can't be edited, but can be removed. Moving one to a usable release clears the flag |
 
 M7 still has to add a staff function for each step, owners' read access to an excluded release they hold copies of, and an owner's relink.
+
+### ADR-050: Catalog submissions write the catalog's own records, privately
+
+**Decision.** Approved by the product owner for M7a. A collector submits a missing physical release, of a published game or as a new game, by writing the existing catalog records as `unverified`, marked with `submitted_by`, through `SECURITY DEFINER` functions. `catalog_change_requests` keeps the permanent review record, with no client grant. Limit: 10 per user in any rolling 24 hours, withdrawn ones included. Region may be unknown, but stays unconfirmed. Product codes and barcodes are unverified evidence. Game, compilation or expansion. Withdrawal while unreviewed, refused while copies exist. Rejected submissions are read-only until M7b.
+
+**Why.**
+- **One set of records.** The M5 policies already make an unverified record visible only to its submitter and editors, and keep it out of search, the picker and counts, and M6 already lets the submitter attach a copy. Writing the catalog's own rows reuses all of that, and publishing in M7b is a status change, not a copy.
+- **A separate review record.** `submitted_by` is cleared from catalog rows on publication, so who submitted what must live elsewhere for history and for refusing self-review.
+- **No read grant on it.** Staff columns, such as the reviewer, can't leak through a policy.
+
+**Trade-offs.**
+- **New definer functions.** Necessary, because catalog tables have no client write grants by design. They're explicit, audited and tested by the `m7a` mutation suite.
+- **Shared pairings.** A game's platform pairing is one row. A submission reuses an existing one silently, whoever made it. So that its existence never leaks, only catalog editors read an unpublished pairing, including its maker: otherwise not seeing it after submitting would reveal someone else's. This narrowed the M5 read policy, found in the pre-PR review. A withdrawal never deletes one that anything else uses, and M7b's review must do the same.
+- **Personal data.** The request's note and snapshot, and audit rows naming the account's id, outlive the account. Their retention is left to D10 (see [Personal data in submissions](security-rls.md#catalog-submissions-m7a)).
+- **Unowned records after account deletion.** Deleting an account sets `submitted_by` to null on its pending records, which stay unverified for review, and keeps the request's history.
+- **Merges in M7b.** The M6 trigger `drop_unlisted_components` would delete copies' piece records during a merge. M7b must replace it so those records are kept.
 
 ## Risks to watch
 
