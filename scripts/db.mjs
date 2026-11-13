@@ -68,6 +68,7 @@ const steps = {
   submissions: () => runNode("db-submission-checks.mjs"),
   review: () => runNode("db-review-checks.mjs"),
   relink: () => runNode("db-relink-checks.mjs"),
+  exclusion: () => runNode("db-exclusion-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -91,8 +92,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

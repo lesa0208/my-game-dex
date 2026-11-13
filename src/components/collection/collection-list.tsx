@@ -6,6 +6,7 @@ import { completenessLabel, conditionLabel, copyStatusLabel, formatDay, releaseL
 import { type CollectionParams, copyHref } from "@/features/collection/list-params";
 import type { CopyNumber } from "@/features/collection/queries";
 import type { CollectionEntry } from "@/features/collection/types";
+import type { PreservedTitle } from "@/features/exclusion/queries";
 
 const cardClassName =
   "flex gap-3 rounded-lg border bg-card p-3 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring";
@@ -23,19 +24,17 @@ function copyFacts(item: CollectionEntry, number: CopyNumber | undefined, sort: 
   return facts;
 }
 
-function CopyRow({ item, number, params }: { item: CollectionEntry; number: CopyNumber | undefined; params: CollectionParams }) {
+function CopyRow({ item, number, preserved, params }: { item: CollectionEntry; number: CopyNumber | undefined; preserved: PreservedTitle | undefined; params: CollectionParams }) {
   const status = copyStatusLabel(item.status);
+  // A preserved copy's excluded release, as its owner may read it (M7b-2b).
+  const release = item.release ?? preserved ?? null;
   return (
     <Link href={copyHref(item.id, params)} className={cardClassName}>
       <CatalogCover className="w-12" />
       <div className="min-w-0 flex-1">
-        <p className="font-medium text-pretty">{item.game?.title ?? "Release no longer available"}</p>
-        {item.release ? <p className="text-sm text-muted-foreground">{releaseLine(item.release)}</p> : null}
-        {item.release?.local_title ? (
-          <p className="text-xs text-muted-foreground">
-            {item.release.local_title}
-          </p>
-        ) : null}
+        <p className="font-medium text-pretty">{item.game?.title ?? preserved?.title ?? "Release no longer available"}</p>
+        {release ? <p className="text-sm text-muted-foreground">{releaseLine(release)}</p> : null}
+        {release?.local_title ? <p className="text-xs text-muted-foreground">{release.local_title}</p> : null}
         <p className="mt-1.5 text-xs text-muted-foreground">{copyFacts(item, number, params.sort).join(" · ")}</p>
         {status ? <p className="mt-1.5 inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{status}</p> : null}
       </div>
@@ -43,12 +42,22 @@ function CopyRow({ item, number, params }: { item: CollectionEntry; number: Copy
   );
 }
 
-export function CollectionList({ items, numbers, params }: { items: CollectionEntry[]; numbers: Map<string, CopyNumber>; params: CollectionParams }) {
+export function CollectionList({
+  items,
+  numbers,
+  preserved = new Map(),
+  params,
+}: {
+  items: CollectionEntry[];
+  numbers: Map<string, CopyNumber>;
+  preserved?: Map<string, PreservedTitle>;
+  params: CollectionParams;
+}) {
   return (
     <ol className="flex flex-col gap-2">
       {items.map((item) => (
         <li key={item.id}>
-          <CopyRow item={item} number={numbers.get(item.id)} params={params} />
+          <CopyRow item={item} number={numbers.get(item.id)} preserved={preserved.get(item.id)} params={params} />
         </li>
       ))}
     </ol>

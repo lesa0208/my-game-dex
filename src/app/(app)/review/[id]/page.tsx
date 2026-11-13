@@ -332,6 +332,20 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
           </Disclosure>
         </>
       ) : null}
+
+      {!request.own && release && ["open", "in_review", "changes_requested", "rejected"].includes(request.status) ? (
+        <Disclosure title="Exclude from the catalog" destructive>
+          <p className="text-sm text-muted-foreground">
+            For a product outside the catalog&apos;s physical-only scope, such as a download code or a game-key card. The submission is closed for good, and the submitter&apos;s
+            copies are kept privately. You&apos;ll see every effect before confirming.
+          </p>
+          <p className="mt-3">
+            <Link href={`/review/exclude/${release.id}`} className="text-sm font-medium text-destructive underline underline-offset-4">
+              Review the effects of excluding it
+            </Link>
+          </p>
+        </Disclosure>
+      ) : null}
     </article>
   );
 }

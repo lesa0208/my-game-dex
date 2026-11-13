@@ -132,13 +132,12 @@ try {
   check("with the move flow open", /<details id="move"[^>]* open/.test(kept.html));
   check("and no edit form, which the database would refuse", !plain(kept.html).includes("Edit this copy") && !kept.html.includes('id="edit-copy"'));
   check("nor removing a piece record, also refused", plain(kept.html).includes("Old leaflet") && !plain(kept.html).includes("Remove this record"));
-  check("and it says the search can't be limited to the copy's platform", plain(kept.html).includes("the search can't be limited to its platform"));
+  // Its owner reads the excluded release's platform and game (M7b-2b), so the picker is limited to them.
+  const target = hrefs(kept.html).find((h) => h.includes(`move_to=${us}`));
+  check("it lists the game's other releases for the copy's platform", Boolean(target) && !hrefs(kept.html).some((h) => h.includes(`move_to=${jp}`)));
+  check("and limits the search to that platform", plain(kept.html).includes("Search the catalog for Super Nintendo Entertainment System games") && !plain(kept.html).includes("the search can't be limited"));
   const searched = await owner.browser.get(`/collection/${preserved}?move_q=starfall`);
-  const gameLink = hrefs(searched.html).find((h) => h.includes("move_game=starfall-odyssey"));
-  check("searching finds the game", Boolean(gameLink));
-  const releasesPage = await owner.browser.get(gameLink.split("#")[0]);
-  const target = hrefs(releasesPage.html).find((h) => h.includes(`move_to=${us}`));
-  check("and lists its releases", Boolean(target));
+  check("searching finds the game", hrefs(searched.html).some((h) => h.includes("move_game=starfall-odyssey") && !h.includes("move_to=")));
   const confirmKept = await owner.browser.get(target.split("#")[0]);
   const recovered = await owner.browser.submit(target.split("#")[0], formById(confirmKept.html, "move-copy"), {});
   check("moving it recovers it", recovered.response.status === 303

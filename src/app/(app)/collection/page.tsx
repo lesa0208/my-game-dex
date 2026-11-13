@@ -1,4 +1,4 @@
-import { CircleCheck, Library, Plus, PlugZap, SearchX, TimerReset } from "lucide-react";
+import { CircleCheck, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -15,12 +15,14 @@ import { completenessLabel } from "@/features/collection/details";
 import {
   collectionHref,
   type CollectionParams,
+  DEFAULT_PARAMS,
   readCollectionParams,
   readNotice,
   STATUSES,
 } from "@/features/collection/list-params";
 import { getCopyNumbers, getMyCollection, getMyCollectionSummary } from "@/features/collection/queries";
 import type { CollectionSummary } from "@/features/collection/types";
+import { getMyPreservedTitles } from "@/features/exclusion/queries";
 
 export const metadata: Metadata = {
   title: "My Collection",
@@ -100,13 +102,16 @@ async function CollectionResults({ params, summary }: { params: CollectionParams
     );
   }
 
-  const numbers = await getCopyNumbers(items);
+  const [numbers, preserved] = await Promise.all([
+    getCopyNumbers(items),
+    getMyPreservedTitles(items.filter((item) => item.status === "invalid" && !item.release).map((item) => item.id)),
+  ]);
   return (
     <section aria-labelledby="collection-results">
       <h2 id="collection-results" className="mb-3 text-sm font-medium text-muted-foreground">
         {describe(params, summary)}
       </h2>
-      <CollectionList items={items} numbers={numbers} params={params} />
+      <CollectionList items={items} numbers={numbers} preserved={preserved} params={params} />
       {params.cursor || nextCursor ? (
         <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
           {params.cursor ? (
@@ -167,6 +172,18 @@ async function CollectionView({ searchParams }: { searchParams: PageProps<"/coll
   return (
     <>
       {notice ? <Notice notice={notice} /> : null}
+      {summary.data.invalid > 0 && params.status !== "invalid" ? (
+        <p className="mb-4 flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {summary.data.invalid === 1 ? "1 copy is" : `${summary.data.invalid.toLocaleString("en")} copies are`} kept privately because {summary.data.invalid === 1 ? "its release" : "their releases"}{" "}
+            left the catalog. Everything you recorded is kept.{" "}
+            <Link href={collectionHref({ ...DEFAULT_PARAMS, sort: params.sort, status: "invalid" })} className="font-medium text-primary-text underline underline-offset-4">
+              See {summary.data.invalid === 1 ? "it" : "them"}
+            </Link>
+          </span>
+        </p>
+      ) : null}
       <CollectionSummaryView summary={summary.data} params={params} />
       <CollectionFilters params={params} summary={summary.data} />
       <Suspense key={collectionHref(params)} fallback={<CollectionListSkeleton />}>

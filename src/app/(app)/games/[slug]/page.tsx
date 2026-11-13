@@ -5,6 +5,7 @@ import { Suspense } from "react";
 
 import { gameHref, ReleasePickerSkeleton, ReleasePickerView } from "@/components/catalog/release-picker";
 import { AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
+import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link";
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getReleasePicker } from "@/features/catalog/queries";
@@ -45,9 +46,14 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
       picker={picker}
       requestedRelease={selection.release !== null}
       renderAdd={(release) => (
-        <Suspense fallback={<AddToCollectionSkeleton />}>
-          <AddToCollection release={release} returnPath={gameHref(picker.game.slug, { ...selection, release: release.id })} />
-        </Suspense>
+        <>
+          <Suspense fallback={<AddToCollectionSkeleton />}>
+            <AddToCollection release={release} returnPath={gameHref(picker.game.slug, { ...selection, release: release.id })} />
+          </Suspense>
+          <Suspense fallback={null}>
+            <ExcludeReleaseLink releaseId={release.id} />
+          </Suspense>
+        </>
       )}
     />
   );

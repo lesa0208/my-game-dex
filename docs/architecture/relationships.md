@@ -413,7 +413,9 @@ stateDiagram-v2
   rejected --> unverified: User edits and resubmits
   published --> merged: Duplicate found later
   published --> excluded: Later found out of scope
-  excluded --> under_review: Exclusion reversed by an admin
+  excluded --> unverified: Restored by another admin
+  excluded --> rejected: Restored by another admin
+  excluded --> published: Restored by another admin
   published --> [*]
   merged --> [*]
   excluded --> [*]
@@ -425,7 +427,7 @@ stateDiagram-v2
 | `under_review` | Submitter, catalog editors | Yes | Can't read it or attach to it |
 | `published` | Everyone | Yes | Normal catalog entry |
 | `rejected` | Submitter, catalog editors | Yes, marked "Not approved" | Can't read it or attach to it |
-| `excluded` | Submitter, catalog editors, owners of preserved records | No. Existing items are preserved privately, and none can be added | Can't read it or attach to it |
+| `excluded` | Catalog editors. Owners of preserved copies, the submitter among them, read a fixed set of its fields through `get_my_preserved_release` (M7b-2b) | No. Existing items are preserved privately, and none can be added | Can't read it or attach to it |
 | `merged` | Everyone, as a redirect | Items are moved to the target | Redirected |
 
 What each outcome does, always in one transaction through a staff function that writes an audit row:
@@ -470,7 +472,7 @@ flowchart TD
 | --- | --- |
 | Excluded from the public catalog | `excluded` releases are readable only by the submitter, catalog editors and owners of preserved records |
 | No new additions | `can_use_release()` rejects excluded releases, on insert and update |
-| Owners notified | The exclusion function sends a `catalog_exclusion` notification to every owner |
+| Owners notified | Once per owner per exclusion: `catalog_exclusion` with their number of copies, or, for the submitter, `catalog_submission` with status `excluded`. Never naming who acted. Restoration returns each to its previous status (M7b-2b) |
 | Preserved privately | The row, its components and its private data all stay. Others can't read it, whatever its `visibility` was |
 | Not counted as a valid game | Statistics require `record_status = 'active'` and a `published` release. It's shown to the owner as its own category, distinct from pending (A1) |
 | Not shown as legitimate | It disappears from public shelves automatically, because a shelf entry needs a readable item |
@@ -479,7 +481,7 @@ flowchart TD
 
 Under A2, **a preserved record is never deleted automatically because of its age**, and owners may delete their own. A formal retention policy will be defined separately, before real user data is processed.
 
-While preserved, the owner can read, export or delete the record, edit its private notes, or relink it. Other edits are blocked until it's corrected, so an invalid record can't be repaired by changing unrelated fields. Relinking is safe for owners to do themselves, because the target must be a published release, or their own submission. A trigger then clears the flag.
+While preserved, the owner can read, export or delete the record, or relink it. Every other edit, private notes included, is blocked until it's relinked or restored (M7b-2b D9), so an invalid record can't be repaired by changing unrelated fields. Relinking is safe for owners to do themselves, because the target must be a published release, or their own submission. A trigger then clears the flag.
 
 Other references to an excluded release:
 

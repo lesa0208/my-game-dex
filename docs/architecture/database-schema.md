@@ -948,6 +948,34 @@ There's deliberately no maximum price. On a publicly visible row it would show s
 
 ---
 
+### `private.catalog_exclusions` and `private.catalog_exclusion_copies`
+
+Built in M7b-2b. Written only by `exclude_release` and `restore_exclusion`; no client role has any privilege. See [security-rls.md](security-rls.md#excluding-and-restoring-releases-m7b-2b).
+
+`private.catalog_exclusions`, one row per exclusion, kept after restoration:
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `release_id` | `uuid` | No | → `releases(id)`, on delete restrict |
+| `excluded_by` | `uuid` | No | Plain value, no foreign key, as in the audit log |
+| `excluded_at` | `timestamptz` | No | Also each preserved copy's `invalidated_at` |
+| `reason_code` | `private.exclusion_reason` | No | Shown to owners |
+| `staff_reason` | `text` | No | 1 to 500 characters. Staff only |
+| `owner_note` | `text` | Yes | 1 to 1,000 characters, trimmed. Shown to owners and the submitter |
+| `previous_status` | `catalog_status` | No | `unverified`, `under_review`, `published` or `rejected` |
+| `request_id` | `uuid` | Yes | The submission it closed. → `catalog_change_requests(id)`, on delete set null |
+| `previous_request` | `jsonb` | Yes | That request's `status`, `reviewed_by`, `reviewed_at` and `reviewer_note` before |
+| `cascade` | `jsonb` | No | The games and pairing excluded with it, each with its previous status |
+| `copies_preserved`, `owners_affected` | `integer` | No | |
+| `version` | `integer` | No | Raised by restoration |
+| `restored_at`, `restored_by`, `restore_reason`, `copies_restored` | | Yes | All set together, or none |
+
+- **Unique:** `release_id` where `restored_at IS NULL`: a release is excluded at most once at a time
+- **Indexes:** `((restored_at IS NULL), id DESC)` for the administrators' list
+
+`private.catalog_exclusion_copies`: `exclusion_id` (→ exclusions, cascade), `item_id` (→ `collection_items(id)`, cascade, so an owner's removal is never undone) and `owner_id` (plain). Primary key `(exclusion_id, item_id)`, index on `item_id`.
+
 ## Social system
 
 ### `posts`
@@ -1138,13 +1166,13 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 | `actor_id` | `uuid` | Yes | Required for follow types. Always null for `moderation`, which never names who acted |
 | `type` | `notification_type` | No | |
 | `event_at` | `timestamptz` | Yes | The follow's `requested_at` or `accepted_at`. Required for follow types, null for `moderation` |
-| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (M4-D8). Default `{}` |
+| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (M4-D8). `catalog_submission` holds `status` and `submission_id`, and `exclusion_id` when excluded; `catalog_exclusion` holds `status` (`excluded` or `restored`), `exclusion_id` and `copies` (M7b-2b). Default `{}` |
 | `created_at` | `timestamptz` | No | Default `now()` |
 | `read_at` | `timestamptz` | Yes | Set by `mark_notifications_read` |
 
 - **Primary key:** `id`
 - **Foreign keys:** `recipient_id` and `actor_id` → `profiles(id)`, both on delete cascade (M4-D4), so nothing about a deleted account remains in anyone's notifications
-- **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict
+- **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict. `(recipient_id, data->>'exclusion_id', data->>'status')` where `data ? 'exclusion_id'`, so one exclusion or restoration notifies each person once (M7b-2b)
 - **Checks:** the type, actor, event and data combinations above; the actor is never the recipient
 - **Indexes:** `(recipient_id, id DESC)`; `(recipient_id, id DESC)` where `read_at IS NULL`; `(actor_id, recipient_id)` where `actor_id` is not null
 - **Timestamps:** `created_at`, `read_at`. `event_at` is the time of the change that caused the notification
