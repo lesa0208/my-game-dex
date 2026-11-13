@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleCheck, Lock, PlugZap } from "lucide-react";
+import { ArrowLeft, CircleCheck, Lock, MessageSquareText, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -8,6 +8,7 @@ import { Suspense } from "react";
 import { AddCopyForm } from "@/components/collection/add-copy-form";
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ResubmitSubmissionForm } from "@/components/submissions/resubmit-submission-form";
 import { SubmissionForm } from "@/components/submissions/submission-form";
 import { WithdrawSubmissionForm } from "@/components/submissions/withdraw-submission-form";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -26,7 +27,13 @@ export const metadata: Metadata = {
 };
 
 /** Statuses whose release the submitter may still add a copy of (can_use_release). */
-const COPYABLE = new Set(["submitted", "in_review", "rejected"]);
+const COPYABLE = new Set(["submitted", "in_review", "changes_requested", "rejected"]);
+
+const NOTICES: Record<string, string> = {
+  submitted: "Submitted. Thank you: an editor will review it.",
+  withdrawn: "The submission was withdrawn.",
+  resubmitted: "Sent for review. An editor will look at it again.",
+};
 
 function Section({ id, title, icon, children }: { id: string; title: string; icon?: ReactNode; children: ReactNode }) {
   return (
@@ -58,7 +65,7 @@ function Facts({ rows }: { rows: { label: string; value: string | null }[] }) {
 async function SubmissionView({ params, searchParams }: { params: PageProps<"/submissions/[id]">["params"]; searchParams: PageProps<"/submissions/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
-  const notice = search.notice === "submitted" || search.notice === "withdrawn" ? search.notice : null;
+  const notice = typeof search.notice === "string" ? (NOTICES[search.notice] ?? null) : null;
   const viewer = await requireViewerWithHandle(UUID.test(id) ? `/submissions/${id}` : "/submissions");
 
   const submission = await getMySubmission(id);
@@ -90,7 +97,7 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
       {notice ? (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
           <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
-          {notice === "submitted" ? "Submitted. Thank you: an editor will review it." : "The submission was withdrawn."}
+          {notice}
         </p>
       ) : null}
 
@@ -111,6 +118,33 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
           </p>
         ) : null}
       </header>
+
+      {submission.reviewer_note && (submission.status === "changes_requested" || submission.status === "rejected") ? (
+        <section aria-labelledby="editor-note" className="rounded-lg border border-primary/40 bg-primary/5 p-4">
+          <h2 id="editor-note" className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <MessageSquareText aria-hidden="true" className="size-4" />
+            {submission.status === "changes_requested" ? "The editors asked for changes" : "Why it wasn't approved"}
+          </h2>
+          <p className="text-sm break-words whitespace-pre-wrap">{submission.reviewer_note}</p>
+        </section>
+      ) : submission.status === "changes_requested" ? (
+        <p className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm">The editors asked for changes. Change it below, then send it back for review.</p>
+      ) : null}
+
+      {submission.previous_id || submission.next_id ? (
+        <p className="text-sm">
+          {submission.previous_id ? (
+            <Link href={`/submissions/${submission.previous_id}`} className="text-primary-text underline underline-offset-4">
+              The earlier, rejected submission
+            </Link>
+          ) : null}
+          {submission.next_id ? (
+            <Link href={`/submissions/${submission.next_id}`} className="text-primary-text underline underline-offset-4">
+              Its resubmission
+            </Link>
+          ) : null}
+        </p>
+      ) : null}
 
       {!isPublic && submission.status !== "withdrawn" ? (
         <p className="flex gap-2 rounded-lg border px-4 py-3 text-sm text-muted-foreground">
@@ -140,7 +174,8 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
             { label: "Release year", value: details.release_date ? details.release_date.slice(0, 4) : null },
             { label: "In the box", value: details.components.length ? details.components.map((c) => componentLabel(c)).join(", ") : null },
             { label: "Note for the editors", value: submission.note },
-            { label: "Note from the editors", value: submission.reviewer_note },
+            // Shown above, on its own, while it asks for changes or explains a rejection.
+            { label: "Note from the editors", value: submission.status === "changes_requested" || submission.status === "rejected" ? null : submission.reviewer_note },
           ]}
         />
       </Section>
@@ -171,6 +206,8 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
           </div>
         </details>
       ) : null}
+
+      {submission.resubmittable ? <ResubmitSubmissionForm submissionId={submission.id} rejected={submission.status === "rejected"} /> : null}
 
       {submission.editable && submission.created_game && submission.game_id ? (
         <p className="text-sm">

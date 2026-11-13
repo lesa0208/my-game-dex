@@ -835,6 +835,21 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Unowned records after account deletion.** Deleting an account sets `submitted_by` to null on its pending records, which stay unverified for review, and keeps the request's history.
 - **Merges in M7b.** The M6 trigger `drop_unlisted_components` would delete copies' piece records during a merge. M7b must replace it so those records are kept.
 
+### ADR-051: Catalog review goes through audited functions, and nothing is published without it
+
+**Decision.** Approved by the product owner for M7b-1, with decisions 1 to 9 of the M7b proposal. Active catalog editors and administrators review submissions through `SECURITY DEFINER` functions: start, approve (verify and publish), request changes, reject. Editors may correct records with the M5a functions while a submission is in review. A submitter answers requested changes on the same request; a rejected submission is resubmitted as a new, linked request that counts toward the daily limit. Editors see the submitter's handle and account status, never their email or collection. Optimistic version checks, not exclusive claims. Outcomes notify the submitter in-app, always on, without naming the reviewer.
+
+**Why.**
+- **No bypass.** The M5 functions publish any verified record, so without a guard a submission could be published, even by its own submitter, without a review. A trigger on `games` and `releases` covers every path: no verification or publication while a review is active, and never by anyone who ever submitted the record, by the permanent history.
+- **Reuse.** Approval calls the M5 verification and publication functions, so every publication rule and audit row applies unchanged.
+- **Versions, not claims.** Two editors can work without waiting for each other, and a stale page can't act on something it didn't show.
+
+**Trade-offs.**
+- **Verification and publication happen together** for a submission, inside approval. Editors can't verify a submission ahead of approving it.
+- **Lock order.** M7a's submitter functions now lock the caller's profile, then the game before the release, so withdrawal can't deadlock with publication. That redefined two M7a helpers, with their checks unchanged.
+- **Deleted accounts.** Their submissions can be approved or rejected, but not sent back for changes.
+- **Imports.** Private submissions are invisible to import title matching (M7b-1 follow-up), so an import with the same title creates its own candidate instead, and editors resolve the duplicate in review.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -972,7 +987,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | Before | Required |
 | --- | --- |
 | Catalog approval workflows open (M7 in use) | Written editorial eligibility guidelines (A3) |
-| Real user data is processed | Retention policy (A2, D10), minimum age (D12), Frankfurt legal review (D13). See [Legal and age blockers](security-rls.md#legal-and-age-blockers) |
+| Real user data is processed | Retention policy (A2, D10, M4-D10), including catalog submissions, review history and audit rows; minimum age (D12); Frankfurt legal review (D13). See [Legal and age blockers](security-rls.md#legal-and-age-blockers) |
 | Public authentication opens | All of [Blockers before public authentication](security-rls.md#blockers-before-public-authentication), and [Requirements before any hosted registration](security-rls.md#requirements-before-any-hosted-registration) |
 | Public launch | Reporting (L4), including impersonation reporting and moderation, because lookalike handles may coexist. Rate limiting, and a security review of all policies |
 

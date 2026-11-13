@@ -327,6 +327,13 @@ export const m5bMutations = [
   sql("importer can verify", "pgtap", "grant execute on function public.verify_release(uuid, text, bigint) to catalog_importer;"),
   sql("importer reads the catalog", "both", "grant select on public.games to catalog_importer;"),
   sql("importer inherits roles", "pgtap", "alter role catalog_importer inherit;"),
+  // Private submissions (M7b-1 follow-up)
+  sql("imports match a pending submission by title", "pgtap", rewrite("private.import_games_by_key(uuid, text)", "\n    and not private.import_private_game(g)", "")),
+  sql("imports match a pending submission ignoring word breaks", "pgtap", rewrite("private.import_games_by_compact(uuid, text)", "\n    and not private.import_private_game(g)", "")),
+  sql("imports note a pending submission's serial", "pgtap",
+    rewrite("private.import_apply_release(private.import_runs, private.provider_records)", "\n      and not private.import_private_release(r);", ";")),
+  sql("an unowned submitted game is matched", "pgtap",
+    rewrite("private.import_private_game(public.games)", "or exists (select 1 from public.catalog_change_requests s where s.game_id = p_game.id and s.created_game)", "or false")),
 ];
 
 const SEARCH = "public.search_catalog(text, text[], integer, text)";
@@ -446,4 +453,41 @@ export const m7aMutations = [
     "     or true then\n    delete from public.game_platforms")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations };
+const GUARD = "private.guard_submitted_record()";
+const BEGIN_REVIEW = "private.begin_review(uuid, uuid, integer)";
+const START_REVIEW = "public.start_submission_review(uuid, integer, text)";
+const APPROVE = "public.approve_submission(uuid, integer, bigint, bigint, text, text)";
+const REQUEST_CHANGES = "public.request_submission_changes(uuid, integer, text, text)";
+const REJECT = "public.reject_submission(uuid, integer, text, text)";
+const RESUBMIT = "public.resubmit_my_submission(uuid, text)";
+
+export const m7b1Mutations = [
+  // Who reviews, and never their own
+  sql("anyone may start a review", "both", rewrite(START_REVIEW, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
+  sql("collectors may read the queue", "both", rewrite("public.get_submission_queue(text, uuid, integer)", "v_me uuid := private.require_active_staff('catalog_editor');", "v_me uuid := (select auth.uid());")),
+  sql("collectors may read a submission under review", "both", rewrite("public.get_submission_review(uuid)", "v_me uuid := private.require_active_staff('catalog_editor');", "v_me uuid := (select auth.uid());")),
+  sql("self-review allowed", "pgtap", rewrite(BEGIN_REVIEW, "if req.submitted_by is not distinct from p_me then", "if false then")),
+  sql("a deleted submitter blocks review", "both", rewrite(BEGIN_REVIEW, "if req.submitted_by is not distinct from p_me then", "if req.submitted_by is null or req.submitted_by = p_me then")),
+  sql("editors see the submitter's email", "both", rewrite("private.review_submitter(uuid)", "'handle', p.handle,", "'handle', p.handle, 'email', (select u.email from auth.users u where u.id = p.id),")),
+  // No bypass
+  sql("publication without review", "both", rewrite(GUARD, "      raise exception 'review required' using errcode = 'P0001';", "      null;")),
+  sql("submitters may verify what they submitted", "pgtap", rewrite(GUARD, "      raise exception 'own submission' using errcode = 'P0001';", "      null;")),
+  sql("editors may change a submission before its review", "pgtap", rewrite(GUARD, "  elsif v_req.status <> 'in_review' then", "  elsif false then")),
+  sql("submitters may change it in review as editors", "pgtap", rewrite(GUARD, "    if v_req.status not in ('open', 'changes_requested') then", "    if false then")),
+  sql("submitters may confirm an unknown region", "pgtap", rewrite(GUARD, "if v_release and new.region_unknown_confirmed and not old.region_unknown_confirmed then", "if false then")),
+  // Stale pages
+  sql("stale version accepted", "both", rewrite(BEGIN_REVIEW, "if req.version <> p_expected_version then", "if false then")),
+  sql("account deletion leaves the version", "pgtap", "drop trigger bump_request_version on public.catalog_change_requests;"),
+  // Outcomes
+  sql("approval leaves the request open", "both", rewrite(APPROVE, "status = 'approved', reviewed_by = v_me", "status = 'in_review', reviewed_by = v_me")),
+  sql("changes requested of a deleted account", "both", rewrite(REQUEST_CHANGES, "if v_req.submitted_by is null then", "if false then")),
+  sql("rejection ignores a game's other releases", "pgtap",
+    rewrite(REJECT, "o.status in ('unverified', 'under_review', 'published')) then 'unverified'::public.catalog_status", "o.status in ('unverified', 'under_review', 'published') and false) then 'unverified'::public.catalog_status")),
+  sql("resubmitting after rejection not counted", "pgtap", rewrite(RESUBMIT, "  perform private.begin_submission(true);", "  perform private.begin_submission(false);")),
+  sql("a rejected request resubmitted twice", "pgtap", rewrite(RESUBMIT, "if exists (select 1 from public.catalog_change_requests n where n.previous_request_id = v_old.id) then", "if false then")),
+  // Notifications
+  sql("a submission notice names the reviewer", "both", rewrite(APPROVE, "perform private.notify(v_req.submitted_by, null, 'catalog_submission', null,", "perform private.notify(v_req.submitted_by, v_me, 'catalog_submission', null,")),
+  sql("submission notices unconstrained", "pgtap", "alter table public.notifications drop constraint notifications_shape;"),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations };

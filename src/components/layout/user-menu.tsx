@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, FilePlus2, LogIn, LogOut, Settings, UserRound } from "lucide-react";
+import { AtSign, ClipboardCheck, FilePlus2, LogIn, LogOut, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -25,7 +25,8 @@ export function UserMenuPlaceholder() {
   );
 }
 
-export function UserMenu({ viewer }: { viewer: Viewer | null }) {
+/** `canReview`: an active catalog editor or administrator, from `can_review_submissions()`. */
+export function UserMenu({ viewer, canReview = false }: { viewer: Viewer | null; canReview?: boolean }) {
   if (!viewer) {
     return (
       <Button asChild variant="ghost" size="lg" className="h-10">
@@ -69,6 +70,14 @@ export function UserMenu({ viewer }: { viewer: Viewer | null }) {
                   My submissions
                 </Link>
               </DropdownMenuItem>
+              {canReview ? (
+                <DropdownMenuItem asChild>
+                  <Link href="/review">
+                    <ClipboardCheck aria-hidden="true" />
+                    Review submissions
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem asChild>
                 <Link href="/settings">
                   <Settings aria-hidden="true" />

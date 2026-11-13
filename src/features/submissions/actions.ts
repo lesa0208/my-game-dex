@@ -108,6 +108,29 @@ export async function updateMySubmissionFromForm(formData: FormData): Promise<vo
   await updateMySubmission({ status: "idle", message: null }, formData);
 }
 
+/**
+ * Sends a submission back for review (M7b-1): after changes were requested, as the
+ * same submission; after a rejection, as a new one linked to it, which counts toward
+ * today's limit. Lands on the submission that's now waiting.
+ */
+export async function resubmitMySubmission(_state: SubmissionState, formData: FormData): Promise<SubmissionState> {
+  const id = field(formData, "submission_id");
+  if (!UUID.test(id)) return { status: "error", message: submissionErrorMessage("submission unavailable") };
+  const note = field(formData, "note").replace(/\r\n/g, "\n").trim();
+  if (note.length > 1000) return { status: "error", message: "The note can be up to 1,000 characters." };
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return UNAVAILABLE;
+  const { data: auth } = await supabase.auth.getClaims();
+  if (!auth?.claims?.sub) return SIGNED_OUT;
+
+  const { data, error } = await supabase.rpc("resubmit_my_submission", { p_submission: id, p_note: note || null });
+  if (error) return { status: "error", message: submissionErrorMessage(error.message) };
+  const next = (data as { submission_id?: string } | null)?.submission_id;
+  if (!next || !UUID.test(next)) return { status: "error", message: submissionErrorMessage(null) };
+  refresh();
+  redirect(`/submissions/${next}?notice=resubmitted`);
+}
+
 /** Withdraws an unreviewed submission, then shows it as withdrawn. */
 export async function withdrawMySubmission(_state: SubmissionState, formData: FormData): Promise<SubmissionState> {
   const id = field(formData, "submission_id");
