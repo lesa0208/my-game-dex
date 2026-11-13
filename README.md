@@ -188,7 +188,7 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 - Community, Notifications, Messages and My Profile are placeholder pages, and Settings has only the account and handle
 - Search covers the published game catalog only, not collectors
 - My Collection is private: there are no public collections, shelves, valuation, import or bulk editing yet, and the catalog has no cover artwork
-- Missing games and releases can be submitted, and catalog editors review, approve, send back or reject them. Merging duplicates, exclusion, restoration and relinking copies come with M7b-2, and the notifications page isn't built yet
+- Missing games and releases can be submitted, and catalog editors review, approve, send back or reject them. Merging duplicates, exclusion, restoration and relinking copies come with M7b-2, the notifications page isn't built yet, and the review page edits up to 30 listed pieces (the editor function allows 50)
 - JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review
