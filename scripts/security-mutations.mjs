@@ -397,8 +397,11 @@ export const m6Mutations = [
     `drop policy collection_items_insert_own on public.collection_items; create policy collection_items_insert_own on public.collection_items for insert to authenticated with check (${ACTIVE} and private.can_use_release(release_id));`),
   sql("details written for another owner", "pgtap",
     `drop policy collection_item_private_insert_own on public.collection_item_private; create policy collection_item_private_insert_own on public.collection_item_private for insert to authenticated with check (${ACTIVE});`),
+  // Since M7b-2a the late release check (a trigger) enforces the same rule as the
+  // policy, so weakening the policy alone changes nothing. This removes both; the m7b2a
+  // suite tests the trigger on its own.
   sql("any release can be attached", "both",
-    `drop policy collection_items_insert_own on public.collection_items; create policy collection_items_insert_own on public.collection_items for insert to authenticated with check (${OWNER} and ${ACTIVE});`),
+    `drop policy collection_items_insert_own on public.collection_items; create policy collection_items_insert_own on public.collection_items for insert to authenticated with check (${OWNER} and ${ACTIVE}); drop trigger check_copy_release on public.collection_items;`),
   sql("suspended owners may edit copies", "api",
     `drop policy collection_items_update_own on public.collection_items; create policy collection_items_update_own on public.collection_items for update to authenticated using (${OWNER}) with check (${OWNER} and private.can_use_release(release_id));`),
   sql("suspended owners may add", "both", rewrite(ADD_ITEM, "if not coalesce((select a.is_active from public.get_my_account() a), false) then", "if false then")),
@@ -490,4 +493,26 @@ export const m7b1Mutations = [
   sql("submission notices unconstrained", "pgtap", "alter table public.notifications drop constraint notifications_shape;"),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations };
+const USABLE = "private.lock_usable_release(uuid, uuid)";
+const RELINK = "public.relink_my_copy(uuid, uuid)";
+
+export const m7b2aMutations = [
+  // Piece records survive a change of release
+  sql("moving a copy drops its unlisted piece records", "both",
+    "create function private.__m_drop_unlisted() returns trigger language plpgsql set search_path = '' as $f$ begin delete from public.collection_item_components c where c.item_id = new.id and not exists (select 1 from public.release_components rc where rc.release_id = new.release_id and rc.kind = c.kind and rc.label = c.label); return null; end $f$; create trigger __m_drop_unlisted after update of release_id on public.collection_items for each row when (new.release_id is distinct from old.release_id) execute function private.__m_drop_unlisted();"),
+  // The late check
+  sql("adding a copy skips the late release check", "both", "drop trigger check_copy_release on public.collection_items;"),
+  sql("moving a copy skips the late release check", "pgtap", "drop trigger check_copy_release_move on public.collection_items;"),
+  sql("the late check takes a key-share lock", "api", rewrite(USABLE, "for share;", "for key share;")),
+  sql("the late check ignores the release's status", "both", rewrite(USABLE, "  if not found or not (rel.status = 'published'", "  if not found or false and not (rel.status = 'published'")),
+  sql("the late check isn't null-safe", "pgtap", rewrite(USABLE, "or (rel.submitted_by is not null and rel.submitted_by = p_owner", "or (rel.submitted_by = p_owner")),
+  // Relinking
+  sql("another user's copy can be moved", "both", rewrite(RELINK, "c.owner_id = v_me", "true")),
+  sql("a copy moves to another platform", "pgtap", rewrite(RELINK, "if v_target.platform_id is distinct from v_source.platform_id then", "if false then")),
+  sql("a suspended owner can move copies", "pgtap", rewrite(RELINK, "if not private.is_active_user() then", "if false then")),
+  sql("relinking locks the copy before the releases", "api", rewrite(RELINK, "  perform 1 from public.releases r where r.id in (v_from, p_release) order by r.id for share;\n", "")),
+  sql("clients may change a copy's release directly", "both", "grant update (release_id) on public.collection_items to authenticated;"),
+  sql("visitors may call relinking", "pgtap", `grant execute on function ${RELINK} to anon;`),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations };

@@ -48,6 +48,7 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run submissions:test` | Test the submission forms' rules |
 | `npm run app:submission-checks` | After a build, test catalog submissions (submitting, editing, withdrawing and adding a copy) in the running app against the local stack and catalog fixture |
 | `npm run review:test` | Test the review forms' rules |
+| `npm run app:relink-checks` | After a build, test moving a copy to another release (choosing, confirming, refusals and preserved copies) in the running app against the local stack and catalog fixture |
 | `npm run app:review-checks` | After a build, test catalog review (the queue, starting, correcting, approving, asking for changes, rejecting and resubmitting) in the running app against the local stack and catalog fixture |
 
 Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection.

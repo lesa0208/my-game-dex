@@ -135,8 +135,10 @@ async function listing() {
   await add(owner, poketrail, { completeness: "sealed" });
   await add(owner, meadow);
   for (let i = 0; i < 52; i += 1) await add(owner, sequel);
-  // A copy whose release the catalog has since excluded, as M7 will.
-  psql(`insert into public.collection_items (id, owner_id, release_id) values ('${uuidv7()}', '${owner.id}', '${orphan}');`);
+  // A copy whose release the catalog has since excluded, as M7 will. Copies can't be
+  // put on an excluded release (M7b-2a), so this one is written as data from before the
+  // exclusion would be, without triggers.
+  psql(`begin; set local session_replication_role = replica; insert into public.collection_items (id, owner_id, release_id) values ('${uuidv7()}', '${owner.id}', '${orphan}'); commit;`);
   const total = count(`select count(*) from public.collection_items where owner_id = '${owner.id}';`);
 
   const first = await owner.browser.get("/collection");

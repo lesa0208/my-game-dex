@@ -3,7 +3,7 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|all] [--out results.json] [--log run.log] [--only name]
+ *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|all] [--out results.json] [--log run.log] [--only name]
  *   node scripts/db-mutation-checks.mjs --recover
  *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
  *
@@ -346,7 +346,7 @@ async function runApi(timeout) {
   let failedCount = 0;
   let elapsed = 0;
   const stages = {};
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

@@ -97,3 +97,32 @@ export function readNotice(search: Search): "removed" | "already_removed" | null
   const notice = first(search, "notice");
   return notice === "removed" || notice === "already_removed" ? notice : null;
 }
+
+/**
+ * Where a copy's "Move to another release" flow is (M7b-2a): a game searched for, a
+ * game chosen, and a release chosen to confirm. Each is checked before use; anything
+ * else is dropped.
+ */
+export type MoveParams = { query: string | null; game: string | null; release: string | null };
+
+export function readMoveParams(search: Search): MoveParams {
+  const query = first(search, "move_q")?.trim() ?? "";
+  const game = first(search, "move_game") ?? "";
+  const release = first(search, "move_to") ?? "";
+  return {
+    query: query && query.length <= 100 ? query : null,
+    game: /^[a-z0-9]+(-[a-z0-9]+)*$/.test(game) && game.length <= 120 ? game : null,
+    release: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release) ? release.toLowerCase() : null,
+  };
+}
+
+/** A copy's page with the move flow at a step, keeping how the collection list was left. */
+export function moveHref(itemId: string, params: CollectionParams, move: Partial<MoveParams>): string {
+  const base = copyHref(itemId, params);
+  const query = new URLSearchParams();
+  if (move.query) query.set("move_q", move.query);
+  if (move.game) query.set("move_game", move.game);
+  if (move.release) query.set("move_to", move.release);
+  const extra = query.toString();
+  return `${base}${extra ? `${base.includes("?") ? "&" : "?"}${extra}` : ""}#move`;
+}

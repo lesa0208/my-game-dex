@@ -99,6 +99,8 @@ insert into approved_function_grants values
   ('request_submission_changes(uuid,integer,text,text)', 'authenticated'), ('reject_submission(uuid,integer,text,text)', 'authenticated'),
   ('can_review_submissions()', 'authenticated'), ('get_submission_queue(text,uuid,integer)', 'authenticated'),
   ('get_submission_review(uuid)', 'authenticated'),
+  -- M7b-2a: an owner moves their own copy. SECURITY DEFINER, because clients can't change a copy's release.
+  ('relink_my_copy(uuid,uuid)', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

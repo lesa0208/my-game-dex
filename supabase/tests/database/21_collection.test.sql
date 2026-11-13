@@ -177,9 +177,9 @@ select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.
                                                         'get_my_collection_item', 'get_my_release_copies', 'get_my_collection_summary')
              and not p.prosecdef), 7, 'every collection function runs with the caller''s rights');
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'private' and p.proname in ('check_new_collection_item', 'guard_collection_item_update', 'drop_unlisted_components',
+           where n.nspname = 'private' and p.proname in ('check_new_collection_item', 'guard_collection_item_update',
                                                          'check_collection_item_component', 'check_collection_item_private')
-             and not p.prosecdef), 5, 'every collection trigger runs with the caller''s rights');
+             and not p.prosecdef), 4, 'every M6 collection trigger runs with the caller''s rights (the M7b-2a release checks are in 25_copy_relink)');
 select ok(not has_function_privilege('anon', 'public.add_collection_item(uuid, uuid, jsonb)', 'execute')
           and not has_function_privilege('anon', 'public.get_my_collection(text, text, text, text, text, integer, text)', 'execute')
           and not has_function_privilege('service_role', 'public.get_my_collection_item(uuid)', 'execute'),
@@ -235,7 +235,7 @@ select pg_temp.new_id('d1');
 -- Without RETURNING, which would also apply the read policy and hide a broken insert policy.
 select ok(pg_temp.as_user('c1', format('insert into public.collection_items (id, owner_id, release_id) values (%L, %L, %L)', pg_temp.id('d1'), pg_temp.u('c2'), pg_temp.id('pub'))) like 'error: new row violates row-level security policy%'
           and not exists (select 1 from public.collection_items where id = pg_temp.id('d1')), 'a copy can''t be added for someone else');
-select ok(pg_temp.as_user('c1', format('insert into public.collection_items (id, owner_id, release_id) values (%L, %L, %L) returning id::text', pg_temp.id('d1'), pg_temp.u('c1'), pg_temp.id('draft'))) like 'error: new row violates row-level security policy%', 'a direct insert can''t use an unpublished release');
+select ok(pg_temp.as_user('c1', format('insert into public.collection_items (id, owner_id, release_id) values (%L, %L, %L) returning id::text', pg_temp.id('d1'), pg_temp.u('c1'), pg_temp.id('draft'))) = 'error: release unavailable', 'a direct insert can''t use an unpublished release (refused by the M7b-2a release check, before the policy)');
 select ok(pg_temp.as_user('c1', format('insert into public.collection_items (id, owner_id, release_id, record_status) values (%L, %L, %L, ''active'') returning id::text', pg_temp.id('d1'), pg_temp.u('c1'), pg_temp.id('pub'))) like 'error: permission denied%', 'a client can''t set a copy''s status');
 select is(pg_temp.as_user('c1', format('insert into public.collection_items (id, owner_id, release_id) values (%L, %L, %L) returning id::text', gen_random_uuid(), pg_temp.u('c1'), pg_temp.id('pub'))), 'error: invalid item id', 'a direct insert still needs a recent UUIDv7');
 
@@ -375,7 +375,7 @@ select is(pg_temp.upd('c1', 'p1', '{"remove_components": [{"kind": "map", "label
 select is(pg_temp.item('c1', 'p1') ->> 'status', 'invalid', 'a preserved copy shows as invalid');
 update public.collection_items set release_id = pg_temp.id('pub-eu') where id = pg_temp.id('p1');
 select is((select record_status::text || ' ' || coalesce(invalidated_at::text, 'none') from public.collection_items where id = pg_temp.id('p1')), 'active none', 'moving a preserved copy to a usable release clears the flag');
-select is((select count(*)::int from public.collection_item_components where item_id = pg_temp.id('p1')), 0, 'moving a copy drops pieces its new release doesn''t list');
+select is((select count(*)::int from public.collection_item_components where item_id = pg_temp.id('p1')), 1, 'moving a copy keeps its piece records, even of pieces its new release doesn''t list (M7b-2a)');
 select is((select notes from public.collection_item_private where item_id = pg_temp.id('p1')), 'keep', 'moving a copy keeps its details');
 update public.collection_items set record_status = 'invalid_preserved', invalidated_at = now() where id = pg_temp.id('p1');
 select is(pg_temp.as_user('c1', format('select public.remove_collection_item(%L)::text', pg_temp.id('p1'))), 'true', 'the owner can remove a preserved copy');

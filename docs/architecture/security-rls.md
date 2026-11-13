@@ -1079,7 +1079,7 @@ A signed-in collector with an active account submits a physical release the cata
 
 **Review.** Once a request is in review its submitter can't change or withdraw it. After changes are requested they can change it again, and withdraw it, then send it back; a rejected submission is read-only, and can be resubmitted as a new, linked request. See [Catalog review (M7b-1)](#catalog-review-m7b-1).
 
-**M7b-2 must keep copy data through merges.** Release merges must never silently delete user-owned collection information. The M6 trigger `drop_unlisted_components` runs when a copy's release changes, and deletes the copy's records of pieces the new release doesn't list. A merge moves copies to the target release, so as it stands a merge would delete those records. M7b-2 must correct the trigger before implementing any operation that moves copies between releases, in a forward-only migration with tests and an `m6` mutation run, so the records stay as "no longer listed" and are removed only on request (`remove_components`, M6d follow-up). M7a and M7b-1 don't change the trigger, and nothing in them moves a copy. Submitted pieces use the same kind and label identity as catalog pieces, and copies record pieces by kind and label, not by catalog row id, so those records stay meaningful after a merge.
+**Copy data through merges.** Release merges must never silently delete user-owned collection information. The M6 trigger `drop_unlisted_components`, which deleted a copy's records of pieces its new release doesn't list, was removed in M7b-2a, before anything moves copies between releases: records stay as "no longer listed" and are removed only by the owner (`remove_components`). See [Relinking copies (M7b-2a)](#relinking-copies-m7b-2a). Submitted pieces use the same kind and label identity as catalog pieces, and copies record pieces by kind and label, not by catalog row id, so those records stay meaningful after a merge.
 
 **When the submitter's account is deleted.** The foreign keys set `submitted_by` to null on the request and on the pending game, pairing and release, and cascade the account's copies away. Nothing is left that breaks a rule:
 - `releases_submitter_cleared` allows a null submitter on an unpublished release, and the pending-submission key ignores rows without one.
@@ -1163,6 +1163,42 @@ The M6 collection functions lock only the owner's copies and take no review row,
 - `scripts/db-review-checks.mjs`: the API boundary, and races: two editors approving at once, approval against rejection, concurrent corrections, a review against a withdrawal and against an edit, a review against an account deletion through Auth, and a withdrawal against an approval on the same game and pairing;
 - `npm run review:test` and `npm run app:review-checks` (the built app over HTTP, without JavaScript);
 - the `m7b1` suite in `scripts/security-mutations.mjs`.
+
+## Relinking copies (M7b-2a)
+
+The first part of M7b-2: copies keep every piece record when their release changes, no copy can be added or moved to a release whose status is changing at the same moment, and owners move their own copies to another release of the same platform. Exclusion and restoration (M7b-2b) and merging (M7b-2c) build on this. Migration: `20261113100000_m7b2a_relink.sql`.
+
+**Piece records are kept.** The M6 trigger `drop_unlisted_components` deleted a copy's records of pieces its new release doesn't list whenever its release changed. It's removed, before anything moves copies. A copy keeps every record, with its condition and timestamps; nothing identifies a record but its copy, kind and label, so nothing else can change. A record of a piece the new release also lists matches it; the rest show as no longer listed (M6d), and only the owner removes them, through `update_collection_item`'s `remove_components`. Recording a new piece still needs it to be listed.
+
+**The late release check.** Before, adding a copy was checked by the insert policy, which reads the release's status from the statement's snapshot, and by the foreign key, which takes only `FOR KEY SHARE`. An update of a release's status takes `FOR NO KEY UPDATE`, which doesn't conflict with `FOR KEY SHARE`, so a copy could land on a release whose status had just changed. Two triggers on `collection_items` now close that:
+- `check_copy_release` (insert) locks the owner's profile, then the release, `FOR SHARE`;
+- `check_copy_release_move` (a change of `release_id`) locks the new release `FOR SHARE`.
+
+`FOR SHARE` conflicts with every update of the release row, so whichever transaction commits first is seen by the other: a status change waits for a copy being added and then finds it, or the copy waits and is refused. After the lock, the release must be usable by the copy's owner: published, or the owner's own submission that's pending or not approved, never merged or excluded. The check uses the copy's owner, not the caller, so it holds for a staff merge too. A locking read needs `UPDATE` privilege, which clients don't have on releases, so these trigger functions run as their owner; they read and lock only the release named by the row being written, and clients can't call them. Deterministic tests in `db-relink-checks.mjs` hold one session's change open, confirm the other is waiting on a lock, then commit.
+
+**Lock order.** Profiles, then releases (by id), then copies. Adding a copy takes, in trigger order, the owner's profile, its release, then M6's per-owner collection lock, which only other additions by that owner take. Status changes lock their release `FOR UPDATE`, and M7b-2b and M7b-2c will lock releases before any copy. Locking the owner's profile first means an account deletion, which locks the profile and then clears `submitted_by` on their releases, waits for a copy being added rather than deadlocking with it.
+
+**Relinking.** `relink_my_copy(item, release)` moves the caller's own copy:
+- only an active owner; another user's copy reads as `item unavailable`;
+- to a release the caller may use, on the same platform. A release they can't use, such as someone else's pending submission, reads exactly like one that doesn't exist, and its platform is never compared;
+- active, not-approved and preserved copies alike; a preserved copy becomes active again, through the M6 guard, only when the move succeeds;
+- moving to the release it's already on changes nothing, not even `updated_at`;
+- everything else stays: the copy's id, conditions, when it was added, private details and piece records.
+
+It locks the caller's profile, then both releases `FOR SHARE` in id order, then the copy, so it waits for a merge or exclusion of either release rather than deadlocking with one.
+
+**Why a definer function.** Clients have no grant to change a copy's `release_id`, and that stays so. A column grant with the existing policies would have kept M6 free of privileged functions, but it would let any client change `release_id` directly, guarded only by the policies, and invite future columns into the same path. The dedicated `SECURITY DEFINER` function changes that one column after its own checks, with an empty `search_path`, executable by `authenticated` only; every trigger still runs. Tests prove clients still can't change `release_id`, `record_status` or `owner_id` directly. Owners' own relinks aren't audited, like any change to one's own collection.
+
+**Defense in depth.** The relink function and the late check both refuse an unusable release. A mutation that weakens only the function's own check is masked by the trigger, so the mutation suite tests the trigger directly, through superuser writes that bypass the function.
+
+**App.** The copy's page has "Move to another release": the game's other releases for the copy's platform, or a search for another game, then a confirmation naming both releases and what's kept. It works without JavaScript. A preserved copy explains that it's kept privately and opens the move flow. Until M7b-2b gives owners a read path to excluded releases, a copy on one shows no release, so its search isn't filtered to the platform, and the function refuses another platform.
+
+**Tested by:**
+- `25_copy_relink.test.sql` (who can relink, which targets, preservation compared before and after, not-approved and preserved copies, the late check through direct writes);
+- `21_collection.test.sql`, updated: moving a copy keeps its piece records;
+- `scripts/db-relink-checks.mjs` (the API boundary, and deterministic races between adding or moving a copy and a status change, and an account deletion);
+- `npm run collection:test` and `npm run app:relink-checks`;
+- the `m7b2a` suite, and an `m6` rerun.
 
 ## Assigning the first administrator
 

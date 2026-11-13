@@ -17,9 +17,10 @@ import {
   priceInput,
   readCopyChanges,
   readCopyDetails,
+  relinkErrorMessage,
   releaseLine,
 } from "./details.ts";
-import { collectionHref, copyHref, DEFAULT_PARAMS, readCollectionParams, readNotice } from "./list-params.ts";
+import { collectionHref, copyHref, DEFAULT_PARAMS, moveHref, readCollectionParams, readMoveParams, readNotice } from "./list-params.ts";
 import { keepingIdOnFailure, UNCONFIRMED } from "./retry.ts";
 import { UUID_V7, uuidv7 } from "./uuid.ts";
 
@@ -224,4 +225,27 @@ test("edit errors become fixed messages", () => {
   assert.equal(editErrorMessage("account not active"), "Your account can't edit copies right now. You can still remove them.");
   assert.equal(editErrorMessage("item unavailable"), "This copy isn't in your collection any more.");
   assert.equal(editErrorMessage('duplicate key value violates "x"'), "Your changes couldn't be saved. Try again.");
+});
+
+const ITEM = "0190f0a0-0000-7000-8000-000000000001";
+const RELEASE = "0190f0a0-0000-7000-8000-0000000000aa";
+
+test("the move flow's address keeps only well-formed steps", () => {
+  assert.deepEqual(readMoveParams({ move_q: "  starfall ", move_game: "starfall-odyssey", move_to: RELEASE.toUpperCase() }), { query: "starfall", game: "starfall-odyssey", release: RELEASE });
+  assert.deepEqual(readMoveParams({ move_q: "x".repeat(101), move_game: "../etc", move_to: "not-a-uuid" }), { query: null, game: null, release: null });
+  assert.deepEqual(readMoveParams({}), { query: null, game: null, release: null });
+});
+
+test("move links keep how the collection list was left", () => {
+  assert.equal(moveHref(ITEM, DEFAULT_PARAMS, { game: "starfall-odyssey" }), `/collection/${ITEM}?move_game=starfall-odyssey#move`);
+  const filtered = { ...DEFAULT_PARAMS, platform: "snes" };
+  const href = moveHref(ITEM, filtered, { game: "starfall-odyssey", release: RELEASE });
+  assert.ok(href.startsWith(copyHref(ITEM, filtered)) && href.includes(`move_to=${RELEASE}`) && href.endsWith("#move"), href);
+  assert.equal(moveHref(ITEM, DEFAULT_PARAMS, {}), `/collection/${ITEM}#move`);
+});
+
+test("relinking errors become fixed messages, and nothing else gets through", () => {
+  assert.equal(relinkErrorMessage("other platform"), "A copy can only move to a release for the same platform. For another platform, add it as a new copy.");
+  assert.equal(relinkErrorMessage("release unavailable"), "That release can't hold copies. Choose another one.");
+  assert.equal(relinkErrorMessage('new row violates row-level security policy for table "x"'), "The copy couldn't be moved. Try again.");
 });

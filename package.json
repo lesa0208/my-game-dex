@@ -31,7 +31,8 @@
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",
-    "app:review-checks": "node scripts/app-review-checks.mjs"
+    "app:review-checks": "node scripts/app-review-checks.mjs",
+    "app:relink-checks": "node scripts/app-relink-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",
