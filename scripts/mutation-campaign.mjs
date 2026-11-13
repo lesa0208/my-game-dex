@@ -158,7 +158,8 @@ const failed = results.flatMap((r) => {
     return [];
   }
 });
-lines.push(failed.length ? "Violations that failed or survived:" : "Every violation that ran was detected as expected.", ...failed, "");
+const unfinished = results.some((r) => r.stopped || !r.of) || results.length < steps.length;
+lines.push(failed.length ? "Violations that failed or survived:" : unfinished ? "No violation failed or survived, but the campaign didn't finish: see the logs." : "Every violation was detected as expected.", ...failed, "");
 writeFileSync(join(directory, "summary.txt"), lines.join("\n"));
 writeFileSync(join(directory, "summary.json"), JSON.stringify(results, null, 1));
 console.log(`\n${lines.join("\n")}`);

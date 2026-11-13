@@ -175,7 +175,8 @@ try {
   check("but isn't offered restoring their own exclusion", plain(ownPage.html).includes("You excluded this, so another administrator has to restore it.") && !ownPage.html.includes('id="restore-exclusion"'));
   const forcedRestore = await admin.browser.submit(`/review/exclusions/${exclusion}`, restoreForm, { exclusion_id: ownId, version: "1", reason: "Mine" });
   check("and a forged restoration is refused", forcedRestore.response.status !== 303 && psql(`select status from public.releases where id = '${jp}';`) === "excluded");
-  psql(`begin; set local session_replication_role = replica; update public.releases set status = 'published' where id = '${jp}'; delete from private.catalog_exclusions where id = '${ownId}'; commit;`);
+  psql(`begin; set local session_replication_role = replica; update public.releases set status = 'published' where id = '${jp}'; commit;`);
+  psql(`delete from private.catalog_exclusions where id = '${ownId}';`);
 
   const { session } = readSession(owner.browser);
   const submitted = await fetch(`${api}/rest/v1/rpc/submit_release`, {
@@ -196,14 +197,16 @@ try {
 } finally {
   stopApp();
   const ids = users.map((id) => `'${id}'`).join(",") || "null";
+  // Not in replica mode, so foreign-key cascades run; only the status reset needs it.
+  psql(`begin; set local session_replication_role = replica;
+update public.releases set status = 'published' where status = 'excluded' and product_code in ('SNSP-ZSFP-EUR', 'SHVC-ZSFJ-JPN');
+commit;`);
   psql(`begin;
-set local session_replication_role = replica;
 delete from private.catalog_exclusions where excluded_by in (${ids});
 delete from public.collection_items where owner_id in (${ids});
 create temp table sub_requests on commit drop as select * from public.catalog_change_requests where submitted_by in (${ids});
 delete from public.releases where submitted_by in (${ids}) or id in (select release_id from sub_requests);
 delete from public.catalog_change_requests where id in (select id from sub_requests);
-update public.releases set status = 'published' where status = 'excluded' and product_code in ('SNSP-ZSFP-EUR', 'SHVC-ZSFJ-JPN');
 commit;`);
   const deleted = await deleteUsers();
   psql("delete from private.handle_holds where kind = 'released' and handle like 'xa\\_%';");

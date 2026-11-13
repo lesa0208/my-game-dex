@@ -153,14 +153,16 @@ try {
   a.close();
   b.close();
 } finally {
+  // Not in replica mode, so foreign-key cascades run; only the audit rows need it.
   psql(`begin;
-    set local session_replication_role = replica;
     create temp table our_games on commit drop as select id from public.games where title like '${PREFIX}%';
     delete from private.catalog_exclusions where release_id in (select id from public.releases where game_id in (select id from our_games));
     delete from public.collection_items where release_id in (select id from public.releases where game_id in (select id from our_games));
     delete from public.release_components where release_id in (select id from public.releases where game_id in (select id from our_games));
     delete from public.releases where game_id in (select id from our_games);
     delete from public.games where id in (select id from our_games);
+    commit;
+    begin; set local session_replication_role = replica;
     delete from private.audit_events where actor_id in (select id from auth.users where email like 'exb-%@example.test');
     commit;
     delete from auth.users where email like 'exb-%@example.test';

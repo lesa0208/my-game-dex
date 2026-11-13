@@ -184,8 +184,9 @@ const requestOf = (release) => psql(`select id || ' ' || version from public.cat
 
 async function cleanup() {
   const ids = [...everyUser].map((id) => `'${id}'`).join(",") || "null";
+  // Not in replica mode: foreign-key cascades must run, so copies take their private
+  // details and piece records with them, and games their pairings.
   psql(`begin;
-set local session_replication_role = replica;
 create temp table our_games on commit drop as select id from public.games where title like '${PREFIX}%';
 delete from private.catalog_exclusions where release_id in (select id from public.releases where game_id in (select id from our_games));
 delete from public.collection_items where owner_id in (${ids}) or release_id in (select id from public.releases where game_id in (select id from our_games));
