@@ -863,7 +863,7 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **New definer code.** The relink function and the trigger functions run as their owner: a locking read needs `UPDATE` privilege on releases. They're narrow, explicit and covered by the `m7b2a` mutation suite.
 - **Brief waits.** Adding a copy now briefly waits for, and holds up, an editor's change to the same release.
 - **Fixtures.** Copies can no longer be written onto an excluded release, even by maintenance sessions; test data for such copies is written without triggers, as data from before an exclusion.
-- **Excluded releases.** Owners can't read them until M7b-2b, so a preserved copy's move search isn't filtered to its platform yet.
+- **Excluded releases.** Owners can't read them until M7b-2b, so a preserved copy's move search isn't filtered to its platform yet; the page says so, and the database refuses another platform. Constraining the picker is deferred to M7b-2b's read path, rather than weakening RLS.
 
 ## Risks to watch
 

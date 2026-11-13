@@ -108,6 +108,9 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const line = release ? releaseLine(release) : null;
   const copyName = `${number ? `copy ${number} of ` : "this copy of "}${title}${line ? ` (${line})` : ""}`;
 
+  // A preserved copy can't be changed (the M6 guards refuse it), only moved or removed.
+  const preserved = copy.status === "invalid";
+  const editable = viewer.isActive && !preserved;
   const listed = copy.components.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
   const unlisted = copy.components.filter((p) => !p.listed && p.recorded);
 
@@ -156,14 +159,15 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
         </div>
       </header>
 
-      {copy.status === "invalid" ? (
+      {preserved ? (
         <section aria-labelledby="copy-preserved" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
           <h2 id="copy-preserved" className="mb-1 flex items-center gap-2 text-sm font-semibold">
             <TriangleAlert aria-hidden="true" className="size-4" />
             This copy is kept privately
           </h2>
           <p className="text-sm">
-            Its release is no longer in the catalog, so the copy isn&apos;t counted as owned, and it can&apos;t be edited. Everything you recorded is kept.
+            Its release is no longer in the catalog, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
+            it&apos;s on a release in the catalog.
             {viewer.isActive ? (
               <>
                 {" "}
@@ -171,7 +175,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
                 <a href="#move" className="text-primary-text underline underline-offset-4">
                   move it to the release you own
                 </a>
-                , or remove it.
+                ; then you can edit it again. You can also remove it.
               </>
             ) : (
               " You can still remove it."
@@ -211,7 +215,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
                         <p>{name}</p>
                         <p className="text-muted-foreground">{pieceStateLabel(p)}</p>
                       </div>
-                      {viewer.isActive && p.label ? <RemovePieceRecordForm itemId={copy.id} kind={p.kind} label={p.label} name={name} /> : null}
+                      {editable && p.label ? <RemovePieceRecordForm itemId={copy.id} kind={p.kind} label={p.label} name={name} /> : null}
                     </li>
                   );
                 })}
@@ -279,7 +283,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
         </Section>
       ) : null}
 
-      {viewer.isActive ? (
+      {preserved ? null : viewer.isActive ? (
         <details className="rounded-lg border bg-card">
           <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
             Edit this copy
@@ -314,7 +318,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
         </p>
       )}
 
-      {viewer.isActive ? <MoveCopySection copy={copy} back={back} move={move} open={Boolean(move.query || move.game || move.release) || copy.status === "invalid"} /> : null}
+      {viewer.isActive ? <MoveCopySection copy={copy} back={back} move={move} open={Boolean(move.query || move.game || move.release) || preserved} /> : null}
 
       <RemoveCopyForm itemId={copy.id} name={copyName} added={formatDay(copy.added_at)} back={back} />
     </article>

@@ -123,10 +123,16 @@ try {
   section("A preserved copy");
   const preserved = await add(owner, jp, { notes: "Keep me" });
   psql(`begin; update public.releases set status = 'excluded' where id = '${jp}';
-    update public.collection_items set record_status = 'invalid_preserved', invalidated_at = now() where id = '${preserved}'; commit;`);
+    update public.collection_items set record_status = 'invalid_preserved', invalidated_at = now() where id = '${preserved}';
+    -- A piece recorded before the release changed, so it shows as no longer listed.
+    set local session_replication_role = replica;
+    insert into public.collection_item_components (item_id, owner_id, kind, label, condition) values ('${preserved}', '${owner.id}', 'insert', 'Old leaflet', 'good'); commit;`);
   const kept = await owner.browser.get(`/collection/${preserved}`);
   check("its page explains it's kept privately, and how to recover it", plain(kept.html).includes("This copy is kept privately") && plain(kept.html).includes("move it to the release you own"));
   check("with the move flow open", /<details id="move"[^>]* open/.test(kept.html));
+  check("and no edit form, which the database would refuse", !plain(kept.html).includes("Edit this copy") && !kept.html.includes('id="edit-copy"'));
+  check("nor removing a piece record, also refused", plain(kept.html).includes("Old leaflet") && !plain(kept.html).includes("Remove this record"));
+  check("and it says the search can't be limited to the copy's platform", plain(kept.html).includes("the search can't be limited to its platform"));
   const searched = await owner.browser.get(`/collection/${preserved}?move_q=starfall`);
   const gameLink = hrefs(searched.html).find((h) => h.includes("move_game=starfall-odyssey"));
   check("searching finds the game", Boolean(gameLink));
@@ -138,6 +144,8 @@ try {
   check("moving it recovers it", recovered.response.status === 303
     && psql(`select release_id || ' ' || record_status from public.collection_items where id = '${preserved}';`) === `${us} active`);
   check("with its details", psql(`select notes from public.collection_item_private where item_id = '${preserved}';`) === "Keep me");
+  const recoveredPage = await owner.browser.get(`/collection/${preserved}`);
+  check("and it can be edited again", recoveredPage.html.includes('id="edit-copy"') && plain(recoveredPage.html).includes("Remove this record") && !plain(recoveredPage.html).includes("the search can't be limited"));
   psql(`update public.releases set status = 'published' where id = '${jp}';`);
 
   section("Who sees it");

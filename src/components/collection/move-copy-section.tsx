@@ -123,6 +123,12 @@ export async function MoveCopySection({ copy, back, move, open }: { copy: CopyDe
             <p className="text-xs text-muted-foreground">
               Only releases in the catalog are offered. A copy can move only to a release for the same platform; for another platform, add it as a new copy.
             </p>
+            {platform ? null : (
+              <p className="text-xs text-muted-foreground">
+                This copy&apos;s release isn&apos;t shown any more, so the search can&apos;t be limited to its platform. Choose a release for the platform the copy was on; one
+                for another platform will be refused.
+              </p>
+            )}
           </>
         )}
       </div>
