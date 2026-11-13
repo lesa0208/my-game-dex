@@ -3,13 +3,17 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|all] [--out results.json] [--log run.log] [--only name]
+ *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name]
  *   node scripts/db-mutation-checks.mjs --recover
  *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
  *
  * About two minutes per violation. Local only. Progress goes to the terminal and,
  * unbuffered, to the log file. Don't pipe the output through a filter: that can
  * buffer it until exit.
+ *
+ * With --artifacts, the full pgTAP and API output of each violation that fails or
+ * survives is saved there, one file each; the output of violations detected as
+ * expected is discarded. scripts/mutation-campaign.mjs runs several suites this way.
  *
  * Every selected violation gets a result. The run exits non-zero if a violation can't
  * be applied, doesn't change what it targets, isn't detected, passes a suite expected
@@ -331,8 +335,15 @@ function failedPgtapAssertions(text) {
 }
 
 /** Parses a suite's outcome. A result it can't interpret is abnormal, never a pass. */
+/**
+ * The raw output of the latest pgTAP and API runs, saved with --artifacts for a
+ * violation that fails or survives, and otherwise discarded.
+ */
+const lastRaw = { pgtap: "", api: "" };
+
 async function runPgtap(timeout) {
   const run = await runProcess("pgTAP", [cli, "test", "db"], timeout);
+  lastRaw.pgtap = run.text;
   if (run.abnormal) return { abnormal: `pgTAP ${run.abnormal}`, elapsed: run.elapsed };
   if (!/^Files=\d+, Tests=\d+/m.test(run.text)) return { abnormal: `pgTAP produced no summary (exit ${run.status})`, elapsed: run.elapsed };
   const failedFiles = [...run.text.matchAll(/(\d\d_\w+)\.test\.sql\s+\(Wstat[^\n]*Failed: (\d+)\)/g)].map((match) => `${match[1]}:${match[2]}`);
@@ -346,10 +357,12 @@ async function runApi(timeout) {
   let failedCount = 0;
   let elapsed = 0;
   const stages = {};
+  lastRaw.api = "";
   for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;
+    lastRaw.api += `\n===== ${script} (exit ${run.status}) =====\n${run.text}`;
     if (run.abnormal) return { abnormal: `${script} ${run.abnormal}`, elapsed, stages };
     const summary = /^(\d+) passed, (\d+) failed$/m.exec(run.text);
     if (!summary) return { abnormal: `${script} produced no summary (exit ${run.status})`, elapsed, stages };
@@ -762,6 +775,8 @@ async function main() {
       return 2;
     }
 
+    const artifacts = argument("--artifacts") ?? null;
+    if (artifacts) mkdirSync(artifacts, { recursive: true });
     const started = Date.now();
     const results = [];
     log(`Running ${mutations.length} violations from suite ${suiteName}. Limits: ${minutes(VIOLATION_TIMEOUT_MS)} per violation, ${minutes(SUBPROCESS_TIMEOUT_MS)} per subprocess.`);
@@ -779,14 +794,25 @@ async function main() {
       const done = results.length;
       const eta = done ? ` ETA ${minutes(((Date.now() - started) / done) * (mutations.length - done))}` : "";
       log(`start ${position} ${mutation.name}${eta}`);
+      lastRaw.pgtap = "(not run)";
+      lastRaw.api = "(not run)";
       const result = await runMutation(mutation, { directory, cleanFingerprint: clean });
+      const saveArtifact = () => {
+        if (!artifacts || !result.problems.length) return;
+        const file = join(artifacts, `${suiteName}-${String(index + 1).padStart(2, "0")}-${mutation.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}.txt`);
+        writeFileSync(file, [`Violation: ${mutation.name}`, `Suite: ${suiteName}`, `Expected to fail: ${mutation.expect}`, `Problems: ${result.problems.join("; ")}`,
+          "", "----- applied -----", mutation.sql ?? JSON.stringify(mutation.code, null, 1), "", "----- pgTAP -----", lastRaw.pgtap, "", "----- API checks -----", lastRaw.api].join("\n"));
+        result.artifact = file;
+      };
       try {
         result.timings = { ...result.timings, reset: await resetAndVerify(clean, mutation.name) };
       } catch (error) {
         result.problems.push(error.message);
+        saveArtifact();
         results.push(result);
         throw error;
       }
+      saveArtifact();
       results.push(result);
       const seconds = Object.values(result.timings ?? {}).reduce((sum, value) => sum + value, 0) / 1000;
       log(`${result.problems.length ? "FAIL" : "ok  "} ${position} ${mutation.name} (${seconds.toFixed(0)}s)${result.problems.length ? `: ${result.problems.join("; ")}` : ""}`);

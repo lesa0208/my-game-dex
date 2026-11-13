@@ -16,6 +16,7 @@
     "db:test": "node scripts/db.mjs test",
     "db:verify": "node scripts/db.mjs verify",
     "db:mutation": "node scripts/db-mutation-checks.mjs",
+    "mutation:campaign": "node scripts/mutation-campaign.mjs",
     "secrets:check": "node scripts/check-secrets.mjs",
     "secrets:bundle": "node scripts/check-secrets.mjs --bundle",
     "secrets:test": "node --test scripts/check-secrets.test.mjs",
