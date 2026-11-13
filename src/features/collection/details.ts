@@ -194,6 +194,24 @@ export function editErrorMessage(message: unknown): string {
   }
 }
 
+/** The fixed errors from relink_my_copy (M7b-2a), as messages for the owner. */
+export function relinkErrorMessage(message: unknown): string {
+  switch (message) {
+    case "account not active":
+      return "Your account can't change copies right now. You can still remove them.";
+    case "item unavailable":
+      return "This copy isn't in your collection any more.";
+    case "release unavailable":
+      return "That release can't hold copies. Choose another one.";
+    case "other platform":
+      return "A copy can only move to a release for the same platform. For another platform, add it as a new copy.";
+    case "request conflict":
+      return "This copy changed while you were choosing. Reload the page and try again.";
+    default:
+      return "The copy couldn't be moved. Try again.";
+  }
+}
+
 /** The fixed errors from the M6b functions, as messages for the owner. */
 export function addErrorMessage(message: unknown): { text: string; renewId: boolean } {
   switch (message) {

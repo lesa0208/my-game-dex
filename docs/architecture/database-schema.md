@@ -817,7 +817,7 @@ One actual physical game owned by one user. Owning two copies of a release means
   - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission
 - **Triggers** (all run with the caller's rights):
   - On insert: the id check, then the owner's limit of 100,000 copies, under a per-owner advisory lock so concurrent additions can't pass it together
-  - On update: a preserved copy can't be edited, except by moving it to another release, which clears the flag. Moving a copy drops recorded pieces its new release doesn't list
+  - On update: a preserved copy can't be edited, except by moving it to another release, which clears the flag. Moving a copy keeps every recorded piece; those its new release doesn't list show as no longer listed (M7b-2a). Two triggers lock the target release `FOR SHARE` and refuse one its owner can't use
 
 What each `completeness` value means, with details in [relationships.md](relationships.md#collection-item-completeness-and-components):
 

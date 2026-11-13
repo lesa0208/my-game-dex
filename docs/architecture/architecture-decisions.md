@@ -833,7 +833,7 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Shared pairings.** A game's platform pairing is one row. A submission reuses an existing one silently, whoever made it. So that its existence never leaks, only catalog editors read an unpublished pairing, including its maker: otherwise not seeing it after submitting would reveal someone else's. This narrowed the M5 read policy, found in the pre-PR review. A withdrawal never deletes one that anything else uses, and M7b's review must do the same.
 - **Personal data.** The request's note and snapshot, and audit rows naming the account's id, outlive the account. Their retention is left to D10 (see [Personal data in submissions](security-rls.md#catalog-submissions-m7a)).
 - **Unowned records after account deletion.** Deleting an account sets `submitted_by` to null on its pending records, which stay unverified for review, and keeps the request's history.
-- **Merges in M7b.** The M6 trigger `drop_unlisted_components` would delete copies' piece records during a merge. M7b must replace it so those records are kept.
+- **Merges in M7b.** The M6 trigger `drop_unlisted_components` would have deleted copies' piece records during a merge. M7b-2a removed it (ADR-052).
 
 ### ADR-051: Catalog review goes through audited functions, and nothing is published without it
 
@@ -849,6 +849,21 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Lock order.** M7a's submitter functions now lock the caller's profile, then the game before the release, so withdrawal can't deadlock with publication. That redefined two M7a helpers, with their checks unchanged.
 - **Deleted accounts.** Their submissions can be approved or rejected, but not sent back for changes.
 - **Imports.** Private submissions are invisible to import title matching (M7b-1 follow-up), so an import with the same title creates its own candidate instead, and editors resolve the duplicate in review.
+
+### ADR-052: Copies keep their piece records, are checked against their release under a lock, and are moved only by their owner
+
+**Decision.** Approved by the product owner for M7b-2a, with the M7b-2 decisions. The trigger that dropped a copy's unlisted piece records when its release changed is removed. Two triggers lock a copy's release `FOR SHARE` when the copy is added or moved, and refuse one its owner can't use. Owners move their own copies with `relink_my_copy`, a dedicated `SECURITY DEFINER` function, to a usable release of the same platform.
+
+**Why.**
+- **No silent loss.** Merging moves copies, so the trigger would have deleted collectors' records.
+- **No race.** The insert policy reads a snapshot, and the foreign key's `FOR KEY SHARE` doesn't conflict with a status update's `FOR NO KEY UPDATE`. `FOR SHARE` conflicts with every update of the release, so a copy and a status change always see each other.
+- **No broad grant.** A column grant on `release_id` would let any client change it directly, guarded only by policies. A dedicated function changes that one column after explicit checks.
+
+**Trade-offs.**
+- **New definer code.** The relink function and the trigger functions run as their owner: a locking read needs `UPDATE` privilege on releases. They're narrow, explicit and covered by the `m7b2a` mutation suite.
+- **Brief waits.** Adding a copy now briefly waits for, and holds up, an editor's change to the same release.
+- **Fixtures.** Copies can no longer be written onto an excluded release, even by maintenance sessions; test data for such copies is written without triggers, as data from before an exclusion.
+- **Excluded releases.** Owners can't read them until M7b-2b, so a preserved copy's move search isn't filtered to its platform yet; the page says so, and the database refuses another platform. Constraining the picker is deferred to M7b-2b's read path, rather than weakening RLS.
 
 ## Risks to watch
 

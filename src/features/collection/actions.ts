@@ -16,6 +16,7 @@ import {
   pieceFieldValue,
   readCopyChanges,
   readCopyDetails,
+  relinkErrorMessage,
 } from "./details";
 import { collectionHref, copyHref, readCollectionParams } from "./list-params";
 import { getMyCopy, getMyReleaseCopyCount } from "./queries";
@@ -195,6 +196,35 @@ export async function removePieceRecord(_state: RemoveRecordState, formData: For
 /** The same action for a native form post. The page rendered afterwards no longer shows the record. */
 export async function removePieceRecordFromForm(formData: FormData): Promise<void> {
   await removePieceRecord({ status: "idle", message: null }, formData);
+}
+
+export type MoveCopyState = { status: "idle" | "error"; message: string | null };
+
+/**
+ * Moves the signed-in user's copy to another release of the same platform (M7b-2a).
+ * `relink_my_copy` checks the account, that the copy is theirs, that they may use the
+ * release and that it's the same platform, and keeps everything else about the copy.
+ * Success returns to the copy's page, saying it moved.
+ */
+export async function moveCopy(_state: MoveCopyState, formData: FormData): Promise<MoveCopyState> {
+  const itemId = field(formData, "item_id");
+  const releaseId = field(formData, "release_id");
+  const back = readCollectionParams(new URLSearchParams([...formData.entries()].filter((e): e is [string, string] => typeof e[1] === "string")));
+  if (!UUID.test(itemId) || !UUID.test(releaseId)) return { status: "error", message: relinkErrorMessage("release unavailable") };
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { status: "error", message: "Your collection isn't available right now. Try again later." };
+  const { data: auth } = await supabase.auth.getClaims();
+  if (!auth?.claims?.sub) redirect(signInHref(copyHref(itemId, back)));
+
+  const { error } = await supabase.rpc("relink_my_copy", { p_item: itemId, p_release: releaseId });
+  if (error) return { status: "error", message: relinkErrorMessage(error.message) };
+  refresh();
+  const href = copyHref(itemId, back);
+  redirect(`${href}${href.includes("?") ? "&" : "?"}notice=moved`);
+}
+
+export async function moveCopyFromForm(formData: FormData): Promise<void> {
+  await moveCopy({ status: "idle", message: null }, formData);
 }
 
 export type RemoveCopyState = { status: "idle" | "error"; message: string | null };

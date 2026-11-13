@@ -175,7 +175,8 @@ try {
   check("an unknown release gets the same answer", error(await rpc(owner.headers, "add_collection_item", { p_item_id: uuidv7(), p_release: randomUUID() }), "release unavailable"));
   check("an editor can't use an unpublished release either", error(await rpc(editor.headers, "add_collection_item", { p_item_id: uuidv7(), p_release: draft }), "release unavailable"));
   const direct = await request("POST", "/rest/v1/collection_items", owner.headers, { id: uuidv7(), owner_id: owner.id, release_id: draft });
-  check("a direct insert can't use an unpublished release", direct.status === 403, `${direct.status}`);
+  // Refused by the M7b-2a release check, before the policy would refuse it.
+  check("a direct insert can't use an unpublished release", error(direct, "release unavailable") || direct.status === 403, `${direct.status}`);
   check("a random id is refused", error(await rpc(owner.headers, "add_collection_item", { p_item_id: randomUUID(), p_release: published }), "invalid item id"));
 
   section("Nobody else sees or changes a copy");

@@ -1,4 +1,4 @@
-import { ArrowLeft, Lock, PlugZap, UserRoundX } from "lucide-react";
+import { ArrowLeft, CircleCheck, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { EditCopyForm } from "@/components/collection/edit-copy-form";
+import { MoveCopySection } from "@/components/collection/move-copy-section";
 import { RemoveCopyForm } from "@/components/collection/remove-copy-form";
 import { RemovePieceRecordForm } from "@/components/collection/remove-piece-record-form";
 import { CatalogCover } from "@/components/games/catalog-cover";
@@ -28,7 +29,7 @@ import {
   priceInput,
   releaseLine,
 } from "@/features/collection/details";
-import { collectionHref, type CollectionParams, copyHref, readCollectionParams } from "@/features/collection/list-params";
+import { collectionHref, type CollectionParams, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
 import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyReleaseCopies } from "@/features/collection/queries";
 import { getMySubmissionForRelease } from "@/features/submissions/queries";
 import type { CopyDetail } from "@/features/collection/types";
@@ -73,7 +74,10 @@ function plural(label: string, count: number) {
 
 async function CopyView({ params, searchParams }: { params: PageProps<"/collection/[itemId]">["params"]; searchParams: PageProps<"/collection/[itemId]">["searchParams"] }) {
   const { itemId } = await params;
-  const back: CollectionParams = readCollectionParams(await searchParams);
+  const search = await searchParams;
+  const back: CollectionParams = readCollectionParams(search);
+  const move = readMoveParams(search);
+  const moved = search.notice === "moved";
   const viewer = await requireViewerWithHandle(UUID.test(itemId) ? copyHref(itemId, back) : "/collection");
 
   const outcome = await getMyCopy(itemId);
@@ -104,6 +108,9 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const line = release ? releaseLine(release) : null;
   const copyName = `${number ? `copy ${number} of ` : "this copy of "}${title}${line ? ` (${line})` : ""}`;
 
+  // A preserved copy can't be changed (the M6 guards refuse it), only moved or removed.
+  const preserved = copy.status === "invalid";
+  const editable = viewer.isActive && !preserved;
   const listed = copy.components.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
   const unlisted = copy.components.filter((p) => !p.listed && p.recorded);
 
@@ -115,6 +122,13 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           Back to your collection
         </Link>
       </p>
+
+      {moved ? (
+        <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
+          <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
+          Moved. Your copy is now on this release, with everything you recorded.
+        </p>
+      ) : null}
 
       <header className="flex gap-4">
         <CatalogCover className="w-20" />
@@ -144,6 +158,31 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           ) : null}
         </div>
       </header>
+
+      {preserved ? (
+        <section aria-labelledby="copy-preserved" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+          <h2 id="copy-preserved" className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <TriangleAlert aria-hidden="true" className="size-4" />
+            This copy is kept privately
+          </h2>
+          <p className="text-sm">
+            Its release is no longer in the catalog, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
+            it&apos;s on a release in the catalog.
+            {viewer.isActive ? (
+              <>
+                {" "}
+                To recover it,{" "}
+                <a href="#move" className="text-primary-text underline underline-offset-4">
+                  move it to the release you own
+                </a>
+                ; then you can edit it again. You can also remove it.
+              </>
+            ) : (
+              " You can still remove it."
+            )}
+          </p>
+        </section>
+      ) : null}
 
       <Section id="copy-condition" title="This copy">
         <Facts
@@ -176,7 +215,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
                         <p>{name}</p>
                         <p className="text-muted-foreground">{pieceStateLabel(p)}</p>
                       </div>
-                      {viewer.isActive && p.label ? <RemovePieceRecordForm itemId={copy.id} kind={p.kind} label={p.label} name={name} /> : null}
+                      {editable && p.label ? <RemovePieceRecordForm itemId={copy.id} kind={p.kind} label={p.label} name={name} /> : null}
                     </li>
                   );
                 })}
@@ -244,7 +283,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
         </Section>
       ) : null}
 
-      {viewer.isActive ? (
+      {preserved ? null : viewer.isActive ? (
         <details className="rounded-lg border bg-card">
           <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
             Edit this copy
@@ -278,6 +317,8 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           Your account can&apos;t edit copies right now. You can still view and remove them.
         </p>
       )}
+
+      {viewer.isActive ? <MoveCopySection copy={copy} back={back} move={move} open={Boolean(move.query || move.game || move.release) || preserved} /> : null}
 
       <RemoveCopyForm itemId={copy.id} name={copyName} added={formatDay(copy.added_at)} back={back} />
     </article>
