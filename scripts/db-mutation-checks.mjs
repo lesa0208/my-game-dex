@@ -341,6 +341,19 @@ function failedPgtapAssertions(text) {
  */
 const lastRaw = { pgtap: "", api: "" };
 
+/**
+ * Saves what's needed to analyse a violation that failed or survived: what was
+ * applied, its problems, and the raw test output. Writes nothing for a violation
+ * detected as expected. Returns the file, or null.
+ */
+function writeArtifact(folder, suiteName, index, mutation, result, raw) {
+  if (!folder || !result.problems.length) return null;
+  const file = join(folder, `${suiteName}-${String(index + 1).padStart(2, "0")}-${mutation.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}.txt`);
+  writeFileSync(file, [`Violation: ${mutation.name}`, `Suite: ${suiteName}`, `Expected to fail: ${mutation.expect}`, `Problems: ${result.problems.join("; ")}`,
+    "", "----- applied -----", mutation.sql ?? JSON.stringify(mutation.code, null, 1), "", "----- pgTAP -----", raw.pgtap, "", "----- API checks -----", raw.api].join("\n"));
+  return file;
+}
+
 async function runPgtap(timeout) {
   const run = await runProcess("pgTAP", [cli, "test", "db"], timeout);
   lastRaw.pgtap = run.text;
@@ -518,6 +531,19 @@ async function offlineSelfTests() {
     reset();
     outcome = await runMutation(codeMutation, { directory, checkDatabase: false, runners: { pgtap: fake(passing), api: fake(passing) } });
     record("an undetected mutation is reported, and the file restored", outcome.problems.includes("not detected by any test") && readFileSync(target, "utf8") === original);
+
+    // Diagnostics: kept for a violation that survives, never for one detected as expected.
+    const artifactsDir = join(workspace, "artifacts");
+    mkdirSync(artifactsDir);
+    const raw = { pgtap: "not ok 7 - SELF-TEST PGTAP OUTPUT", api: "===== SELF-TEST API OUTPUT =====" };
+    const saved = writeArtifact(artifactsDir, "selftest", 2, codeMutation, outcome, raw);
+    const savedText = saved && existsSync(saved) ? readFileSync(saved, "utf8") : "";
+    record("a surviving violation's output is saved", savedText.includes("Violation: self-test: code") && savedText.includes("not detected by any test")
+      && savedText.includes("SELF-TEST PGTAP OUTPUT") && savedText.includes("SELF-TEST API OUTPUT") && savedText.includes("ORIGINAL"), saved ?? "no file");
+    reset();
+    const detected = await runMutation(codeMutation, { directory, checkDatabase: false, runners: { pgtap: fake(passing), api: fake(failing) } });
+    record("a detected violation's output is discarded", writeArtifact(artifactsDir, "selftest", 3, codeMutation, detected, raw) === null && readdirSync(artifactsDir).length === 1);
+    record("and with no folder, nothing is written", writeArtifact(null, "selftest", 4, codeMutation, outcome, raw) === null);
 
     reset();
     let threw = false;
@@ -798,11 +824,8 @@ async function main() {
       lastRaw.api = "(not run)";
       const result = await runMutation(mutation, { directory, cleanFingerprint: clean });
       const saveArtifact = () => {
-        if (!artifacts || !result.problems.length) return;
-        const file = join(artifacts, `${suiteName}-${String(index + 1).padStart(2, "0")}-${mutation.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 60)}.txt`);
-        writeFileSync(file, [`Violation: ${mutation.name}`, `Suite: ${suiteName}`, `Expected to fail: ${mutation.expect}`, `Problems: ${result.problems.join("; ")}`,
-          "", "----- applied -----", mutation.sql ?? JSON.stringify(mutation.code, null, 1), "", "----- pgTAP -----", lastRaw.pgtap, "", "----- API checks -----", lastRaw.api].join("\n"));
-        result.artifact = file;
+        const file = writeArtifact(artifacts, suiteName, index, mutation, result, lastRaw);
+        if (file) result.artifact = file;
       };
       try {
         result.timings = { ...result.timings, reset: await resetAndVerify(clean, mutation.name) };
