@@ -250,7 +250,7 @@ const CATALOG_LOCK = "private.lock_catalog_edits()";
 const PUBLISH = "public.publish_release(uuid, text, bigint)";
 const VERIFY_RELEASE = "public.verify_release(uuid, text, bigint)";
 const CREATE_RELEASE = "public.create_release(uuid, uuid, text, text, jsonb, text)";
-const PUBLICATION_CHECK = "private.check_catalog_publication()";
+const PUBLICATION_RULES = "private.check_publication_of(uuid, uuid)";
 const SHARED_LOCK = "perform pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('staff-changes', 0));";
 
 export const m5aMutations = [
@@ -273,7 +273,8 @@ export const m5aMutations = [
   sql("unverified release published", "both", `alter table public.releases drop constraint releases_published_verified; ${rewrite(PUBLISH, "if v_release.verified_at is null then", "if false then")}`),
   sql("unverified game published", "pgtap", `alter table public.games drop constraint games_published_verified; ${rewrite(PUBLISH, "if v_game.verified_at is null then", "if false then")}`),
   sql("release published without its game", "pgtap", "drop trigger check_catalog_publication on public.releases;"),
-  sql("game published without a physical release", "pgtap", rewrite(PUBLICATION_CHECK, "if exists (select 1 from public.games g where g.id = v_game and g.status = 'published')\n     and not private.game_has_published_release(v_game) then", "if false then")),
+  // M7b-2b moved the rules into check_publication_of, which the trigger calls.
+  sql("game published without a physical release", "pgtap", rewrite(PUBLICATION_RULES, "  if v_published then\n    if not private.game_has_published_release(p_game) then", "  if v_published then\n    if false then")),
   sql("published release can be unpublished", "pgtap", "drop trigger guard_published_catalog_row on public.releases;"),
   sql("edits keep a stale verification", "pgtap", rewrite("private.clear_release_verification(uuid)", "where r.id = p_release and r.status <> 'published' and r.verified_at is not null;", "where false;")),
   sql("import defaults an edition", "pgtap", rewrite(CREATE_RELEASE, "v_row.edition_name,\n    v_row.edition_kind,", "coalesce(v_row.edition_name, 'Standard'),\n    coalesce(v_row.edition_kind, 'standard'),")),
