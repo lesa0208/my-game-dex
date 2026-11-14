@@ -302,6 +302,9 @@ select concat_ws(' ',
   nullif('follows=' || (select count(*) from public.follows), 'follows=0'),
   nullif('blocks=' || (select count(*) from public.blocked_users), 'blocks=0'),
   nullif('audit_events=' || (select count(*) from private.audit_events), 'audit_events=0'),
+  nullif('owner=' || (select count(*) from private.platform_owner), 'owner=0'),
+  nullif('owner_transfers=' || (select count(*) from private.ownership_transfers), 'owner_transfers=0'),
+  nullif('owner_recoveries=' || (select count(*) from private.owner_recoveries), 'owner_recoveries=0'),
   nullif('notifications=' || (select count(*) from public.notifications), 'notifications=0'),
   nullif('games=' || (select count(*) from public.games), 'games=0'),
   nullif('releases=' || (select count(*) from public.releases), 'releases=0'),
@@ -375,7 +378,7 @@ async function runApi(timeout) {
   let elapsed = 0;
   const stages = {};
   lastRaw.api = "";
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

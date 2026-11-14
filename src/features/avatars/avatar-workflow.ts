@@ -27,6 +27,7 @@ export type AvatarErrorCode =
   | "dimensions_out_of_range"
   | "not_authenticated"
   | "not_eligible"
+  | "account_protected"
   | "storage_failed";
 
 export class AvatarError extends Error {
@@ -212,8 +213,20 @@ export async function removeAvatar(
  * Removes a user's files, then the user, which cascades to their account records.
  * Storage files don't cascade from the database. Callers must have authorized this:
  * it takes a user ID, not a session, and is never exposed directly to clients.
+ *
+ * The Owner's account can't be deleted (M8, D12): the database refuses it on every
+ * path, and this asks first, so a refused deletion leaves their files in place. If
+ * the question can't be answered, nothing is deleted.
  */
 export async function deleteAccountWithAvatars(config: AvatarConfig, userId: string): Promise<void> {
+  const blockedResponse = await fetch(`${config.supabaseUrl}/rest/v1/rpc/account_deletion_blocked`, {
+    method: "POST",
+    headers: { ...serviceHeaders(config), "Content-Type": "application/json" },
+    body: JSON.stringify({ p_user: userId }),
+  });
+  if (!blockedResponse.ok) throw new AvatarError("storage_failed");
+  if ((await blockedResponse.json()) !== false) throw new AvatarError("account_protected");
+
   const listResponse = await fetch(`${config.supabaseUrl}/storage/v1/object/list/${BUCKET}`, {
     method: "POST",
     headers: { ...serviceHeaders(config), "Content-Type": "application/json" },

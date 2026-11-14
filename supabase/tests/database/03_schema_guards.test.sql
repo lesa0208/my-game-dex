@@ -32,6 +32,8 @@ insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
   ('get_my_account()', 'authenticated'),
   ('set_avatar_path(uuid,text)', 'service_role'),
+  -- M8a: the server's account deletion asks whether the account is the Owner's.
+  ('account_deletion_blocked(uuid)', 'service_role'),
   ('private.is_active_user()', 'authenticated'),
   -- M3: clients act only through these. follows and blocked_users have no client grants.
   ('request_follow(uuid)', 'authenticated'),

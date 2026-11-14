@@ -70,6 +70,7 @@ const steps = {
   relink: () => runNode("db-relink-checks.mjs"),
   exclusion: () => runNode("db-exclusion-checks.mjs"),
   merge: () => runNode("db-merge-checks.mjs"),
+  owner: () => runNode("db-owner-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -93,8 +94,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");
