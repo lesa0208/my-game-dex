@@ -1,14 +1,15 @@
 import { PlugZap } from "lucide-react";
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { gameHref, ReleasePickerSkeleton, ReleasePickerView } from "@/components/catalog/release-picker";
 import { AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
 import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link";
 import { PageLayout } from "@/components/layout/page-layout";
+import { MergeReleaseLink } from "@/components/merge/merge-release-link";
 import { EmptyState } from "@/components/shared/empty-state";
-import { getReleasePicker } from "@/features/catalog/queries";
+import { getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 
 export const metadata: Metadata = {
   title: "Game",
@@ -36,6 +37,15 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   }
   const picker = outcome.data;
   if (!picker) notFound();
+  // A link to a release merged while published goes to the release it was merged into
+  // (M7b-2c D14). Checked only when the release asked for isn't shown, and uncached, so
+  // it answers as of now. Any other id, a release merged while unpublished included,
+  // gets the same page as an unknown one. Inside this streamed boundary the redirect is
+  // sent as the client-side redirect Next.js emits there, as for a merged game.
+  if (selection.release && !picker.selection.releaseId) {
+    const merged = await resolveMergedRelease(selection.release);
+    if (merged) permanentRedirect(gameHref(merged.gameSlug, { platform: null, region: null, release: merged.releaseId }));
+  }
   // A merged game, or a link by id, goes to the game's own address.
   if (picker.game.slug !== slug) redirect(gameHref(picker.game.slug, selection));
 
@@ -52,6 +62,9 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
           </Suspense>
           <Suspense fallback={null}>
             <ExcludeReleaseLink releaseId={release.id} />
+          </Suspense>
+          <Suspense fallback={null}>
+            <MergeReleaseLink releaseId={release.id} />
           </Suspense>
         </>
       )}

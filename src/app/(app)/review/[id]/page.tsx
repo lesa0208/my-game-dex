@@ -228,6 +228,14 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
                     ({catalogStatusLabel(d.status)}
                     {why ? `, ${why}` : ""})
                   </span>
+                  {inReview && !request.own && release && d.status === "published" ? (
+                    <>
+                      {" · "}
+                      <Link href={`/review/merge/${release.id}?into=${d.id}`} className="text-primary-text underline underline-offset-4">
+                        Compare and merge
+                      </Link>
+                    </>
+                  ) : null}
                 </li>
               );
             })}
@@ -331,6 +339,20 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
             />
           </Disclosure>
         </>
+      ) : null}
+
+      {!request.own && release && inReview ? (
+        <Disclosure title="Merge into an existing release">
+          <p className="text-sm text-muted-foreground">
+            If this is a physical product the catalog already has, merge it into that release instead of approving a duplicate. The submitter&apos;s copies move with
+            everything recorded, and they see where it went. You&apos;ll compare every field before confirming.
+          </p>
+          <p className="mt-3">
+            <Link href={`/review/merge/${release.id}`} className="text-sm font-medium text-primary-text underline underline-offset-4">
+              Choose the release to merge into
+            </Link>
+          </p>
+        </Disclosure>
       ) : null}
 
       {!request.own && release && ["open", "in_review", "changes_requested", "rejected"].includes(request.status) ? (

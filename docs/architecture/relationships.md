@@ -391,7 +391,7 @@ erDiagram
   }
 ```
 
-Merged records stay as tombstones with `merged_into_id` set. Old URLs and provider links keep working, and all references are repointed by a server job.
+Merged records stay as tombstones with `merged_into_id` set. A release merged while published keeps its address, which leads to the release it was merged into; one merged while unpublished stays private (M7b-2c D3, D14). A merge moves the copies and provider references to the target in the same transaction, and repoints earlier merges, so redirects take one step.
 
 ## Submission and approval workflow
 
@@ -428,7 +428,7 @@ stateDiagram-v2
 | `published` | Everyone | Yes | Normal catalog entry |
 | `rejected` | Submitter, catalog editors | Yes, marked "Not approved" | Can't read it or attach to it |
 | `excluded` | Catalog editors. Owners of preserved copies, the submitter among them, read a fixed set of its fields through `get_my_preserved_release` (M7b-2b) | No. Existing items are preserved privately, and none can be added | Can't read it or attach to it |
-| `merged` | Everyone, as a redirect | Items are moved to the target | Redirected |
+| `merged` | Everyone, as a redirect, if it was published when merged; otherwise catalog editors, and its submitter through their submission (M7b-2c) | Items are moved to the target | Redirected, or as for an unknown id if it was never published |
 
 What each outcome does, always in one transaction through a staff function that writes an audit row:
 
@@ -436,7 +436,7 @@ What each outcome does, always in one transaction through a staff function that 
 | --- | --- |
 | **Approve** | Publishes the release and any unverified game or pairing it needs, assigns a slug, clears `submitted_by` from the public rows, and moves images to the public bucket. The submitter is notified |
 | **Request changes** | Returns it to `unverified` with a note |
-| **Merge** | Points the record at the published release and moves every attached collection item to it. Owners are notified. Their copies, conditions, and private data are unchanged |
+| **Merge** | Points the record at a published release of the same platform and physical format, and moves every attached collection item to it. Every differing field is acknowledged, and the release kept isn't changed. Owners are notified once. Their copies, conditions, private data, piece records and timestamps are unchanged (M7b-2c) |
 | **Reject** | For a genuine physical product with a problem such as bad data. Keeps the record and the owner's items, because the physical copy still exists. The user can edit and resubmit, or relink the copy to a published release |
 | **Exclude** | For a product outside the physical-only scope. Marks attached collection items as preserved invalid records and notifies every owner. **Nothing is deleted.** The user can't resubmit the record. See [below](#invalid-record-preservation-and-correction) |
 

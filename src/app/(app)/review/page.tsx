@@ -37,7 +37,10 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/review">[
       {/* Here, not in the static shell, so only editors ever see what this page is. */}
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Review submissions</h1>
       <p className="mb-4 text-sm text-muted-foreground">
-        Missing games and releases sent by collectors. Oldest first.
+        Missing games and releases sent by collectors. Oldest first.{" "}
+        <Link href="/review/merges" className="text-primary-text underline underline-offset-4">
+          Merges
+        </Link>
         {admin ? (
           <>
             {" "}

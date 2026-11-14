@@ -33,10 +33,13 @@
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",
     "exclusion:test": "node --experimental-strip-types --no-warnings --test src/features/exclusion/exclusion.test.mjs",
+    "merge:test": "node --experimental-strip-types --no-warnings --test src/features/merge/merge.test.mjs",
     "app:review-checks": "node scripts/app-review-checks.mjs",
     "app:relink-checks": "node scripts/app-relink-checks.mjs",
     "app:exclusion-checks": "node scripts/app-exclusion-checks.mjs",
-    "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs"
+    "app:merge-checks": "node scripts/app-merge-checks.mjs",
+    "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs",
+    "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

@@ -20,6 +20,7 @@ import { getMyDefaultCurrency } from "@/features/collection/queries";
 import { UUID, uuidv7 } from "@/features/collection/uuid";
 import { formValues, submissionName } from "@/features/submissions/display";
 import { GAME_KINDS, statusLabel } from "@/features/submissions/form";
+import { getMyMergedSubmission } from "@/features/merge/queries";
 import { getMySubmission, getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
@@ -83,7 +84,11 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
   const name = submissionName(details);
   const isPublic = submission.status === "published";
   const canCopy = Boolean(submission.release_id) && COPYABLE.has(submission.status) && viewer.isActive;
-  const [options, currency] = await Promise.all([submission.editable ? getSubmissionOptions() : null, canCopy ? getMyDefaultCurrency() : null]);
+  const [options, currency, mergedInto] = await Promise.all([
+    submission.editable ? getSubmissionOptions() : null,
+    canCopy ? getMyDefaultCurrency() : null,
+    submission.status === "merged" ? getMyMergedSubmission(submission.id) : null,
+  ]);
   const region = details.region.code === "unknown" ? "Unknown, not confirmed" : details.region.label;
 
   return (
@@ -119,7 +124,7 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
         ) : null}
       </header>
 
-      {submission.reviewer_note && (submission.status === "changes_requested" || submission.status === "rejected") ? (
+      {submission.reviewer_note && (submission.status === "changes_requested" || submission.status === "rejected" || submission.status === "merged") ? (
         <section aria-labelledby="editor-note" className="rounded-lg border border-primary/40 bg-primary/5 p-4">
           <h2 id="editor-note" className="mb-1 flex items-center gap-2 text-sm font-semibold">
             <MessageSquareText aria-hidden="true" className="size-4" />
@@ -146,7 +151,19 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
         </p>
       ) : null}
 
-      {!isPublic && submission.status !== "withdrawn" ? (
+      {submission.status === "merged" ? (
+        <p className="rounded-lg border border-primary/40 bg-primary/5 px-4 py-3 text-sm">
+          The catalog already had this physical product, so your submission was merged into it. Your copies moved there with everything you recorded.
+          {mergedInto ? (
+            <>
+              {" "}
+              <Link href={`/games/${mergedInto.game_slug}?release=${mergedInto.release_id}`} className="font-medium text-primary-text underline underline-offset-4">
+                See the release in the catalog
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : !isPublic && submission.status !== "withdrawn" ? (
         <p className="flex gap-2 rounded-lg border px-4 py-3 text-sm text-muted-foreground">
           <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           Only you and catalog editors can see this submission. It isn&apos;t in search or on game pages until it&apos;s published.

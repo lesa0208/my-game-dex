@@ -567,4 +567,68 @@ export const m7b2bMutations = [
   sql("clients may read exclusion records", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_exclusions to authenticated;"),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations };
+const MERGE = "public.merge_release(uuid, uuid, text, text, text, text[], boolean)";
+const MERGE_PLAN = "private.merge_plan(uuid, uuid)";
+const MERGE_INVOLVES = "private.merge_involves(uuid, uuid, uuid)";
+const RESOLVE = "public.resolve_merged_release(uuid)";
+const READ_RELEASE = "private.can_read_release(uuid)";
+const MERGED_SUBMISSION = "public.get_my_merged_submission(uuid)";
+const MERGE_LIST = "public.get_merges(uuid, integer)";
+const MERGE_CANDIDATES = "public.get_merge_candidates(uuid)";
+const BEFORE_COPIES = "  insert into private.catalog_merge_copies (merge_id, item_id, owner_id)";
+const DIFFERENCES_NAMED = "(select coalesce(pg_catalog.array_agg(d ->> 'field' order by d ->> 'field'), '{}')\n      from pg_catalog.jsonb_array_elements(v_plan -> 'differences') d)";
+const ACKNOWLEDGED = "(select coalesce(pg_catalog.array_agg(distinct a order by a), '{}') from pg_catalog.unnest(p_acknowledged) a)";
+
+export const m7b2cMutations = [
+  // Unpublished merges stay private (D3, D14)
+  sql("unpublished merged releases are public", "pgtap", "alter policy releases_read_anon on public.releases using (status in ('published', 'merged'));"),
+  sql("unpublished merged releases' pieces are public", "pgtap", rewrite(READ_RELEASE, "r.status = 'published' or (r.status = 'merged' and r.merged_publicly)", "r.status in ('published', 'merged')")),
+  sql("every merged release redirects", "pgtap", rewrite(RESOLVE, "if not rel.merged_publicly or v_depth >= 10 then", "if v_depth >= 10 then")),
+  sql("a merged submission is marked public", "pgtap", rewrite(MERGE, "merged_publicly = (r.status = 'published')", "merged_publicly = true")),
+  sql("anyone reads where a submission went", "pgtap", rewrite(MERGED_SUBMISSION, "x.submitted_by = (select auth.uid()) and ", "")),
+  // Who may merge
+  sql("collectors may merge", "pgtap", rewrite(MERGE, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
+  sql("editors may merge a published release", "both", rewrite(MERGE, "if v_plan ->> 'kind' = 'published' and not private.has_staff_role('admin') then", "if false then")),
+  sql("editors may merge their own submission", "pgtap", rewrite(MERGE, "if private.merge_involves(v_me, p_source, p_target) then", "if false then")),
+  sql("a submitter's history isn't checked", "pgtap", rewrite(MERGE_INVOLVES, "      or exists (select 1 from public.catalog_change_requests x\n                 where x.submitted_by = p_me", "      or exists (select 1 from public.catalog_change_requests x\n                 where false and x.submitted_by = p_me")),
+  sql("anyone lists merges", "pgtap", rewrite(MERGE_LIST, "  perform private.require_active_staff('catalog_editor');\n", "")),
+  sql("visitors may merge", "pgtap", `grant execute on function ${MERGE} to anon;`),
+  sql("clients may read merge records", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_merges to authenticated;"),
+  // What must match, and what blocks
+  sql("another platform doesn't block", "pgtap", rewrite(MERGE_PLAN, "if s.platform_id <> t.platform_id then", "if false then")),
+  sql("another physical format doesn't block", "pgtap", rewrite(MERGE_PLAN, "if s.media_format_code is distinct from t.media_format_code then", "if false then")),
+  sql("a published release may move to another game", "pgtap", rewrite(MERGE_PLAN, "if v_kind = 'published' and s.game_id <> t.game_id then", "if false then")),
+  sql("a submission merges outside review", "pgtap", rewrite(MERGE_PLAN, "if v_kind = 'submission' and (req.id is null or req.status <> 'in_review') then", "if false then")),
+  sql("a preserved copy doesn't block", "pgtap", rewrite(MERGE_PLAN, "if exists (select 1 from public.collection_items c where c.release_id = s.id and c.record_status = 'invalid_preserved') then", "if false then")),
+  sql("an active exclusion doesn't block", "pgtap", rewrite(MERGE_PLAN, "    where e.restored_at is null\n", "    where false\n")),
+  sql("the target may be unpublished", "pgtap", rewrite(MERGE_PLAN, "if not found or t.status <> 'published' or t.id = s.id then", "if not found or t.id = s.id then")),
+  sql("a release may merge into itself", "pgtap", rewrite(MERGE_PLAN, "if not found or t.status <> 'published' or t.id = s.id then", "if not found or t.status <> 'published' then")),
+  sql("a merged release may be merged again", "pgtap", rewrite(MERGE_PLAN, "if not found or s.status not in ('published', 'unverified', 'under_review') then", "if not found or s.status = 'rejected' then")),
+  sql("candidates include other platforms", "pgtap", rewrite(MERGE_CANDIDATES, " and r.platform_id = s.platform_id\n", "\n")),
+  // Acknowledgements and the token (safeguard 2)
+  sql("the preview's token is ignored", "both", rewrite(MERGE, "if v_plan ->> 'token' is distinct from p_token then", "if false then")),
+  sql("differences needn't be acknowledged", "pgtap", rewrite(MERGE, DIFFERENCES_NAMED, ACKNOWLEDGED)),
+  sql("moving copies needn't be acknowledged", "pgtap", rewrite(MERGE, "     or ((v_plan ->> 'copies')::bigint > 0 and not coalesce(p_acknowledge_copies, false)) then", "     then")),
+  sql("the token doesn't cover the differences", "pgtap", rewrite(MERGE_PLAN, "'kind', v_kind, 'differences', v_differences, 'blocking', v_blocking,", "'kind', v_kind, 'blocking', v_blocking,")),
+  // The copies (D10, D12)
+  sql("merging moves an owner's other copies", "pgtap", rewrite(MERGE, "update public.collection_items c set release_id = p_target where c.id = any (v_items);", "update public.collection_items c set release_id = p_target where c.owner_id = any (v_owners) and c.record_status = 'active';")),
+  sql("merging deletes piece records", "pgtap", rewrite(MERGE, BEFORE_COPIES, "  delete from public.collection_item_components k where k.item_id = any (v_items);\n" + BEFORE_COPIES)),
+  sql("merging deletes private details", "pgtap", rewrite(MERGE, BEFORE_COPIES, "  delete from public.collection_item_private k where k.item_id = any (v_items);\n" + BEFORE_COPIES)),
+  sql("merging deduplicates an owner's copies", "pgtap", rewrite(MERGE, BEFORE_COPIES, "  delete from public.collection_items k where k.release_id = p_target and k.owner_id = any (v_owners);\n" + BEFORE_COPIES)),
+  sql("merging changes a copy's updated_at", "both", rewrite(COPY_TOUCHED, "        new.updated_at := old.updated_at;\n        return new;", "        new.updated_at := pg_catalog.clock_timestamp();\n        return new;")),
+  // History and references (D9, D11, safeguard 4)
+  sql("chains aren't flattened", "pgtap", rewrite(MERGE, "  update public.releases r set merged_into_id = p_target where r.merged_into_id = p_source;\n", "")),
+  sql("a target's own references are dropped", "pgtap", rewrite(MERGE, "  update private.external_references x set release_id = p_target where x.release_id = p_source;", "  delete from private.external_references y where y.release_id = p_target;\n  update private.external_references x set release_id = p_target where x.release_id = p_source;")),
+  sql("reference moves aren't recorded", "pgtap", rewrite(MERGE, "  from pg_catalog.jsonb_array_elements(v_plan -> 'references') x;", "  from pg_catalog.jsonb_array_elements(v_plan -> 'references') x where false;")),
+  sql("merge records can be changed", "pgtap", "drop trigger refuse_change on private.catalog_merges;"),
+  sql("a created game isn't retired", "pgtap", rewrite(MERGE, "    update public.games g set status = (v_plan -> 'retire' ->> 'status')::public.catalog_status", "    update public.games g set status = g.status")),
+  // Notifications (D13)
+  sql("the submitter is notified twice", "pgtap", rewrite(MERGE, "    v_notified := req.submitted_by;\n", "")),
+  sql("a second notice of a merge can be stored", "pgtap", "drop index public.notifications_merge_event_key;"),
+  sql("notices name the merging editor", "both", rewrite(MERGE, "perform private.notify(v_owner, null, 'catalog_merge', null,", "perform private.notify(v_owner, v_me, 'catalog_merge', null,")),
+  // Locks (safeguard 3)
+  sql("profiles aren't locked before catalog rows", "api", rewrite(MERGE, "  perform 1 from public.profiles p where p.id = any (v_locked) order by p.id for key share;\n", "")),
+  sql("a late copy owner isn't checked", "api", rewrite(MERGE, "  perform private.lock_new_profiles(v_locked, private.merge_profiles(v_me, p_source, p_target));\n", "")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations };

@@ -557,6 +557,7 @@ One specific physical edition: platform, region code, physical format, packaging
 | `release_date_precision` | `date_precision` | No | Default `unknown` |
 | `status` | `catalog_status` | No | `staff_only`. Default `unverified` |
 | `merged_into_id` | `uuid` | Yes | `staff_only` |
+| `merged_publicly` | `boolean` | No | Whether it was published when merged, which makes it readable as merged (M7b-2c D3). Only when `status = 'merged'`. Default `false` |
 | `submitted_by` | `uuid` | Yes | `system`. Cleared on approval or merge, so a public row never shows who owns a copy |
 | `verified_at` | `timestamptz` | Yes | `staff_only`. Set by `verify_release`. Required to publish |
 | `revision` | `bigint` | No | Default 1. Raised by every content change, and by changes to its markets, components and hardware requirements (M5b) |
@@ -585,6 +586,7 @@ One specific physical edition: platform, region code, physical format, packaging
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK ((status = 'merged') = (merged_into_id IS NOT NULL))`
+  - `CHECK (NOT merged_publicly OR status = 'merged')`
   - `CHECK (status IN ('unverified', 'under_review', 'rejected', 'excluded') OR submitted_by IS NULL)`
   - `CHECK (status <> 'published' OR verified_at IS NOT NULL)`
   - `CHECK (status <> 'published' OR (edition_name, edition_kind and media_count are set))`
@@ -948,6 +950,34 @@ There's deliberately no maximum price. On a publicly visible row it would show s
 
 ---
 
+### `private.catalog_merges`, `private.catalog_merge_copies` and `private.catalog_merge_references`
+
+Built in M7b-2c. Written only by `merge_release`; no client role has any privilege, and triggers refuse any change, except a copy's row going with the copy. See [security-rls.md](security-rls.md#merging-releases-m7b-2c).
+
+`private.catalog_merges`, one row per merge, permanent:
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `source_release_id` | `uuid` | No | → `releases(id)`, on delete restrict. Unique: a release is merged once |
+| `target_release_id` | `uuid` | No | → `releases(id)`, on delete restrict. Never the source |
+| `source_game_id`, `target_game_id` | `uuid` | No | Plain values, as they were |
+| `kind` | `text` | No | `published`, `submission` or `unpublished` |
+| `merged_by` | `uuid` | No | Plain value, as in the audit log |
+| `merged_at` | `timestamptz` | No | |
+| `staff_reason` | `text` | No | 1 to 500 characters. Staff only |
+| `owner_note` | `text` | Yes | Up to 1,000 characters. The submission's reviewer note |
+| `previous_status`, `previous_revision` | | No | The source before |
+| `request_id`, `previous_request` | | Yes | The submission merged, for a `submission` merge, and its fields before |
+| `differences` | `jsonb` | No | Every acknowledged difference, with both values |
+| `repointed_releases`, `repointed_requests` | `uuid[]` | No | What pointed at the source and now points at the target |
+| `retired_game` | `jsonb` | Yes | A game the submission created: id, previous status, status |
+| `copies_moved`, `owners_affected`, `references_moved` | `integer` | No | |
+
+`private.catalog_merge_copies`: `merge_id` and `item_id` (→ `collection_items`, on delete cascade), with `owner_id`: exactly the copies a merge moved.
+
+`private.catalog_merge_references`: `merge_id`, `reference_id`, `provider_code`, `entity_type`, `external_id`, `from_release_id`, `to_release_id` and `target_had_provider`: every external reference a merge reassigned, as it was.
+
 ### `private.catalog_exclusions` and `private.catalog_exclusion_copies`
 
 Built in M7b-2b. Written only by `exclude_release` and `restore_exclusion`; no client role has any privilege. See [security-rls.md](security-rls.md#excluding-and-restoring-releases-m7b-2b).
@@ -1166,13 +1196,13 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 | `actor_id` | `uuid` | Yes | Required for follow types. Always null for `moderation`, which never names who acted |
 | `type` | `notification_type` | No | |
 | `event_at` | `timestamptz` | Yes | The follow's `requested_at` or `accepted_at`. Required for follow types, null for `moderation` |
-| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (M4-D8). `catalog_submission` holds `status` and `submission_id`, and `exclusion_id` when excluded; `catalog_exclusion` holds `status` (`excluded` or `restored`), `exclusion_id` and `copies` (M7b-2b). Default `{}` |
+| `data` | `jsonb` | No | `{}` for follow types. `{"status": ...}` only for `moderation`, never the staff member's reason (M4-D8). `catalog_submission` holds `status` and `submission_id`, and `exclusion_id` when excluded or `merge_id` when merged (M7b-2c); `catalog_exclusion` holds `status` (`excluded` or `restored`), `exclusion_id` and `copies` (M7b-2b); `catalog_merge` holds `status` (`merged`), `merge_id` and `copies` (M7b-2c). Default `{}` |
 | `created_at` | `timestamptz` | No | Default `now()` |
 | `read_at` | `timestamptz` | Yes | Set by `mark_notifications_read` |
 
 - **Primary key:** `id`
 - **Foreign keys:** `recipient_id` and `actor_id` → `profiles(id)`, both on delete cascade (M4-D4), so nothing about a deleted account remains in anyone's notifications
-- **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict. `(recipient_id, data->>'exclusion_id', data->>'status')` where `data ? 'exclusion_id'`, so one exclusion or restoration notifies each person once (M7b-2b)
+- **Unique:** `(recipient_id, actor_id, type, event_at)`, so the same follow change can never notify twice. `moderation` rows have a null actor, so they never conflict. `(recipient_id, data->>'exclusion_id', data->>'status')` where `data ? 'exclusion_id'`, so one exclusion or restoration notifies each person once (M7b-2b). `(recipient_id, data->>'merge_id', data->>'status')` where `data ? 'merge_id'`, so one merge notifies each person once (M7b-2c)
 - **Checks:** the type, actor, event and data combinations above; the actor is never the recipient
 - **Indexes:** `(recipient_id, id DESC)`; `(recipient_id, id DESC)` where `read_at IS NULL`; `(actor_id, recipient_id)` where `actor_id` is not null
 - **Timestamps:** `created_at`, `read_at`. `event_at` is the time of the change that caused the notification

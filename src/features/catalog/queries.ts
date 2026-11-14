@@ -81,3 +81,17 @@ export async function getReleasePicker(
   });
   return outcome.ok ? { ok: true, data: parseReleasePicker(outcome.data) } : outcome;
 }
+
+/**
+ * Where an address naming a merged release should go: the release it was merged into,
+ * and its game. Null for anything else, a release merged while unpublished included,
+ * exactly as for an unknown id (M7b-2c D3, D14). Not cached: it's asked only for an id
+ * the game page can't show, and must answer as of now, not as of before a merge.
+ */
+export async function resolveMergedRelease(release: string): Promise<{ gameSlug: string; releaseId: string } | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release)) return null;
+  const outcome = await rpc("resolve_merged_release", { p_release: release });
+  if (!outcome.ok || typeof outcome.data !== "object" || outcome.data === null) return null;
+  const data = outcome.data as { game_slug?: unknown; release_id?: unknown };
+  return typeof data.game_slug === "string" && typeof data.release_id === "string" ? { gameSlug: data.game_slug, releaseId: data.release_id } : null;
+}

@@ -881,6 +881,23 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Retries.** A preview goes stale when the release, its submission or the cascade changes, including when a submitter's or reviewer's account is deleted; the editor reviews again. In a narrow race with an account deletion, the call fails with a retryable conflict.
 - **More privileged code.** Eight new `SECURITY DEFINER` functions, covered by the `m7b2b` mutation suite.
 
+### ADR-054: Merging moves every copy with everything recorded, never changes the target, and keeps unpublished merges private
+
+**Decision.** Approved by the product owner for M7b-2c, with decisions D1 to D15 and its safeguards. A catalog editor (an administrator, for a published source) merges a duplicate into a published release of the same platform and physical format, through a preview and a token-checked call that acknowledges every differing field by name. Copies move with their conditions, private details, piece records and `updated_at`. External references move with a permanent record of each. Earlier merges are repointed, so redirects take one step. The source and its history stay. A merged release is public only if it was published when merged.
+
+**Why.**
+- **No silent loss.** Collectors' records never change except the release a copy is on, and a duplicate copy is never folded into another.
+- **No accidental truth.** The target is never edited by a merge: values come over only through the audited M5 edit functions, under their field locks.
+- **No new visibility.** Merging an unpublished submission would have published it through the M5 read policy; that policy was narrowed first, and tested before any merge existed.
+- **No chains, no cycles.** Only published releases take a merge, and a merged release never does.
+
+**Trade-offs.**
+- **No unmerge.** The records keep what one would need. Owners can relink their own copies at any time.
+- **Administrators for published merges.** A published merge changes public addresses and many collections, and can't be undone.
+- **Client-side redirects.** Inside the game page's streamed boundary, the redirect is the one Next.js emits there, not an HTTP 308. A 308 would need the proxy to call the database on every release link.
+- **Locks.** A merge locks both games, both releases and the profiles of everyone it affects: about 374 ms for 2,000 copies.
+- **More privileged code.** Six new public `SECURITY DEFINER` functions and one public read, covered by the `m7b2c` mutation suite.
+
 ## Risks to watch
 
 | Risk | Mitigation |
