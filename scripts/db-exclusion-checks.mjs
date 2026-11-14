@@ -529,8 +529,8 @@ try {
     check("the exclusion waits for the game, and only for the game", await waitingForGame("excl_a", "excl_d"));
     // Its own profile is locked as it starts (begin_catalog_edit); the copy owner's
     // only by the profile locks the exclusion takes before any catalog row.
-    check("while it waits, it holds the editor's profile", profileLock(editor.id) === "locked");
-    check("and the copy owner's profile, locked before any catalog row", profileLock(owner.id) === "locked");
+    check("while the exclusion waits, it holds the editor's profile", profileLock(editor.id) === "locked");
+    check("the exclusion holds the copy owner's profile before any catalog row", profileLock(owner.id) === "locked");
     const late = addCopy(newcomer, r);
     check("meanwhile a new owner adds a copy", copyStatus(late) === "active");
     const deleting = await c.run(`begin; delete from auth.users where id = '${newcomer.id}';`);
@@ -589,8 +589,8 @@ try {
     check("the restoration waits for the game, and only for the game", await waitingForGame("excl_a", "excl_d"));
     // Its own profile is locked as it starts; the copy owner's only by the profile
     // locks the restoration takes before the exclusion record and the catalog rows.
-    check("while it waits, it holds the administrator's profile", profileLock(admin.id) === "locked");
-    check("and the copy owner's profile, locked before any catalog row", profileLock(holder.id) === "locked");
+    check("while the restoration waits, it holds the administrator's profile", profileLock(admin.id) === "locked");
+    check("the restoration holds the copy owner's profile before any catalog row", profileLock(holder.id) === "locked");
     await d.run("commit;");
     const done = await restoring;
     await a.run("commit;");
