@@ -309,6 +309,10 @@ select concat_ws(' ',
   nullif('collection_items=' || (select count(*) from public.collection_items), 'collection_items=0'),
   nullif('collection_private=' || (select count(*) from public.collection_item_private), 'collection_private=0'),
   nullif('change_requests=' || (select count(*) from public.catalog_change_requests), 'change_requests=0'),
+  nullif('exclusions=' || (select count(*) from private.catalog_exclusions), 'exclusions=0'),
+  nullif('merges=' || (select count(*) from private.catalog_merges), 'merges=0'),
+  nullif('merged_copies=' || (select count(*) from private.catalog_merge_copies), 'merged_copies=0'),
+  nullif('external_references=' || (select count(*) from private.external_references), 'external_references=0'),
   nullif('provider_records=' || (select count(*) from private.provider_records), 'provider_records=0'),
   nullif('import_runs=' || (select count(*) from private.import_runs), 'import_runs=0'),
   nullif('importer_login=' || (select rolcanlogin from pg_roles where rolname = 'catalog_importer'), 'importer_login=false'),
@@ -371,7 +375,7 @@ async function runApi(timeout) {
   let elapsed = 0;
   const stages = {};
   lastRaw.api = "";
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

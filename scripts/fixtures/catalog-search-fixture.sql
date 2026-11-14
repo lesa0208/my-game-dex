@@ -178,9 +178,9 @@ reset role;
 update public.games set status = 'rejected', verified_at = null, verified_by = null where id = pg_temp.fx_id('rejected');
 update public.releases set status = 'excluded' where id = pg_temp.fx_id('orphan-r');
 update public.games set status = 'excluded' where id = pg_temp.fx_id('orphan');
-update public.releases set status = 'merged', merged_into_id = pg_temp.fx_id('starfall-us') where id = pg_temp.fx_id('typo-r');
+update public.releases set status = 'merged', merged_into_id = pg_temp.fx_id('starfall-us'), merged_publicly = true where id = pg_temp.fx_id('typo-r');
 update public.games set status = 'merged', merged_into_id = pg_temp.fx_id('starfall') where id = pg_temp.fx_id('typo');
-update public.releases set status = 'merged', merged_into_id = pg_temp.fx_id('hidden-r') where id = pg_temp.fx_id('shadow-r');
+update public.releases set status = 'merged', merged_into_id = pg_temp.fx_id('hidden-r'), merged_publicly = true where id = pg_temp.fx_id('shadow-r');
 update public.games set status = 'merged', merged_into_id = pg_temp.fx_id('hidden') where id = pg_temp.fx_id('shadow');
 -- A published pairing needs a published release, so these pairings go too.
 update public.game_platforms set status = 'excluded'

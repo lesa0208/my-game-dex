@@ -18,7 +18,7 @@ select is((select pg_get_userbyid(nspowner) from pg_namespace where nspname = 'p
 -- Only approved objects exist. Later steps add to this list deliberately.
 select is(
   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
-  array['audit_events', 'blocked_users', 'catalog_change_requests', 'catalog_exclusion_copies', 'catalog_exclusions', 'catalog_field_locks', 'catalog_reclassifications', 'collection_item_components', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'staff_roles', 'user_preferences'],
+  array['audit_events', 'blocked_users', 'catalog_change_requests', 'catalog_exclusion_copies', 'catalog_exclusions', 'catalog_field_locks', 'catalog_merge_copies', 'catalog_merge_references', 'catalog_merges', 'catalog_reclassifications', 'collection_item_components', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'notifications', 'platform_media_formats', 'platform_names', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'staff_roles', 'user_preferences'],
   'only the approved tables exist, with no views or sequences'
 );
 
@@ -47,7 +47,7 @@ select enum_has_labels('public', 'completeness', array['sealed', 'complete', 'in
 select enum_has_labels('public', 'condition_grade', array['mint', 'near_mint', 'very_good', 'good', 'fair', 'poor', 'not_included']);
 select enum_has_labels('public', 'post_kind', array['general', 'pickup', 'showcase', 'review', 'discussion', 'achievement']);
 select enum_has_labels('public', 'moderation_status', array['visible', 'hidden', 'removed']);
-select enum_has_labels('public', 'notification_type', array['follow', 'follow_request', 'follow_accepted', 'like', 'comment', 'reply', 'mention', 'message', 'achievement', 'moderation', 'catalog_submission', 'catalog_exclusion']);
+select enum_has_labels('public', 'notification_type', array['follow', 'follow_request', 'follow_accepted', 'like', 'comment', 'reply', 'mention', 'message', 'achievement', 'moderation', 'catalog_submission', 'catalog_exclusion', 'catalog_merge']);
 select enum_has_labels('public', 'conversation_kind', array['direct', 'group']);
 select enum_has_labels('public', 'member_role', array['member', 'admin']);
 select enum_has_labels('public', 'report_reason', array['spam', 'harassment', 'hate', 'sexual_content', 'violence', 'illegal', 'counterfeit', 'impersonation', 'other']);

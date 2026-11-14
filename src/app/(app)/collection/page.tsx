@@ -1,4 +1,4 @@
-import { CircleCheck, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
+import { CircleCheck, GitMerge, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -23,6 +23,7 @@ import {
 import { getCopyNumbers, getMyCollection, getMyCollectionSummary } from "@/features/collection/queries";
 import type { CollectionSummary } from "@/features/collection/types";
 import { getMyPreservedTitles } from "@/features/exclusion/queries";
+import { getMyRecentMergedCopies } from "@/features/merge/queries";
 
 export const metadata: Metadata = {
   title: "My Collection",
@@ -147,7 +148,7 @@ async function CollectionView({ searchParams }: { searchParams: PageProps<"/coll
   const notice = readNotice(search);
   await requireViewerWithHandle(collectionHref(params));
 
-  const summary = await getMyCollectionSummary();
+  const [summary, merged] = await Promise.all([getMyCollectionSummary(), getMyRecentMergedCopies()]);
   if (!summary.ok) return <Unavailable />;
 
   if (summary.data.total === 0) {
@@ -181,6 +182,15 @@ async function CollectionView({ searchParams }: { searchParams: PageProps<"/coll
             <Link href={collectionHref({ ...DEFAULT_PARAMS, sort: params.sort, status: "invalid" })} className="font-medium text-primary-text underline underline-offset-4">
               See {summary.data.invalid === 1 ? "it" : "them"}
             </Link>
+          </span>
+        </p>
+      ) : null}
+      {merged > 0 ? (
+        <p className="mb-4 flex gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 text-sm">
+          <GitMerge aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            {merged === 1 ? "1 of your copies was" : `${merged.toLocaleString("en")} of your copies were`} moved to the catalog&apos;s main record for the same release, after a
+            duplicate record was merged. Everything you recorded is kept.
           </span>
         </p>
       ) : null}

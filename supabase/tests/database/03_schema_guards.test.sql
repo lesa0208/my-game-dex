@@ -106,6 +106,13 @@ insert into approved_function_grants values
   ('get_exclusion_preview(uuid)', 'authenticated'), ('exclude_release(uuid,text,text,text,text,boolean,boolean)', 'authenticated'),
   ('restore_exclusion(uuid,integer,text)', 'authenticated'), ('get_exclusions(text,uuid,integer)', 'authenticated'), ('get_exclusion(uuid)', 'authenticated'),
   ('get_my_preserved_release(uuid)', 'authenticated'), ('get_my_preserved_titles(uuid[])', 'authenticated'),
+  -- M7b-2c: merging (editors; administrators for a published source), each function
+  -- checks the caller's staff role. A submitter reads where their merged submission
+  -- went. Anyone may resolve a merged release's address, as for the catalog.
+  ('get_merge_preview(uuid,uuid)', 'authenticated'), ('get_merge_candidates(uuid)', 'authenticated'),
+  ('merge_release(uuid,uuid,text,text,text,text[],boolean)', 'authenticated'), ('get_merges(uuid,integer)', 'authenticated'),
+  ('get_merge(uuid)', 'authenticated'), ('get_my_merged_submission(uuid)', 'authenticated'),
+  ('resolve_merged_release(uuid)', 'anon'), ('resolve_merged_release(uuid)', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

@@ -440,7 +440,7 @@ select is(pg_temp.item('c1', 'sub') ->> 'status', 'owned', 'an approved submissi
 -- Merge: a duplicate release is merged, and its copies move to the target.
 select pg_temp.new_id('m1');
 select pg_temp.add('c1', 'm1', 'pub-eu', '{"completeness": "loose", "notes": "merge me"}');
-update public.releases set status = 'merged', merged_into_id = pg_temp.id('pub') where id = pg_temp.id('pub-eu');
+update public.releases set status = 'merged', merged_into_id = pg_temp.id('pub'), merged_publicly = true where id = pg_temp.id('pub-eu');
 select is(pg_temp.item('c1', 'm1') ->> 'status', 'pending', 'a copy on a release being merged isn''t counted as owned');
 update public.collection_items set release_id = pg_temp.id('pub') where release_id = pg_temp.id('pub-eu');
 select is(pg_temp.item('c1', 'm1') ->> 'status' || ' ' || (pg_temp.item('c1', 'm1') -> 'release' ->> 'id'), 'owned ' || pg_temp.id('pub'), 'a merged copy moves to the target release and counts again');

@@ -239,6 +239,10 @@ try {
   check("the checks ran to the end", false, error.message);
 } finally {
   await deleteUsers();
+  // Deleting an account, or correcting its handle, holds the old handle for 30 days.
+  // Only this suite's handles start with app_.
+  psql("delete from private.handle_holds where kind = 'released' and handle like 'app\\_%';");
+  check("no handle holds are left behind", psql("select count(*) from private.handle_holds where handle like 'app\\_%';") === "0");
   stopApp();
 }
 

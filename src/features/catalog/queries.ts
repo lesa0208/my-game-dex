@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 
 import { parsePlatforms, parseReleasePicker, parseSearchResponse } from "./parse";
 import type { CatalogPlatform, ReleasePicker, SearchResponse } from "./types";
@@ -43,11 +43,18 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<CatalogOu
   return { ok: true, data: await response.json() };
 }
 
+/**
+ * The tag on every cached public catalog read. A merge expires it (M7b-2c), so pages
+ * read after it show the catalog as it is, not as cached before.
+ */
+export const CATALOG_TAG = "catalog";
+
 export const SEARCH_PAGE_SIZE = 20;
 
 export async function searchCatalog(query: string, platform: string | null, cursor: string | null): Promise<CatalogOutcome<SearchResponse>> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("search_catalog", {
     p_query: query || null,
     p_platforms: platform ? [platform] : null,
@@ -60,6 +67,7 @@ export async function searchCatalog(query: string, platform: string | null, curs
 export async function listCatalogPlatforms(): Promise<CatalogOutcome<CatalogPlatform[]>> {
   "use cache";
   cacheLife("hours");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("list_catalog_platforms", {});
   return outcome.ok ? { ok: true, data: parsePlatforms(outcome.data) } : outcome;
 }
@@ -72,6 +80,7 @@ export async function getReleasePicker(
 ): Promise<CatalogOutcome<ReleasePicker | null>> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("get_release_picker", {
     p_game: game,
     p_platform: platform,
@@ -80,4 +89,18 @@ export async function getReleasePicker(
     p_release: release && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release) ? release : null,
   });
   return outcome.ok ? { ok: true, data: parseReleasePicker(outcome.data) } : outcome;
+}
+
+/**
+ * Where an address naming a merged release should go: the release it was merged into,
+ * and its game. Null for anything else, a release merged while unpublished included,
+ * exactly as for an unknown id (M7b-2c D3, D14). Not cached: it's asked only for an id
+ * the game page can't show, and must answer as of now, not as of before a merge.
+ */
+export async function resolveMergedRelease(release: string): Promise<{ gameSlug: string; releaseId: string } | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release)) return null;
+  const outcome = await rpc("resolve_merged_release", { p_release: release });
+  if (!outcome.ok || typeof outcome.data !== "object" || outcome.data === null) return null;
+  const data = outcome.data as { game_slug?: unknown; release_id?: unknown };
+  return typeof data.game_slug === "string" && typeof data.release_id === "string" ? { gameSlug: data.game_slug, releaseId: data.release_id } : null;
 }
