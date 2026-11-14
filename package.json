@@ -16,6 +16,7 @@
     "db:test": "node scripts/db.mjs test",
     "db:verify": "node scripts/db.mjs verify",
     "db:mutation": "node scripts/db-mutation-checks.mjs",
+    "mutation:campaign": "node scripts/mutation-campaign.mjs",
     "secrets:check": "node scripts/check-secrets.mjs",
     "secrets:bundle": "node scripts/check-secrets.mjs --bundle",
     "secrets:test": "node --test scripts/check-secrets.test.mjs",
@@ -31,8 +32,11 @@
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",
+    "exclusion:test": "node --experimental-strip-types --no-warnings --test src/features/exclusion/exclusion.test.mjs",
     "app:review-checks": "node scripts/app-review-checks.mjs",
-    "app:relink-checks": "node scripts/app-relink-checks.mjs"
+    "app:relink-checks": "node scripts/app-relink-checks.mjs",
+    "app:exclusion-checks": "node scripts/app-exclusion-checks.mjs",
+    "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

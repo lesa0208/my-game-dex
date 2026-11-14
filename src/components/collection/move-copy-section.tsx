@@ -21,10 +21,23 @@ function pickerLine(r: PickerRelease) {
  * platform, or search for another game, then confirm. Only published releases are
  * offered, through the public release picker; relink_my_copy checks the choice again.
  */
-export async function MoveCopySection({ copy, back, move, open }: { copy: CopyDetail; back: CollectionParams; move: MoveParams; open: boolean }) {
+export async function MoveCopySection({
+  copy,
+  known,
+  back,
+  move,
+  open,
+}: {
+  copy: CopyDetail;
+  /** For a preserved copy, its excluded release's game as its owner may read it (M7b-2b). */
+  known?: { title: string; slug: string | null } | null;
+  back: CollectionParams;
+  move: MoveParams;
+  open: boolean;
+}) {
   const platform = copy.release?.platform ?? null;
-  const gameSlug = move.game ?? copy.game?.slug ?? null;
-  const current = copy.release ? `${copy.game?.title ?? "This game"} (${releaseLine(copy.release)})` : "A release that's no longer shown in the catalog";
+  const gameSlug = move.game ?? copy.game?.slug ?? known?.slug ?? null;
+  const current = copy.release ? `${copy.game?.title ?? known?.title ?? "This game"} (${releaseLine(copy.release)})` : "A release that's no longer shown in the catalog";
 
   const [picker, search] = await Promise.all([
     gameSlug ? getReleasePicker(gameSlug, platform?.slug ?? null, null, null).catch(() => null) : null,

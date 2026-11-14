@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
+import { isAdministrator } from "@/features/exclusion/queries";
 import { QUEUE_FILTERS, queueFilter, requestStatusLabel, submitterLabel } from "@/features/review/form";
 import { canReview, getSubmissionQueue } from "@/features/review/queries";
 import { cn } from "@/lib/utils";
@@ -28,14 +29,24 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/review">[
   // Anyone else gets the same page as for an address that doesn't exist.
   if (!(await canReview())) notFound();
 
-  const queue = await getSubmissionQueue(status, after);
+  const [queue, admin] = await Promise.all([getSubmissionQueue(status, after), isAdministrator()]);
   const filterHref = (value: string) => (value === "active" ? "/review" : `/review?status=${value}`);
 
   return (
     <>
       {/* Here, not in the static shell, so only editors ever see what this page is. */}
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Review submissions</h1>
-      <p className="mb-4 text-sm text-muted-foreground">Missing games and releases sent by collectors. Oldest first.</p>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Missing games and releases sent by collectors. Oldest first.
+        {admin ? (
+          <>
+            {" "}
+            <Link href="/review/exclusions" className="text-primary-text underline underline-offset-4">
+              Exclusions
+            </Link>
+          </>
+        ) : null}
+      </p>
       <nav aria-label="Filter submissions" className="mb-4">
         <ul className="flex flex-wrap gap-2">
           {QUEUE_FILTERS.map((f) => (

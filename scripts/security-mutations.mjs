@@ -250,7 +250,7 @@ const CATALOG_LOCK = "private.lock_catalog_edits()";
 const PUBLISH = "public.publish_release(uuid, text, bigint)";
 const VERIFY_RELEASE = "public.verify_release(uuid, text, bigint)";
 const CREATE_RELEASE = "public.create_release(uuid, uuid, text, text, jsonb, text)";
-const PUBLICATION_CHECK = "private.check_catalog_publication()";
+const PUBLICATION_RULES = "private.check_publication_of(uuid, uuid)";
 const SHARED_LOCK = "perform pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('staff-changes', 0));";
 
 export const m5aMutations = [
@@ -273,7 +273,8 @@ export const m5aMutations = [
   sql("unverified release published", "both", `alter table public.releases drop constraint releases_published_verified; ${rewrite(PUBLISH, "if v_release.verified_at is null then", "if false then")}`),
   sql("unverified game published", "pgtap", `alter table public.games drop constraint games_published_verified; ${rewrite(PUBLISH, "if v_game.verified_at is null then", "if false then")}`),
   sql("release published without its game", "pgtap", "drop trigger check_catalog_publication on public.releases;"),
-  sql("game published without a physical release", "pgtap", rewrite(PUBLICATION_CHECK, "if exists (select 1 from public.games g where g.id = v_game and g.status = 'published')\n     and not private.game_has_published_release(v_game) then", "if false then")),
+  // M7b-2b moved the rules into check_publication_of, which the trigger calls.
+  sql("game published without a physical release", "pgtap", rewrite(PUBLICATION_RULES, "  if v_published then\n    if not private.game_has_published_release(p_game) then", "  if v_published then\n    if false then")),
   sql("published release can be unpublished", "pgtap", "drop trigger guard_published_catalog_row on public.releases;"),
   sql("edits keep a stale verification", "pgtap", rewrite("private.clear_release_verification(uuid)", "where r.id = p_release and r.status <> 'published' and r.verified_at is not null;", "where false;")),
   sql("import defaults an edition", "pgtap", rewrite(CREATE_RELEASE, "v_row.edition_name,\n    v_row.edition_kind,", "coalesce(v_row.edition_name, 'Standard'),\n    coalesce(v_row.edition_kind, 'standard'),")),
@@ -515,4 +516,55 @@ export const m7b2aMutations = [
   sql("visitors may call relinking", "pgtap", `grant execute on function ${RELINK} to anon;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations };
+const EXCLUDE = "public.exclude_release(uuid, text, text, text, text, boolean, boolean)";
+const RESTORE = "public.restore_exclusion(uuid, integer, text)";
+const PLAN = "private.exclusion_plan(uuid)";
+const BLOCKER = "private.restore_blocker(private.catalog_exclusions)";
+const PUBLICATION = "private.check_publication_of(uuid, uuid)";
+const PRESERVED = "private.my_preserved_releases(uuid[])";
+const PRESERVED_RELEASE = "public.get_my_preserved_release(uuid)";
+const COPY_TOUCHED = "private.set_copy_updated_at()";
+const NEW_PROFILES = "private.lock_new_profiles(uuid[], uuid[])";
+const RESTORED_COPIES = "    where c.release_id = ex.release_id and c.record_status = 'invalid_preserved' and c.invalidated_at = ex.excluded_at\n";
+
+export const m7b2bMutations = [
+  // Preservation
+  sql("exclusion preserves other copies of the same owners", "pgtap", rewrite(EXCLUDE, "  where c.id = any (v_items);", "  where c.id = any (v_items) or c.owner_id = any (v_owners);")),
+  sql("exclusion deletes piece records", "pgtap", rewrite(EXCLUDE, "  insert into private.catalog_exclusion_copies (exclusion_id, item_id, owner_id)", "  delete from public.collection_item_components k where k.item_id = any (v_items);\n  insert into private.catalog_exclusion_copies (exclusion_id, item_id, owner_id)")),
+  sql("exclusion deletes private details", "pgtap", rewrite(EXCLUDE, "  insert into private.catalog_exclusion_copies (exclusion_id, item_id, owner_id)", "  delete from public.collection_item_private k where k.item_id = any (v_items);\n  insert into private.catalog_exclusion_copies (exclusion_id, item_id, owner_id)")),
+  sql("exclusion changes a copy's updated_at", "api", rewrite(COPY_TOUCHED, "    new.updated_at := old.updated_at;", "    new.updated_at := pg_catalog.clock_timestamp();")),
+  // Notifications
+  sql("each copy is notified, not each owner", "pgtap", rewrite(EXCLUDE, "select o, count(*)::integer from pg_catalog.unnest(v_owners) o where o is distinct from v_notified group by o order by o", "select o, 1 from pg_catalog.unnest(v_owners) o where o is distinct from v_notified")),
+  sql("a second notice of an event can be stored", "pgtap", "drop index public.notifications_exclusion_event_key;"),
+  sql("notices name the excluding editor", "both", rewrite(EXCLUDE, "perform private.notify(v_owner, null, 'catalog_exclusion', null,", "perform private.notify(v_owner, v_me, 'catalog_exclusion', null,")),
+  // Who may exclude and restore
+  sql("collectors may exclude", "pgtap", rewrite(EXCLUDE, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
+  sql("editors may exclude their own submission", "pgtap", rewrite(EXCLUDE, "if private.exclusion_involves(v_me, p_release, v_plan -> 'cascade') then", "if false then")),
+  sql("editors may restore", "both", rewrite(RESTORE, "v_me := private.require_active_staff('admin');", "v_me := private.require_active_staff('catalog_editor');")),
+  sql("administrators may restore their own exclusion", "pgtap", rewrite(RESTORE, "if ex.excluded_by = v_me then", "if false then")),
+  sql("administrators may restore their own submission", "pgtap", rewrite(RESTORE, "if private.exclusion_involves(v_me, ex.release_id, ex.cascade) then", "if false then")),
+  // Restoring only what the exclusion preserved
+  sql("restoring reactivates every recorded copy", "pgtap", rewrite(RESTORE, RESTORED_COPIES, "")),
+  sql("restoring moves relinked copies back", "pgtap", rewrite(RESTORE, RESTORED_COPIES, "") + rewrite(RESTORE, "set record_status = 'active', invalidated_at = null", "set record_status = 'active', invalidated_at = null, release_id = ex.release_id")),
+  sql("restoring ignores a later preservation", "pgtap", rewrite(RESTORE, " and c.invalidated_at = ex.excluded_at\n", "\n")),
+  sql("restoring ignores records changed since", "pgtap", rewrite(BLOCKER, "    return 'exclusion changed';", "    null;")),
+  sql("restoring ignores the publication rules", "pgtap", rewrite(BLOCKER, "    return 'restore blocked';", "    null;")),
+  // The preview, acknowledgements and the cascade
+  sql("the preview's token is ignored", "both", rewrite(EXCLUDE, "if v_plan ->> 'token' is distinct from p_token then", "if false then")),
+  sql("the cascade needn't be acknowledged", "pgtap", rewrite(EXCLUDE, "(pg_catalog.jsonb_array_length(v_plan -> 'cascade') > 0 and not coalesce(p_acknowledge_cascade, false))", "false")),
+  sql("stranded submissions don't block", "pgtap", rewrite(EXCLUDE, "if pg_catalog.jsonb_array_length(v_plan -> 'blocking') > 0 then", "if false then")),
+  sql("a game keeps publication without its last release", "pgtap", rewrite(PLAN, "      v_games := v_games || v_game.id;", "      null;")),
+  sql("contained games aren't rechecked", "pgtap", rewrite(PUBLICATION, "  -- Games cataloged through this one, if it's a compilation (D2).\n  if exists (", "  if false and exists (")),
+  sql("an unpublished game may keep published releases", "pgtap", rewrite(PUBLICATION, "    -- The reverse: nothing of an unpublished game stays published.\n    raise exception", "    perform 1; --")),
+  // What owners read
+  sql("anyone reads a preserved copy's release", "both", rewrite(PRESERVED, "    and c.owner_id = (select auth.uid())\n", "\n")),
+  sql("the read path returns any of the owner's copies", "pgtap", rewrite(PRESERVED, "join public.releases r on r.id = c.release_id and r.status = 'excluded'", "join public.releases r on r.id = c.release_id") + rewrite(PRESERVED, "    and c.record_status = 'invalid_preserved'\n", "\n")),
+  sql("the read path names the submitter", "both", rewrite(PRESERVED_RELEASE, "'media_count', (x.release).media_count, 'packaging', (x.release).packaging,", "'media_count', (x.release).media_count, 'packaging', (x.release).packaging, 'submitted_by', (x.release).submitted_by,")),
+  // Locks
+  sql("a profile found late is waited for", "api", rewrite(NEW_PROFILES, "for key share nowait;", "for key share;")),
+  // Grants
+  sql("visitors may exclude", "pgtap", `grant execute on function ${EXCLUDE} to anon;`),
+  sql("clients may read exclusion records", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_exclusions to authenticated;"),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations };

@@ -32,6 +32,8 @@ import {
 import { collectionHref, type CollectionParams, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
 import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyReleaseCopies } from "@/features/collection/queries";
 import { getMySubmissionForRelease } from "@/features/submissions/queries";
+import { exclusionReasonLabel, withListedPieces } from "@/features/exclusion/form";
+import { getMyPreservedRelease } from "@/features/exclusion/queries";
 import type { CopyDetail } from "@/features/collection/types";
 import { UUID } from "@/features/collection/uuid";
 import { componentLabel, regionLabel } from "@/features/catalog/format";
@@ -91,7 +93,11 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   // Someone else's copy reads exactly like one that doesn't exist.
   if (!outcome.data) notFound();
   const copy: CopyDetail = outcome.data;
-  const { release, game } = copy;
+  // A preserved copy's excluded release isn't readable through the catalog; its owner
+  // reads a fixed set of its fields through get_my_preserved_release (M7b-2b, D3).
+  const excluded = copy.status === "invalid" && !copy.release ? await getMyPreservedRelease(copy.id) : null;
+  const release = copy.release ?? excluded?.release ?? null;
+  const { game } = copy;
 
   const [category, siblings, defaultCurrency, submissionId] = await Promise.all([
     getMediaCategory(release?.format.code ?? null),
@@ -104,15 +110,16 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   // agree. A copy older than the newest 100 isn't in it and gets no number.
   const number = siblings?.copies.find((c) => c.id === copy.id)?.number ?? null;
   const status = copyStatusLabel(copy.status);
-  const title = game?.title ?? "A release no longer in the catalog";
+  const title = game?.title ?? excluded?.game.title ?? "A release no longer in the catalog";
   const line = release ? releaseLine(release) : null;
   const copyName = `${number ? `copy ${number} of ` : "this copy of "}${title}${line ? ` (${line})` : ""}`;
 
   // A preserved copy can't be changed (the M6 guards refuse it), only moved or removed.
   const preserved = copy.status === "invalid";
   const editable = viewer.isActive && !preserved;
-  const listed = copy.components.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
-  const unlisted = copy.components.filter((p) => !p.listed && p.recorded);
+  const pieces = excluded ? withListedPieces(copy.components, excluded.components) : copy.components;
+  const listed = pieces.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
+  const unlisted = pieces.filter((p) => !p.listed && p.recorded);
 
   return (
     <article aria-labelledby="copy-title" className="flex flex-col gap-4">
@@ -165,6 +172,12 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             <TriangleAlert aria-hidden="true" className="size-4" />
             This copy is kept privately
           </h2>
+          {excluded?.exclusion ? (
+            <p className="mb-2 text-sm">
+              <span className="font-medium">Removed from the catalog:</span> {exclusionReasonLabel(excluded.exclusion.reason_code)}.
+              {excluded.exclusion.note ? <span className="mt-1 block break-words whitespace-pre-wrap">“{excluded.exclusion.note}”</span> : null}
+            </p>
+          ) : null}
           <p className="text-sm">
             Its release is no longer in the catalog, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
             it&apos;s on a release in the catalog.
@@ -237,7 +250,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
       </Section>
 
       {release ? (
-        <Section id="copy-release" title="Release">
+        <Section id="copy-release" title={excluded ? "Release, no longer in the catalog" : "Release"}>
           <Facts
             rows={[
               { label: "Platform", value: release.platform.name },
@@ -318,7 +331,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
         </p>
       )}
 
-      {viewer.isActive ? <MoveCopySection copy={copy} back={back} move={move} open={Boolean(move.query || move.game || move.release) || preserved} /> : null}
+      {viewer.isActive ? <MoveCopySection copy={{ ...copy, release }} known={excluded?.game ?? null} back={back} move={move} open={Boolean(move.query || move.game || move.release) || preserved} /> : null}
 
       <RemoveCopyForm itemId={copy.id} name={copyName} added={formatDay(copy.added_at)} back={back} />
     </article>

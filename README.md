@@ -48,6 +48,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run submissions:test` | Test the submission forms' rules |
 | `npm run app:submission-checks` | After a build, test catalog submissions (submitting, editing, withdrawing and adding a copy) in the running app against the local stack and catalog fixture |
 | `npm run review:test` | Test the review forms' rules |
+| `npm run exclusion:test` | Test the exclusion forms' rules, reason codes and messages |
+| `npm run app:exclusion-checks` | After a build, test excluding and restoring a release (preview, confirmation, refusals, the owner's preserved copy, restoration) in the running app against the local stack and catalog fixture |
+| `npm run db:exclusion-benchmark` | Time excluding and restoring a release with 2,000 copies of 500 owners on the local stack, and what waits meanwhile |
 | `npm run app:relink-checks` | After a build, test moving a copy to another release (choosing, confirming, refusals and preserved copies) in the running app against the local stack and catalog fixture |
 | `npm run app:review-checks` | After a build, test catalog review (the queue, starting, correcting, approving, asking for changes, rejecting and resubmitting) in the running app against the local stack and catalog fixture |
 

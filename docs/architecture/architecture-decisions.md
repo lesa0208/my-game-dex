@@ -863,7 +863,23 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **New definer code.** The relink function and the trigger functions run as their owner: a locking read needs `UPDATE` privilege on releases. They're narrow, explicit and covered by the `m7b2a` mutation suite.
 - **Brief waits.** Adding a copy now briefly waits for, and holds up, an editor's change to the same release.
 - **Fixtures.** Copies can no longer be written onto an excluded release, even by maintenance sessions; test data for such copies is written without triggers, as data from before an exclusion.
-- **Excluded releases.** Owners can't read them until M7b-2b, so a preserved copy's move search isn't filtered to its platform yet; the page says so, and the database refuses another platform. Constraining the picker is deferred to M7b-2b's read path, rather than weakening RLS.
+- **Excluded releases.** Owners couldn't read them until M7b-2b, so a preserved copy's move search wasn't filtered to its platform. M7b-2b's owner read path (ADR-053) fixed that without weakening RLS.
+
+### ADR-053: Exclusion preserves every copy, cascades only what the publication rules need, and is restored by another administrator
+
+**Decision.** Approved by the product owner for M7b-2b, with decisions D1 to D12 and the lock-order correction. Catalog editors exclude a release through a preview and an acknowledged, token-checked call. The pairing, game and contained games that would otherwise break the publication rules are excluded with it, unless that would strand another submission. Every active copy is preserved and recorded, and its owner notified once. Another administrator restores exactly the previous statuses, and only the copies the exclusion preserved that are still there. Owners of preserved copies read a fixed set of the excluded release's fields through dedicated functions.
+
+**Why.**
+- **Nothing lost.** Collectors' copies, private details and piece records never change, so a wrong exclusion is fully reversible, and a right one leaves the owner everything they recorded.
+- **Consistent catalog.** The publication rules, now checked in both directions and through compilations, fail the whole transaction rather than leave a published game without a release.
+- **No accidental restoration.** Only recorded copies, still on the release and still preserved by this exclusion, come back. An owner's later relink or removal stands.
+- **No new visibility.** Catalog RLS is unchanged; the owner read path is narrow, fixed and tested field by field.
+
+**Trade-offs.**
+- **Single administrator.** Their own exclusions can't be restored until there's another administrator (D5).
+- **Locks.** An exclusion briefly locks the release's game, the games it contains, and the profiles of everyone it affects. Catalog edits to that game and those accounts' deletion wait for it: about 265 ms for 2,000 copies.
+- **Retries.** A preview goes stale when the release, its submission or the cascade changes, including when a submitter's or reviewer's account is deleted; the editor reviews again. In a narrow race with an account deletion, the call fails with a retryable conflict.
+- **More privileged code.** Eight new `SECURITY DEFINER` functions, covered by the `m7b2b` mutation suite.
 
 ## Risks to watch
 

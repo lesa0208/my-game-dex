@@ -101,6 +101,11 @@ insert into approved_function_grants values
   ('get_submission_review(uuid)', 'authenticated'),
   -- M7b-2a: an owner moves their own copy. SECURITY DEFINER, because clients can't change a copy's release.
   ('relink_my_copy(uuid,uuid)', 'authenticated'),
+  -- M7b-2b: excluding (editors) and restoring (administrators); each function checks
+  -- the caller's staff role. Owners read what their preserved copies are on.
+  ('get_exclusion_preview(uuid)', 'authenticated'), ('exclude_release(uuid,text,text,text,text,boolean,boolean)', 'authenticated'),
+  ('restore_exclusion(uuid,integer,text)', 'authenticated'), ('get_exclusions(text,uuid,integer)', 'authenticated'), ('get_exclusion(uuid)', 'authenticated'),
+  ('get_my_preserved_release(uuid)', 'authenticated'), ('get_my_preserved_titles(uuid[])', 'authenticated'),
   -- M5a: called by catalog read policies.
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),

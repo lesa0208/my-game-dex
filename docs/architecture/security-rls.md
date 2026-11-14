@@ -1193,7 +1193,7 @@ It locks the caller's profile, then both releases `FOR SHARE` in id order, then 
 
 **App.** The copy's page has "Move to another release": the game's other releases for the copy's platform, or a search for another game, then a confirmation naming both releases and what's kept. It works without JavaScript. A preserved copy explains that it's kept privately and opens the move flow; it offers no edit form and no removal of piece records, which the M6 guards refuse on a preserved copy, only moving or removing the copy.
 
-**Deferred to M7b-2b: the preserved copy's platform.** A copy stores no platform of its own; it comes from the release. `get_my_collection_item` reads as the caller, and the release policies hide an excluded release, and with it its game and platform, from everyone but catalog staff. So no data the owner may read gives a preserved copy's platform, and the move search isn't limited to it. The page says so: choose a release for the platform the copy was on, or it's refused. Exposing the platform now would need a new read path to excluded releases, which M7b-2b plans with the restoration history; RLS isn't weakened for it. The database still refuses a relink to another platform, comparing the platforms as the function's owner and returning only `other platform`.
+**The preserved copy's platform.** A copy stores no platform of its own, and catalog RLS hides an excluded release from its owner, so until M7b-2b the move search couldn't be limited to it. M7b-2b's owner read path gives the platform without weakening RLS, and the picker is limited to it; see [Excluding and restoring releases (M7b-2b)](#excluding-and-restoring-releases-m7b-2b). The database still refuses a relink to another platform.
 
 **Tested by:**
 - `25_copy_relink.test.sql` (who can relink, which targets, preservation compared before and after, not-approved and preserved copies, the late check through direct writes);
@@ -1201,6 +1201,57 @@ It locks the caller's profile, then both releases `FOR SHARE` in id order, then 
 - `scripts/db-relink-checks.mjs` (the API boundary, and deterministic races between adding or moving a copy and a status change, and an account deletion);
 - `npm run collection:test` and `npm run app:relink-checks`;
 - the `m7b2a` suite, and an `m6` rerun.
+
+## Excluding and restoring releases (M7b-2b)
+
+The second part of M7b-2, approved with decisions D1 to D12 and the lock-order correction. Catalog editors exclude a release that is outside the physical-only scope; every copy of it is kept privately, nothing is deleted, and another administrator can restore it exactly as it was. Merging (M7b-2c) builds on this. Migrations: `20261114100000_m7b2b_exclusion_types.sql`, `20261114100100_m7b2b_exclusion.sql`, `20261114100200_m7b2b_preserved_reads.sql`.
+
+**Who.** `get_exclusion_preview` and `exclude_release` need an active catalog editor or administrator (D6) who submitted neither the release nor a game the exclusion would take with it (D5). `restore_exclusion`, `get_exclusions` and `get_exclusion` need an active administrator, and restoring refuses the administrator who excluded it and anyone who submitted any of it (D5). With only one administrator, their own exclusions can't be restored until there's another. Every check is in the database functions, which are `SECURITY DEFINER` with an empty `search_path` and executable by `authenticated` only; the pages only show what they allow.
+
+**What can be excluded.** A published, pending (unverified or under review, whether its request is open, in review or awaiting changes) or rejected release. Not an excluded or merged one, and not one that other releases were merged into (D10).
+
+**The cascade (D1, D2).** The publication rules must still hold afterwards, so excluding a release also excludes:
+- its pairing, if no other published release is on it;
+- its game, if that was the game's last published physical release, its own or through a compilation;
+- the games a compilation contains that are cataloged only through this release;
+- for a submission, a game it made that nothing else uses, as rejection treats it.
+
+An excluded pairing isn't a trap: `publish_release` publishes the pairing again with the next release on it. An excluded game refuses new submissions, so the exclusion is refused while another submission of a game it would exclude is pending or rejected ('exclusion blocked'), and the editor reviews those first.
+
+**Acknowledgement and the token (D12).** The preview lists the copies and owners affected, every cascaded record by name, and anything blocking it, with a token: an MD5 of the release's id, status and revision, the submission it would close and its version, the whole cascade and the number of blockers. `exclude_release` recomputes the plan under its locks; a different token is 'preview stale'. Copy and owner counts aren't in the token, so a collector adding a copy doesn't invalidate the preview. Copies and the cascade each need their own acknowledgement ('acknowledgement required').
+
+**What it changes, in one transaction.** The submission's request becomes `excluded` first (the M7b-1 guard refuses changing a record whose submission is active), with the owner note as its reviewer note; then the release and cascaded records become `excluded`; then every active copy on the release becomes `invalid_preserved`, with `invalidated_at` set to the exclusion's time. Nothing else about a copy changes, its private details and piece records included, and `updated_at` is kept: the new `set_copy_updated_at` trigger leaves it when only the preservation status changes. A preserved copy stays read-only, private notes included (D9), until it's relinked or restored.
+
+**Records.** `private.catalog_exclusions` keeps each exclusion as history: the release's previous status, the request's fields before, each cascaded record's previous status, the reason code, the owner note, the staff reason, the counts, a version, and the restoration. Staff ids are plain values, as in the audit log, so an account deletion never changes or locks them. `private.catalog_exclusion_copies` lists exactly the copies the exclusion preserved; a row goes when its copy is deleted. Clients can't read either.
+
+**Reasons (D7).** A fixed reason code that owners see (`download_code`, `game_key_card`, `installer_only`, `no_game_data`, `not_physical_release`, `other`), a required staff reason kept in the record and the audit log, and an optional note to owners of up to 1,000 characters.
+
+**Notifications (D8).** Once per affected person per event, never naming who acted: the submitter by their submission (`catalog_submission`, status `excluded`), every other owner by their copies (`catalog_exclusion`, with the count). A unique index on recipient, exclusion and status makes a second notice of the same event impossible. Restoring notifies each owner whose copies came back, and the submitter. The notifications page is still a placeholder; My Collection shows a banner and the "kept privately" filter.
+
+**Audit.** `catalog_release_excluded` and `catalog_exclusion_restored` rows, with the staff member, their reason, the exclusion's id and counts, and no owner ids.
+
+**Restoring (D4).** Exactly the previous statuses, the request's fields included, if:
+- the exclusion isn't restored yet, at the version the administrator read;
+- every record it changed is still excluded ('exclusion changed' otherwise): excluded records can't be edited, so a status is enough to tell;
+- the publication rules would hold: a published release needs its game and pairing published, as they are or as this restores them, and a submission can't come back under a game since excluded or merged ('restore blocked').
+
+Only copies that this exclusion recorded, that are still on the release, still `invalid_preserved` and still carry the exclusion's `invalidated_at`, become active again. Restoration never moves a copy: one its owner relinked stays where it is, one they removed stays removed, and one preserved by anything else is untouched. A reviewer whose account is gone stays null.
+
+**Publication rules, both directions (D2).** `check_catalog_publication`, checked at commit, now also checks that nothing of an unpublished game or pairing stays published, and that every published game a compilation contains still has a published physical release. A violation rolls the whole transaction back: catalog changes, copies, the exclusion record, notifications and audit rows.
+
+**Lock order (approved).** Profiles first, `FOR KEY SHARE`: the caller (as every editor function does), then, in id order, every profile the rows about to be locked refer to (submitters and verifiers of the release, its game and contained games, the pairing's submitter, the request's submitter and reviewer) and every owner of an active copy. Then catalog rows: the release's submission requests, games by id (the release's game and the games it contains), the release, the pairing; then copies by id. Account deletion locks a profile and then clears its id from catalog rows (`submitted_by`, `verified_by`, `reviewed_by`), so waiting for a profile while holding a catalog row could deadlock with it. After the catalog locks, references and owners are read again, and a profile not locked before is locked with `NOWAIT`: if that would wait, the call fails with 'request conflict' and nothing is kept. That happens only if a copy was added, or a reviewer changed, in the moment between the first read and the locks, while that person's account is being deleted. Suspensions take the staff-changes lock exclusively, which exclusion holds shared, so they can't be in progress then. Restoration takes the same order, with the exclusion record before the requests; its copies are a recorded set that can only shrink, so it finds no new owners. Nested writes take no other profile locks: notifications' foreign keys use the owner locks already held, the records' staff ids have no foreign keys, and no trigger on the rows written locks a profile.
+
+**What owners read (D3).** Catalog RLS is unchanged: an excluded release stays readable only by catalog editors. `get_my_preserved_release` and `get_my_preserved_titles` read past it for one purpose, and only for the caller's own copy that is `invalid_preserved` and on an excluded release: the release's platform, region, edition, variant, local title, format, media count, packaging, product code and barcode, the pieces it listed, the game's title (and slug while the game is published), and the exclusion's reason code, note and date. Never who submitted, verified or excluded it, evidence, provenance, field locks, the staff reason, other owners or the audit log. Another user's copy, or a copy relinked away or removed, reads exactly like one that doesn't exist. Titles are read at most 100 at a time, by copy id. The copy's page uses the platform to limit the move picker, which M7b-2a deferred.
+
+**Performance (D11).** Measured locally: excluding a release with 2,000 copies of 500 owners takes about 265 ms, and the commit-time checks 3 ms; restoring it, 183 ms. Meanwhile copies are added to other releases without waiting; a copy added to the release being excluded waits for the commit and is refused. `npm run db:exclusion-benchmark` repeats it.
+
+**Tested by:**
+- `26_release_exclusion.test.sql` and `27_exclusion_restore.test.sql`;
+- `scripts/db-exclusion-checks.mjs`: the API boundary, and deterministic races against account deletions (an owner who verified the release, a reviewer, an account with several references, during a restoration), a review decision, a new owner's copy, the `NOWAIT` conflict and its retry, a rollback at commit, relinking, a second exclusion and a second restoration;
+- `npm run exclusion:test` and `npm run app:exclusion-checks`;
+- the `m7b2b` suite.
+
+**Retention.** Exclusion records keep staff ids, the staff reason and the owner note, and `previous_request` keeps a reviewer's id even after their account is deleted, as the audit log does. Rows of `catalog_exclusion_copies` go with their copies. Nothing is deleted by age; the retention policy is still a production-launch blocker (A2, D10, M4-D10).
 
 ## Assigning the first administrator
 
