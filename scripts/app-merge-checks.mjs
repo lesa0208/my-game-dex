@@ -117,6 +117,10 @@ try {
   const visitor = await new Browser().get(`/review/merge/${dup}`);
   check("a visitor is sent to sign in", visitor.response.status === 307 || /sign-in/.test(location(visitor.response)) || /sign-in/.test(visitor.html));
   check("a collector can't open the merge history", plain((await owner.browser.get("/review/merges")).html).includes(NOT_AVAILABLE));
+  // Visitors' pages, read before the merge, so the public catalog has them cached.
+  const cachedRelease = await new Browser().get(`/games/starfall-odyssey?release=${dup}`);
+  const cachedSearch = await new Browser().get("/explore?q=MGA-DUP");
+  check("before the merge, a visitor sees the duplicate on the game page and in search", visible(cachedRelease.html).includes("MGA-DUP") && hrefs(cachedSearch.html).some((h) => h.includes(`release=${dup}`)));
 
   section("Choosing and comparing");
   const choose = await editor.browser.get(`/review/merge/${dup}`);
@@ -153,10 +157,23 @@ try {
   check("with the reason and the differences acknowledged", detail.includes("The same cartridge") && detail.includes("MGA-DUP → SNS-ZSFE-USA"));
 
   section("Links and owners");
-  // An address not asked for before the merge: the public catalog caches each one for
-  // minutes, so one shown before could still show the release as it was.
-  const old = await new Browser().get(`/games/starfall-odyssey?platform=snes&release=${dup}`);
-  check("a link to the merged release redirects to the kept one", redirectsTo(old) === `/games/starfall-odyssey?release=${us}`, `${old.response.status} ${redirectsTo(old)}`);
+  // The same address a visitor read before the merge: the merge expired the cached catalog.
+  const old = await new Browser().get(`/games/starfall-odyssey?release=${dup}`);
+  check("a link to the merged release, cached before, now redirects to the kept one", redirectsTo(old) === `/games/starfall-odyssey?release=${us}`, `${old.response.status} ${redirectsTo(old)}`);
+  const searchAfter = await new Browser().get("/explore?q=MGA-DUP");
+  check("and a search cached before no longer finds the merged release", !hrefs(searchAfter.html).some((h) => h.includes(`release=${dup}`)));
+  // Even a page still showing it can't put a copy on it: the database refuses.
+  const { session: ownerSession } = readSession(owner.browser);
+  const attempt = (fn, args) =>
+    fetch(`${api}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: { apikey: publishableKey, Authorization: `Bearer ${ownerSession.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    }).then(async (r) => ({ status: r.status, message: (await r.json())?.message }));
+  const addToMerged = await attempt("add_collection_item", { p_item_id: uuidv7(), p_release: dup, p_details: {} });
+  check("adding a copy to the merged release is refused", addToMerged.status >= 400 && addToMerged.message === "release unavailable");
+  const relinkToMerged = await attempt("relink_my_copy", { p_item: copy, p_release: dup });
+  check("and so is moving a copy to it", relinkToMerged.status >= 400 && relinkToMerged.message === "release unavailable" && onRelease(copy) === us);
   const list = await owner.browser.get("/collection");
   check("My Collection says a copy moved to the main record", plain(list.html).includes("1 of your copies was moved to the catalog's main record"));
   const mine = plain((await owner.browser.get(`/collection/${copy}`)).html);
@@ -164,7 +181,7 @@ try {
   check("another collector sees no banner", !plain((await someone.browser.get("/collection")).html).includes("moved to the catalog's main record"));
 
   section("A submission");
-  const submitted = await rpcAs(owner, "submit_release", { p_game: game, p_platform: "snes", p_media_format: "rom-cartridge", p_region: "ntsc-uc", p_details: { product_code: "SNS-ZSFE-USA" }, p_components: [], p_physical: true });
+  const submitted = await rpcAs(owner, "submit_release", { p_game: game, p_platform: "snes", p_media_format: "rom-cartridge", p_region: "ntsc-uc", p_details: { product_code: "MGA-SECRET-CODE", local_title: "Mga Secret Title" }, p_components: [], p_physical: true });
   const subCopy = await add(owner, submitted.release_id, { notes: "Mine" });
   const version = psql(`select version from public.catalog_change_requests where id = '${submitted.submission_id}';`);
   await rpcAs(editor, "start_submission_review", { p_request: submitted.submission_id, p_expected_version: Number(version), p_reason: "Checking" });
@@ -183,6 +200,11 @@ try {
   const unknown = await new Browser().get(`/games/starfall-odyssey?release=${uuidv7()}`);
   check("a link to the merged submission doesn't redirect", hidden.response.status === 200 && unknown.response.status === 200 && !redirectsTo(hidden));
   check("and the page is the same as for an id that doesn't exist", visible(hidden.html) === visible(unknown.html));
+  const titleOf = (html) => /<title>([^<]*)<\/title>/.exec(html)?.[1] ?? null;
+  check("with the same page title", titleOf(hidden.html) === titleOf(unknown.html));
+  check("and nothing of the submission anywhere in the response, scripts and metadata included",
+    !["MGA-SECRET-CODE", "Mga Secret Title", "We already had it."].some((text) => hidden.html.includes(text)));
+  check("nor in the headers", ![...hidden.response.headers.values()].some((v) => v.includes(submitted.release_id) || v.includes("MGA-SECRET")));
 
   const files = readdirSync(join(root, ".next", "static"), { recursive: true }).filter((f) => String(f).endsWith(".js"));
   const bundle = files.map((f) => readFileSync(join(root, ".next", "static", String(f)), "utf8")).join("\n");

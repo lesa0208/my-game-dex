@@ -894,7 +894,8 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 **Trade-offs.**
 - **No unmerge.** The records keep what one would need. Owners can relink their own copies at any time.
 - **Administrators for published merges.** A published merge changes public addresses and many collections, and can't be undone.
-- **Client-side redirects.** Inside the game page's streamed boundary, the redirect is the one Next.js emits there, not an HTTP 308. A 308 would need the proxy to call the database on every release link.
+- **Client-side redirects.** Inside the game page's streamed boundary, the redirect is the one Next.js emits there, not an HTTP 308. A 308 would need the proxy to call the database on every release link. A known limitation, not a security one.
+- **Cache.** A merge expires the public catalog's cache tag, all of it: merges are rare, and the catalog refills on the next reads.
 - **Locks.** A merge locks both games, both releases and the profiles of everyone it affects: about 374 ms for 2,000 copies.
 - **More privileged code.** Six new public `SECURITY DEFINER` functions and one public read, covered by the `m7b2c` mutation suite.
 

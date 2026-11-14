@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 
 import { parsePlatforms, parseReleasePicker, parseSearchResponse } from "./parse";
 import type { CatalogPlatform, ReleasePicker, SearchResponse } from "./types";
@@ -43,11 +43,18 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<CatalogOu
   return { ok: true, data: await response.json() };
 }
 
+/**
+ * The tag on every cached public catalog read. A merge expires it (M7b-2c), so pages
+ * read after it show the catalog as it is, not as cached before.
+ */
+export const CATALOG_TAG = "catalog";
+
 export const SEARCH_PAGE_SIZE = 20;
 
 export async function searchCatalog(query: string, platform: string | null, cursor: string | null): Promise<CatalogOutcome<SearchResponse>> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("search_catalog", {
     p_query: query || null,
     p_platforms: platform ? [platform] : null,
@@ -60,6 +67,7 @@ export async function searchCatalog(query: string, platform: string | null, curs
 export async function listCatalogPlatforms(): Promise<CatalogOutcome<CatalogPlatform[]>> {
   "use cache";
   cacheLife("hours");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("list_catalog_platforms", {});
   return outcome.ok ? { ok: true, data: parsePlatforms(outcome.data) } : outcome;
 }
@@ -72,6 +80,7 @@ export async function getReleasePicker(
 ): Promise<CatalogOutcome<ReleasePicker | null>> {
   "use cache";
   cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
   const outcome = await rpc("get_release_picker", {
     p_game: game,
     p_platform: platform,

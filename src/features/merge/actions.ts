@@ -1,9 +1,10 @@
 "use server";
 
-import { refresh } from "next/cache";
+import { refresh, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createSupabaseServerClient } from "@/features/auth/server";
+import { CATALOG_TAG } from "@/features/catalog/queries";
 import { UUID } from "@/features/collection/uuid";
 
 import { mergeErrorMessage, readFieldList, readMerge } from "./form";
@@ -49,6 +50,9 @@ export async function mergeRelease(_state: MergeState, formData: FormData): Prom
   if (error) return { status: "error", message: mergeErrorMessage(error.message) };
   const id = (data as { merge_id?: unknown })?.merge_id;
   if (typeof id !== "string" || !UUID.test(id)) return { status: "error", message: mergeErrorMessage(null) };
+  // The public catalog's cached pages and lists may still show the merged release:
+  // expire them, so the next visit to any of them reads the catalog as it is now.
+  updateTag(CATALOG_TAG);
   refresh();
   redirect(`/review/merges/${id}?notice=merged`);
 }

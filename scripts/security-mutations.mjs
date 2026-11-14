@@ -626,6 +626,11 @@ export const m7b2cMutations = [
   sql("the submitter is notified twice", "pgtap", rewrite(MERGE, "    v_notified := req.submitted_by;\n", "")),
   sql("a second notice of a merge can be stored", "pgtap", "drop index public.notifications_merge_event_key;"),
   sql("notices name the merging editor", "both", rewrite(MERGE, "perform private.notify(v_owner, null, 'catalog_merge', null,", "perform private.notify(v_owner, v_me, 'catalog_merge', null,")),
+  // Behavior these redefined objects had before M7b-2c
+  sql("another collector reads a submission's pieces", "pgtap", rewrite(READ_RELEASE, "(r.submitted_by = (select auth.uid()) and r.status in ('unverified', 'under_review', 'rejected'))", "(r.status in ('unverified', 'under_review', 'rejected'))")),
+  sql("editors can't read unpublished pieces", "pgtap", rewrite(READ_RELEASE, "        or private.is_catalog_editor()\n", "\n")),
+  sql("visitors read unpublished releases", "pgtap", "alter policy releases_read_anon on public.releases using (true);"),
+  sql("an owner's relink keeps updated_at", "api", rewrite(COPY_TOUCHED, "      if exists (\n        select 1 from private.catalog_merge_copies mc", "      if true or exists (\n        select 1 from private.catalog_merge_copies mc")),
   // Locks (safeguard 3)
   sql("profiles aren't locked before catalog rows", "api", rewrite(MERGE, "  perform 1 from public.profiles p where p.id = any (v_locked) order by p.id for key share;\n", "")),
   sql("a late copy owner isn't checked", "api", rewrite(MERGE, "  perform private.lock_new_profiles(v_locked, private.merge_profiles(v_me, p_source, p_target));\n", "")),

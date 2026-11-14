@@ -263,6 +263,11 @@ try {
     const done = await rpc(admin.headers, "merge_release", args);
     check("an administrator merges it", done.status === 200 && done.body.copies === 1 && copyOn(item) === t && releaseStatus(s) === "merged", done.text);
     check("which leaves the copy's updated_at as its owner last left it", touched() === touchedBefore);
+    // The owner's own move is their edit: it still moves updated_at on.
+    const other = makeRelease(g, "pal");
+    const relinked = await rpc(owner.headers, "relink_my_copy", { p_item: item, p_release: other });
+    check("an owner's own relink afterwards still moves its updated_at on", relinked.status === 200 && copyOn(item) === other
+      && psql(`select updated_at > '${touchedBefore}'::timestamptz from public.collection_items where id = '${item}';`) === "t", relinked.text);
     const resolved = await rpc(anon, "resolve_merged_release", { p_release: s });
     check("a visitor's link to it resolves to the target", resolved.body?.release_id === t);
     const list = await rpc(editor.headers, "get_merges", {});
