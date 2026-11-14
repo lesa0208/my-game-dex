@@ -138,6 +138,9 @@ async function waitingOnLock(name) {
   }
   return false;
 }
+/** Whether a promise settles within ms; a slow one keeps running. */
+const settlesWithin = (promise, ms) =>
+  Promise.race([promise.then(() => true, () => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))]);
 const deadlocked = (result) => /deadlock/i.test(result?.err ?? "");
 const errorOf = (result) => /ERROR:\s+([^\n]+)/.exec(result?.err ?? "")?.[1] ?? "";
 
@@ -482,7 +485,10 @@ try {
     const tok = token(r);
     // d holds the game, so the exclusion stops after its first profile locks.
     await d.run(`begin; select 1 from public.games where id = '${g}' for share;`);
-    await a.run("begin;");
+    // Scoped to this transaction: a wait the function shouldn't make ends in seconds,
+    // not at the mutation runner's timeout. It can't stand in for NOWAIT, which the
+    // timing check below tells apart.
+    await a.run("begin; set local lock_timeout = '15s';");
     const excluding = a.asUser(editor.id, excludeSql(r, tok));
     check("the exclusion has locked the profiles it knew, and waits for the game", await waitingOnLock("excl_a"));
     const late = addCopy(newcomer, r);
@@ -490,10 +496,13 @@ try {
     const deleting = await c.run(`begin; delete from auth.users where id = '${newcomer.id}';`);
     check("and their account deletion is in progress", !deleting.err, deleting.err);
     await d.run("commit;");
+    const prompt = await settlesWithin(excluding, 5000);
+    check("once it has the game, it doesn't wait for that owner's deletion", prompt);
     const done = await excluding;
     check("the exclusion can't lock that owner without waiting, so it stops with a retryable conflict", !deadlocked(done) && errorOf(done) === "request conflict", done.err);
     check("which names no lock or table", !/profiles|lock|nowait/i.test(errorOf(done)));
     await a.run("rollback;");
+    check("its lock timeout ended with its transaction", (await a.run("show lock_timeout;")).out === "0");
     check("and nothing it did is kept: release, copies, exclusion, notices and audit",
       releaseStatus(r) === "published" && copyStatus(keep) === "active" && exclusionOf(r) === ""
       && psql(`select count(*) from public.notifications where recipient_id = '${owner.id}' and type = 'catalog_exclusion' and created_at > now() - interval '1 minute' and data ->> 'exclusion_id' not in (select id::text from private.catalog_exclusions);`) === "0"
@@ -584,6 +593,9 @@ try {
   check("the checks ran to the end", false, caught.message);
 } finally {
   for (const s of [a, b, c, d]) s.close();
+  // A session left waiting on a lock would keep its transaction, and its locks, open
+  // and hold up the cleanup: end each one's backend. Their settings went with them.
+  psql(`select count(pg_terminate_backend(pid)) from pg_stat_activity where application_name in (${[a, b, c, d].map((s) => `'${s.name}'`).join(", ")});`);
   await cleanup();
 }
 

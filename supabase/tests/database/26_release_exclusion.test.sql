@@ -4,7 +4,7 @@
 -- calls are tested in scripts/db-exclusion-checks.mjs, where sessions really overlap.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(89);
+select plan(92);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
@@ -57,6 +57,11 @@ begin
   end if;
   return r;
 end $$;
+-- A call's result as JSON, or {"error": ...} if it was refused, so an assertion on it
+-- fails by name instead of the cast aborting the file.
+create function pg_temp.j(r text) returns jsonb language sql immutable as $$
+  select case when r like '{%' then r::jsonb else jsonb_build_object('error', r) end
+$$;
 create function pg_temp.new_id(p text) returns void language sql as $$ insert into ids values (p, private.uuid_v7()) $$;
 create function pg_temp.add(p_actor text, p_item text, p_release text, p_details text default '{}') returns text language plpgsql as $$
 begin
@@ -202,7 +207,7 @@ update public.releases set local_title = null where id = pg_temp.id('us');
 -- ---------------------------------------------------------------------------
 -- Excluding a published release
 -- ---------------------------------------------------------------------------
-select is((pg_temp.exclude('e5', 'us')::jsonb - 'exclusion_id')::text, '{"copies": 3, "owners": 2}', 'an editor excludes the release, preserving 3 copies of 2 owners');
+select is((pg_temp.j(pg_temp.exclude('e5', 'us')) - 'exclusion_id')::text, '{"copies": 3, "owners": 2}', 'an editor excludes the release, preserving 3 copies of 2 owners');
 select is(pg_temp.rel('us'), 'excluded', 'it''s excluded');
 select is((select string_agg(pg_temp.status(n), ',' order by n) from unnest(array['a', 'b', 'c']) n), 'invalid_preserved,invalid_preserved,invalid_preserved', 'its copies are preserved');
 select ok((select bool_and(c.invalidated_at = e.excluded_at) from public.collection_items c, private.catalog_exclusions e
@@ -238,18 +243,18 @@ select is((select count(*) from public.releases where id = pg_temp.id('us')), 1:
 select is((select string_agg(e ->> 'entity' || ':' || (e ->> 'platform'), ',') from jsonb_array_elements(pg_temp.preview('e5', 'nes')::jsonb -> 'cascade') e),
           'pairing:Nintendo Entertainment System', 'excluding the last NES release takes the NES pairing, not the game');
 select is(pg_temp.exclude('e5', 'nes', p_cascade => false), 'error: acknowledgement required', 'which must be acknowledged');
-select is(pg_temp.exclude('e5', 'nes')::jsonb ->> 'copies', '1', 'then it''s excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'nes')) ->> 'copies', '1', 'then it''s excluded');
 select is((select status::text from public.game_platforms where game_id = pg_temp.id('g') and platform_id = (select id from public.platforms where slug = 'nes')) || ' ' || pg_temp.game('g'),
           'excluded published', 'with the pairing; the game keeps its other releases');
 select is((select string_agg(e ->> 'entity', ',' order by e ->> 'entity') from jsonb_array_elements(pg_temp.preview('e5', 'lone')::jsonb -> 'cascade') e),
           'game,pairing', 'excluding a game''s last release takes the game and its pairing');
-select is(pg_temp.exclude('e5', 'lone')::jsonb ->> 'copies', '1', 'acknowledged, it''s excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'lone')) ->> 'copies', '1', 'acknowledged, it''s excluded');
 select is(pg_temp.game('h'), 'excluded', 'and the game with it');
 select is(pg_temp.as_user('c1', format('select count(*)::text from public.games where id = %L', pg_temp.id('h'))), '0', 'which collectors can no longer read');
 select is((select string_agg(format('%s:%s', e ->> 'entity', coalesce(e ->> 'contained', '-')), ',' order by e ->> 'entity', e ->> 'contained')
            from jsonb_array_elements(pg_temp.preview('e5', 'comp')::jsonb -> 'cascade') e),
           'game:false,game:true,pairing:-', 'a compilation''s last release takes it, its pairing, and the game cataloged only through it');
-select is(pg_temp.exclude('e5', 'comp')::jsonb ->> 'copies', '1', 'acknowledged, it''s excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'comp')) ->> 'copies', '1', 'acknowledged, it''s excluded');
 select is(pg_temp.game('comp-g') || ' ' || pg_temp.game('t'), 'excluded excluded', 'with both games');
 select is(pg_temp.commit_check(), 'ok', 'and the publication rules hold');
 
@@ -275,7 +280,7 @@ select is(pg_temp.exclude('e9', 'pend', p_token => 'x'), 'error: not permitted',
 -- Excluding submissions
 -- ---------------------------------------------------------------------------
 create temp table req_pend as select * from public.catalog_change_requests where id = pg_temp.req('pend');
-select is(pg_temp.exclude('e5', 'pend', p_code => 'download_code')::jsonb ->> 'copies', '1', 'an open submission can be excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'pend', p_code => 'download_code')) ->> 'copies', '1', 'an open submission can be excluded');
 select is((select row(r.status, s.status, s.reviewer_note, s.reviewed_by = pg_temp.u('e5'))::text
            from public.releases r join public.catalog_change_requests s on s.release_id = r.id where r.id = pg_temp.id('pend') and s.id = (select id from req_pend)),
           '(excluded,excluded,"This product holds no game.",t)', 'closing its request with the owner note');
@@ -285,7 +290,7 @@ select is((select string_agg(type || ':' || (data ->> 'status'), ',') from publi
 select is(pg_temp.as_user('c3', format('select public.resubmit_my_submission(%L, null)::text', (select id from req_pend))), 'error: submission unavailable', 'an excluded submission can''t be resubmitted');
 select is(pg_temp.as_user('c3', format('select public.withdraw_my_submission(%L)::text', (select id from req_pend))), 'error: submission locked', 'or withdrawn');
 select is(pg_temp.as_user('c3', format('select public.get_my_submission(%L) ->> ''status''', (select id from req_pend))), 'excluded', 'and its submitter sees it''s excluded');
-select is(pg_temp.exclude('e5', 'rej')::jsonb ->> 'copies', '1', 'a rejected submission can be excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'rej')) ->> 'copies', '1', 'a rejected submission can be excluded');
 select is((select status::text from public.catalog_change_requests where id = pg_temp.req('rej')) || ' ' || pg_temp.status('r'), 'excluded invalid_preserved',
           'closing it for good and preserving its copy');
 select is((select previous_request ->> 'reviewer_note' from private.catalog_exclusions where id = pg_temp.id('x-rej')), 'Please add a photo', 'the earlier reviewer note is recorded');
@@ -296,7 +301,7 @@ insert into ids select 'ng', (pg_temp.as_user('c3', 'select public.submit_game('
 insert into ids select 'ng-g', game_id from public.releases where id = pg_temp.id('ng');
 select is((select string_agg(e ->> 'entity' || ':' || (e ->> 'previous_status'), ',') from jsonb_array_elements(pg_temp.preview('e5', 'ng')::jsonb -> 'cascade') e),
           'game:unverified', 'excluding a new game''s only submission takes the game it made');
-select is(pg_temp.exclude('e5', 'ng')::jsonb ->> 'copies', '0', 'which is excluded');
+select is(pg_temp.j(pg_temp.exclude('e5', 'ng')) ->> 'copies', '0', 'which is excluded');
 select is(pg_temp.game('ng-g'), 'excluded', 'with its game');
 select is(pg_temp.commit_check(), 'ok', 'and the publication rules hold');
 
@@ -316,11 +321,32 @@ rollback to savepoint rules;
 update public.releases set status = 'excluded' where id = pg_temp.id('kr');
 select is(pg_temp.commit_check(), 'error: a platform is published for a game only with a published release on it', 'and excluding a last release without its cascade fails at commit');
 rollback to savepoint rules;
+-- The compilation's side of D2: a game published only through a compilation can't
+-- stay published once the compilation's release, game and pairing all leave
+-- publication. Nothing about the contained game itself changes here, so only the
+-- recheck of contained games, run for the compilation, can refuse it.
+select set_config('request.jwt.claims', json_build_object('sub', pg_temp.u('e5'), 'role', 'authenticated')::text, true);
+select set_config('role', 'authenticated', true);
+select pg_temp.game_of('comp2-g', 'Exc Triple Pack', 'compilation');
+select pg_temp.game_of('t2', 'Exc Quiet Harbor');
+select public.set_game_relation(pg_temp.id('comp2-g'), pg_temp.id('t2'), 'contains', null, null, 'Exclusion tests');
+select pg_temp.release('comp2', 'comp2-g', 'snes', 'pal', '[]');
+select set_config('role', 'none', true);
+update public.games set status = 'published', slug = 'exc-quiet-harbor' where id = pg_temp.id('t2');
+select is(pg_temp.commit_check(), 'ok', 'a game published only through a compilation satisfies the rules');
+savepoint contained;
+update public.releases set status = 'excluded' where id = pg_temp.id('comp2');
+update public.game_platforms set status = 'excluded' where game_id = pg_temp.id('comp2-g');
+update public.games set status = 'excluded' where id = pg_temp.id('comp2-g');
+select is((select status::text from public.games where id = pg_temp.id('t2')), 'published', 'the contained game is left published');
+select is(pg_temp.commit_check(), 'error: a game is published only with a published physical release',
+          'so the compilation leaving publication without it fails at commit');
+rollback to savepoint contained;
 
 -- ---------------------------------------------------------------------------
 -- What owners of preserved copies may read (D3)
 -- ---------------------------------------------------------------------------
-create temp table mine as select pg_temp.as_user('c1', format('select public.get_my_preserved_release(%L)::text', pg_temp.id('a')))::jsonb as v;
+create temp table mine as select pg_temp.j(pg_temp.as_user('c1', format('select public.get_my_preserved_release(%L)::text', pg_temp.id('a')))) as v;
 grant select on mine to authenticated;
 select is((select row(v -> 'game' ->> 'title', v -> 'game' ->> 'slug', v -> 'release' -> 'platform' ->> 'slug', v -> 'release' -> 'identifiers' ->> 'product_code',
                       v -> 'exclusion' ->> 'reason_code', v -> 'exclusion' ->> 'note', jsonb_array_length(v -> 'components'))::text from mine),
@@ -336,7 +362,7 @@ select is(pg_temp.as_user('c1', format('select coalesce(public.get_my_preserved_
 select is(pg_temp.as_user('c1', format('select coalesce(public.get_my_preserved_release(%L)::text, ''none'')', private.uuid_v7())), 'none', 'nor does a copy that doesn''t exist');
 select ok(pg_temp.as_user(null, format('select public.get_my_preserved_release(%L)::text', pg_temp.id('a'))) like 'error: permission denied%', 'nor a visitor');
 select is(pg_temp.as_user('c1', format('select count(*)::text from public.releases where id = %L', pg_temp.id('us'))), '0', 'catalog RLS is unchanged: the owner still can''t read the release row');
-select is(pg_temp.as_user('c1', format('select public.get_my_preserved_titles(array[%L, %L, %L]::uuid[])::text', pg_temp.id('a'), pg_temp.id('c'), pg_temp.id('d')))::jsonb ?| array[pg_temp.id('c')::text, pg_temp.id('d')::text],
+select is(pg_temp.j(pg_temp.as_user('c1', format('select public.get_my_preserved_titles(array[%L, %L, %L]::uuid[])::text', pg_temp.id('a'), pg_temp.id('c'), pg_temp.id('d')))) ?| array[pg_temp.id('c')::text, pg_temp.id('d')::text],
           false, 'listing titles returns the caller''s preserved copies only');
 select is(pg_temp.as_user('c1', format('select public.get_my_preserved_titles(array[%L]::uuid[]) -> %L ->> ''title''', pg_temp.id('a'), pg_temp.id('a'))), 'Exc Copper Coast', 'with their titles');
 select is(pg_temp.as_user('c1', 'select public.get_my_preserved_titles(array_fill(gen_random_uuid(), array[101]))::text'), 'error: too many items', 'at most 100 at a time');
