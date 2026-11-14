@@ -5,6 +5,22 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(160);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
 
@@ -17,7 +33,7 @@ begin
     perform set_config('request.jwt.claims', '{"role": "anon"}', true);
     perform set_config('role', 'anon', true);
   else
-    perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
     perform set_config('role', 'authenticated', true);
   end if;
   execute p_sql into r;
@@ -329,7 +345,7 @@ select throws_ok(format($$insert into private.external_references (provider_code
 -- ---------------------------------------------------------------------------
 -- Policies call these helpers. Clients can't reach the private schema directly, so
 -- call them as the owner with the user's claims.
-do $$ begin perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u('c3'), 'role', 'authenticated')::text, true); end $$;
+do $$ begin perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('c3'))::text, true); end $$;
 select is(private.can_use_release(pg_temp.id('r1')), true, 'a published release can be used');
 select is(private.can_use_release(pg_temp.id('r2')), false, 'an unpublished candidate can''t');
 select is(private.can_read_release(pg_temp.id('r2')), false, 'and an ordinary user can''t read it');

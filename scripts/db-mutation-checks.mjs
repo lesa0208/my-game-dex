@@ -3,7 +3,7 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name|#N,...]
+ *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|m7b2c|m8|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name|#N,...]
  *   node scripts/db-mutation-checks.mjs --recover
  *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
  *
@@ -305,6 +305,7 @@ select concat_ws(' ',
   nullif('owner=' || (select count(*) from private.platform_owner), 'owner=0'),
   nullif('owner_transfers=' || (select count(*) from private.ownership_transfers), 'owner_transfers=0'),
   nullif('owner_recoveries=' || (select count(*) from private.owner_recoveries), 'owner_recoveries=0'),
+  nullif('factor_registrations=' || (select count(*) from private.mfa_factor_registrations), 'factor_registrations=0'),
   nullif('notifications=' || (select count(*) from public.notifications), 'notifications=0'),
   nullif('games=' || (select count(*) from public.games), 'games=0'),
   nullif('releases=' || (select count(*) from public.releases), 'releases=0'),
@@ -378,7 +379,7 @@ async function runApi(timeout) {
   let elapsed = 0;
   const stages = {};
   lastRaw.api = "";
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs", "scripts/db-mfa-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

@@ -42,7 +42,7 @@ const count = (sql) => Number(psql(sql));
 const status = (id) => psql(`select status from public.catalog_change_requests where id = '${id}';`);
 
 async function account(role) {
-  const user = await createUser({ prefix: "rvw" });
+  const user = await createUser({ prefix: "rvw", mfa: Boolean(role) });
   users.push(user.id);
   const browser = new Browser();
   await signInAs(browser, user, "/home");

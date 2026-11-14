@@ -24,6 +24,14 @@ insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
 values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'authenticated', 'authenticated', 'catalog-fixture@example.test', now(), '00000000-0000-0000-0000-000000000000');
 update public.profiles set handle = 'catalog_fixture', handle_changed_at = now() where id = 'f1c5f1c5-0000-4000-8000-00000000c5c5';
 insert into public.staff_roles (user_id, role) values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'catalog_editor');
+-- M8b: staff need a live aal2 session with a verified TOTP factor. The fixture editor
+-- is made in SQL, so it gets Auth rows of the shape GoTrue writes, removed with it.
+insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'aal2', 'f1c5f1c5-0000-4000-8000-00000000c5c5', now(), now());
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'fixture', 'totp', 'verified', now(), now());
+insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+values (gen_random_uuid(), 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'totp', now(), now());
 
 create temp table fx (name text primary key, id uuid not null);
 grant all on fx to authenticated;
@@ -68,7 +76,7 @@ end $$;
 grant execute on function pg_temp.fx_id(text), pg_temp.fx_game(text, text, date, public.date_precision, public.game_kind),
   pg_temp.fx_release(text, text, text, text, text, jsonb, text[], jsonb, boolean) to authenticated;
 
-select set_config('request.jwt.claims', '{"sub": "f1c5f1c5-0000-4000-8000-00000000c5c5", "role": "authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub": "f1c5f1c5-0000-4000-8000-00000000c5c5", "role": "authenticated", "aal": "aal2", "session_id": "f1c5f1c5-0000-4000-8000-00000000c5c5"}', true);
 set local role authenticated;
 
 -- Published games -------------------------------------------------------------

@@ -641,4 +641,76 @@ export const m7b2cMutations = [
   sql("a late copy owner isn't checked", "api", rewrite(MERGE, "  perform private.lock_new_profiles(v_locked, private.merge_profiles(v_me, p_source, p_target));\n", "")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations };
+const PROTECT_PROFILE = "private.protect_owner_profile()";
+const PROTECT_ROLE = "private.protect_owner_admin_role()";
+const GUARD_OWNER = "private.guard_platform_owner()";
+const REFUSAL = "private.record_refusal(uuid, private.audit_action, uuid, text, jsonb)";
+const BEGIN_RECOVERY = "private.begin_owner_recovery(text, text, text, text, boolean)";
+const COMPLETE_RECOVERY = "private.complete_owner_recovery(uuid, text)";
+const ASSIGN_OWNER = "private.assign_initial_owner(text, text)";
+const STANDING = "private.account_standing(uuid)";
+const DELETION_BLOCKED = "public.account_deletion_blocked(uuid)";
+const MFA_OK = "private.mfa_session_ok()";
+const MFA_RECENT = "private.mfa_recent(interval)";
+const HAS_ROLE = "private.has_staff_role(public.staff_role)";
+const REGISTER = "public.register_my_verified_factors()";
+const MATURE = "private.mature_totp_factor_count(uuid)";
+const AUTHORITY = "private.owner_authority_refusal()";
+const SESSION_MATCH = "where s.id = v_session and s.user_id = v_me and s.aal = 'aal2'";
+
+export const m8Mutations = [
+  // Owner protection, one layer at a time (D12). Each test of a layer disables the others.
+  sql("the profile trigger doesn't protect the Owner", "pgtap", rewrite(PROTECT_PROFILE, "if private.is_designated_owner(old.id) then\n    raise log 'mygamedex owner protection: refused % of profile", "if false then\n    raise log 'mygamedex owner protection: refused % of profile")),
+  sql("the admin-role trigger doesn't protect the Owner", "pgtap", rewrite(PROTECT_ROLE, "if old.role = 'admin' and private.is_designated_owner(old.user_id)", "if false")),
+  sql("the Owner record's key cascades", "pgtap", "alter table private.platform_owner drop constraint platform_owner_user_id_fkey; alter table private.platform_owner add constraint platform_owner_user_id_fkey foreign key (user_id) references public.profiles (id) on delete cascade;"),
+  sql("the Owner's status can be changed", "pgtap", "drop trigger protect_owner_status on public.profiles;"),
+  sql("profiles can be truncated", "pgtap", "drop trigger protect_owner_profiles_truncate on public.profiles;"),
+  sql("staff roles can be truncated", "pgtap", "drop trigger protect_owner_admin_role_truncate on public.staff_roles;"),
+  sql("the Owner record can be reassigned directly", "pgtap", rewrite(GUARD_OWNER, "if pg_catalog.current_setting('mygamedex.owner_change', true) is distinct from 'on' then", "if false then")),
+  sql("the Owner record can be deleted", "pgtap", rewrite(GUARD_OWNER, "if tg_op in ('DELETE', 'TRUNCATE') then", "if false then")),
+  sql("account deletion isn't blocked for the Owner", "both", rewrite(DELETION_BLOCKED, "select private.is_designated_owner(p_user)", "select false")),
+  code("the server deletes without asking first", "api", '  if ((await blockedResponse.json()) !== false) throw new AvatarError("account_protected");\n', ""),
+  // Refusals (D9)
+  sql("refusals don't need the staff lock", "pgtap", rewrite(REFUSAL, "if not private.holds_staff_lock() then", "if false then")),
+  sql("refusals aren't rate-limited", "pgtap", rewrite(REFUSAL, "and e.occurred_at > pg_catalog.now() - interval '10 minutes'", "and false")),
+  // Recovery (D6, D17)
+  sql("the recovery hold is short", "pgtap", rewrite(BEGIN_RECOVERY, "pg_catalog.now() + interval '72 hours'", "pg_catalog.now() + interval '1 second'")),
+  sql("a recovery completes during its hold", "pgtap", rewrite(COMPLETE_RECOVERY, "if pg_catalog.now() < r.hold_until then", "if false then")),
+  sql("a reassignment needs no confirmation", "pgtap", rewrite(COMPLETE_RECOVERY, "if r.confirmed_at is null then", "if false then")),
+  sql("a reassignment keeps the previous Owner an admin", "pgtap", rewrite(COMPLETE_RECOVERY, "    delete from public.staff_roles s where s.user_id = o.user_id and s.role = 'admin';\n    v_revoked := found;", "    v_revoked := true;")),
+  sql("a recovery ignores an Owner change", "pgtap", rewrite(COMPLETE_RECOVERY, "if r.owner_id is distinct from o.user_id then", "if false then")),
+  sql("a disputed recovery needs no earlier cancellation", "pgtap", rewrite(BEGIN_RECOVERY, "if p_disputed and not exists (", "if false and not exists (")),
+  sql("the succession document isn't checked", "pgtap", rewrite(BEGIN_RECOVERY, "if p_fingerprint is distinct from o.succession_fingerprint then", "if false then")),
+  sql("an Owner is assigned without two factors", "pgtap", rewrite(ASSIGN_OWNER, "elsif v_factors < 2 then", "elsif v_factors < 0 then")),
+  sql("a banned account is in good standing", "pgtap", rewrite(STANDING, "if v_banned is not null and v_banned > pg_catalog.now() then return 'banned'; end if;", "")),
+  // MFA for staff (D3)
+  sql("staff roles don't need MFA", "both", rewrite(HAS_ROLE, "  ) and private.mfa_session_ok()", "  )")),
+  sql("any of the user's sessions counts", "both", rewrite(MFA_OK, SESSION_MATCH, "where s.user_id = v_me and s.aal = 'aal2'")),
+  sql("a session downgraded to aal1 counts", "pgtap", rewrite(MFA_OK, SESSION_MATCH, "where s.id = v_session and s.user_id = v_me")),
+  sql("an expired session counts", "pgtap", rewrite(MFA_OK, "\n      and (s.not_after is null or s.not_after > pg_catalog.now())", "")),
+  sql("any verified factor counts for a session", "pgtap", rewrite(MFA_OK, "join auth.mfa_factors f on f.id = s.factor_id", "join auth.mfa_factors f on f.user_id = s.user_id")),
+  sql("an unverified factor counts for a session", "pgtap", rewrite(MFA_OK, "and f.user_id = v_me and f.factor_type = 'totp' and f.status = 'verified'", "and f.user_id = v_me and f.factor_type = 'totp'")),
+  sql("the token's aal isn't checked", "pgtap", rewrite(MFA_OK, " or v_claims ->> 'aal' is distinct from 'aal2' then", " then")),
+  sql("the reauthentication window can be widened", "pgtap", rewrite(MFA_RECENT, " or p_window > interval '10 minutes' then", " then")),
+  sql("a verification time far ahead counts", "pgtap", rewrite(MFA_RECENT, "\n      and c.updated_at <= pg_catalog.now() + interval '60 seconds'", "")),
+  sql("a stale verification counts as recent", "pgtap", rewrite(MFA_RECENT, "\n      and c.updated_at > pg_catalog.now() - p_window", "")),
+  // Factor maturity (D13)
+  sql("factors mature at once", "pgtap", rewrite(MATURE, "\n    and r.registered_at <= pg_catalog.now() - interval '24 hours'", "")),
+  sql("a replaced factor inherits maturity", "pgtap", rewrite(MATURE, " and r.factor_created_at = f.created_at", "")),
+  sql("unverified factors are registered", "both", rewrite(REGISTER, "where f.user_id = v_me and f.factor_type = 'totp' and f.status = 'verified'", "where f.user_id = v_me and f.factor_type = 'totp'")),
+  sql("registrations can be backdated", "pgtap", "drop trigger mfa_factor_registrations_immutable on private.mfa_factor_registrations;"),
+  sql("registering needs no MFA", "both", rewrite(REGISTER, "v_me uuid := private.require_mfa();", "v_me uuid := (select auth.uid());")),
+  // Owner authority, separate from identity (A1)
+  sql("anyone has Owner authority", "pgtap", rewrite(AUTHORITY, "if not private.is_designated_owner(v_me) then", "if false then")),
+  sql("Owner authority needs no MFA", "pgtap", rewrite(AUTHORITY, "if not private.mfa_session_ok() then\n    return 'mfa_required';", "if false then\n    return 'mfa_required';")),
+  sql("Owner authority ignores standing", "pgtap", rewrite(AUTHORITY, "if private.account_standing(v_me) is not null then\n    return 'owner_ineligible';", "if false then\n    return 'owner_ineligible';")),
+  sql("Owner authority ignores factor maturity", "pgtap", rewrite(AUTHORITY, "if v_mature is null or v_mature < 2 then", "if false then")),
+  sql("Owner authority ignores a pending recovery", "pgtap", rewrite(AUTHORITY, "if exists (select 1 from private.owner_recoveries r where r.status = 'pending') then\n    return 'recovery_pending';", "if false then\n    return 'recovery_pending';")),
+  sql("Owner authority needs no recent verification", "pgtap", rewrite(AUTHORITY, "if not private.mfa_recent(interval '10 minutes') then", "if false then")),
+  // Grants
+  sql("clients may read the Owner record", "pgtap", "grant usage on schema private to authenticated; grant select on private.platform_owner to authenticated;"),
+  sql("clients may ask whether an account is protected", "pgtap", `grant execute on function ${DELETION_BLOCKED} to authenticated;`),
+  sql("clients may write factor registrations", "pgtap", "grant usage on schema private to authenticated; grant insert on private.mfa_factor_registrations to authenticated;"),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations };

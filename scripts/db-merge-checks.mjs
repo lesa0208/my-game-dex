@@ -15,6 +15,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -80,7 +81,7 @@ async function createUser(role = null) {
   createdUsers.add(user.id);
   everyUser.add(user.id);
   response = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const claimed = await rpc(asUser(session.access_token), "claim_handle", { p_handle: `xm_${randomBytes(6).toString("hex")}` });
   if (claimed.status !== 200) throw new Error(`could not claim a handle: status ${claimed.status}`);
   if (role) psql(`insert into public.staff_roles (user_id, role) values ('${user.id}', '${role}');`);
@@ -88,7 +89,7 @@ async function createUser(role = null) {
 }
 /** Runs SQL as a signed-in user in its own transaction, and returns the last line. */
 function sqlAs(userId, sql) {
-  const out = psql(`begin; select set_config('request.jwt.claims', '{"sub": "${userId}", "role": "authenticated"}', true); set local role authenticated; ${sql} commit;`);
+  const out = psql(`begin; select set_config('request.jwt.claims', '${claimsFor(userId)}', true); set local role authenticated; ${sql} commit;`);
   return out.split("\n").filter((line) => line !== "" && !line.startsWith("{\"sub\"")).at(-1) ?? "";
 }
 
@@ -126,7 +127,7 @@ class Session {
   }
   /** Runs SQL as a signed-in user inside the session's open transaction. */
   asUser(userId, sql) {
-    return this.run(`select set_config('request.jwt.claims', '{"sub": "${userId}", "role": "authenticated"}', true); set local role authenticated; ${sql} reset role;`);
+    return this.run(`select set_config('request.jwt.claims', '${claimsFor(userId)}', true); set local role authenticated; ${sql} reset role;`);
   }
   close() {
     this.child.stdin.end();

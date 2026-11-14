@@ -71,6 +71,7 @@ const steps = {
   exclusion: () => runNode("db-exclusion-checks.mjs"),
   merge: () => runNode("db-merge-checks.mjs"),
   owner: () => runNode("db-owner-checks.mjs"),
+  mfa: () => runNode("db-mfa-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -94,8 +95,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

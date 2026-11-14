@@ -7,6 +7,22 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(140);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
 create temp table ids (name text primary key, id uuid not null);
@@ -23,7 +39,7 @@ begin
     perform set_config('request.jwt.claims', '{"role": "anon"}', true);
     perform set_config('role', 'anon', true);
   else
-    perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
     perform set_config('role', 'authenticated', true);
   end if;
   execute p_sql into r;
@@ -107,7 +123,7 @@ insert into public.staff_roles (user_id, role) values
 update public.profiles set account_status = 'suspended' where id = pg_temp.u('c3');
 
 -- A published game with a published release on SNES.
-select set_config('request.jwt.claims', json_build_object('sub', pg_temp.u('e5'), 'role', 'authenticated')::text, true);
+select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
 insert into ids select 'g', public.create_game('Qzs Lantern Keep', 'game', null, null, null, 'unknown', 'Review tests');
 select public.verify_game(pg_temp.id('g'), 'Review tests', (select revision from public.games where id = pg_temp.id('g')));
@@ -314,7 +330,7 @@ select is((select data ->> 'status' from public.notifications where recipient_id
 -- The permanent history: a withdrawn submission's game, kept by an editor's release,
 -- can't be verified by the person who submitted it.
 select is(pg_temp.subgame('og', 'e6', 'Qzs Harbor Lights'), 'submitted', 'the editor submits a new game');
-select set_config('request.jwt.claims', json_build_object('sub', pg_temp.u('e5'), 'role', 'authenticated')::text, true);
+select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
 select ok(public.create_release(pg_temp.id('og-g'), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'pal', '{}', 'Found a second release') is not null,
           'another editor adds a release to that game');

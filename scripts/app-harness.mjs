@@ -11,6 +11,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { elevate, reverify } from "./lib/mfa-session.mjs";
+
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
@@ -201,7 +203,12 @@ export const streamedRedirectTo = (html, target) =>
 
 const createdUsers = new Set();
 
-export async function createUser({ confirmed = true, prefix = "app" } = {}) {
+/**
+ * A throwaway account. With mfa, it also gets a verified TOTP factor through the Auth
+ * server, and signInAs() then takes the browser's session to aal2 (M8b: staff
+ * privileges need it). The factor's secret stays in memory, never in a cookie.
+ */
+export async function createUser({ confirmed = true, prefix = "app", mfa = false } = {}) {
   const email = `${prefix}-${randomUUID()}@example.test`;
   const password = `pw-${randomUUID()}`;
   const response = await fetch(`${api}/auth/v1/admin/users`, {
@@ -212,7 +219,27 @@ export async function createUser({ confirmed = true, prefix = "app" } = {}) {
   const user = await response.json();
   if (!response.ok) throw new Error(`could not create a test user: status ${response.status}`);
   createdUsers.add(user.id);
-  return { id: user.id, email, password };
+  if (!mfa) return { id: user.id, email, password };
+  const signIn = await fetch(`${api}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: publishableKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!signIn.ok) throw new Error(`could not sign in a test user: status ${signIn.status}`);
+  const elevated = await elevate(api, publishableKey, await signIn.json());
+  return { id: user.id, email, password, factorId: elevated.factorId, totpSecret: elevated.totpSecret };
+}
+
+/** Completes a TOTP challenge with the browser's session, and stores the aal2 session it returns. */
+export async function elevateBrowser(browser, user) {
+  const current = readSession(browser);
+  if (!current || !user.totpSecret) throw new Error("no session or factor to elevate");
+  const next = await reverify(api, publishableKey, { access_token: current.session.access_token, factorId: user.factorId, totpSecret: user.totpSecret });
+  // The cookie gets the session only, never the factor's secret.
+  const session = { ...next };
+  delete session.factorId;
+  delete session.totpSecret;
+  writeSession(browser, current.names, session);
 }
 
 export async function deleteUsers() {
@@ -238,5 +265,7 @@ export function writeSession(browser, names, session) {
 
 export async function signInAs(browser, user, next = "/settings") {
   const page = await browser.get(`/sign-in?next=${encodeURIComponent(next)}`);
-  return browser.submit("/sign-in", formWith(page.html, "password"), { email: user.email, password: user.password });
+  const result = await browser.submit("/sign-in", formWith(page.html, "password"), { email: user.email, password: user.password });
+  if (user.totpSecret && readSession(browser)) await elevateBrowser(browser, user);
+  return result;
 }

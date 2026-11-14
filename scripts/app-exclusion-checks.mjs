@@ -52,7 +52,7 @@ const hrefs = (html) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => decode(
 const NOT_AVAILABLE = "This page isn't available";
 
 async function person(role = null) {
-  const user = await createUser({ prefix: "exa" });
+  const user = await createUser({ prefix: "exa", mfa: Boolean(role) });
   users.push(user.id);
   const browser = new Browser();
   await signInAs(browser, user, "/home");

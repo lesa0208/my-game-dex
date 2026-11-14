@@ -4,7 +4,7 @@
 -- is exposed) until they are updated. See security-rls.md, "The Auth contract".
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(22);
+select plan(23);
 
 -- Columns and types read by account_standing, totp_factor_count and (M8b) the MFA helpers.
 select col_type_is('auth', 'users', 'id', 'uuid', 'auth.users.id is a uuid');
@@ -15,6 +15,7 @@ select col_type_is('auth', 'sessions', 'id', 'uuid', 'auth.sessions.id is the JW
 select col_type_is('auth', 'sessions', 'user_id', 'uuid', 'auth.sessions.user_id');
 select col_type_is('auth', 'sessions', 'aal', 'auth.aal_level', 'auth.sessions.aal');
 select col_type_is('auth', 'sessions', 'not_after', 'timestamp with time zone', 'auth.sessions.not_after');
+select col_type_is('auth', 'sessions', 'factor_id', 'uuid', 'auth.sessions.factor_id, the factor that verified the session');
 select col_type_is('auth', 'mfa_amr_claims', 'session_id', 'uuid', 'auth.mfa_amr_claims.session_id');
 select col_type_is('auth', 'mfa_amr_claims', 'authentication_method', 'text', 'auth.mfa_amr_claims.authentication_method');
 select col_type_is('auth', 'mfa_amr_claims', 'updated_at', 'timestamp with time zone', 'auth.mfa_amr_claims.updated_at, set by each verification');

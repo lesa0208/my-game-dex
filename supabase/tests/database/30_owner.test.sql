@@ -4,6 +4,22 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(96);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated;
 
@@ -11,7 +27,7 @@ grant execute on function pg_temp.u(text) to authenticated;
 create function pg_temp.as_user(p_actor text, p_sql text) returns text language plpgsql as $t$
 declare r text;
 begin
-  perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute p_sql into r;
   perform set_config('role', 'none', true);
@@ -101,7 +117,7 @@ select ok(exists (select 1 from public.staff_roles where user_id = pg_temp.u('f1
 select is((select metadata ->> 'admin_granted' from private.audit_events where action = 'owner_assigned'), 'true', 'which the audit row records');
 select is(pg_temp.try($$select private.assign_initial_owner('owner_t_a2', 'Approved for the test')$$), 'error: an owner is already assigned', 'a second assignment is refused');
 select ok(private.is_designated_owner(pg_temp.u('f1')) and not private.is_designated_owner(pg_temp.u('a2')) and not private.is_designated_owner(null), 'is_designated_owner names the Owner only');
-select is(pg_temp.findings(), 'owner security changed in the last 24 hours', 'a factor under 24 hours old is reported');
+select is(pg_temp.findings(), 'owner has 0 mature TOTP factors; owner security changed in the last 24 hours', 'unregistered and recent factors are reported (D13)');
 
 -- 5. The record is permanent and singular
 select is(pg_temp.try($$insert into private.platform_owner (id, user_id) values (true, '$$ || pg_temp.u('a2') || $$')$$), 'error: duplicate key value violates unique constraint "platform_owner_pkey"', 'a second Owner row is impossible');
@@ -152,7 +168,7 @@ select is(pg_temp.audit_by('owner_recovery_started', 'Case 1'), 'owner_recovery_
 select ok((select hold_until between now() + interval '71 hours 59 minutes' and now() + interval '72 hours 1 minute' from private.owner_recoveries), 'held for 72 hours (D17)');
 select is(pg_temp.try($$select private.begin_owner_recovery('reassign', 'owner_t_b3', 'Case 2')$$), 'error: recovery pending', 'only one recovery at a time');
 select is(pg_temp.try($$select private.complete_owner_recovery((select id from private.owner_recoveries), 'Case 1')$$), 'error: recovery hold not over', 'it can''t complete during the hold');
-select is(pg_temp.findings(), 'owner security changed in the last 24 hours; recovery pending', 'the report shows it');
+select is(pg_temp.findings(), 'owner has 0 mature TOTP factors; owner security changed in the last 24 hours; recovery pending', 'the report shows it');
 update private.owner_recoveries set hold_until = now() - interval '1 second', created_at = now() - interval '73 hours';
 select is((private.complete_owner_recovery((select id from private.owner_recoveries), 'Case 1')) ->> 'owner_id', pg_temp.u('f1')::text, 'after the hold it completes, keeping the Owner');
 select is(pg_temp.owner(), pg_temp.u('f1'), 'who is still the Owner');
@@ -194,7 +210,7 @@ select is(pg_temp.audit_by('owner_recovery_cancelled', 'Resolved with the owner'
 select is(private.operator_set_owner_status('suspended', 'Case 6'), true, 'an operator can suspend the Owner');
 select is(pg_temp.audit_by('owner_status_set_by_operator', 'Case 6'), 'owner_status_set_by_operator/operator', 'with an operator audit row');
 select is(pg_temp.try($$delete from public.profiles where id = '$$ || pg_temp.u('b3') || $$'$$), 'error: account protected', 'a suspended Owner is still protected');
-select is(pg_temp.findings(), 'owner account: inactive', 'and the report says the account is inactive');
+select is(pg_temp.findings(), 'owner account: inactive; owner has 0 mature TOTP factors; owner security changed in the last 24 hours', 'and the report says the account is inactive');
 select is(private.operator_set_owner_status('active', 'Case 6'), true, 'an operator reinstates them');
 
 -- 12. A deleted account closes what is pending for it
@@ -204,7 +220,7 @@ select is((select status || '/' || cancel_cause from private.owner_recoveries or
 
 -- 13. The report, for a damaged Owner account
 update auth.users set deleted_at = now() where id = pg_temp.u('b3');
-select is(pg_temp.findings(), 'owner account: deleted', 'a soft-deleted Owner is reported');
+select is(pg_temp.findings(), 'owner account: deleted; owner has 0 mature TOTP factors; owner security changed in the last 24 hours', 'a soft-deleted Owner is reported');
 select ok(private.is_designated_owner(pg_temp.u('b3')), 'and is still the designated Owner, so still protected');
 
 select * from finish();

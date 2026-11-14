@@ -35,6 +35,7 @@ import {
   stopApp,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { claimsFor } from "./lib/mfa-session.mjs";
 
 function uuidv7(at = Date.now()) {
   const bytes = randomBytes(16);
@@ -57,7 +58,7 @@ const hrefs = (html) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => decode(
 const NOT_AVAILABLE = "This page isn't available";
 
 async function person(role = null) {
-  const user = await createUser({ prefix: "mga" });
+  const user = await createUser({ prefix: "mga", mfa: Boolean(role) });
   users.push(user.id);
   const browser = new Browser();
   await signInAs(browser, user, "/home");
@@ -92,7 +93,7 @@ try {
   const owner = await person();
   const someone = await person();
   // A published duplicate of us, made by the editor.
-  const dup = psql(`begin; select set_config('request.jwt.claims', '{"sub": "${editor.id}", "role": "authenticated"}', true); set local role authenticated;
+  const dup = psql(`begin; select set_config('request.jwt.claims', '${claimsFor(editor.id)}', true); set local role authenticated;
     select public.create_release('${game}', (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
       '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "MGA-DUP"}', 'Merge checks');
     select public.verify_release(r.id, 'Merge checks', r.revision) from public.releases r where r.product_code = 'MGA-DUP';

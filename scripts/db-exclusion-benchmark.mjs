@@ -22,7 +22,9 @@ const OWNERS = Number(process.env.OWNERS ?? 500);
 const COPIES = Number(process.env.COPIES ?? 2000);
 const tag = randomBytes(3).toString("hex");
 const PREFIX = `Exb ${tag}`;
-const as = (user) => `select set_config('request.jwt.claims', '{"sub": "${user}", "role": "authenticated"}', true); set local role authenticated;`;
+// M8b: staff need a live aal2 session with a verified TOTP factor. Users here are made
+// in SQL, so each gets Auth rows of the shape GoTrue writes, removed with the user.
+const as = (user) => `select set_config('request.jwt.claims', '{"sub": "${user}", "role": "authenticated", "aal": "aal2", "session_id": "${user}"}', true); set local role authenticated;`;
 const lastLine = (out) => out.split("\n").filter((l) => l && !l.startsWith('{"sub"') && l !== "authenticated").at(-1);
 
 /** A session whose statements report their own duration, measured in the database. */
@@ -78,7 +80,10 @@ try {
     from unnest(array['${ids.editor}', '${ids.admin}']::uuid[] || array(select gen_random_uuid() from generate_series(1, ${OWNERS}))) u;
     update public.profiles p set handle = 'xb_' || substr(replace(p.id::text, '-', ''), 1, 12), handle_changed_at = now()
     where p.id in (select id from auth.users where email like 'exb-%@example.test');
-    insert into public.staff_roles (user_id, role) values ('${ids.editor}', 'catalog_editor'), ('${ids.admin}', 'admin');`);
+    insert into public.staff_roles (user_id, role) values ('${ids.editor}', 'catalog_editor'), ('${ids.admin}', 'admin');
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) select x, x, 'aal2', x, now(), now() from unnest(array['${ids.editor}', '${ids.admin}']::uuid[]) x;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at) select x, x, 'benchmark', 'totp', 'verified', now(), now() from unnest(array['${ids.editor}', '${ids.admin}']::uuid[]) x;
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at) select gen_random_uuid(), x, 'totp', now(), now() from unnest(array['${ids.editor}', '${ids.admin}']::uuid[]) x;`);
   ids.users = psql(`select string_agg(id::text, ',') from auth.users where email like 'exb-%@example.test' and id not in ('${ids.editor}', '${ids.admin}');`).split(",");
 
   // A game with three releases, and another game.

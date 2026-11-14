@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -78,7 +79,7 @@ async function createUser() {
   if (!response.ok) throw new Error(`could not create a test user: status ${response.status}`);
   createdUsers.add(user.id);
   response = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const claimed = await rpc(asUser(session.access_token), "claim_handle", { p_handle: `sb_${randomBytes(6).toString("hex")}` });
   if (claimed.status !== 200) throw new Error(`could not claim a handle: status ${claimed.status}`);
   return { id: user.id, headers: asUser(session.access_token) };

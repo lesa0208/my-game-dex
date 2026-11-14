@@ -10,6 +10,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -54,7 +55,7 @@ async function whileHeld(setupSql, during) {
   return { result, waited };
 }
 
-const asUserSql = (id) => `select set_config('request.jwt.claims', '{"sub":"${id}","role":"authenticated"}', true);\nset local role authenticated;`;
+const asUserSql = (id) => `select set_config('request.jwt.claims', '${claimsFor(id)}', true);\nset local role authenticated;`;
 
 const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
 const api = status.API_URL;
@@ -79,7 +80,7 @@ async function createUser({ approval = false, claim = true } = {}) {
   if (!response.ok) throw new Error(`could not create a test user: status ${response.status}`);
   createdUsers.add(user.id);
   response = await post("/auth/v1/token?grant_type=password", anon, { email, password });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const handle = `az_${randomBytes(6).toString("hex")}`;
   if (claim) {
     response = await post("/rest/v1/rpc/claim_handle", asUser(session.access_token), { p_handle: handle });

@@ -34,6 +34,8 @@ insert into approved_function_grants values
   ('set_avatar_path(uuid,text)', 'service_role'),
   -- M8a: the server's account deletion asks whether the account is the Owner's.
   ('account_deletion_blocked(uuid)', 'service_role'),
+  -- M8b: registering one's own verified factors, from a live aal2 session.
+  ('register_my_verified_factors()', 'authenticated'),
   ('private.is_active_user()', 'authenticated'),
   -- M3: clients act only through these. follows and blocked_users have no client grants.
   ('request_follow(uuid)', 'authenticated'),
