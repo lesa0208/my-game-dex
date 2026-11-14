@@ -252,7 +252,7 @@ async function flow() {
   makeFirstAdmin(admin);
   const member = await createUser();
   let result = await setStatus(admin, member, "suspended", "Notification checks: internal note ZQX");
-  check("an admin suspends an account", result.body === true, result.message);
+  check("an admin suspends an account", result.body?.ok === true && result.body?.result === "changed", result.message);
   rows = await list(member);
   check(
     "the suspended account sees a notice holding only the new status",

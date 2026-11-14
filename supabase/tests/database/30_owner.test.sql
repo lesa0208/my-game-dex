@@ -140,8 +140,8 @@ select is(pg_temp.try($$alter table public.profiles disable trigger protect_owne
   'error: update or delete on table "profiles" violates foreign key constraint "platform_owner_user_id_fkey" on table "platform_owner"', 'with both triggers disabled, the key still refuses');
 select is(pg_temp.try($$truncate public.profiles cascade$$), 'error: account protected', 'profiles can''t be truncated');
 select is(pg_temp.try($$update public.profiles set account_status = 'suspended' where id = '$$ || pg_temp.u('f1') || $$'$$), 'error: account protected', 'the Owner''s status can''t be changed directly');
-select is(pg_temp.as_user('a2', $$select public.set_account_status('$$ || pg_temp.u('f1') || $$', 'suspended', 'Test')::text$$), 'error: account protected', 'nor by another admin');
-select is(pg_temp.as_user('a2', $$select public.revoke_staff_role('$$ || pg_temp.u('f1') || $$', 'admin', 'Test')::text$$), 'error: account protected', 'another admin can''t remove the Owner''s admin role');
+select is(pg_temp.as_user('a2', $$select public.set_account_status('$$ || pg_temp.u('f1') || $$', 'suspended', 'Test') ->> 'refusal'$$), 'owner_protected', 'nor by another admin, whose function refuses first (M8c)');
+select is(pg_temp.as_user('a2', $$select public.revoke_staff_role('$$ || pg_temp.u('f1') || $$', 'admin', 'Test') ->> 'refusal'$$), 'owner_protected', 'another admin can''t remove the Owner''s admin role');
 select is(pg_temp.try($$delete from public.staff_roles where user_id = '$$ || pg_temp.u('f1') || $$' and role = 'admin'$$), 'error: account protected', 'nor can SQL');
 select is(pg_temp.try($$update public.staff_roles set role = 'moderator' where user_id = '$$ || pg_temp.u('f1') || $$' and role = 'admin'$$), 'error: account protected', 'or change it');
 select is(pg_temp.try($$truncate public.staff_roles$$), 'error: account protected', 'staff roles can''t be truncated');
@@ -152,10 +152,11 @@ select is(pg_temp.as_user('c4', $$select public.account_deletion_blocked('$$ || 
 
 -- 7. Refusals (D9). This transaction holds the staff lock since section 4; the
 -- check without it is in section 1.
-select is(pg_temp.audit_of(private.record_refusal(pg_temp.u('a2'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_protected', '{"op": "suspend"}')), 'owner_protection_refused/refused', 'with it, a refusal is recorded as a refused attempt');
-select is((select metadata ->> 'code' || '/' || (metadata ->> 'op') from private.audit_events where action = 'owner_protection_refused' and reason = 'Refused: owner_protected'), 'owner_protected/suspend', 'with its code and details, once');
-select is(private.record_refusal(pg_temp.u('a2'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_protected'), null, 'the same refusal within 10 minutes isn''t recorded again');
-select isnt(private.record_refusal(pg_temp.u('a2'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_only'), null, 'a different code is');
+-- b3 here, since a2's refusals above are already recorded and so rate-limited.
+select is(pg_temp.audit_of(private.record_refusal(pg_temp.u('b3'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_protected', '{"op": "suspend"}')), 'owner_protection_refused/refused', 'with it, a refusal is recorded as a refused attempt');
+select is((select metadata ->> 'code' || '/' || (metadata ->> 'op') from private.audit_events where action = 'owner_protection_refused' and reason = 'Refused: owner_protected' and actor_id = pg_temp.u('b3')), 'owner_protected/suspend', 'with its code and details, once');
+select is(private.record_refusal(pg_temp.u('b3'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_protected'), null, 'the same refusal within 10 minutes isn''t recorded again');
+select isnt(private.record_refusal(pg_temp.u('b3'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_only'), null, 'a different code is');
 select isnt(private.record_refusal(pg_temp.u('c4'), 'owner_protection_refused', pg_temp.u('f1'), 'owner_protected'), null, 'and so is another actor');
 select is(pg_temp.try($$select private.record_refusal(null, 'staff_role_granted', null, 'x')$$), 'error: invalid refusal', 'only refusal actions are accepted');
 

@@ -69,3 +69,16 @@ export async function reverify(api, anonKey, session) {
   remember(verified);
   return Object.assign(verified, { factorId: session.factorId, totpSecret: session.totpSecret });
 }
+
+/**
+ * Enrolls and verifies another TOTP factor with an aal2 session (Auth requires aal2
+ * once a verified factor exists), and returns the session that verification issues,
+ * keyed to the new factor for later challenges.
+ */
+export async function addFactor(api, anonKey, session, name) {
+  const enrolled = await call(api, anonKey, session.access_token, "/factors", { factor_type: "totp", friendly_name: name });
+  const challenge = await call(api, anonKey, session.access_token, `/factors/${enrolled.id}/challenge`, {});
+  const verified = await call(api, anonKey, session.access_token, `/factors/${enrolled.id}/verify`, { challenge_id: challenge.id, code: totp(enrolled.totp.secret) });
+  remember(verified);
+  return Object.assign(verified, { factorId: enrolled.id, totpSecret: enrolled.totp.secret });
+}

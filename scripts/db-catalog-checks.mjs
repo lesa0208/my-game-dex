@@ -257,7 +257,7 @@ async function races(admin) {
   game = await createGame(editing, `Edited before revocation ${randomBytes(3).toString("hex")}`);
   held = await whileHeld(`${asUserSql(editing)}\nselect public.update_game('${game}', '{"summary": "Edited first."}', 'race');`, () => revoke(admin, editing, "catalog_editor"));
   check("a revocation during an uncommitted edit waits for it", held.waited > 500, `${held.waited} ms`);
-  check("then completes, and the edit came first", held.result.ok && held.result.body === true && psql(`select summary from public.games where id = ${q(game)};`) === "Edited first.", held.result.message);
+  check("then completes, and the edit came first", held.result.ok && held.result.body?.result === "changed" && psql(`select summary from public.games where id = ${q(game)};`) === "Edited first.", held.result.message);
   check("the revoked editor is refused afterwards", refusedWith(await call(editing, "update_game", { p_game: game, p_changes: { summary: "Later." } }), "not permitted"));
 
   // Editors don't wait for each other.

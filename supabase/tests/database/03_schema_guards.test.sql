@@ -57,6 +57,11 @@ insert into approved_function_grants values
   ('revoke_staff_role(uuid,staff_role,text)', 'authenticated'),
   ('set_account_status(uuid,account_status,text)', 'authenticated'),
   ('get_audit_events(integer,uuid)', 'authenticated'),
+  -- M8c: ownership transfer, succession and the app side of recovery. Each checks the caller itself.
+  ('start_ownership_transfer(uuid,text)', 'authenticated'), ('accept_ownership_transfer(uuid)', 'authenticated'),
+  ('cancel_ownership_transfer(uuid,text)', 'authenticated'), ('set_owner_successor(uuid,text)', 'authenticated'),
+  ('register_succession_document(text,text)', 'authenticated'), ('confirm_owner_recovery(uuid)', 'authenticated'),
+  ('cancel_owner_recovery(uuid,text)', 'authenticated'),
   -- M4b: notifications have no client grants; clients use only these.
   ('get_my_notifications(integer,uuid)', 'authenticated'),
   ('get_unread_notification_count()', 'authenticated'),

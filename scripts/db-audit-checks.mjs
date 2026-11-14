@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claimsFor, elevate } from "./lib/mfa-session.mjs";
+import { makeTestOwner, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -69,6 +70,7 @@ if (!api || !anonKey || !serviceKey) {
   console.error("Couldn't read the local stack's status. Is it running? Try npm run db:start.");
   process.exit(1);
 }
+requireNoOwner(psql);
 
 const anon = { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json" };
 const service = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" };
@@ -88,7 +90,7 @@ async function createUser() {
   const handle = `au_${randomBytes(6).toString("hex")}`;
   response = await post("/rest/v1/rpc/claim_handle", asUser(session.access_token), { p_handle: handle });
   if (!response.ok) throw new Error(`could not claim a handle: status ${response.status}`);
-  return { id: user.id, handle, headers: asUser(session.access_token) };
+  return { id: user.id, handle, session, headers: asUser(session.access_token) };
 }
 
 /** Calls a function. Never throws on a refusal. */
@@ -113,8 +115,13 @@ select private.record_operator_action('${user.id}', 'Audit checks: first adminis
 insert into public.staff_roles (user_id, role) values ('${user.id}', 'admin');
 commit;`);
 }
+/** M8c: only the Owner grants and revokes admin (D4), so the races need one. */
+async function makeOwner(user) {
+  const session = await makeTestOwner(psql, { api, anonKey, session: user.session, handle: user.handle, userId: user.id });
+  user.headers = asUser(session.access_token);
+}
+const changed = (result) => result.ok && result.body?.ok === true && result.body?.result === "changed";
 const grant = (actor, user, role, reason = "Audit checks") => call(actor, "grant_staff_role", { p_user: user.id, p_role: role, p_reason: reason });
-const revoke = (actor, user, role, reason = "Audit checks") => call(actor, "revoke_staff_role", { p_user: user.id, p_role: role, p_reason: reason });
 const setStatus = (actor, user, value, reason = "Audit checks") => call(actor, "set_account_status", { p_user: user.id, p_status: value, p_reason: reason });
 const accountStatus = (user) => psql(`select account_status from public.profiles where id = '${user.id}';`);
 const roles = (user) => psql(`select coalesce(string_agg(role::text, ',' order by role), '') from public.staff_roles where user_id = '${user.id}';`);
@@ -150,10 +157,10 @@ async function flow() {
   makeFirstAdmin(admin);
 
   let result = await grant(admin, moderator, "moderator", "Launch moderator");
-  check("an admin grants a role", result.ok && result.body === true && roles(moderator) === "moderator", result.message);
+  check("an admin grants a role", changed(result) && roles(moderator) === "moderator", result.message);
   check("the grant is audited", audits(moderator) === 1);
   result = await setStatus(moderator, member, "suspended", "Spam");
-  check("a moderator suspends an ordinary account", result.ok && result.body === true && accountStatus(member) === "suspended", result.message);
+  check("a moderator suspends an ordinary account", changed(result) && accountStatus(member) === "suspended", result.message);
 
   section("A suspended user's existing session");
   const before = psql(`select coalesce(display_name, '') from public.profiles where id = '${member.id}';`);
@@ -178,15 +185,17 @@ async function races() {
   section("Races");
   let held;
 
-  // Two admins revoke each other at once: the second waits, then is no longer an admin.
+  // The Owner revokes an admin who acts at the same moment: the admin's call waits,
+  // then finds its caller is no longer an admin (M8c: only the Owner revokes admin).
   const adminA = await createUser();
+  await makeOwner(adminA);
   const adminB = await createUser();
-  makeFirstAdmin(adminA);
   await grant(adminA, adminB, "admin");
-  held = await whileHeld(`${asUserSql(adminA)}\nselect public.revoke_staff_role('${adminB.id}', 'admin', 'race');`, () => revoke(adminB, adminA, "admin"));
-  check("a revoke during an uncommitted revoke waits for it", held.waited > 500, `${held.waited} ms`);
+  const bystander = await createUser();
+  held = await whileHeld(`${asUserSql(adminA)}\nselect public.revoke_staff_role('${adminB.id}', 'admin', 'race');`, () => grant(adminB, bystander, "moderator"));
+  check("an admin's grant during their uncommitted revocation waits for it", held.waited > 500, `${held.waited} ms`);
   check("then finds its caller is no longer an admin", refusedWith(held.result, "not permitted"), held.result.message);
-  check("an administrator remains", roles(adminA) === "admin" && roles(adminB) === "");
+  check("the Owner is still an administrator, the other admin isn't, and nothing was granted", roles(adminA) === "admin" && roles(adminB) === "" && roles(bystander) === "");
 
   // A grant to an account being suspended: the grant waits, then sees the suspension.
   const moderator = await createUser();
@@ -232,6 +241,7 @@ async function races() {
  * limit documented in security-rls.md, used here only to clean up test data.
  */
 async function cleanup() {
+  removeTestOwner(psql);
   for (const id of createdUsers) {
     await fetch(`${api}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: service });
   }

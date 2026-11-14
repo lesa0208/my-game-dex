@@ -175,6 +175,7 @@ const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
 const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
 const STATUS = "public.set_account_status(uuid, public.account_status, text)";
 const AUDIT_READ = "public.get_audit_events(integer, uuid)";
+const ROLE_REFUSAL = "private.role_change_refusal(uuid, uuid, public.staff_role)";
 
 export const m4Mutations = [
   // Confidentiality and forgery
@@ -187,17 +188,20 @@ export const m4Mutations = [
   sql("audit rows can be changed", "pgtap", "drop trigger audit_events_no_update_or_delete on private.audit_events;"),
   sql("audit table can be truncated", "pgtap", "drop trigger audit_events_no_truncate on private.audit_events;"),
   // Completeness and atomicity
-  sql("grant not audited", "both", rewrite(GRANT, "perform private.record_audit(v_me, 'staff_role_granted'", "perform pg_catalog.jsonb_build_array(v_me, 'staff_role_granted'")),
-  sql("suspension not audited", "both", rewrite(STATUS, "perform private.record_audit(\n", "perform pg_catalog.jsonb_build_array(\n")),
+  // M8c: the functions return JSONB (A2), so these name the new lines; each mutation is the same.
+  sql("grant not audited", "both", rewrite(GRANT, "v_audit := private.record_audit(v_me, 'staff_role_granted'", "v_audit := pg_catalog.gen_random_uuid(); perform pg_catalog.jsonb_build_array(v_me, 'staff_role_granted'")),
+  sql("suspension not audited", "both", rewrite(STATUS, "v_audit := private.record_audit(\n", "v_audit := pg_catalog.gen_random_uuid(); perform pg_catalog.jsonb_build_array(\n")),
   sql("audit failure ignored", "pgtap", rewrite("private.record_audit(uuid, private.audit_action, uuid, text, jsonb)", "  return v_id;\nend;", "  return v_id;\nexception when others then\n  return null;\nend;")),
   sql("reason not required", "pgtap", rewrite("private.require_reason(text)", "if v_reason is null or pg_catalog.char_length", "if pg_catalog.char_length")),
   // Staff authorization
   sql("moderator may grant roles", "pgtap", rewrite(GRANT, "v_me := private.require_active_staff('admin');", "v_me := private.require_active_staff('moderator');")),
   sql("suspended staff may act", "both", rewrite("private.require_active_staff(public.staff_role)", "or not private.is_active_user() ", "")),
   sql("inactive account may receive a role", "both", rewrite(GRANT, "where p.id = p_user and p.account_status = 'active' and p.handle", "where p.id = p_user and p.handle")),
-  sql("last administrator may be removed", "pgtap", rewrite(REVOKE, "if p_role = 'admin' and private.other_active_admins(p_user) = 0 then", "if false then")),
-  sql("moderator may suspend staff", "pgtap", rewrite(STATUS, "  if exists (select 1 from public.staff_roles s where s.user_id = p_user) then", "  if false then")),
-  sql("self-suspension allowed", "pgtap", rewrite(STATUS, "if p_user is null or p_user = v_me then", "if p_user is null then")),
+  // M8c: "one administrator remains" is now "the Owner is always one": nobody changes their
+  // own roles (D7) and the Owner's can't be changed (owner_protected, in the m8 suite).
+  sql("own roles may be changed", "pgtap", rewrite(ROLE_REFUSAL, "if p_user = p_actor then\n    return 'self_change';", "if false then\n    return 'self_change';")),
+  sql("moderator may suspend staff", "pgtap", rewrite(STATUS, "elsif exists (select 1 from public.staff_roles s where s.user_id = p_user) and not private.has_staff_role('admin') then", "elsif false then")),
+  sql("self-suspension allowed", "pgtap", rewrite(STATUS, "  if p_user = v_me then\n    v_refusal := 'self_change';", "  if false then\n    v_refusal := 'self_change';")),
   sql("deactivation managed by staff", "pgtap", rewrite(STATUS, "p_status not in ('active', 'suspended')", "p_status not in ('active', 'suspended', 'deactivated')")),
   sql("staff function without search_path", "pgtap", `alter function ${STATUS} set search_path = public;`),
   // Concurrency
@@ -657,6 +661,15 @@ const REGISTER = "public.register_my_verified_factors()";
 const MATURE = "private.mature_totp_factor_count(uuid)";
 const AUTHORITY = "private.owner_authority_refusal()";
 const SESSION_MATCH = "where s.id = v_session and s.user_id = v_me and s.aal = 'aal2'";
+const STAFF_REFUSAL = "private.staff_refusal(uuid, uuid, text, jsonb)";
+const CANDIDATE = "private.owner_candidate_ok(uuid)";
+const START_TRANSFER = "public.start_ownership_transfer(uuid, text)";
+const ACCEPT_TRANSFER = "public.accept_ownership_transfer(uuid)";
+const CANCEL_TRANSFER = "public.cancel_ownership_transfer(uuid, text)";
+const SUCCESSOR = "public.set_owner_successor(uuid, text)";
+const SUCCESSION_DOCUMENT = "public.register_succession_document(text, text)";
+const CONFIRM_RECOVERY = "public.confirm_owner_recovery(uuid)";
+const CANCEL_RECOVERY = "public.cancel_owner_recovery(uuid, text)";
 
 export const m8Mutations = [
   // Owner protection, one layer at a time (D12). Each test of a layer disables the others.
@@ -711,6 +724,44 @@ export const m8Mutations = [
   sql("clients may read the Owner record", "pgtap", "grant usage on schema private to authenticated; grant select on private.platform_owner to authenticated;"),
   sql("clients may ask whether an account is protected", "pgtap", `grant execute on function ${DELETION_BLOCKED} to authenticated;`),
   sql("clients may write factor registrations", "pgtap", "grant usage on schema private to authenticated; grant insert on private.mfa_factor_registrations to authenticated;"),
+  // M8c: the staff authority matrix (D4, D7)
+  sql("an admin may grant or revoke admin", "pgtap", rewrite(ROLE_REFUSAL, "if p_role = 'admin' then\n    return private.owner_authority_refusal();\n  end if;", "")),
+  sql("the Owner's roles may be changed through the staff functions", "pgtap", rewrite(ROLE_REFUSAL, "if private.is_designated_owner(p_user) then\n    return 'owner_protected';", "if false then\n    return 'owner_protected';")),
+  sql("an admin may suspend an admin", "pgtap", rewrite(STATUS, "s.role = 'admin') then\n    v_refusal := private.owner_authority_refusal();", "s.role = 'admin') and false then\n    v_refusal := private.owner_authority_refusal();")),
+  sql("the Owner may be suspended through the staff functions", "pgtap", rewrite(STATUS, "elsif private.is_designated_owner(p_user) then\n    v_refusal := 'owner_protected';", "elsif false then\n    v_refusal := 'owner_protected';")),
+  sql("role changes need no recent verification", "pgtap", rewrite(GRANT, "  perform private.require_recent_mfa();\n", "")),
+  sql("status changes need no recent verification", "pgtap", rewrite(STATUS, "  perform private.require_recent_mfa();\n", "")),
+  // The JSONB contract (A4): a refusal commits its audit row and nothing else
+  sql("a refusal writes before refusing", "pgtap", rewrite(GRANT, "  if v_refusal is not null then\n", "  if v_refusal is not null then\n    insert into public.staff_roles (user_id, role, granted_by) values (p_user, 'moderator', v_me) on conflict do nothing;\n")),
+  sql("refusals aren't audited", "both", rewrite(STAFF_REFUSAL, "v_audit := private.record_refusal(", "v_audit := null; perform pg_catalog.jsonb_build_array(")),
+  sql("attempts on the Owner aren't told apart", "pgtap", rewrite(STAFF_REFUSAL, "case when p_code = 'owner_protected' then 'owner_protection_refused' else 'staff_change_refused' end", "'staff_change_refused'")),
+  sql("the audit log hides the outcome", "pgtap", rewrite(AUDIT_READ, "e.metadata, e.outcome", "e.metadata, 'succeeded'::text")),
+  // Ownership transfer (D5)
+  sql("a transfer needs no Owner authority", "both", rewrite(START_TRANSFER, "  v_refusal := private.owner_authority_refusal();\n  if v_refusal is null and p_to = v_me then", "  v_refusal := null;\n  if v_refusal is null and p_to = v_me then")),
+  sql("two transfers may be pending", "both", rewrite(START_TRANSFER, "and t.expires_at > pg_catalog.now()) then\n    v_refusal := 'transfer_pending';", "and false) then\n    v_refusal := 'transfer_pending';")),
+  sql("a transfer target needs no second factor", "both", rewrite(CANDIDATE, "\n    and coalesce(private.totp_factor_count(p_user), 0) >= 2", "")),
+  sql("an expired transfer can be accepted", "pgtap", rewrite(ACCEPT_TRANSFER, "if t.expires_at <= pg_catalog.now() then\n    v_refusal := 'transfer_expired';", "if false then\n    v_refusal := 'transfer_expired';")),
+  sql("accepting needs no recent verification", "both", rewrite(ACCEPT_TRANSFER, "  perform private.require_recent_mfa();\n", "")),
+  sql("an accepted transfer keeps the old succession", "pgtap", rewrite(ACCEPT_TRANSFER, "set user_id = v_me, successor_id = null, succession_fingerprint = null, succession_registered_at = null", "set user_id = v_me")),
+  sql("the Owner record is updated without its key", "both", rewrite(ACCEPT_TRANSFER, "succession_registered_at = null\n  where id;", "succession_registered_at = null;")),
+  sql("a suspension leaves the transfer pending", "both", rewrite(STATUS, "    perform private.close_owner_designations(v_me, p_user, 'target_suspended', v_reason);", "    null;")),
+  sql("a revocation leaves the transfer and successor", "both", rewrite(REVOKE, "    perform private.close_owner_designations(v_me, p_user, 'target_role_revoked', v_reason);", "    null;")),
+  sql("anyone may cancel a transfer", "pgtap", rewrite(CANCEL_TRANSFER, "if not found or (t.from_user is distinct from v_me and t.to_user is distinct from v_me) then", "if not found then")),
+  sql("the Owner cancels without a recent verification", "pgtap", rewrite(CANCEL_TRANSFER, "  if v_by = 'owner' then\n    perform private.require_recent_mfa();\n  end if;\n", "")),
+  // Succession (D14, D6a)
+  sql("anyone names the successor", "pgtap", rewrite(SUCCESSOR, "  v_refusal := private.owner_authority_refusal();\n  if v_refusal is null and p_successor = v_me then", "  v_refusal := null;\n  if v_refusal is null and p_successor = v_me then")),
+  sql("a successor needn't be an admin", "pgtap", rewrite(SUCCESSOR, "\n    and exists (select 1 from public.staff_roles s where s.user_id = p_successor and s.role = 'admin')\n  ) then", "\n  ) then")),
+  sql("anyone registers the succession document", "pgtap", rewrite(SUCCESSION_DOCUMENT, "  v_refusal := private.owner_authority_refusal();\n  if v_refusal is not null then", "  v_refusal := null;\n  if v_refusal is not null then")),
+  // Recovery in the app (D6, D6b)
+  sql("anyone confirms a recovery", "pgtap", rewrite(CONFIRM_RECOVERY, "r.target_id is distinct from v_me then", "false then")),
+  sql("confirming needs no recent verification", "pgtap", rewrite(CONFIRM_RECOVERY, "v_me := private.require_recent_mfa();", "v_me := (select auth.uid());")),
+  sql("anyone cancels a recovery", "pgtap", rewrite(CANCEL_RECOVERY, "if not private.is_designated_owner(v_me) then\n    v_refusal := 'owner_only';", "if false then\n    v_refusal := 'owner_only';")),
+  sql("a banned Owner cancels a recovery", "pgtap", rewrite(CANCEL_RECOVERY, "elsif private.account_standing(v_me) is not null then\n    v_refusal := 'owner_ineligible';", "elsif false then\n    v_refusal := 'owner_ineligible';")),
+  sql("a disputed recovery is cancelled from the app", "pgtap", rewrite(CANCEL_RECOVERY, "elsif r.status = 'pending' and r.disputed then", "elsif false then")),
+  sql("cancelling a recovery needs no recent verification", "pgtap", rewrite(CANCEL_RECOVERY, "  perform private.require_recent_mfa();\n", "")),
+  // Grants
+  sql("anon may accept a transfer", "both", `grant execute on function ${ACCEPT_TRANSFER} to anon;`),
+  sql("a refusal helper is exposed", "pgtap", `grant usage on schema private to authenticated; grant execute on function ${STAFF_REFUSAL} to authenticated;`),
 ];
 
 export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations };

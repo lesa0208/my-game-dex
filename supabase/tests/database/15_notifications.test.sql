@@ -179,7 +179,7 @@ select pg_temp.as_user('c3', $$update public.user_preferences set notification_s
 -- ---------------------------------------------------------------------------
 -- Moderation notices
 -- ---------------------------------------------------------------------------
-select is(pg_temp.as_user('e5', format($$select public.set_account_status(%L, 'suspended', 'Internal staff reason XYZ')$$, pg_temp.u('a7'))), 'true', 'e5 suspends a7');
+select is(pg_temp.as_user('e5', format($$select public.set_account_status(%L, 'suspended', 'Internal staff reason XYZ') ->> 'result'$$, pg_temp.u('a7'))), 'changed', 'e5 suspends a7');
 select is((select count(*)::int from public.notifications where recipient_id = pg_temp.u('a7') and type = 'moderation' and actor_id is null and data = '{"status": "suspended"}'),
   1, 'a7 gets a moderation notice that names no actor');
 select is((select count(*)::int from public.notifications where data::text like '%XYZ%'), 0, 'no notice contains the staff reason');
