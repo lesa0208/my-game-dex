@@ -525,6 +525,7 @@ const PRESERVED = "private.my_preserved_releases(uuid[])";
 const PRESERVED_RELEASE = "public.get_my_preserved_release(uuid)";
 const COPY_TOUCHED = "private.set_copy_updated_at()";
 const NEW_PROFILES = "private.lock_new_profiles(uuid[], uuid[])";
+const PROFILE_PRELOCK = "  perform 1 from public.profiles p where p.id = any (v_locked) order by p.id for key share;\n";
 const RESTORED_COPIES = "    where c.release_id = ex.release_id and c.record_status = 'invalid_preserved' and c.invalidated_at = ex.excluded_at\n";
 
 export const m7b2bMutations = [
@@ -565,6 +566,10 @@ export const m7b2bMutations = [
   // Grants
   sql("visitors may exclude", "pgtap", `grant execute on function ${EXCLUDE} to anon;`),
   sql("clients may read exclusion records", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_exclusions to authenticated;"),
+  // Locks, added after the M7b-2c campaign: each function's prelock of the profiles it
+  // already knows, before any catalog row (only this takes the copy owner's).
+  sql("an exclusion doesn't lock known profiles before catalog rows", "api", rewrite(EXCLUDE, PROFILE_PRELOCK, "")),
+  sql("a restoration doesn't lock known profiles before catalog rows", "api", rewrite(RESTORE, PROFILE_PRELOCK, "")),
 ];
 
 const MERGE = "public.merge_release(uuid, uuid, text, text, text, text[], boolean)";
@@ -632,7 +637,7 @@ export const m7b2cMutations = [
   sql("visitors read unpublished releases", "pgtap", "alter policy releases_read_anon on public.releases using (true);"),
   sql("an owner's relink keeps updated_at", "api", rewrite(COPY_TOUCHED, "      if exists (\n        select 1 from private.catalog_merge_copies mc", "      if true or exists (\n        select 1 from private.catalog_merge_copies mc")),
   // Locks (safeguard 3)
-  sql("profiles aren't locked before catalog rows", "api", rewrite(MERGE, "  perform 1 from public.profiles p where p.id = any (v_locked) order by p.id for key share;\n", "")),
+  sql("profiles aren't locked before catalog rows", "api", rewrite(MERGE, PROFILE_PRELOCK, "")),
   sql("a late copy owner isn't checked", "api", rewrite(MERGE, "  perform private.lock_new_profiles(v_locked, private.merge_profiles(v_me, p_source, p_target));\n", "")),
 ];
 

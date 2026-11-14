@@ -139,6 +139,40 @@ async function waitingOnLock(name) {
   }
   return false;
 }
+/**
+ * Whether session `waiter` waits for the game row that session `holder` holds, and
+ * for nothing else: holder, idle in its transaction, is its only blocker; it waits
+ * for holder's transaction; and the row it is queued for is in public.games.
+ */
+async function waitingForGame(waiter, holder) {
+  const sql = `select coalesce((select pg_catalog.pg_blocking_pids(w.pid) = array[h.pid]
+      and h.state = 'idle in transaction'
+      and exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and not l.granted and l.locktype = 'transactionid' and l.transactionid = h.backend_xid)
+      and exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and l.granted and l.locktype = 'tuple' and l.relation = 'public.games'::regclass)
+      and not exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and l.locktype = 'tuple' and l.relation <> 'public.games'::regclass)
+    from pg_catalog.pg_stat_activity w, pg_catalog.pg_stat_activity h
+    where w.application_name = '${waiter}' and w.wait_event_type = 'Lock' and h.application_name = '${holder}'), false);`;
+  for (let i = 0; i < 100; i += 1) {
+    if (psql(sql) === "t") return true;
+    await pause(50);
+  }
+  return false;
+}
+/**
+ * Tries to lock a profile FOR UPDATE NOWAIT from a new connection that holds nothing
+ * else, and lets go at once: "locked" if another transaction holds a lock on it that
+ * conflicts (KEY SHARE does), "free" if not, "missing" if there's no such profile.
+ */
+const profileLock = (id) =>
+  psql(`create function pg_temp.probe(p uuid) returns text language plpgsql as $f$
+begin
+  perform 1 from public.profiles where id = p for update nowait;
+  if not found then return 'missing'; end if;
+  return 'free';
+exception when lock_not_available then
+  return 'locked';
+end $f$;
+select pg_temp.probe('${id}');`);
 /** Whether a promise settles within ms; a slow one keeps running. */
 const settlesWithin = (promise, ms) =>
   Promise.race([promise.then(() => true, () => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))]);
@@ -500,9 +534,15 @@ try {
     const p = preview(editor, s, t);
     // d holds the game, so the merge stops after its first profile locks.
     await d.run(`begin; select 1 from public.games where id = '${g}' for share;`);
+    // Nothing else holds the profiles the merge will lock, d included.
+    check("before the merge, neither the administrator's nor the copy owner's profile is locked", profileLock(admin.id) === "free" && profileLock(owner.id) === "free");
     await begin(a);
     const merging = a.asUser(admin.id, mergeSql(s, t, p));
-    check("the merge has locked the profiles it knew, and waits for the game", await waitingOnLock("mrg_a"));
+    check("the merge waits for the game, and only for the game", await waitingForGame("mrg_a", "mrg_d"));
+    // Its own profile is locked as it starts (begin_catalog_edit); the copy owner's
+    // only by the profile locks the merge takes before any catalog row.
+    check("while it waits, it holds the administrator's profile", profileLock(admin.id) === "locked");
+    check("and the copy owner's profile, locked before any catalog row", profileLock(owner.id) === "locked");
     const late = addCopy(newcomer, s);
     check("meanwhile a new owner adds a copy", copyOn(late) === s);
     const deleting = await c.run(`begin; delete from auth.users where id = '${newcomer.id}';`);

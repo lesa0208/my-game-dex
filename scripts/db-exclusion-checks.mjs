@@ -138,6 +138,40 @@ async function waitingOnLock(name) {
   }
   return false;
 }
+/**
+ * Whether session `waiter` waits for the game row that session `holder` holds, and
+ * for nothing else: holder, idle in its transaction, is its only blocker; it waits
+ * for holder's transaction; and the row it is queued for is in public.games.
+ */
+async function waitingForGame(waiter, holder) {
+  const sql = `select coalesce((select pg_catalog.pg_blocking_pids(w.pid) = array[h.pid]
+      and h.state = 'idle in transaction'
+      and exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and not l.granted and l.locktype = 'transactionid' and l.transactionid = h.backend_xid)
+      and exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and l.granted and l.locktype = 'tuple' and l.relation = 'public.games'::regclass)
+      and not exists (select 1 from pg_catalog.pg_locks l where l.pid = w.pid and l.locktype = 'tuple' and l.relation <> 'public.games'::regclass)
+    from pg_catalog.pg_stat_activity w, pg_catalog.pg_stat_activity h
+    where w.application_name = '${waiter}' and w.wait_event_type = 'Lock' and h.application_name = '${holder}'), false);`;
+  for (let i = 0; i < 100; i += 1) {
+    if (psql(sql) === "t") return true;
+    await pause(50);
+  }
+  return false;
+}
+/**
+ * Tries to lock a profile FOR UPDATE NOWAIT from a new connection that holds nothing
+ * else, and lets go at once: "locked" if another transaction holds a lock on it that
+ * conflicts (KEY SHARE does), "free" if not, "missing" if there's no such profile.
+ */
+const profileLock = (id) =>
+  psql(`create function pg_temp.probe(p uuid) returns text language plpgsql as $f$
+begin
+  perform 1 from public.profiles where id = p for update nowait;
+  if not found then return 'missing'; end if;
+  return 'free';
+exception when lock_not_available then
+  return 'locked';
+end $f$;
+select pg_temp.probe('${id}');`);
 /** Whether a promise settles within ms; a slow one keeps running. */
 const settlesWithin = (promise, ms) =>
   Promise.race([promise.then(() => true, () => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))]);
@@ -485,12 +519,18 @@ try {
     const tok = token(r);
     // d holds the game, so the exclusion stops after its first profile locks.
     await d.run(`begin; select 1 from public.games where id = '${g}' for share;`);
+    // Nothing else holds the profiles the exclusion will lock, d included.
+    check("before the exclusion, neither the editor's nor the copy owner's profile is locked", profileLock(editor.id) === "free" && profileLock(owner.id) === "free");
     // Scoped to this transaction: a wait the function shouldn't make ends in seconds,
     // not at the mutation runner's timeout. It can't stand in for NOWAIT, which the
     // timing check below tells apart.
     await a.run("begin; set local lock_timeout = '15s';");
     const excluding = a.asUser(editor.id, excludeSql(r, tok));
-    check("the exclusion has locked the profiles it knew, and waits for the game", await waitingOnLock("excl_a"));
+    check("the exclusion waits for the game, and only for the game", await waitingForGame("excl_a", "excl_d"));
+    // Its own profile is locked as it starts (begin_catalog_edit); the copy owner's
+    // only by the profile locks the exclusion takes before any catalog row.
+    check("while it waits, it holds the editor's profile", profileLock(editor.id) === "locked");
+    check("and the copy owner's profile, locked before any catalog row", profileLock(owner.id) === "locked");
     const late = addCopy(newcomer, r);
     check("meanwhile a new owner adds a copy", copyStatus(late) === "active");
     const deleting = await c.run(`begin; delete from auth.users where id = '${newcomer.id}';`);
@@ -529,6 +569,32 @@ try {
       releaseStatus(r) === "published" && psql(`select status from public.games where id = '${g}';`) === "published" && copyStatus(keep) === "active" && exclusionOf(r) === ""
       && psql(`select count(*) from private.audit_events where action = 'catalog_release_excluded' and metadata ->> 'id' = '${r}';`) === "0"
       && psql(`select count(*) from public.notifications n where recipient_id = '${owner.id}' and type = 'catalog_exclusion' and not exists (select 1 from private.catalog_exclusions e where e.id::text = n.data ->> 'exclusion_id');`) === "0");
+  }
+
+  // -------------------------------------------------------------------------
+  section("9. A restoration locks the profiles it knows before the catalog rows");
+  {
+    const g = makeGame("Restore order");
+    const r = makeRelease(g, "ntsc-uc");
+    makeRelease(g, "pal");
+    const holder = await createUser();
+    const kept = addCopy(holder, r);
+    const x = exclude(r).exclusion_id;
+    const version = exclusionVersion(x);
+    // d holds the game, so the restoration stops after its profile and exclusion locks.
+    await d.run(`begin; select 1 from public.games where id = '${g}' for share;`);
+    check("before the restoration, neither the administrator's nor the copy owner's profile is locked", profileLock(admin.id) === "free" && profileLock(holder.id) === "free");
+    await a.run("begin; set local lock_timeout = '15s';");
+    const restoring = a.asUser(admin.id, `select public.restore_exclusion('${x}', ${version}, 'Restore check');`);
+    check("the restoration waits for the game, and only for the game", await waitingForGame("excl_a", "excl_d"));
+    // Its own profile is locked as it starts; the copy owner's only by the profile
+    // locks the restoration takes before the exclusion record and the catalog rows.
+    check("while it waits, it holds the administrator's profile", profileLock(admin.id) === "locked");
+    check("and the copy owner's profile, locked before any catalog row", profileLock(holder.id) === "locked");
+    await d.run("commit;");
+    const done = await restoring;
+    await a.run("commit;");
+    check("then restores the copy, with no deadlock", !deadlocked(done) && !done.err && copyStatus(kept) === "active" && releaseStatus(r) === "published", done.err);
   }
 
   // -------------------------------------------------------------------------
