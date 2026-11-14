@@ -11,7 +11,8 @@
  *   npm run mutation:campaign -- --steps m6,m7b1   only these suites, in this order
  *   npm run mutation:campaign -- --dir <path>      where to write, instead of a new folder
  *
- * A step is a suite name, or `suite:violation name` for one violation of it. Local
+ * A step is a suite name, or `suite:violation name` for one violation of it, or
+ * `suite:#5+#22` for violations by position (as numbered in failure file names). Local
  * only, like db-mutation-checks.mjs, which also refuses anything but the local stack.
  * If a suite stops (rather than reporting undetected violations), the campaign stops
  * too, because the database may need attention. Rerun the remaining suites with
@@ -42,11 +43,16 @@ const steps = (argument("--steps")?.split(",") ?? DEFAULT_STEPS).map((text) => {
   const [suite, ...rest] = text.trim().split(":");
   return { suite, only: rest.length ? rest.join(":").trim() : null };
 });
+/** The violations a step names: one name, or positions joined by +. */
+const picks = (step) => (/^#\d+(\+#\d+)*$/.test(step.only) ? step.only.split("+") : [step.only]);
 for (const step of steps) {
   if (!suites[step.suite]) throw new Error(`Unknown suite: ${step.suite}`);
-  if (step.only && !suites[step.suite].some((m) => m.name === step.only)) throw new Error(`Unknown violation in ${step.suite}: ${step.only}`);
+  for (const pick of step.only ? picks(step) : []) {
+    const known = pick.startsWith("#") ? Boolean(suites[step.suite][Number(pick.slice(1)) - 1]) : suites[step.suite].some((m) => m.name === pick);
+    if (!known) throw new Error(`Unknown violation in ${step.suite}: ${pick}`);
+  }
 }
-const count = (step) => (step.only ? 1 : suites[step.suite].length);
+const count = (step) => (step.only ? picks(step).length : suites[step.suite].length);
 const label = (step) => (step.only ? `${step.suite} (${step.only})` : step.suite);
 
 const base = join(homedir(), ".my-game-dex", "mutation-campaigns");
@@ -83,7 +89,7 @@ function runStep(step) {
   return new Promise((resolveStep) => {
     const name = step.only ? `${step.suite}-only` : step.suite;
     const args = ["scripts/db-mutation-checks.mjs", "--suite", step.suite, "--log", join(directory, `${name}.log`), "--out", join(directory, `${name}.json`), "--artifacts", failures];
-    if (step.only) args.push("--only", step.only);
+    if (step.only) args.push("--only", picks(step).join(","));
     const child = spawn(process.execPath, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
     let buffer = "";
     let stopped = false;

@@ -3,7 +3,7 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name]
+ *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name|#N,...]
  *   node scripts/db-mutation-checks.mjs --recover
  *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
  *
@@ -789,7 +789,10 @@ async function main() {
       return 2;
     }
     const only = argument("--only");
-    const wanted = only ? only.split(",").map((name) => name.trim()) : null;
+    // A name, or #N for the suite's Nth violation (as numbered in artifact file names),
+    // which also selects a violation whose name has a comma in it.
+    const byPosition = (name) => (/^#\d+$/.test(name) ? selected[Number(name.slice(1)) - 1]?.name ?? name : name);
+    const wanted = only ? only.split(",").map((name) => byPosition(name.trim())) : null;
     const unknown = wanted ? wanted.filter((name) => !selected.some((mutation) => mutation.name === name)) : [];
     if (unknown.length) {
       log(`Unknown violations: ${unknown.join(", ")}`);
