@@ -1,14 +1,17 @@
 import { ClipboardCheck, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { AdminFrame } from "@/components/admin/admin-frame";
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
+import { stepUpHref } from "@/features/admin/form";
+import { getAdminAccess } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { isAdministrator } from "@/features/exclusion/queries";
@@ -20,37 +23,39 @@ export const metadata: Metadata = {
   title: "Review",
 };
 
-async function QueueView({ searchParams }: { searchParams: PageProps<"/review">["searchParams"] }) {
+async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/catalog">["searchParams"] }) {
   const search = await searchParams;
   const status = queueFilter(Array.isArray(search.status) ? search.status[0] : search.status);
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/review");
+  await requireViewerWithHandle("/admin/catalog");
+  // Staff signed in without their authenticator verify first, then come back (M8d).
+  const access = await getAdminAccess();
+  if (access && access.roles.length > 0 && access.active && !access.mfa) redirect(stepUpHref("/admin/catalog"));
   // Anyone else gets the same page as for an address that doesn't exist.
-  if (!(await canReview())) notFound();
+  if (!access || !(await canReview())) notFound();
 
   const [queue, admin] = await Promise.all([getSubmissionQueue(status, after), isAdministrator()]);
-  const filterHref = (value: string) => (value === "active" ? "/review" : `/review?status=${value}`);
+  const filterHref = (value: string) => (value === "active" ? "/admin/catalog" : `/admin/catalog?status=${value}`);
 
   return (
-    <>
-      {/* Here, not in the static shell, so only editors ever see what this page is. */}
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">Review submissions</h1>
-      <p className="mb-4 text-sm text-muted-foreground">
+    // Here, not in the static shell, so only editors ever see what this page is.
+    <AdminFrame access={access} current="catalog" title="Review submissions">
+      <p className="text-sm text-muted-foreground">
         Missing games and releases sent by collectors. Oldest first.{" "}
-        <Link href="/review/merges" className="text-primary-text underline underline-offset-4">
+        <Link href="/admin/catalog/merges" className="text-primary-text underline underline-offset-4">
           Merges
         </Link>
         {admin ? (
           <>
             {" "}
-            <Link href="/review/exclusions" className="text-primary-text underline underline-offset-4">
+            <Link href="/admin/catalog/exclusions" className="text-primary-text underline underline-offset-4">
               Exclusions
             </Link>
           </>
         ) : null}
       </p>
-      <nav aria-label="Filter submissions" className="mb-4">
+      <nav aria-label="Filter submissions">
         <ul className="flex flex-wrap gap-2">
           {QUEUE_FILTERS.map((f) => (
             <li key={f.value}>
@@ -88,7 +93,7 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/review">[
               return (
                 <li key={item.id}>
                   <Link
-                    href={`/review/${item.id}`}
+                    href={`/admin/catalog/${item.id}`}
                     className="flex flex-col gap-1 rounded-lg border bg-card p-3 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
                   >
                     <span className="font-medium text-pretty">{item.title ?? "Submission"}</span>
@@ -115,18 +120,18 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/review">[
               )}
               {queue.next_after ? (
                 <Button asChild variant="secondary" size="lg">
-                  <Link href={`/review?status=${status}&after=${queue.next_after}`}>Next page</Link>
+                  <Link href={`/admin/catalog?status=${status}&after=${queue.next_after}`}>Next page</Link>
                 </Button>
               ) : null}
             </nav>
           ) : null}
         </section>
       )}
-    </>
+    </AdminFrame>
   );
 }
 
-export default function ReviewQueuePage({ searchParams }: PageProps<"/review">) {
+export default function ReviewQueuePage({ searchParams }: PageProps<"/admin/catalog">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

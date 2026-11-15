@@ -35,10 +35,10 @@ function cascadeText(entry: CascadeEntry) {
   return entry.contained ? `${entry.title}, cataloged only through this compilation` : `the game ${entry.title}`;
 }
 
-async function ExcludeView({ params, searchParams }: { params: PageProps<"/review/exclude/[releaseId]">["params"]; searchParams: PageProps<"/review/exclude/[releaseId]">["searchParams"] }) {
+async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin/catalog/exclude/[releaseId]">["params"]; searchParams: PageProps<"/admin/catalog/exclude/[releaseId]">["searchParams"] }) {
   const { releaseId } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(releaseId) ? `/review/exclude/${releaseId}` : "/review");
+  await requireViewerWithHandle(UUID.test(releaseId) ? `/admin/catalog/exclude/${releaseId}` : "/admin/catalog");
   // Anyone who can't review gets the same page as for an address that doesn't exist.
   if (!(await canReview())) notFound();
 
@@ -51,7 +51,7 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/revie
           Excluded.{copies !== null ? ` ${copies === 1 ? "1 copy is" : `${copies.toLocaleString("en")} copies are`} kept privately for their owners, who have been told.` : ""}
         </p>
         <p>
-          <Link href="/review" className="text-sm text-primary-text underline underline-offset-4">
+          <Link href="/admin/catalog" className="text-sm text-primary-text underline underline-offset-4">
             Back to the review queue
           </Link>
         </p>
@@ -76,7 +76,7 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/revie
     <article aria-labelledby="exclude-title" className="flex flex-col gap-4">
       <p>
         <Link
-          href={preview.request_id ? `/review/${preview.request_id}` : release.game.slug && release.game.status === "published" ? `/games/${release.game.slug}?release=${release.id}` : "/review"}
+          href={preview.request_id ? `/admin/catalog/${preview.request_id}` : release.game.slug && release.game.status === "published" ? `/games/${release.game.slug}?release=${release.id}` : "/admin/catalog"}
           className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring"
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
@@ -133,7 +133,7 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/revie
                     {b.request_id ? (
                       <>
                         {" · "}
-                        <Link href={`/review/${b.request_id}`} className="text-primary-text underline underline-offset-4">
+                        <Link href={`/admin/catalog/${b.request_id}`} className="text-primary-text underline underline-offset-4">
                           Review it
                         </Link>
                       </>
@@ -153,7 +153,7 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/revie
   );
 }
 
-export default function ExcludePage({ params, searchParams }: PageProps<"/review/exclude/[releaseId]">) {
+export default function ExcludePage({ params, searchParams }: PageProps<"/admin/catalog/exclude/[releaseId]">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

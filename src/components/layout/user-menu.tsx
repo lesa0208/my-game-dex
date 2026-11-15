@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, ClipboardCheck, FilePlus2, LogIn, LogOut, Settings, UserRound } from "lucide-react";
+import { AtSign, FilePlus2, LogIn, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -25,8 +25,8 @@ export function UserMenuPlaceholder() {
   );
 }
 
-/** `canReview`: an active catalog editor or administrator, from `can_review_submissions()`. */
-export function UserMenu({ viewer, canReview = false }: { viewer: Viewer | null; canReview?: boolean }) {
+/** `isStaff`: the account holds a staff role, from `get_my_admin_access()`; /admin checks it again. */
+export function UserMenu({ viewer, isStaff = false }: { viewer: Viewer | null; isStaff?: boolean }) {
   if (!viewer) {
     return (
       <Button asChild variant="ghost" size="lg" className="h-10">
@@ -70,11 +70,11 @@ export function UserMenu({ viewer, canReview = false }: { viewer: Viewer | null;
                   My submissions
                 </Link>
               </DropdownMenuItem>
-              {canReview ? (
+              {isStaff ? (
                 <DropdownMenuItem asChild>
-                  <Link href="/review">
-                    <ClipboardCheck aria-hidden="true" />
-                    Review submissions
+                  <Link href="/admin">
+                    <ShieldCheck aria-hidden="true" />
+                    Admin
                   </Link>
                 </DropdownMenuItem>
               ) : null}

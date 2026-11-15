@@ -18,11 +18,11 @@ export const metadata: Metadata = {
   title: "Merges",
 };
 
-async function MergesView({ searchParams }: { searchParams: PageProps<"/review/merges">["searchParams"] }) {
+async function MergesView({ searchParams }: { searchParams: PageProps<"/admin/catalog/merges">["searchParams"] }) {
   const search = await searchParams;
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/review/merges");
+  await requireViewerWithHandle("/admin/catalog/merges");
 
   const outcome = await getMerges(after);
   // Anyone but a catalog editor gets the same page as for an address that doesn't exist.
@@ -49,7 +49,7 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/review/m
             {outcome.data.items.map((item) => (
               <li key={item.id}>
                 <Link
-                  href={`/review/merges/${item.id}`}
+                  href={`/admin/catalog/merges/${item.id}`}
                   className="flex flex-col gap-1 rounded-lg border bg-card p-3 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   <span className="font-medium text-pretty">{item.source.game.title}</span>
@@ -68,14 +68,14 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/review/m
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {after ? (
                 <Button asChild variant="ghost" size="lg">
-                  <Link href="/review/merges">First page</Link>
+                  <Link href="/admin/catalog/merges">First page</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {outcome.data.next_after ? (
                 <Button asChild variant="secondary" size="lg">
-                  <Link href={`/review/merges?after=${outcome.data.next_after}`}>Next page</Link>
+                  <Link href={`/admin/catalog/merges?after=${outcome.data.next_after}`}>Next page</Link>
                 </Button>
               ) : null}
             </nav>
@@ -86,7 +86,7 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/review/m
   );
 }
 
-export default function MergesPage({ searchParams }: PageProps<"/review/merges">) {
+export default function MergesPage({ searchParams }: PageProps<"/admin/catalog/merges">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

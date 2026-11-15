@@ -70,7 +70,7 @@ if (!api || !anonKey || !serviceKey) {
   console.error("Couldn't read the local stack's status. Is it running? Try npm run db:start.");
   process.exit(1);
 }
-requireNoOwner(psql);
+requireNoOwner(psql, api);
 
 const anon = { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json" };
 const service = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" };

@@ -3,6 +3,7 @@
 import { refresh, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { stepUpHref } from "@/features/admin/form";
 import { createSupabaseServerClient } from "@/features/auth/server";
 import { CATALOG_TAG } from "@/features/catalog/queries";
 import { UUID } from "@/features/collection/uuid";
@@ -47,6 +48,9 @@ export async function mergeRelease(_state: MergeState, formData: FormData): Prom
     p_acknowledged: input.value.acknowledged,
     p_acknowledge_copies: input.value.acknowledgeCopies,
   });
+  // M8d (D3): a published merge needs a fresh verification. The editor verifies, comes
+  // back to this preview and merges again; nothing is replayed for them.
+  if (error?.message === "reauthentication required") redirect(stepUpHref(`/admin/catalog/merge/${source}?into=${target}`));
   if (error) return { status: "error", message: mergeErrorMessage(error.message) };
   const id = (data as { merge_id?: unknown })?.merge_id;
   if (typeof id !== "string" || !UUID.test(id)) return { status: "error", message: mergeErrorMessage(null) };
@@ -54,7 +58,7 @@ export async function mergeRelease(_state: MergeState, formData: FormData): Prom
   // expire them, so the next visit to any of them reads the catalog as it is now.
   updateTag(CATALOG_TAG);
   refresh();
-  redirect(`/review/merges/${id}?notice=merged`);
+  redirect(`/admin/catalog/merges/${id}?notice=merged`);
 }
 
 export async function mergeReleaseFromForm(formData: FormData): Promise<void> {

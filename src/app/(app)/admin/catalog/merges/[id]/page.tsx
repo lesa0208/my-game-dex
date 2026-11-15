@@ -36,10 +36,10 @@ const KIND: Record<string, string> = {
   unpublished: "An unpublished record",
 };
 
-async function MergeDetailView({ params, searchParams }: { params: PageProps<"/review/merges/[id]">["params"]; searchParams: PageProps<"/review/merges/[id]">["searchParams"] }) {
+async function MergeDetailView({ params, searchParams }: { params: PageProps<"/admin/catalog/merges/[id]">["params"]; searchParams: PageProps<"/admin/catalog/merges/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(id) ? `/review/merges/${id}` : "/review/merges");
+  await requireViewerWithHandle(UUID.test(id) ? `/admin/catalog/merges/${id}` : "/admin/catalog/merges");
   const outcome = await getMerge(id);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
@@ -56,7 +56,7 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/r
     <article aria-labelledby="merge-detail-title" className="flex flex-col gap-4">
       <p>
         <Link
-          href="/review/merges"
+          href="/admin/catalog/merges"
           className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring"
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
@@ -136,7 +136,7 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/r
             <div>
               <dt className="font-medium">Submission</dt>
               <dd>
-                <Link href={`/review/${m.request_id}`} className="text-primary-text underline underline-offset-4">
+                <Link href={`/admin/catalog/${m.request_id}`} className="text-primary-text underline underline-offset-4">
                   See the submission
                 </Link>
               </dd>
@@ -175,7 +175,7 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/r
   );
 }
 
-export default function MergeDetailPage({ params, searchParams }: PageProps<"/review/merges/[id]">) {
+export default function MergeDetailPage({ params, searchParams }: PageProps<"/admin/catalog/merges/[id]">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

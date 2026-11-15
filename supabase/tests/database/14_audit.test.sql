@@ -92,11 +92,11 @@ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'serv
   where has_function_privilege(r, f, 'execute')), 0, 'no API role can execute an audit or authority helper');
 select is((select count(*)::int from unnest(array['anon', 'service_role']) r, unnest(array[
     'public.grant_staff_role(uuid,public.staff_role,text)', 'public.revoke_staff_role(uuid,public.staff_role,text)',
-    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid)']) f
+    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid,text,text,text,timestamptz,timestamptz)']) f
   where has_function_privilege(r, f, 'execute')), 0, 'anon and service_role can execute no staff function');
 select is((select count(*)::int from unnest(array[
     'public.grant_staff_role(uuid,public.staff_role,text)', 'public.revoke_staff_role(uuid,public.staff_role,text)',
-    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid)']) f
+    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid,text,text,text,timestamptz,timestamptz)']) f
   where has_function_privilege('authenticated', f, 'execute')), 4, 'signed-in users can call the staff functions, which check the role');
 select is(pg_temp.as_user('c4', 'select count(*)::text from private.audit_events'), 'error: permission denied for schema private', 'a signed-in user can''t reach the table');
 set local role service_role;
@@ -108,7 +108,7 @@ reset role;
 select is((select string_agg(p.proname || ':' || pg_get_function_result(p.oid), ',' order by p.proname) from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status')),
   'grant_staff_role:jsonb,revoke_staff_role:jsonb,set_account_status:jsonb', 'each staff function exists once, returning jsonb');
 select is((select pg_get_function_result(p.oid) from pg_proc p where p.proname = 'get_audit_events'),
-  'TABLE(id uuid, occurred_at timestamp with time zone, actor_id uuid, action text, target_profile_id uuid, reason text, metadata jsonb, outcome text)', 'get_audit_events exists once, with outcome');
+  'TABLE(id uuid, occurred_at timestamp with time zone, actor_id uuid, action text, target_profile_id uuid, reason text, metadata jsonb, outcome text, actor_handle text, target_handle text)', 'get_audit_events exists once, with outcome and handles (M8d)');
 select is((select count(*)::int from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status', 'get_audit_events')
   and p.prosecdef and p.proconfig = array['search_path=""'] and p.proacl::text = '{postgres=X/postgres,authenticated=X/postgres}' and pg_get_userbyid(p.proowner) = 'postgres'),
   4, 'all four are SECURITY DEFINER with an empty search_path, owned by postgres, executable by authenticated only');

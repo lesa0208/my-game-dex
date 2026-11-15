@@ -47,10 +47,10 @@ const copies = (n: number) => (n === 1 ? "1 copy" : `${n.toLocaleString("en")} c
 const cascadeText = (entry: CascadeEntry) =>
   entry.entity === "pairing" ? `${entry.title} on ${entry.platform}` : entry.contained ? `${entry.title} (cataloged through the compilation)` : `The game ${entry.title}`;
 
-async function ExclusionView({ params, searchParams }: { params: PageProps<"/review/exclusions/[id]">["params"]; searchParams: PageProps<"/review/exclusions/[id]">["searchParams"] }) {
+async function ExclusionView({ params, searchParams }: { params: PageProps<"/admin/catalog/exclusions/[id]">["params"]; searchParams: PageProps<"/admin/catalog/exclusions/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(id) ? `/review/exclusions/${id}` : "/review/exclusions");
+  await requireViewerWithHandle(UUID.test(id) ? `/admin/catalog/exclusions/${id}` : "/admin/catalog/exclusions");
   const outcome = await getExclusion(id);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
@@ -68,7 +68,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/rev
   return (
     <article aria-labelledby="exclusion-title" className="flex flex-col gap-4">
       <p>
-        <Link href="/review/exclusions" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">
+        <Link href="/admin/catalog/exclusions" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">
           <ArrowLeft aria-hidden="true" className="size-4" />
           Exclusions
         </Link>
@@ -99,7 +99,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/rev
             { label: "Status before", value: catalogStatusLabel(ex.previous_status) },
             { label: "Copies preserved", value: `${copies(ex.copies_preserved)} of ${ex.owners_affected === 1 ? "1 collector" : `${ex.owners_affected.toLocaleString("en")} collectors`}` },
             { label: "Also excluded", value: ex.cascade.length ? ex.cascade.map(cascadeText).join("; ") : "Nothing else" },
-            ...(ex.request_id ? [{ label: "Submission", value: <Link href={`/review/${ex.request_id}`} className="text-primary-text underline underline-offset-4">See the submission</Link> }] : []),
+            ...(ex.request_id ? [{ label: "Submission", value: <Link href={`/admin/catalog/${ex.request_id}`} className="text-primary-text underline underline-offset-4">See the submission</Link> }] : []),
             ...(restored ? [{ label: "Restored", value: `${formatDay(ex.restored_at!)}: ${ex.restore_reason ?? ""}` }, { label: "Copies restored", value: copies(ex.copies_restored ?? 0) }] : []),
           ]}
         />
@@ -134,7 +134,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/rev
   );
 }
 
-export default function ExclusionPage({ params, searchParams }: PageProps<"/review/exclusions/[id]">) {
+export default function ExclusionPage({ params, searchParams }: PageProps<"/admin/catalog/exclusions/[id]">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

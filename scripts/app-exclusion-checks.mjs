@@ -97,29 +97,29 @@ try {
 
   section("Who can reach it");
   const game = await editor.browser.get(`/games/starfall-odyssey?release=${eu}`);
-  check("an editor sees “Exclude from the catalog” on a release", hrefs(game.html).includes(`/review/exclude/${eu}`));
+  check("an editor sees “Exclude from the catalog” on a release", hrefs(game.html).includes(`/admin/catalog/exclude/${eu}`));
   const gameAsCollector = await owner.browser.get(`/games/starfall-odyssey?release=${eu}`);
-  check("a collector doesn't", !hrefs(gameAsCollector.html).some((h) => h.startsWith("/review/exclude/")));
-  const refused = await owner.browser.get(`/review/exclude/${eu}`);
+  check("a collector doesn't", !hrefs(gameAsCollector.html).some((h) => h.startsWith("/admin/catalog/exclude/")));
+  const refused = await owner.browser.get(`/admin/catalog/exclude/${eu}`);
   check("and gets the page for an address that doesn't exist", plain(refused.html).includes(NOT_AVAILABLE) && !plain(refused.html).includes("Starfall"));
-  const visitor = await new Browser().get(`/review/exclude/${eu}`);
+  const visitor = await new Browser().get(`/admin/catalog/exclude/${eu}`);
   check("a visitor is sent to sign in", visitor.response.status === 307 || /sign-in/.test(location(visitor.response)) || /sign-in/.test(visitor.html));
 
   section("The preview and confirmation");
-  const blocked = await editor.browser.get(`/review/exclude/${us}`);
+  const blocked = await editor.browser.get(`/admin/catalog/exclude/${us}`);
   check("a release others were merged into can't be excluded, and the page says why", plain(blocked.html).includes("It can't be excluded yet") && plain(blocked.html).includes("A release merged into it") && !formById(blocked.html, "exclude-release"));
-  const page = await editor.browser.get(`/review/exclude/${eu}`);
+  const page = await editor.browser.get(`/admin/catalog/exclude/${eu}`);
   const form = formById(page.html, "exclude-release");
   check("the editor sees what excluding it does", plain(page.html).includes("1 copy of 1 collector will be kept privately") && Boolean(form));
   check("with a fixed reason, a note to owners, a staff reason and a confirmation", form && ["reason_code", "owner_note", "reason", "acknowledge_copies"].every((n) => form.names.includes(n)));
-  const unconfirmed = await editor.browser.submit(`/review/exclude/${eu}`, form, { ...FIELDS, acknowledge_copies: "" });
+  const unconfirmed = await editor.browser.submit(`/admin/catalog/exclude/${eu}`, form, { ...FIELDS, acknowledge_copies: "" });
   check("without the confirmation it's refused", unconfirmed.response.status !== 303 && psql(`select status from public.releases where id = '${eu}';`) === "published");
-  const stale = await editor.browser.submit(`/review/exclude/${eu}`, form, { ...FIELDS, token: "0".repeat(32) });
+  const stale = await editor.browser.submit(`/admin/catalog/exclude/${eu}`, form, { ...FIELDS, token: "0".repeat(32) });
   check("a stale preview is refused", stale.response.status !== 303 && psql(`select status from public.releases where id = '${eu}';`) === "published");
-  const forged = await owner.browser.submit(`/review/exclude/${eu}`, form, FIELDS);
+  const forged = await owner.browser.submit(`/admin/catalog/exclude/${eu}`, form, FIELDS);
   check("a collector's forged exclusion is refused", forged.response.status !== 303 && psql(`select status from public.releases where id = '${eu}';`) === "published");
-  const done = await editor.browser.submit(`/review/exclude/${eu}`, form, FIELDS);
-  check("confirmed, it's excluded", done.response.status === 303 && location(done.response) === `/review/exclude/${eu}?notice=excluded&copies=1` && status(copy) === "invalid_preserved");
+  const done = await editor.browser.submit(`/admin/catalog/exclude/${eu}`, form, FIELDS);
+  check("confirmed, it's excluded", done.response.status === 303 && location(done.response) === `/admin/catalog/exclude/${eu}?notice=excluded&copies=1` && status(copy) === "invalid_preserved");
   const confirmation = await editor.browser.get(location(done.response));
   check("which the page says", plain(confirmation.html).includes("Excluded. 1 copy is kept privately"));
   check("and the copy is unchanged", keep() === before);
@@ -146,18 +146,18 @@ try {
 
   section("Restoring");
   const exclusion = psql(`select id from private.catalog_exclusions where release_id = '${eu}' and restored_at is null;`);
-  check("an editor can't open the exclusions", plain((await editor.browser.get("/review/exclusions")).html).includes(NOT_AVAILABLE));
-  check("nor one exclusion", plain((await editor.browser.get(`/review/exclusions/${exclusion}`)).html).includes(NOT_AVAILABLE));
-  const queue = await admin.browser.get("/review");
-  check("an administrator finds them from the review queue", hrefs(queue.html).includes("/review/exclusions"));
-  const all = await admin.browser.get("/review/exclusions");
-  check("listed", hrefs(all.html).includes(`/review/exclusions/${exclusion}`));
-  const detail = await admin.browser.get(`/review/exclusions/${exclusion}`);
+  check("an editor can't open the exclusions", plain((await editor.browser.get("/admin/catalog/exclusions")).html).includes(NOT_AVAILABLE));
+  check("nor one exclusion", plain((await editor.browser.get(`/admin/catalog/exclusions/${exclusion}`)).html).includes(NOT_AVAILABLE));
+  const queue = await admin.browser.get("/admin/catalog");
+  check("an administrator finds them from the review queue", hrefs(queue.html).includes("/admin/catalog/exclusions"));
+  const all = await admin.browser.get("/admin/catalog/exclusions");
+  check("listed", hrefs(all.html).includes(`/admin/catalog/exclusions/${exclusion}`));
+  const detail = await admin.browser.get(`/admin/catalog/exclusions/${exclusion}`);
   const restoreForm = formById(detail.html, "restore-exclusion");
   check("with what restoring would do", plain(detail.html).includes("1 copy still preserved by this exclusion will count again") && Boolean(restoreForm));
   check("the staff reason is shown to the administrator", plain(detail.html).includes("A download code in a box"));
-  const restored = await admin.browser.submit(`/review/exclusions/${exclusion}`, restoreForm, { reason: "Excluded by mistake" });
-  check("restoring brings it back", restored.response.status === 303 && location(restored.response) === `/review/exclusions/${exclusion}?notice=restored`
+  const restored = await admin.browser.submit(`/admin/catalog/exclusions/${exclusion}`, restoreForm, { reason: "Excluded by mistake" });
+  check("restoring brings it back", restored.response.status === 303 && location(restored.response) === `/admin/catalog/exclusions/${exclusion}?notice=restored`
     && psql(`select status from public.releases where id = '${eu}';`) === "published" && status(copy) === "active");
   check("which the page says", plain((await admin.browser.get(location(restored.response))).html).includes("Restored. 1 copy came back"));
   check("the copy is exactly as it was", keep() === before);
@@ -167,13 +167,13 @@ try {
   check("the copy can be edited again", editable.html.includes('id="edit-copy"'));
 
   section("Own exclusions and submissions");
-  const adminExcludes = await admin.browser.get(`/review/exclude/${jp}`);
-  const own = await admin.browser.submit(`/review/exclude/${jp}`, formById(adminExcludes.html, "exclude-release"), { ...FIELDS, acknowledge_copies: "" });
+  const adminExcludes = await admin.browser.get(`/admin/catalog/exclude/${jp}`);
+  const own = await admin.browser.submit(`/admin/catalog/exclude/${jp}`, formById(adminExcludes.html, "exclude-release"), { ...FIELDS, acknowledge_copies: "" });
   check("an administrator may exclude, as an editor", own.response.status === 303 && psql(`select status from public.releases where id = '${jp}';`) === "excluded");
   const ownId = psql(`select id from private.catalog_exclusions where release_id = '${jp}' and restored_at is null;`);
-  const ownPage = await admin.browser.get(`/review/exclusions/${ownId}`);
+  const ownPage = await admin.browser.get(`/admin/catalog/exclusions/${ownId}`);
   check("but isn't offered restoring their own exclusion", plain(ownPage.html).includes("You excluded this, so another administrator has to restore it.") && !ownPage.html.includes('id="restore-exclusion"'));
-  const forcedRestore = await admin.browser.submit(`/review/exclusions/${exclusion}`, restoreForm, { exclusion_id: ownId, version: "1", reason: "Mine" });
+  const forcedRestore = await admin.browser.submit(`/admin/catalog/exclusions/${exclusion}`, restoreForm, { exclusion_id: ownId, version: "1", reason: "Mine" });
   check("and a forged restoration is refused", forcedRestore.response.status !== 303 && psql(`select status from public.releases where id = '${jp}';`) === "excluded");
   psql(`begin; set local session_replication_role = replica; update public.releases set status = 'published' where id = '${jp}'; commit;`);
   psql(`delete from private.catalog_exclusions where id = '${ownId}';`);
@@ -184,9 +184,9 @@ try {
     headers: { apikey: publishableKey, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ p_game: psql(`select game_id from public.releases where id = '${eu}';`), p_platform: "snes", p_media_format: "rom-cartridge", p_region: "ntsc-j", p_details: { product_code: "EXA-SUB" }, p_components: [], p_physical: true }),
   }).then((r) => r.json());
-  const review = await editor.browser.get(`/review/${submitted.submission_id}`);
-  check("a submission's review page offers excluding it", hrefs(review.html).includes(`/review/exclude/${submitted.release_id}`));
-  const ownReview = await editor.browser.get(`/review/exclude/${submitted.release_id}`);
+  const review = await editor.browser.get(`/admin/catalog/${submitted.submission_id}`);
+  check("a submission's review page offers excluding it", hrefs(review.html).includes(`/admin/catalog/exclude/${submitted.release_id}`));
+  const ownReview = await editor.browser.get(`/admin/catalog/exclude/${submitted.release_id}`);
   check("whose page names the submission it closes", plain(ownReview.html).includes("Its submission is closed for good"));
 
   const files = readdirSync(join(root, ".next", "static"), { recursive: true }).filter((f) => String(f).endsWith(".js"));

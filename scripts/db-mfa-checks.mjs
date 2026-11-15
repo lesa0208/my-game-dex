@@ -11,7 +11,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -228,6 +228,33 @@ try {
     await b.run("commit;");
     check("the first records it, the second adds nothing", one.out.split("\n").includes("1") && other.out.split("\n").includes("0") && !other.err, `${one.out} / ${other.out} ${other.err}`);
     check("so the factor is recorded once", psql(`select count(*) from private.mfa_factor_registrations where factor_id = '${third.body.id}';`) === "1");
+
+    // -----------------------------------------------------------------------
+    section("5. Registrations can't be backdated by the app (M8d review)");
+    const direct = await fetch(`${api}/rest/v1/mfa_factor_registrations`, {
+      method: "POST",
+      headers: { apikey: anonKey, Authorization: `Bearer ${latest.access_token}`, "Content-Type": "application/json", "Content-Profile": "private", Prefer: "return=minimal" },
+      body: JSON.stringify({ factor_id: randomUUID(), user_id: user.id, factor_created_at: "2000-01-01T00:00:00Z", registered_at: "2000-01-01T00:00:00Z" }),
+    });
+    check("a signed-in user can't write a registration through the API", !direct.ok, `status ${direct.status}`);
+    const patched = await fetch(`${api}/rest/v1/mfa_factor_registrations?user_id=eq.${user.id}`, {
+      method: "PATCH",
+      headers: { apikey: anonKey, Authorization: `Bearer ${latest.access_token}`, "Content-Type": "application/json", "Content-Profile": "private", Prefer: "return=minimal" },
+      body: JSON.stringify({ registered_at: "2000-01-01T00:00:00Z" }),
+    });
+    check("nor move one back", !patched.ok && psql(`select bool_and(registered_at > now() - interval '1 hour') from private.mfa_factor_registrations where user_id = '${user.id}';`) === "t", `status ${patched.status}`);
+    const removed = await fetch(`${api}/rest/v1/mfa_factor_registrations?user_id=eq.${user.id}`, {
+      method: "DELETE",
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Profile": "private" },
+    });
+    check("nor can service_role delete one", !removed.ok && psql(`select count(*) from private.mfa_factor_registrations where user_id = '${user.id}';`) === "3", `status ${removed.status}`);
+    const migrations = readdirSync(join(root, "supabase", "migrations")).filter((name) => name.endsWith(".sql"));
+    const writers = migrations.filter((name) => /insert\s+into\s+private\.mfa_factor_registrations/i.test(readFileSync(join(root, "supabase", "migrations", name), "utf8")));
+    check("only the M8b migration writes registrations", writers.length === 1 && writers[0] === "20261116200000_m8b_mfa.sql", writers.join(", "));
+    // Every statement that writes the ledger, in every migration: only M8b's, using now().
+    const inserts = migrations.flatMap((name) => readFileSync(join(root, "supabase", "migrations", name), "utf8").match(/insert\s+into\s+private\.mfa_factor_registrations[^;]*;/gi) ?? []);
+    check("and it records the server's now(), never an earlier time", inserts.length === 1 && /pg_catalog\.now\(\)/.test(inserts[0]) && !/interval/.test(inserts[0]), inserts.join(" | "));
+    check("no migration updates or deletes registrations", migrations.every((name) => !/(update|delete\s+from)\s+private\.mfa_factor_registrations/i.test(readFileSync(join(root, "supabase", "migrations", name), "utf8"))));
   }
 } catch (error) {
   check("the checks ran to the end", false, error.message);

@@ -13,7 +13,7 @@ export async function MergeReleaseLink({ releaseId }: { releaseId: string }) {
   if (!viewer?.handle || !(await canReview())) return null;
   return (
     <p className="mt-1 text-sm">
-      <Link href={`/review/merge/${releaseId}`} className="text-primary-text underline underline-offset-4">
+      <Link href={`/admin/catalog/merge/${releaseId}`} className="text-primary-text underline underline-offset-4">
         Merge into another release
       </Link>
     </p>

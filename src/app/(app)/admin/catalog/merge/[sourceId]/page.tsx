@@ -78,7 +78,7 @@ async function Candidates({ sourceId }: { sourceId: string }) {
                   {c.same_code ? " · same code" : ""}
                 </span>
               </span>
-              <Link href={`/review/merge/${sourceId}?into=${c.id}`} className="text-primary-text underline underline-offset-4">
+              <Link href={`/admin/catalog/merge/${sourceId}?into=${c.id}`} className="text-primary-text underline underline-offset-4">
                 Compare
               </Link>
             </li>
@@ -91,10 +91,10 @@ async function Candidates({ sourceId }: { sourceId: string }) {
   );
 }
 
-async function MergeView({ params, searchParams }: { params: PageProps<"/review/merge/[sourceId]">["params"]; searchParams: PageProps<"/review/merge/[sourceId]">["searchParams"] }) {
+async function MergeView({ params, searchParams }: { params: PageProps<"/admin/catalog/merge/[sourceId]">["params"]; searchParams: PageProps<"/admin/catalog/merge/[sourceId]">["searchParams"] }) {
   const { sourceId } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(sourceId) ? `/review/merge/${sourceId}` : "/review");
+  await requireViewerWithHandle(UUID.test(sourceId) ? `/admin/catalog/merge/${sourceId}` : "/admin/catalog");
   // Anyone who can't review gets the same page as for an address that doesn't exist.
   if (!(await canReview()) || !UUID.test(sourceId)) notFound();
 
@@ -103,7 +103,7 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/review/
     return (
       <div className="flex flex-col gap-4">
         <p>
-          <Link href="/review" className={backLink}>
+          <Link href="/admin/catalog" className={backLink}>
             <ArrowLeft aria-hidden="true" className="size-4" />
             Review queue
           </Link>
@@ -125,7 +125,7 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/review/
       return (
         <EmptyState icon={PlugZap} title="That release can't take a merge">
           It isn&apos;t published, or it&apos;s this release.{" "}
-          <Link href={`/review/merge/${sourceId}`} className="text-primary-text underline underline-offset-4">
+          <Link href={`/admin/catalog/merge/${sourceId}`} className="text-primary-text underline underline-offset-4">
             Choose another
           </Link>
         </EmptyState>
@@ -144,7 +144,7 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/review/
   return (
     <article aria-labelledby="merge-title" className="flex flex-col gap-4">
       <p>
-        <Link href={`/review/merge/${sourceId}`} className={backLink}>
+        <Link href={`/admin/catalog/merge/${sourceId}`} className={backLink}>
           <ArrowLeft aria-hidden="true" className="size-4" />
           Choose another release
         </Link>
@@ -251,7 +251,7 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/review/
   );
 }
 
-export default function MergePage({ params, searchParams }: PageProps<"/review/merge/[sourceId]">) {
+export default function MergePage({ params, searchParams }: PageProps<"/admin/catalog/merge/[sourceId]">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

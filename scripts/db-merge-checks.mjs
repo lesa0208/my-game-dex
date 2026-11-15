@@ -295,6 +295,13 @@ try {
     check("an editor can't merge a published release", error(await rpc(editor.headers, "merge_release", args), "not permitted"));
     check("one acknowledgement short is refused with a plain message", error(await rpc(admin.headers, "merge_release", { ...args, p_acknowledged: args.p_acknowledged.slice(1) }), "acknowledgement required"));
     check("a stale token is refused with a plain message", error(await rpc(admin.headers, "merge_release", { ...args, p_token: "stale" }), "preview stale"));
+    // M8d (D3): a published merge needs a TOTP verification in the last 10 minutes,
+    // through the API as through the app. Only postgres can age the claim like this.
+    const session = JSON.parse(claimsFor(admin.id)).session_id;
+    psql(`update auth.mfa_amr_claims set updated_at = now() - interval '11 minutes' where session_id = '${session}';`);
+    check("with a verification 11 minutes old, an administrator must reauthenticate to merge a published release",
+      error(await rpc(admin.headers, "merge_release", args), "reauthentication required") && releaseStatus(s) === "published" && copyOn(item) === s);
+    psql(`update auth.mfa_amr_claims set updated_at = now() where session_id = '${session}';`);
     const done = await rpc(admin.headers, "merge_release", args);
     check("an administrator merges it", done.status === 200 && done.body.copies === 1 && copyOn(item) === t && releaseStatus(s) === "merged", done.text);
     check("which leaves the copy's updated_at as its owner last left it", touched() === touchedBefore);

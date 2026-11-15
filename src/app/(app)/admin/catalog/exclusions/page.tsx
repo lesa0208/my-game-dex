@@ -24,17 +24,17 @@ const FILTERS = [
   { value: "restored", label: "Restored" },
 ] as const;
 
-async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/review/exclusions">["searchParams"] }) {
+async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/admin/catalog/exclusions">["searchParams"] }) {
   const search = await searchParams;
   const status = search.status === "restored" ? "restored" : "active";
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/review/exclusions");
+  await requireViewerWithHandle("/admin/catalog/exclusions");
 
   const outcome = await getExclusions(status, after);
   // Anyone but an administrator gets the same page as for an address that doesn't exist.
   if (!outcome.ok && outcome.reason === "refused") notFound();
-  const filterHref = (value: string) => (value === "active" ? "/review/exclusions" : `/review/exclusions?status=${value}`);
+  const filterHref = (value: string) => (value === "active" ? "/admin/catalog/exclusions" : `/admin/catalog/exclusions?status=${value}`);
 
   return (
     <>
@@ -75,7 +75,7 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/revi
             {outcome.data.items.map((item) => (
               <li key={item.id}>
                 <Link
-                  href={`/review/exclusions/${item.id}`}
+                  href={`/admin/catalog/exclusions/${item.id}`}
                   className="flex flex-col gap-1 rounded-lg border bg-card p-3 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   <span className="font-medium text-pretty">{item.release.game.title}</span>
@@ -100,7 +100,7 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/revi
               )}
               {outcome.data.next ? (
                 <Button asChild variant="secondary" size="lg">
-                  <Link href={`/review/exclusions?status=${status}&after=${outcome.data.next}`}>Next page</Link>
+                  <Link href={`/admin/catalog/exclusions?status=${status}&after=${outcome.data.next}`}>Next page</Link>
                 </Button>
               ) : null}
             </nav>
@@ -111,7 +111,7 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/revi
   );
 }
 
-export default function ExclusionsPage({ searchParams }: PageProps<"/review/exclusions">) {
+export default function ExclusionsPage({ searchParams }: PageProps<"/admin/catalog/exclusions">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

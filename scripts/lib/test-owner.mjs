@@ -6,12 +6,39 @@
  *
  * The Owner record is permanent by design, so removing the test Owner disables the
  * record's guard inside one transaction, again as only a database owner can.
+ *
+ * Local only (M8d): requireNoOwner() refuses unless the stack's API is on a loopback
+ * address, and the helpers that backdate or remove refuse to run until it has passed.
+ * psql itself only ever reaches the local Docker container. None of this is a
+ * database function: nothing deployed can backdate a registration (34_admin).
  * Nothing here prints; secrets stay in memory.
  */
 import { addFactor } from "./mfa-session.mjs";
 
-/** Exits if the stack already has an Owner, which the checks would otherwise disturb. */
-export function requireNoOwner(psql) {
+let localStackChecked = false;
+
+/** Exits unless the API is on this machine: these helpers must never reach a hosted project. */
+export function requireLocalStack(api) {
+  let host = "";
+  try {
+    host = new URL(api).hostname;
+  } catch {
+    // Not a URL: refused below.
+  }
+  if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(host)) {
+    console.error("Refusing: these checks backdate factor registrations, so they run only against the local stack.");
+    process.exit(1);
+  }
+  localStackChecked = true;
+}
+
+function assertLocal() {
+  if (!localStackChecked) throw new Error("requireNoOwner(psql, api) must confirm the local stack first");
+}
+
+/** Exits if the stack isn't local, or already has an Owner, which the checks would otherwise disturb. */
+export function requireNoOwner(psql, api) {
+  requireLocalStack(api);
   if (psql("select count(*) from private.platform_owner;") !== "0") {
     console.error("This local stack already has an Owner. These checks assign and remove a test Owner, so they need a stack without one.");
     process.exit(1);
@@ -20,6 +47,8 @@ export function requireNoOwner(psql) {
 
 /** Registers every verified TOTP factor of the user as 25 hours old. */
 export function matureFactors(psql, userId) {
+  assertLocal();
+  if (!/^[0-9a-f-]{36}$/.test(userId)) throw new Error("not a user id");
   psql(`delete from private.mfa_factor_registrations where user_id = '${userId}';
 insert into private.mfa_factor_registrations (factor_id, user_id, factor_created_at, registered_at)
 select f.id, f.user_id, f.created_at, now() - interval '25 hours' from auth.mfa_factors f
@@ -40,6 +69,7 @@ export async function makeTestOwner(psql, { api, anonKey, session, handle, userI
 
 /** Removes the test Owner record, and any transfer or recovery left over. */
 export function removeTestOwner(psql) {
+  assertLocal();
   psql(`begin;
 alter table private.platform_owner disable trigger platform_owner_guard;
 delete from private.platform_owner;

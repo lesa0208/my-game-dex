@@ -73,11 +73,11 @@ function Disclosure({ title, children, destructive = false }: { title: string; c
 
 const yesNo = (value: boolean) => (value ? "Yes" : "No");
 
-async function ReviewView({ params, searchParams }: { params: PageProps<"/review/[id]">["params"]; searchParams: PageProps<"/review/[id]">["searchParams"] }) {
+async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/catalog/[id]">["params"]; searchParams: PageProps<"/admin/catalog/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
   const notice = typeof search.notice === "string" ? (NOTICES[search.notice] ?? null) : null;
-  await requireViewerWithHandle(UUID.test(id) ? `/review/${id}` : "/review");
+  await requireViewerWithHandle(UUID.test(id) ? `/admin/catalog/${id}` : "/admin/catalog");
   if (!(await canReview())) notFound();
 
   const item = await getSubmissionReview(id);
@@ -102,7 +102,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
   return (
     <article aria-labelledby="review-title" className="flex flex-col gap-4">
       <p>
-        <Link href="/review" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">
+        <Link href="/admin/catalog" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">
           <ArrowLeft aria-hidden="true" className="size-4" />
           Review queue
         </Link>
@@ -218,7 +218,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
                       {label}
                     </Link>
                   ) : d.request_id ? (
-                    <Link href={`/review/${d.request_id}`} className="text-primary-text underline underline-offset-4">
+                    <Link href={`/admin/catalog/${d.request_id}`} className="text-primary-text underline underline-offset-4">
                       {label}
                     </Link>
                   ) : (
@@ -231,7 +231,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
                   {inReview && !request.own && release && d.status === "published" ? (
                     <>
                       {" · "}
-                      <Link href={`/review/merge/${release.id}?into=${d.id}`} className="text-primary-text underline underline-offset-4">
+                      <Link href={`/admin/catalog/merge/${release.id}?into=${d.id}`} className="text-primary-text underline underline-offset-4">
                         Compare and merge
                       </Link>
                     </>
@@ -253,7 +253,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
                 {h.id === request.id ? (
                   <span className="font-medium">This round</span>
                 ) : (
-                  <Link href={`/review/${h.id}`} className="text-primary-text underline underline-offset-4">
+                  <Link href={`/admin/catalog/${h.id}`} className="text-primary-text underline underline-offset-4">
                     Round of {formatDay(h.created_at)}
                   </Link>
                 )}
@@ -348,7 +348,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
             everything recorded, and they see where it went. You&apos;ll compare every field before confirming.
           </p>
           <p className="mt-3">
-            <Link href={`/review/merge/${release.id}`} className="text-sm font-medium text-primary-text underline underline-offset-4">
+            <Link href={`/admin/catalog/merge/${release.id}`} className="text-sm font-medium text-primary-text underline underline-offset-4">
               Choose the release to merge into
             </Link>
           </p>
@@ -362,7 +362,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
             copies are kept privately. You&apos;ll see every effect before confirming.
           </p>
           <p className="mt-3">
-            <Link href={`/review/exclude/${release.id}`} className="text-sm font-medium text-destructive underline underline-offset-4">
+            <Link href={`/admin/catalog/exclude/${release.id}`} className="text-sm font-medium text-destructive underline underline-offset-4">
               Review the effects of excluding it
             </Link>
           </p>
@@ -372,7 +372,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/review
   );
 }
 
-export default function ReviewPage({ params, searchParams }: PageProps<"/review/[id]">) {
+export default function ReviewPage({ params, searchParams }: PageProps<"/admin/catalog/[id]">) {
   return (
     <PageLayout>
       <div className="p-4 md:p-0">

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 
 import { HandleForm } from "@/components/auth/handle-form";
@@ -49,6 +50,18 @@ async function AccountSettings() {
         ) : (
           <HandleForm next="/settings" current={viewer.handle} submitLabel="Change handle" />
         )}
+      </section>
+
+      <section aria-labelledby="security-heading" className="rounded-lg border p-4">
+        <h2 id="security-heading" className="font-medium">
+          Security
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">Two-step verification with an authenticator app.</p>
+        <p className="mt-3">
+          <Link href="/settings/security" className="text-sm text-primary-text underline underline-offset-4">
+            Manage authenticators
+          </Link>
+        </p>
       </section>
 
       <p className="text-sm text-muted-foreground">Privacy and appearance settings arrive in a later update.</p>

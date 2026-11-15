@@ -13,7 +13,7 @@ export async function ExcludeReleaseLink({ releaseId }: { releaseId: string }) {
   if (!viewer?.handle || !(await canReview())) return null;
   return (
     <p className="mt-3 text-sm">
-      <Link href={`/review/exclude/${releaseId}`} className="text-destructive underline underline-offset-4">
+      <Link href={`/admin/catalog/exclude/${releaseId}`} className="text-destructive underline underline-offset-4">
         Exclude from the catalog
       </Link>
     </p>

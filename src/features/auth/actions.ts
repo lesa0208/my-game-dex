@@ -48,6 +48,12 @@ export async function signIn(_state: FormState, formData: FormData): Promise<For
     return { error: UNAVAILABLE };
   }
   refresh();
+  // M8d: an account with a verified authenticator verifies it next, reaching aal2,
+  // then continues to where it was going. Without it, staff abilities stay off.
+  const { data: level } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (level?.nextLevel === "aal2" && level.currentLevel !== "aal2") {
+    redirect(`/settings/security/verify?next=${encodeURIComponent(next)}`);
+  }
   redirect(next);
 }
 

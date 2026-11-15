@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { elevate, reverify } from "./lib/mfa-session.mjs";
+import { elevate, totp } from "./lib/mfa-session.mjs";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -205,8 +205,9 @@ const createdUsers = new Set();
 
 /**
  * A throwaway account. With mfa, it also gets a verified TOTP factor through the Auth
- * server, and signInAs() then takes the browser's session to aal2 (M8b: staff
- * privileges need it). The factor's secret stays in memory, never in a cookie.
+ * server, and signInAs() then verifies it on the app's own verification page, as a
+ * person would (M8d), taking the browser's session to aal2. The factor's secret stays
+ * in memory, never in a cookie.
  */
 export async function createUser({ confirmed = true, prefix = "app", mfa = false } = {}) {
   const email = `${prefix}-${randomUUID()}@example.test`;
@@ -230,16 +231,19 @@ export async function createUser({ confirmed = true, prefix = "app", mfa = false
   return { id: user.id, email, password, factorId: elevated.factorId, totpSecret: elevated.totpSecret };
 }
 
-/** Completes a TOTP challenge with the browser's session, and stores the aal2 session it returns. */
-export async function elevateBrowser(browser, user) {
-  const current = readSession(browser);
-  if (!current || !user.totpSecret) throw new Error("no session or factor to elevate");
-  const next = await reverify(api, publishableKey, { access_token: current.session.access_token, factorId: user.factorId, totpSecret: user.totpSecret });
-  // The cookie gets the session only, never the factor's secret.
-  const session = { ...next };
-  delete session.factorId;
-  delete session.totpSecret;
-  writeSession(browser, current.names, session);
+/**
+ * Verifies on the app's verification page (/settings/security/verify), as a browser
+ * without JavaScript would: the page's form, the factor's current code, and the
+ * redirect back to `next`. Returns that response. Used after sign-in and for step-up.
+ */
+export async function verifyBrowser(browser, user, next) {
+  if (!user.totpSecret) throw new Error("no factor to verify");
+  const page = await browser.get(`/settings/security/verify?next=${encodeURIComponent(next)}`);
+  const form = formWith(page.html, "code");
+  if (!form) throw new Error("no verification form");
+  // With more than one factor the page asks which; this user's is the one with the secret.
+  const fields = form.names.includes("factor_id") ? { factor_id: user.factorId, code: totp(user.totpSecret) } : { code: totp(user.totpSecret) };
+  return browser.submit(`/settings/security/verify?next=${encodeURIComponent(next)}`, form, fields);
 }
 
 export async function deleteUsers() {
@@ -266,6 +270,12 @@ export function writeSession(browser, names, session) {
 export async function signInAs(browser, user, next = "/settings") {
   const page = await browser.get(`/sign-in?next=${encodeURIComponent(next)}`);
   const result = await browser.submit("/sign-in", formWith(page.html, "password"), { email: user.email, password: user.password });
-  if (user.totpSecret && readSession(browser)) await elevateBrowser(browser, user);
+  // An account with a verified factor is sent to verify it next (M8d).
+  if (user.totpSecret && readSession(browser)) {
+    const to = location(result.response);
+    if (!to.startsWith("/settings/security/verify?next=")) throw new Error("sign-in didn't ask for the authenticator");
+    const verified = await verifyBrowser(browser, user, decodeURIComponent(to.slice("/settings/security/verify?next=".length)));
+    if (location(verified.response) !== next) throw new Error("verification didn't return to the page");
+  }
   return result;
 }

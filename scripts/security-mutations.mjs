@@ -174,7 +174,8 @@ export const m3Mutations = [
 const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
 const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
 const STATUS = "public.set_account_status(uuid, public.account_status, text)";
-const AUDIT_READ = "public.get_audit_events(integer, uuid)";
+// M8d replaced it with the filtered version (A2); the m4 mutations apply to that one.
+const AUDIT_READ = "public.get_audit_events(integer, uuid, text, text, text, timestamptz, timestamptz)";
 const ROLE_REFUSAL = "private.role_change_refusal(uuid, uuid, public.staff_role)";
 
 export const m4Mutations = [
@@ -670,6 +671,11 @@ const SUCCESSOR = "public.set_owner_successor(uuid, text)";
 const SUCCESSION_DOCUMENT = "public.register_succession_document(text, text)";
 const CONFIRM_RECOVERY = "public.confirm_owner_recovery(uuid)";
 const CANCEL_RECOVERY = "public.cancel_owner_recovery(uuid, text)";
+const ADMIN_ACCESS = "public.get_my_admin_access()";
+const STAFF_MEMBERS = "public.get_staff_members()";
+const FIND_ACCOUNT = "public.find_account_by_handle(text)";
+const OWNERSHIP_STATUS = "public.get_ownership_status()";
+const FACTOR_STATUS = "public.get_my_factor_status()";
 
 export const m8Mutations = [
   // Owner protection, one layer at a time (D12). Each test of a layer disables the others.
@@ -762,6 +768,24 @@ export const m8Mutations = [
   // Grants
   sql("anon may accept a transfer", "both", `grant execute on function ${ACCEPT_TRANSFER} to anon;`),
   sql("a refusal helper is exposed", "pgtap", `grant usage on schema private to authenticated; grant execute on function ${STAFF_REFUSAL} to authenticated;`),
+  // M8d: the recovery guard on accepting, tested in isolation (34_admin, section 5)
+  sql("accepting ignores a pending recovery", "pgtap", rewrite(ACCEPT_TRANSFER, "elsif exists (select 1 from private.owner_recoveries r where r.status = 'pending') then\n    v_refusal := 'recovery_pending';", "elsif false then\n    v_refusal := 'recovery_pending';")),
+  // M8d: published merges need a recent verification (D3)
+  sql("a published merge needs no recent verification", "api", rewrite(MERGE, "  if v_plan ->> 'kind' = 'published' then\n    perform private.require_recent_mfa();\n  end if;\n", "")),
+  // M8d: the reads behind /admin and Settings → Security
+  sql("admin access counts staff without MFA", "pgtap", rewrite(ADMIN_ACCESS, "v_staff := v_active and v_mfa and", "v_staff := v_active and")),
+  sql("the staff list is open to moderators", "pgtap", rewrite(STAFF_MEMBERS, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("the staff list includes emails", "pgtap", rewrite(STAFF_MEMBERS, "'account_status', p.account_status,", "'account_status', p.account_status, 'email', (select u.email from auth.users u where u.id = p.id),")),
+  sql("account lookup needs no staff role", "pgtap", rewrite(FIND_ACCOUNT, "perform private.require_active_staff('moderator');", "perform (select auth.uid());")),
+  sql("account lookup matches part of a handle", "pgtap", rewrite(FIND_ACCOUNT, "where p.handle = v_handle", "where p.handle like v_handle || '%'")),
+  sql("account lookup includes the email", "pgtap", rewrite(FIND_ACCOUNT, "'account_status', p.account_status,", "'account_status', p.account_status, 'email', (select u.email from auth.users u where u.id = p.id),")),
+  sql("ownership status is open to moderators", "pgtap", rewrite(OWNERSHIP_STATUS, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("ownership status shows the document's fingerprint", "pgtap", rewrite(OWNERSHIP_STATUS, "'document_registered_at', o.succession_registered_at,", "'document_registered_at', o.succession_registered_at, 'fingerprint', o.succession_fingerprint,")),
+  sql("factor status shows others' factors", "pgtap", rewrite(FACTOR_STATUS, "where f.user_id = v_me and f.factor_type = 'totp'", "where f.factor_type = 'totp'")),
+  sql("factor status calls unregistered factors mature", "pgtap", rewrite(FACTOR_STATUS, "and r.registered_at <= pg_catalog.now() - interval '24 hours', false)", "and coalesce(r.registered_at, pg_catalog.now()) <= pg_catalog.now(), false)")),
+  sql("the audit log's range is unbounded", "pgtap", rewrite(AUDIT_READ, " or p_until - p_since > interval '366 days'", "")),
+  sql("the audit log takes any action name", "pgtap", rewrite(AUDIT_READ, "    if not (p_action = any (pg_catalog.enum_range(null::private.audit_action)::text[])) then\n      raise exception 'invalid filter' using errcode = '22023';\n    end if;\n", "")),
+  sql("the factor-status read is exposed to anon", "pgtap", `grant execute on function ${FACTOR_STATUS} to anon;`),
 ];
 
 export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations };
