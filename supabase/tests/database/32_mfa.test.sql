@@ -3,7 +3,7 @@
 -- important cases with real sessions from local GoTrue, over the API.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(57);
+select plan(58);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.sid(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-00000000aa' || s)::uuid $$;
@@ -73,6 +73,7 @@ select pg_temp.verified_at('01', interval '1 minute');
 select pg_temp.session('a1', '02', 'aal1');
 select pg_temp.session('e2', '03', 'aal2');
 select pg_temp.session('a1', '04', 'aal2', interval '-1 minute', '01');
+select pg_temp.session('a1', '05', 'aal1', null, '01');
 select is(pg_temp.as_pg('a1', '01', 'aal2', 'select private.mfa_session_ok()::text'), 'true', 'a live aal2 session with a verified factor passes');
 select is(pg_temp.as_pg(null, null, null, 'select private.mfa_session_ok()::text'), 'false', 'no claims don''t');
 select is(pg_temp.as_pg('a1', '01', 'aal1', 'select private.mfa_session_ok()::text'), 'false', 'nor an aal1 token, even for an aal2 session');
@@ -80,6 +81,9 @@ select is(pg_temp.as_pg('a1', '09', 'aal2', 'select private.mfa_session_ok()::te
 select is(pg_temp.as_pg('a1', '02', 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor an aal2 token for a session now at aal1 (factor removed)');
 select is(pg_temp.as_pg('a1', '03', 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor someone else''s session');
 select is(pg_temp.as_pg('a1', '04', 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor a session past not_after');
+-- The session's own level, alone: Auth recorded it at aal1, though it names a factor
+-- that's still verified, so only the aal check can refuse it.
+select is(pg_temp.as_pg('a1', '05', 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor a session Auth holds at aal1, even naming a verified factor');
 select is(pg_temp.as_pg('a1', null, 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor a session id that isn''t a uuid');
 select is(pg_temp.as_pg('e2', '03', 'aal2', 'select private.mfa_session_ok()::text'), 'false', 'nor an aal2 session without a verified factor');
 select pg_temp.factor('e2', '03', 'unverified');

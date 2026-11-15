@@ -2,7 +2,7 @@
 -- foundation. Admin API paths and races are in db-owner-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(96);
+select plan(97);
 
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
@@ -42,6 +42,19 @@ begin
   return 'ok';
 exception when others then
   return 'error: ' || sqlerrm;
+end $t$;
+-- Like try, but always undoes p_sql, so a statement that wrongly succeeds leaves the
+-- later tests untouched.
+create function pg_temp.try_undone(p_sql text) returns text language plpgsql as $t$
+declare r text;
+begin
+  begin
+    execute p_sql;
+    raise exception 'mygamedex test: undo';
+  exception when others then
+    r := case when sqlerrm = 'mygamedex test: undo' then 'ok' else 'error: ' || sqlerrm end;
+  end;
+  return r;
 end $t$;
 create function pg_temp.factor(p_user text, p_name text, p_age interval, p_status auth.factor_status default 'verified') returns void language sql as $$
   insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
@@ -139,6 +152,11 @@ select is(pg_temp.try($$alter table public.staff_roles disable trigger protect_o
 select is(pg_temp.try($$alter table public.profiles disable trigger protect_owner_profile; alter table public.staff_roles disable trigger protect_owner_admin_role; delete from auth.users where id = '$$ || pg_temp.u('f1') || $$'$$),
   'error: update or delete on table "profiles" violates foreign key constraint "platform_owner_user_id_fkey" on table "platform_owner"', 'with both triggers disabled, the key still refuses');
 select is(pg_temp.try($$truncate public.profiles cascade$$), 'error: account protected', 'profiles can''t be truncated');
+-- The cascade also reaches staff_roles and platform_owner, whose own truncate triggers
+-- refuse too; with those disabled (inside try, so it rolls back), only the profiles
+-- trigger is left to refuse.
+select is(pg_temp.try_undone($$alter table public.staff_roles disable trigger protect_owner_admin_role_truncate; alter table private.platform_owner disable trigger platform_owner_no_truncate; truncate public.profiles cascade$$),
+  'error: account protected', 'with the other truncate triggers disabled, the profiles trigger alone refuses');
 select is(pg_temp.try($$update public.profiles set account_status = 'suspended' where id = '$$ || pg_temp.u('f1') || $$'$$), 'error: account protected', 'the Owner''s status can''t be changed directly');
 select is(pg_temp.as_user('a2', $$select public.set_account_status('$$ || pg_temp.u('f1') || $$', 'suspended', 'Test') ->> 'refusal'$$), 'owner_protected', 'nor by another admin, whose function refuses first (M8c)');
 select is(pg_temp.as_user('a2', $$select public.revoke_staff_role('$$ || pg_temp.u('f1') || $$', 'admin', 'Test') ->> 'refusal'$$), 'owner_protected', 'another admin can''t remove the Owner''s admin role');
