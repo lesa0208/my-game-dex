@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M7 is the accepted roadmap. M0 and M1 are implemented locally. Each later step needs the product owner's authorization.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M10 is the accepted roadmap: M8 the Superadmin Foundation, M9 internationalization (EN/SR), M10 the admin panel expansion. M0 to M8 are implemented on the local stack; M8 isn't merged yet. Each later step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -57,6 +57,12 @@ This records why the database is designed as it is, what each choice costs, and 
 | [047](#adr-047-catalog-search-reads-published-records-through-read-only-functions) | Catalog search reads published records through read-only functions |
 | [048](#adr-048-web-sessions-are-handled-only-on-the-server) | Web sessions are handled only on the server |
 | [049](#adr-049-collections-are-owner-only-copies-added-idempotently) | Collections are owner-only copies, added idempotently |
+| [050](#adr-050-catalog-submissions-write-the-catalogs-own-records-privately) | Catalog submissions write the catalog's own records, privately |
+| [051](#adr-051-catalog-review-goes-through-audited-functions-and-nothing-is-published-without-it) | Catalog review goes through audited functions, and nothing is published without it |
+| [052](#adr-052-copies-keep-their-piece-records-are-checked-against-their-release-under-a-lock-and-are-moved-only-by-their-owner) | Copies keep their piece records, are checked against their release under a lock, and are moved only by their owner |
+| [053](#adr-053-exclusion-preserves-every-copy-cascades-only-what-the-publication-rules-need-and-is-restored-by-another-administrator) | Exclusion preserves every copy, cascades only what the publication rules need, and is restored by another administrator |
+| [054](#adr-054-merging-moves-every-copy-with-everything-recorded-never-changes-the-target-and-keeps-unpublished-merges-private) | Merging moves every copy with everything recorded, never changes the target, and keeps unpublished merges private |
+| [055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | The Owner is a protected record, its authority needs mature MFA, and recovery is an audited operator procedure |
 
 ## Decisions requiring product-owner approval
 
@@ -149,7 +155,7 @@ These are separate from D1 to D22 above. M4 documents cite them as M4-D1 to M4-D
 | **M4-D9** | Notification preferences | **Approved.** In-app only, on by default, with no backfill when turned on |
 | **M4-D10** | Retention of notifications and audit events | **Undecided,** pending legal review and [D10](#needed-before-launch-may-need-legal-advice). M4 has no purge or scheduled deletion |
 | **M4-D11** | Notification access | **Approved.** Only through `SECURITY DEFINER` functions. No API role has table access. See [ADR-044](#adr-044-notifications-come-from-state-changes-in-the-same-transaction) |
-| **M4-D12** | Granting `admin` | **Approved.** One active admin may grant `admin`, and the grant is audited |
+| **M4-D12** | Granting `admin` | **Superseded in M8** by D4: only the Owner grants or revokes `admin`. Originally: one active admin may grant `admin`, and the grant is audited |
 
 ### M5 decisions: the catalog and its import
 
@@ -170,6 +176,35 @@ Approved by the product owner on 2026-11-08, separate from the global decisions 
 | Lifecycle | Slugs freeze on publication. No unpublishing in M5 |
 | Search | Language-neutral PostgreSQL search, with 100 ms as a non-blocking local target (M5c) |
 | Images | Deferred until D15 |
+
+### M8 decisions: the Superadmin Foundation
+
+Approved by the product owner on 2026-11-14, separate from the global decisions above. M8 migrations, tests and [security-rls.md](security-rls.md#the-owner-m8) cite them as D1 to D19, and the addendum's sections as A1 to A5. "Built" describes what was implemented, where it differs from the proposal.
+
+| # | Decision | Outcome |
+| --- | --- | --- |
+| **D1** | The Owner | **Approved.** A singleton `private.platform_owner` record, not a `staff_role` value. Identity (`is_designated_owner`) is separate from eligibility (`owner_authority_refusal`), and every protection uses identity only (A1) |
+| **D2** | Assigning the Owner | **Approved.** An operator procedure, `private.assign_initial_owner`, needing good standing and two verified factors. No endpoint, no automatic or hidden Owner |
+| **D3** | MFA | **Approved.** A live verified session for every staff privilege, and a TOTP verification in the last 10 minutes for sensitive actions, with 60 seconds of clock skew. **Built:** also required for published merges (M8d) |
+| **D4** | Administrator grants | **Approved.** Only the Owner, with Owner authority, grants or revokes `admin`. Supersedes M4-D12 |
+| **D5** | Ownership transfer | **Approved.** Two steps, expiring after 72 hours. The previous Owner stays an administrator |
+| **D6** | Recovery | **Approved.** A factor reset or a reassignment, opened and completed by an operator after a 72-hour hold, with Owner authority frozen and the target confirming in the app |
+| **D6a** | Succession document | **Approved.** Its SHA-256 fingerprint is registered by the Owner with fresh MFA. The document stays outside the database with two custodians, and is checked with independent approvals during a reassignment |
+| **D6b** | Cancelling a recovery | **Approved with safeguards.** The designated Owner may cancel with a live session, fresh MFA and one factor. **Built:** after such a cancellation, an operator may open a disputed recovery within 30 days, which only an operator can cancel |
+| **D6c** | The previous Owner's role after a reassignment | **Approved.** Removed in the same transaction. Not for a voluntary transfer |
+| **D7** | Changing one's own roles | **Approved.** Nobody can (`self_change`) |
+| **D8** | Unauthorized `/admin` | **Approved.** `notFound()` |
+| **D9** | Refused attempts | **Approved.** Returned as `{"ok": false, "refusal", "audit_id"}` and committed with their audit row only, rate-limited. Trigger refusals leave a server log line |
+| **D10** | Catalog review pages | **Approved.** Moved to `/admin/catalog/*`, with permanent redirects from `/review/*` |
+| **D11** | Account lookup | **Approved.** By exact handle only |
+| **D12** | Deleting the Owner | **Approved.** A foreign key, delete and truncate triggers, the server's pre-check and `owner_integrity()`, all keyed on identity |
+| **D13** | Factors for Owner authority | **Approved.** At least two verified TOTP factors, each mature 24 hours after it's first verified. **Built:** maturity is measured from our own registration ledger, because Auth's `created_at` is the enrollment time (preflight finding B2) |
+| **D14** | Successor | **Approved.** A visible designation that gives no privilege |
+| **D15** | Staff function results | **Approved.** `jsonb`, migrated with a guard block and exact-signature drops, without `CASCADE` |
+| **D16** | Auth dependency | **Approved.** Read-only access to `auth.sessions`, `auth.mfa_factors` and `auth.mfa_amr_claims`, guarded so a changed schema fails closed, with a contract test |
+| **D17** | Timings | **Approved.** A 72-hour recovery hold and a 72-hour transfer expiry |
+| **D18** | Hosted prerequisites | **Approved as launch blockers,** not M8 work: hosted TOTP, `pgaudit`, key custodians and alerts. See [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8) |
+| **D19** | Local TOTP | **Approved.** Enabled in `supabase/config.toml` for the local stack |
 
 ### Needed before launch, may need legal advice
 
@@ -899,6 +934,35 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **Locks.** A merge locks both games, both releases and the profiles of everyone it affects: about 374 ms for 2,000 copies.
 - **More privileged code.** Six new public `SECURITY DEFINER` functions and one public read, covered by the `m7b2c` mutation suite.
 
+### ADR-055: The Owner is a protected record, its authority needs mature MFA, and recovery is an audited operator procedure
+
+**Decision.** Approved by the product owner for M8, the Superadmin Foundation, with [decisions D1 to D19](#m8-decisions-the-superadmin-foundation), the addendum A1 to A5, and the M8a to M8d checkpoints. Built in five migrations, `20261116100000` to `20261118100000`.
+
+- **One Owner, as a record.** `private.platform_owner` names exactly one account once assigned. It's assigned by an operator in SQL, and changes hands only by a two-step transfer or a break-glass recovery. Nothing reads ownership from a token, metadata or a role.
+- **Identity protects, eligibility empowers.** Being the designated Owner alone protects the account: from deletion by any path, from suspension in the app, from losing the administrator role, and from replacement. Acting as Owner also needs good standing, a live verified session, two TOTP factors registered for 24 hours, no pending recovery and a verification in the last 10 minutes.
+- **The Owner's only powers** are administrators (granting, revoking, suspending), transfer, the successor and the succession document. No collection, purchase-data, catalog, review or no-self-review rule mentions the Owner.
+- **MFA for every staff privilege, checked live.** `has_staff_role` reads Auth's live session, factor and claim rows, so a signed-out or downgraded token gains nothing. Sensitive actions, published merges included, need a verification in the last 10 minutes.
+- **Factor maturity from our own ledger.** A factor is registered at the database's time, by a function with no arguments, in a table no client can touch and nobody can update.
+- **The staff matrix in the database.** Only the Owner changes administrators, nobody changes themselves or the Owner, and every refused attempt by verified staff is committed with its audit row and nothing else.
+- **Recovery is an operator procedure.** After a 72-hour hold, with Owner authority frozen, the target's confirmation in the app, and the succession document's fingerprint checked. A reassignment removes the previous Owner's administrator role. The Owner may cancel, and a disputed recovery, only an operator can cancel. See the [runbook](../operations/owner-recovery-runbook.md).
+- **One `/admin`,** with each section shown only to its roles and `notFound()` for everyone else. `/review` redirects there. Settings → Security enrolls, verifies and removes TOTP factors through Supabase Auth.
+
+**Why.**
+- **The highest-value account can't be removed by mistake or by one stolen credential.** A password and one device don't give full authority for 24 hours, and losing a device never removes protection.
+- **The database is the boundary.** Every decision the pages show is made again by the functions, so direct API calls get the same answers.
+- **No hidden doors.** No bootstrap endpoint, no second Owner, no automatic successor. Every operator step is a named function with an audit row.
+- **Refusals need a record.** An attempt on the Owner by verified staff is evidence, so it commits instead of rolling back.
+
+**Trade-offs.**
+- **Infrastructure keys bypass everything.** `postgres`, superusers, the Auth secret key and dashboard members can disable triggers, edit records and remove factors. `pgaudit`, named key holders and alerts are launch prerequisites (D18).
+- **A dependency on GoTrue internals.** The live checks read three Auth tables. A changed schema locks staff out rather than exposing anything, and a contract test guards upgrades.
+- **TOTP replay.** GoTrue accepts a code twice within its 30-second window. There's no custom TOTP implementation.
+- **Slower recovery.** The 72-hour hold and 24-hour maturity delay a legitimate Owner too. That's the price of resisting a takeover.
+- **Procedural controls.** That the operator isn't the beneficiary, that approvers are independent, and identity checks can't be enforced by the database. They're recorded in case files.
+- **A single lock** serializes every staff, transfer and recovery change, as in M4. Fine at staff volumes.
+- **Enrollment needs JavaScript** to show the QR code and setup key.
+- **More privileged code.** Nineteen new or replaced public `SECURITY DEFINER` functions, covered by the 92 `m8` mutations.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -925,6 +989,10 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 | A suspended user keeps a live session | Suspension does not invalidate existing Auth sessions or prevent sign-in. Protected operations enforce account status at the database level, while explicitly permitted access-reducing operations, such as unfollowing and blocking, remain available. An Auth-level ban is deferred (M4-D7), and needed if non-database features are added |
 | A new code path writes rows that notifications reference, in a different lock order | Lock the referenced profiles before the referencing rows, as the follow functions do. The API checks force this race for accept and request |
 | Notifications and audit events grow without limit | Nothing removes them until M4-D10 sets a retention period. Both tables are indexed for a later purge |
+| Someone with infrastructure keys takes over the Owner (M8) | Protections stop application and API roles only. Name the key holders, `pgaudit`, alerts on Owner changes, MFA on dashboard accounts (D18). The runbook's procedural controls |
+| A Supabase upgrade changes Auth's tables (M8) | The live MFA checks fail closed and log it, locking staff out. Run `31_auth_contract.test.sql` and `db:verify` before every upgrade |
+| A captured TOTP code is replayed (M8) | Possible for about 30 seconds by someone already holding a session (GoTrue). The 10-minute window still holds |
+| The Owner loses both authenticators (M8) | A factor reset by the runbook: 72-hour hold, then 24-hour maturity. A second authenticator on a separate device is the backup, since recovery codes aren't available |
 
 ## Phase 2B plan
 

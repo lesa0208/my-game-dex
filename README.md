@@ -4,7 +4,7 @@ _Your collection. Your gaming identity._
 
 My Game Dex is a social network and collection manager for physical video game collectors. It combines a community feed, a game catalog and virtual shelves, so that a collection becomes part of a collector's identity online.
 
-**Status:** Phase 1 (frontend foundation) is complete. There is no backend, authentication or database yet.
+**Status:** Phase 1 (frontend foundation) is complete. The Supabase backend is built on the local stack through M8, the Superadmin Foundation. No hosted project exists.
 
 ## Requirements
 
@@ -31,7 +31,6 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run lint` | Run ESLint |
 | `npm run typecheck` | Generate route types and run the TypeScript compiler |
 | `npm run seed:art` | Regenerate the placeholder artwork in `public/seed/` |
-
 | `npm run db:start` / `db:stop` | Start or stop the local Supabase stack |
 | `npm run db:reset` | Recreate the local database and apply all migrations |
 | `npm run db:test` | Run database tests against the running stack |
@@ -56,8 +55,12 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run db:exclusion-benchmark` | Time excluding and restoring a release with 2,000 copies of 500 owners on the local stack, and what waits meanwhile |
 | `npm run app:relink-checks` | After a build, test moving a copy to another release (choosing, confirming, refusals and preserved copies) in the running app against the local stack and catalog fixture |
 | `npm run app:review-checks` | After a build, test catalog review (the queue, starting, correcting, approving, asking for changes, rejecting and resubmitting) in the running app against the local stack and catalog fixture |
+| `npm run admin:test` | Test the admin and security forms' rules: return paths, inputs, messages and the audit details shown |
+| `npm run app:admin-checks` | After a build, test `/admin` and Settings → Security in the running app against the local stack: access for each role, the staff matrix, step-up verification, real TOTP enrollment and removal, the audit log, transfer and recovery, and privacy |
+| `npm run db:mutation` | Prove the tests detect real violations, one suite or all (see [Local database](#local-database)) |
+| `npm run mutation:campaign` | Run several mutation suites unattended. `-- --dry-run` checks readiness and runs nothing |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks`.
 
 ## Local database
 
@@ -88,6 +91,10 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 8. **Import checks** in `scripts/db-import-checks.mjs`. They log in as the restricted `catalog_importer` role, run the import tool on synthetic snapshots outside the repository, and force races between runs. `npm run catalog:test` covers the snapshot parsers. The import tool and its runbook are in [security-rls.md](docs/architecture/security-rls.md#catalog-import).
 9. **Search checks** in `scripts/db-search-checks.mjs`. They install the catalog search fixture, call search, the release picker and the platform list through the API as anon, a user, an editor and `service_role`, and remove the fixture and every test account after. `npm run catalog:test` also covers the app's response parser. See [Catalog search](docs/architecture/security-rls.md#catalog-search).
 10. **Collection checks** in `scripts/db-collection-checks.mjs`. Through the API, as the owner, another collector, an editor, a suspended owner, anon and `service_role`, they add, edit, read and remove copies of fixture releases. They also send concurrent repeats and concurrent additions at a lowered limit, and delete an account that has copies. See [Collection system](docs/architecture/security-rls.md#collection-system). `node supabase/benchmarks/m6_collection.mjs` measures a 50,000-copy collection among about a million copies, in a transaction it always rolls back.
+11. **Submission, review, relink, exclusion and merge checks** in `scripts/db-submission-checks.mjs`, `db-review-checks.mjs`, `db-relink-checks.mjs`, `db-exclusion-checks.mjs` and `db-merge-checks.mjs`, through the API with forced races. See [security-rls.md](docs/architecture/security-rls.md#catalog-submissions-m7a) from M7a on.
+12. **Owner checks** in `scripts/db-owner-checks.mjs`: every path that could delete the Owner, Auth's Admin API included, and concurrent assignments.
+13. **MFA checks** in `scripts/db-mfa-checks.mjs`, with real TOTP sessions from the local Auth: live session and factor checks, stale and signed-out tokens, freshness, factor maturity and its ledger.
+14. **Ownership checks** in `scripts/db-ownership-checks.mjs`: the staff matrix through the API, transfers, succession and recovery, with forced races and the refusal rate limit.
 
 `npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 
@@ -104,6 +111,25 @@ To see Explore and game pages with data, set `SUPABASE_URL` and `SUPABASE_PUBLIS
 To sign in locally, set the same two variables, then create a user in local Studio (Authentication, Add user, with the email marked as confirmed), sign in at `/sign-in` and choose a handle. There's deliberately no sign-up page: see [Web sessions](docs/architecture/security-rls.md#web-sessions-m6a).
 
 Real secrets never go in the repository, or in `NEXT_PUBLIC_` variables. To block commits containing them, run `npm run hooks:install` once per clone.
+
+### MFA and administration on the local stack
+
+TOTP is enabled for the local stack only, in `[auth.mfa.totp]` of `supabase/config.toml`. Staff need it: every staff privilege requires a session verified with an authenticator, and sensitive actions a verification in the last 10 minutes. See [MFA for staff](docs/architecture/security-rls.md#mfa-for-staff-m8).
+
+**Adding an authenticator.** Sign in, open Settings → Security, choose "Add an authenticator", scan the QR code or type the setup key into an authenticator app, and enter the first code. Showing the code needs JavaScript. Afterwards, signing in asks for a code, and the factor shows when it matures (24 hours, which matters only for the Owner). Use local test accounts only: never put real authenticator secrets in the repository or in scripts.
+
+**Trying `/admin` locally.** Only the Owner can make administrators, and only administrators grant the other roles, so on the local stack give a test account a role in local Studio's SQL editor, which runs as `postgres`:
+
+```sql
+insert into public.staff_roles (user_id, role)
+select id, 'catalog_editor' from public.profiles where handle = '<local test handle>';
+```
+
+Then add an authenticator to that account and sign in again. Admin sections show only to their roles; everyone else sees a page that doesn't exist. **This is for the local stack only.** On any other project, staff come only from the audited functions, and the Owner only from the [runbook](docs/operations/owner-recovery-runbook.md).
+
+**The Owner.** Don't assign one by hand. The record is permanent by design, and only `npm run db:reset` clears it locally. The test suites assign a temporary Owner on the local stack and remove it, and refuse to run if one already exists or if the API isn't on loopback.
+
+**Testing.** `npm run db:verify` runs the Owner, MFA and ownership checks with real TOTP sessions from the local Auth. `npm run app:admin-checks` needs a production build (`npm run build`), and drives the app as a browser without JavaScript would, enrolling and verifying real authenticators through the pages. The design is in [The Owner (M8)](docs/architecture/security-rls.md#the-owner-m8), [Staff authority (M8)](docs/architecture/security-rls.md#staff-authority-m8) and [ADR-055](docs/architecture/architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure).
 
 ### Troubleshooting
 
@@ -196,7 +222,8 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 - Search covers the published game catalog only, not collectors
 - My Collection is private: there are no public collections, shelves, valuation, import or bulk editing yet, and the catalog has no cover artwork
 - Missing games and releases can be submitted, and catalog editors review, approve, send back or reject them. Duplicates are merged, out-of-scope releases excluded and restored, and owners relink their own copies (M7b-2), the notifications page isn't built yet, and the review page edits up to 30 listed pieces (the editor function allows 50)
-- JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show
+- Staff work in `/admin` (M8): catalog review, account lookup by handle, staff roles, the audit log and ownership. Bulk operations, analytics and new moderation workflows are for M10
+- JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show. Adding an authenticator needs JavaScript to show the QR code and setup key
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Light mode has tokens but no switcher, and hasn't had a visual review
 - Frontend tests cover the catalog parser and the sign-in rules, plus an HTTP check of the auth flow. There are no component or browser tests
