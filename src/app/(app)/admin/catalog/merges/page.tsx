@@ -2,13 +2,11 @@ import { History, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 
-import { PageLayout } from "@/components/layout/page-layout";
+import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { releaseLabelLine } from "@/features/exclusion/form";
@@ -22,16 +20,16 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/admin/ca
   const search = await searchParams;
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/admin/catalog/merges");
+  // Catalog editors only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection("/admin/catalog/merges", "editor");
 
   const outcome = await getMerges(after);
   // Anyone but a catalog editor gets the same page as for an address that doesn't exist.
   if (!outcome.ok && outcome.reason === "refused") notFound();
 
   return (
-    <>
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">Merges</h1>
-      <p className="mb-4 text-sm text-muted-foreground">Duplicate releases merged into the record kept, newest first. Merges are permanent.</p>
+    <AdminFrame access={access} current="catalog" title="Merges">
+      <p className="text-sm text-muted-foreground">Duplicate releases merged into the record kept, newest first. Merges are permanent.</p>
       {!outcome.ok ? (
         <EmptyState icon={PlugZap} title="Merges aren't available">
           They can&apos;t be loaded right now. Try again later.
@@ -82,25 +80,14 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/admin/ca
           ) : null}
         </section>
       )}
-    </>
+    </AdminFrame>
   );
 }
 
 export default function MergesPage({ searchParams }: PageProps<"/admin/catalog/merges">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          }
-        >
-          <MergesView searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <MergesView searchParams={searchParams} />
+    </AdminShell>
   );
 }

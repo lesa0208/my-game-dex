@@ -788,4 +788,29 @@ export const m8Mutations = [
   sql("the factor-status read is exposed to anon", "pgtap", `grant execute on function ${FACTOR_STATUS} to anon;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations };
+// M10a: the /admin overview's counts. Who may read them, which sections each role
+// gets, that they stay aggregate, and that each count counts what it says.
+const OVERVIEW = "public.get_admin_overview()";
+export const m10aMutations = [
+  // Who may read it
+  sql("the overview needs no staff role", "both", rewrite(OVERVIEW, "\n     or not exists (select 1 from public.staff_roles s where s.user_id = v_me) then", " then")),
+  sql("the overview needs no verified session", "both", rewrite(OVERVIEW, " or not private.mfa_session_ok()", "")),
+  sql("a suspended editor reads the overview", "both", rewrite(OVERVIEW, "if v_me is null or not private.is_active_user() or", "if v_me is null or")),
+  sql("the overview is granted to anon", "both", `grant execute on function ${OVERVIEW} to anon;`),
+  sql("the overview is granted to service_role", "pgtap", `grant execute on function ${OVERVIEW} to service_role;`),
+  // Each section for its roles only
+  sql("catalog counts for every staff member", "both", rewrite(OVERVIEW, "if private.has_staff_role('catalog_editor') then", "if true then")),
+  sql("account counts for every staff member", "both", rewrite(OVERVIEW, "if private.has_staff_role('moderator') then", "if true then")),
+  sql("administration counts for moderators", "both", rewrite(OVERVIEW, "if private.has_staff_role('admin') then", "if private.has_staff_role('moderator') then")),
+  // Aggregates only
+  sql("the overview names the oldest submitter", "pgtap", rewrite(OVERVIEW, "'reclassifications_open',", "'oldest_submitter', (select p.handle from public.catalog_change_requests r join public.profiles p on p.id = r.submitted_by order by r.created_at limit 1),\n      'reclassifications_open',")),
+  sql("the overview lists administrators' emails", "both", rewrite(OVERVIEW, "'exclusions_active',", "'admin_emails', (select pg_catalog.jsonb_agg(u.email) from public.staff_roles s join auth.users u on u.id = s.user_id where s.role = 'admin'),\n      'exclusions_active',")),
+  // Each count counts what it says
+  sql("open submissions count every status", "pgtap", rewrite(OVERVIEW, "where r.status = 'open' limit v_cap", "where true limit v_cap")),
+  sql("unpublished games include rejected ones", "pgtap", rewrite(OVERVIEW, "where g.status in ('unverified', 'under_review') limit v_cap", "where g.status <> 'published' limit v_cap")),
+  sql("suspended accounts count every account", "pgtap", rewrite(OVERVIEW, "where p.account_status = 'suspended' limit v_cap", "where true limit v_cap")),
+  sql("refusals count every event", "pgtap", rewrite(OVERVIEW, "where a.outcome = 'refused' and a.occurred_at", "where a.occurred_at")),
+  sql("refusals have no time window", "pgtap", rewrite(OVERVIEW, " and a.occurred_at > pg_catalog.now() - interval '7 days' limit v_cap", " limit v_cap")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations };

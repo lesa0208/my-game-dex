@@ -29,7 +29,8 @@ import { createRequire } from "node:module";
 
 import { chromium } from "playwright-core";
 
-import { api, appErrorLines, Browser, check, createUser, deleteUsers, formWith, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { addFactor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
 import { matureFactors, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
 
@@ -47,6 +48,8 @@ const lightFindings = [];
 let lightStates = 0;
 const NOT_AVAILABLE = "This page isn't available";
 const PREFIX = "a11y";
+/** The product code of the release a collector submits (M10a), to find and remove it. */
+const SUBMISSION_CODE = `QZB-${process.pid}`;
 
 // ---------------------------------------------------------------------------
 // Redaction: secrets seen during the run, and anything shaped like one
@@ -92,10 +95,33 @@ async function applyScheme(page, scheme) {
   await page.evaluate((dark) => document.documentElement.classList.toggle("dark", dark), scheme === "dark");
 }
 
-/** axe-core and the sideways-scroll check on the page as it is, in both schemes. */
+/**
+ * Expands every collapsed section (<details>) for the checks, so what's inside them is
+ * checked too, and returns a function that collapses them again. Collapsed content
+ * keeps a layout box but no rendered text, so it would otherwise look like an unnamed
+ * control, and axe would skip it.
+ */
+async function expandDetails(page) {
+  await page.evaluate(() => {
+    for (const d of document.querySelectorAll("details:not([open])")) {
+      d.dataset.a11yClosed = "true";
+      d.open = true;
+    }
+  });
+  return () =>
+    page.evaluate(() => {
+      for (const d of document.querySelectorAll("details[data-a11y-closed]")) {
+        d.open = false;
+        delete d.dataset.a11yClosed;
+      }
+    });
+}
+
+/** axe-core and the sideways-scroll check on the page, with its sections expanded, in both schemes. */
 async function audit(page, name, tag) {
   await page.waitForLoadState("networkidle");
   if (!(await page.evaluate(() => Boolean(window.axe)))) await page.addScriptTag({ content: axeSource });
+  const collapse = await expandDetails(page);
   for (const scheme of SCHEMES) {
     await applyScheme(page, scheme);
     const found = await page.evaluate(async () => {
@@ -119,10 +145,12 @@ async function audit(page, name, tag) {
     ok(`${tag} ${mode} ${name}: no sideways scrolling`, overflow.scroll <= overflow.view, `${overflow.scroll} > ${overflow.view}`);
   }
   await applyScheme(page, "dark");
+  await collapse();
 }
 
-/** One h1, and every visible field has an accessible name. */
+/** One h1, and every visible field has an accessible name, with the page's sections expanded. */
 async function structure(page, name, tag) {
+  const collapse = await expandDetails(page);
   const facts = await page.evaluate(() => {
     const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
     const fields = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(visible);
@@ -130,6 +158,7 @@ async function structure(page, name, tag) {
     const buttons = [...document.querySelectorAll("button, a[href]")].filter(visible).filter((el) => !(el.innerText.trim() || el.getAttribute("aria-label") || el.getAttribute("title"))).map((el) => el.outerHTML.slice(0, 80));
     return { h1: document.querySelectorAll("h1").length, unnamed, buttons };
   });
+  await collapse();
   ok(`${tag} ${name}: one main heading`, facts.h1 === 1, `${facts.h1} h1`);
   ok(`${tag} ${name}: every field and control has an accessible name`, facts.unnamed.length === 0 && facts.buttons.length === 0, [...facts.unnamed, ...facts.buttons].join(", "));
 }
@@ -260,7 +289,7 @@ async function person(role = null, { mfa = Boolean(role) } = {}) {
   if (psql(`select handle from public.profiles where id = '${user.id}';`) !== handle) throw new Error("setup: the handle wasn't saved");
   if (role) psql(`insert into public.staff_roles (user_id, role) values ('${user.id}', '${role}');`);
   handles.set(user.id, handle);
-  return { ...user, handle };
+  return { ...user, handle, http };
 }
 async function secondFactor(user) {
   const response = await fetch(`${api}/auth/v1/token?grant_type=password`, {
@@ -287,6 +316,7 @@ try {
 }
 
 try {
+  installFixture();
   const collector = await person();
   const editor = await person("catalog_editor");
   const moderator = await person("moderator");
@@ -298,6 +328,23 @@ try {
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
   const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership"];
+
+  // M10a: a collector's submission and the fixture's releases, for the catalog pages.
+  const form = await collector.http.get("/submit?game=starfall-odyssey");
+  const posted = await collector.http.submit("/submit?game=starfall-odyssey", formById(form.html, "new-submission"), {
+    platform: "snes", media_format: "rom-cartridge", region: "pal", product_code: SUBMISSION_CODE, physical: "on",
+  });
+  const submission = location(posted.response).split("/")[2]?.split("?")[0] ?? "";
+  const releaseUs = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+  const releaseEu = psql("select id from public.releases where product_code = 'SNSP-ZSFP-EUR';");
+  ok("setup: a submission and two fixture releases", [submission, releaseUs, releaseEu].every((id) => /^[0-9a-f-]{36}$/.test(id)));
+  const CATALOG_PAGES = [
+    ["submission review", `/admin/catalog/${submission}`],
+    ["merge candidates", `/admin/catalog/merge/${releaseUs}`],
+    ["merge preview", `/admin/catalog/merge/${releaseEu}?into=${releaseUs}`],
+    ["exclusion preview", `/admin/catalog/exclude/${releaseUs}`],
+    ["merge history", "/admin/catalog/merges"],
+  ];
 
   for (const viewport of WIDTHS) {
     const tag = viewport.tag;
@@ -329,6 +376,9 @@ try {
         await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
         const shown = await sectionsShown(s.page);
         ok(`${tag} ${name}: the admin sections are ${sections.join(", ")}`, JSON.stringify(shown) === JSON.stringify(sections), shown.join(", "));
+        const counts = await s.page.evaluate(() => ["overview-catalog", "overview-accounts", "overview-administration"].filter((id) => document.getElementById(id)).map((id) => id.slice(9)).join(","));
+        const expectedCounts = { editor: "catalog", moderator: "accounts", admin: "catalog,accounts,administration" }[name];
+        ok(`${tag} ${name}: the overview shows the ${expectedCounts} counts only`, counts === expectedCounts, counts);
         for (const path of ADMIN_PAGES) {
           await s.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
           const open = pages.includes(path);
@@ -338,8 +388,12 @@ try {
         if (name === "editor") {
           await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
           await audit(s.page, "editor overview", tag);
+          await structure(s.page, "editor overview", tag);
         }
         if (name === "moderator") {
+          await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
+          await audit(s.page, "moderator overview", tag);
+          await structure(s.page, "moderator overview", tag);
           await s.page.goto(`${origin}/admin/accounts?handle=${collector.handle}`, { waitUntil: "networkidle" });
           await audit(s.page, "moderator account lookup", tag);
           await structure(s.page, "moderator account lookup", tag);
@@ -349,6 +403,23 @@ try {
     }
 
     // -----------------------------------------------------------------------
+    section(`${tag}: 2b. The catalog pages, in the admin frame (M10a)`);
+    {
+      const e = await signIn(browser, viewport, editor);
+      for (const [name, path] of CATALOG_PAGES) {
+        await e.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        const current = await e.page.evaluate(() => document.querySelector('nav[aria-label="Admin sections"] a[aria-current="page"]')?.textContent?.trim() ?? "");
+        ok(`${tag} editor ${name}: in the admin frame, with Catalog as the current section`, current === "Catalog", current);
+        await audit(e.page, `editor ${name}`, tag);
+        await structure(e.page, `editor ${name}`, tag);
+      }
+      await e.page.goto(`${origin}/admin/catalog/${submission}`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "submission review page", tag);
+      await e.page.goto(`${origin}/admin/catalog/exclusions`, { waitUntil: "networkidle" });
+      ok(`${tag} an editor gets the unavailable page for exclusions`, (await visibleText(e.page)).includes(NOT_AVAILABLE) && (await sectionsShown(e.page)).length === 0);
+      await e.context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -360,6 +431,7 @@ try {
         ["audit log", "/admin/audit"],
         ["ownership", "/admin/ownership"],
         ["catalog review", "/admin/catalog"],
+        ["exclusions", "/admin/catalog/exclusions"],
         ["verification", "/settings/security/verify?next=%2Fadmin"],
         ["security settings", "/settings/security"],
       ]) {
@@ -463,6 +535,31 @@ try {
     await a.context.close();
   }
 
+  // -------------------------------------------------------------------------
+  section("6. Step-up from a catalog page, with JavaScript (M10a)");
+  {
+    const context = await browser.newContext({ viewport: { width: WIDTHS[1].width, height: WIDTHS[1].height } });
+    const page = await context.newPage();
+    await page.goto(`${origin}/sign-in`, { waitUntil: "networkidle" });
+    await page.fill("#email", editor.email);
+    await page.fill("#password", editor.password);
+    await page.click('main button[type="submit"]');
+    await page.waitForURL((u) => u.pathname === "/settings/security/verify");
+    // Signed in with a password only, the editor opens a submission directly.
+    await page.goto(`${origin}/admin/catalog/${submission}`);
+    await page.waitForURL((u) => u.pathname === "/settings/security/verify" && u.searchParams.get("next") !== "/home");
+    ok("an editor at aal1 opening a submission is sent to verify, and back to it afterwards", new URL(page.url()).searchParams.get("next") === `/admin/catalog/${submission}`, page.url());
+    ok("and the submission isn't on the page meanwhile", !(await page.content()).includes(SUBMISSION_CODE));
+    await page.fill("#verify-code", totp(editor.totpSecret));
+    await page.click('main button[type="submit"]');
+    await page.waitForURL((u) => u.pathname === `/admin/catalog/${submission}`);
+    // The page streams in after the client-side navigation; wait for the frame itself.
+    await page.waitForSelector('nav[aria-label="Admin sections"]', { timeout: 15000 }).catch(() => {});
+    const opened = { sections: (await sectionsShown(page)).join(","), code: (await page.content()).includes(SUBMISSION_CODE) };
+    ok("after verifying, the submission opens in the admin frame", opened.sections.includes("Catalog") && opened.code, JSON.stringify(opened));
+    await context.close();
+  }
+
   const errors = appErrorLines();
   ok("the app logged no errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
@@ -471,14 +568,22 @@ try {
   await browser.close();
   stopApp();
   removeTestOwner(psql);
+  // The submission and its release, before the accounts, while they still name their submitter.
+  const submitters = [...handles.keys()].map((id) => `'${id}'`).join(",") || "null";
+  psql(`begin;
+create temp table m10a_requests on commit drop as select * from public.catalog_change_requests where submitted_by in (${submitters});
+delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
+delete from public.catalog_change_requests where id in (select id from m10a_requests);
+commit;`);
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
   psql("delete from private.handle_holds where kind = 'released' and handle like 'ay\\_%';");
-  ok("no account, Owner record, registration, hold or audit row is left behind",
+  removeFixture();
+  ok("no account, Owner record, registration, hold, submission or audit row is left behind",
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
-      + (select count(*) from private.handle_holds where handle like 'ay\\_%')
+      + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 

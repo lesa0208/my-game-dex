@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented locally, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -1003,7 +1003,7 @@ Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restr
 
 **Matching.** Titles compare after normalizing case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article. Roman numerals II to IX and "Part N" become numbers; I, V and X don't, because they are often letters. A game's own title and every title its source lists, including romanizations, are indexed in `private.game_title_keys`. An entry matching no game exactly, but exactly one game on the run's platform ignoring word breaks ("ClayFighter", "Clay Fighter"), is matched and says so; several such games mean review, and titles under six characters never match this way. An entry whose main title before a subtitle matches a game is suggested for review, never matched. Several matches always wait for an editor: nothing is merged.
 
-**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. Rejecting or merging a queued candidate is an editor action that comes with M7.
+**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. There's no app page for the queue yet. M10d adds one, using the existing `resolve_catalog_review`, which stays an audited write.
 
 | Race, tested with a transaction held open | Result |
 | --- | --- |
@@ -1038,7 +1038,7 @@ Tested by `24_import_submission_privacy.test.sql` (title, word-break, main-title
 
 ## Catalog search
 
-Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included: editor search comes with M7.
+Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included. A staff search of unpublished records is planned for M10b, as a separate function.
 
 **Three functions, read-only.** `search_catalog(query, platforms, limit, cursor)`, `get_release_picker(game, platform, region, release)` and `list_catalog_platforms()` are granted to `anon` and `authenticated` only. Each is `STABLE`, so it can't write, and `SECURITY DEFINER` with an empty `search_path`, so it can read the stored search keys, which clients can't. The app calls them on the server, as anon, so no session is sent and results can be cached.
 
@@ -1438,8 +1438,8 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 
 | Section | Path | Who |
 | --- | --- | --- |
-| Overview | `/admin` | Any staff |
-| Catalog: review, exclusion and merge | `/admin/catalog/*` | Catalog editors and administrators |
+| Overview, with counts for each role ([M10a](#the-admin-overview-m10a)) | `/admin` | Any staff |
+| Catalog: review, exclusion and merge | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
 | Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
 | Staff | `/admin/staff` | Administrators |
 | Audit log | `/admin/audit` | Administrators |
@@ -1448,6 +1448,7 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 - **Anyone without the section's role gets the page that doesn't exist (D8).** Staff signed in without verifying their authenticator are sent to verify first.
 - The navigation lists only the sections the viewer's roles allow. The pages offer only what the matrix allows, and the database checks every action again.
 - **`/review` and `/review/*` redirect permanently (308) to `/admin/catalog`**, keeping the query (D10). The review, exclusion and merge pages behave as before.
+- **Every catalog page uses the same access check as the rest of `/admin` (M10a).** Before, three of them showed staff without a verified session the page that doesn't exist, and four relied only on the database refusing the read. Now staff signed in without their authenticator are sent to verify and come back to the page, and the page renders in the admin frame. Who may open each page didn't change: the database's own checks (`can_review_submissions`, and `require_active_staff` in each read) match the page's.
 - Every form works without JavaScript, and each action redirects back with a fixed notice or error code.
 
 **Reads for the pages,** each checking its caller and returning no email, TOTP secret, purchase detail or collection:
@@ -1462,6 +1463,23 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
 
 The audit page shows 50 rows a page, and only an allow-list of plain metadata fields.
+
+## The admin overview (M10a)
+
+`/admin` shows operational counts from one read, `public.get_admin_overview()` (migration `20261119100000`, [ADR-057](architecture-decisions.md#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). The database decides what each caller gets. The page only displays it.
+
+| Section | Who gets it | Counts |
+| --- | --- | --- |
+| `catalog` | Catalog editors and administrators | Submissions by status (open, in review, changes requested), when the oldest open or in-review submission arrived, open import reclassifications, unpublished (unverified or under review) games and releases, merges in the last 30 days |
+| `accounts` | Moderators and administrators | Suspended accounts |
+| `administration` | Administrators | Active exclusions, staff by role, refused staff actions in the last 7 days |
+
+- **Staff only.** The caller needs an active account, a live verified session (M8b) and a staff role, as `get_my_admin_access` counts staff. Anyone else, at aal1, suspended or without a role, gets the generic `not permitted`. Anon has no `EXECUTE`, so PostgreSQL refuses it before the function runs.
+- **A section the caller may not read is null,** never empty or zero, so a page can't show it by mistake. Each section's role check is the one for reading the records behind it.
+- **Aggregates only.** The result has fixed keys holding numbers, plus the one timestamp. There's no handle, email, title, reason, record id or collection data.
+- **Bounded.** Each count stops at 10,000 (`cap` in the result), and the page shows "10,000 or more".
+- **Not audited.** It writes nothing, like the other staff reads.
+- **Tests.** `35_admin_overview` covers the grants, every refusal, the section each role gets, the fixed keys and each count's filter. `db-mfa-checks` section 6 does the same over the API with real sessions, `app:admin-checks` section 11 and `app:a11y-checks` cover the page, and the 15 `m10a` mutations prove the tests catch each weakening.
 
 **Tested by** `33_ownership.test.sql`, `34_admin.test.sql`, `scripts/db-ownership-checks.mjs`, `npm run admin:test` and `npm run app:admin-checks`, which drives the built app over HTTP as each role: access and navigation, the matrix through the pages and through crafted forms, step-up without replay, real TOTP enrollment and removal, the audit filters, transfer and recovery, and privacy scans of every admin and security page.
 

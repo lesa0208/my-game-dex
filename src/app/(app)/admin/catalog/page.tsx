@@ -1,22 +1,15 @@
 import { ClipboardCheck, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { Suspense } from "react";
 
-import { AdminFrame } from "@/components/admin/admin-frame";
-import { PageLayout } from "@/components/layout/page-layout";
+import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
-import { stepUpHref } from "@/features/admin/form";
-import { getAdminAccess } from "@/features/admin/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
-import { isAdministrator } from "@/features/exclusion/queries";
 import { QUEUE_FILTERS, queueFilter, requestStatusLabel, submitterLabel } from "@/features/review/form";
-import { canReview, getSubmissionQueue } from "@/features/review/queries";
+import { getSubmissionQueue } from "@/features/review/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -28,14 +21,10 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
   const status = queueFilter(Array.isArray(search.status) ? search.status[0] : search.status);
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/admin/catalog");
-  // Staff signed in without their authenticator verify first, then come back (M8d).
-  const access = await getAdminAccess();
-  if (access && access.roles.length > 0 && access.active && !access.mfa) redirect(stepUpHref("/admin/catalog"));
-  // Anyone else gets the same page as for an address that doesn't exist.
-  if (!access || !(await canReview())) notFound();
-
-  const [queue, admin] = await Promise.all([getSubmissionQueue(status, after), isAdministrator()]);
+  // Catalog editors only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection("/admin/catalog", "editor");
+  const admin = access.admin;
+  const queue = await getSubmissionQueue(status, after);
   const filterHref = (value: string) => (value === "active" ? "/admin/catalog" : `/admin/catalog?status=${value}`);
 
   return (
@@ -133,20 +122,8 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
 
 export default function ReviewQueuePage({ searchParams }: PageProps<"/admin/catalog">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          }
-        >
-          <QueueView searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <QueueView searchParams={searchParams} />
+    </AdminShell>
   );
 }

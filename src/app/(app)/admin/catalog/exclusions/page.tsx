@@ -2,13 +2,11 @@ import { History, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 
-import { PageLayout } from "@/components/layout/page-layout";
+import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { exclusionReasonLabel, releaseLabelLine } from "@/features/exclusion/form";
@@ -29,7 +27,8 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/admi
   const status = search.status === "restored" ? "restored" : "active";
   const rawAfter = Array.isArray(search.after) ? search.after[0] : search.after;
   const after = rawAfter && UUID.test(rawAfter) ? rawAfter : null;
-  await requireViewerWithHandle("/admin/catalog/exclusions");
+  // Administrators only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection("/admin/catalog/exclusions", "admin");
 
   const outcome = await getExclusions(status, after);
   // Anyone but an administrator gets the same page as for an address that doesn't exist.
@@ -37,10 +36,9 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/admi
   const filterHref = (value: string) => (value === "active" ? "/admin/catalog/exclusions" : `/admin/catalog/exclusions?status=${value}`);
 
   return (
-    <>
-      <h1 className="mb-1 text-xl font-semibold tracking-tight">Exclusions</h1>
-      <p className="mb-4 text-sm text-muted-foreground">Releases excluded from the catalog, newest first. Only administrators can restore one, and not their own.</p>
-      <nav aria-label="Filter exclusions" className="mb-4">
+    <AdminFrame access={access} current="catalog" title="Exclusions">
+      <p className="text-sm text-muted-foreground">Releases excluded from the catalog, newest first. Only administrators can restore one, and not their own.</p>
+      <nav aria-label="Filter exclusions">
         <ul className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
             <li key={f.value}>
@@ -107,25 +105,14 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/admi
           ) : null}
         </section>
       )}
-    </>
+    </AdminFrame>
   );
 }
 
 export default function ExclusionsPage({ searchParams }: PageProps<"/admin/catalog/exclusions">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          }
-        >
-          <ExclusionsView searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <ExclusionsView searchParams={searchParams} />
+    </AdminShell>
   );
 }

@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented on the local stack, in `supabase/migrations/`. The rest is design, and these aren't migrations.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 
@@ -43,6 +43,21 @@ The three core concepts stay separate:
 ## Table inventory
 
 The design has 57 tables: the 26 requested and 31 supporting tables. Each supporting table exists because a requirement can't be met safely without it.
+
+**Built and planned.** Everything below is built except these 21 tables, each marked **Planned, not built** where it's described:
+
+| Planned tables | Waiting for |
+| --- | --- |
+| `genres`, `game_genres`, `franchises`, `game_franchises` | The Game Details milestone (M10 decision D6) |
+| `catalog_images` | The cover-art decision (D15, legal review) |
+| `shelves`, `shelf_items` | The Collection Shelves milestone |
+| `wantlist_items` | The Wishlist milestone |
+| `user_favorite_games` | Profile editing, not scheduled |
+| `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `achievements`, `user_achievements` | Social features, not scheduled |
+| `conversations`, `conversation_members`, `messages` | Messaging, not scheduled |
+| `reports` | Reporting (L4), required before public launch |
+
+The private tables from M7 and M8 (exclusions, merges, the Owner, transfers, recoveries, factor registrations) are built, and described with their milestones.
 
 | Domain | Requested | Supporting |
 | --- | --- | --- |
@@ -200,6 +215,8 @@ Private settings, one row per user, readable only by that user.
 `jsonb` is acceptable here because this is read one user at a time and never queried across users.
 
 ### `user_favorite_games`
+
+**Planned, not built.** Waits for profile editing; not scheduled.
 
 Favorites reference a **Game**, not a Release, since a favorite is about the game.
 
@@ -655,6 +672,8 @@ Links a physical Release to a hardware requirement, at a level. This sits on the
 
 ### `genres`
 
+**Planned, not built.** Deferred to the Game Details milestone ([M10 decision D6](architecture-decisions.md#m10-decisions-the-admin-panel-expansion)).
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
@@ -667,6 +686,8 @@ Links a physical Release to a hardware requirement, at a level. This sits on the
 
 ### `game_genres`
 
+**Planned, not built.** Deferred to the Game Details milestone ([M10 decision D6](architecture-decisions.md#m10-decisions-the-admin-panel-expansion)).
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `game_id` | `uuid` | No | |
@@ -678,6 +699,8 @@ Links a physical Release to a hardware requirement, at a level. This sits on the
 - **Timestamps:** `created_at`
 
 ### `franchises`
+
+**Planned, not built.** Deferred to the Game Details milestone ([M10 decision D6](architecture-decisions.md#m10-decisions-the-admin-panel-expansion)).
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -692,6 +715,8 @@ Links a physical Release to a hardware requirement, at a level. This sits on the
 - **Timestamps:** `created_at`, `updated_at`
 
 ### `game_franchises`
+
+**Planned, not built.** Deferred to the Game Details milestone ([M10 decision D6](architecture-decisions.md#m10-decisions-the-admin-panel-expansion)).
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -722,6 +747,8 @@ Explicit links between Game records, written only by catalog editors. Ports and 
 - **Constraints:** `CHECK (source_game_id <> target_game_id)`. A trigger requires the source of `contains` to have `kind = 'compilation'`
 
 ### `catalog_images`
+
+**Planned, not built.** Waits for the cover-art decision, which needs legal review ([D15](architecture-decisions.md#needed-before-catalog-work)). Covers aren't stored yet.
 
 Replaces the single `coverUrl` in the Phase 1 types, and records where each image came from and whether we may show it.
 
@@ -893,6 +920,8 @@ A piece is identified by its release component's `kind` and `label`, not by an i
 
 ### `shelves`
 
+**Planned, not built.** Planned for the Collection Shelves milestone, after M10.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
@@ -910,6 +939,8 @@ A piece is identified by its release component's `kind` and `label`, not by an i
 
 ### `shelf_items`
 
+**Planned, not built.** Planned for the Collection Shelves milestone, after M10.
+
 A reference to a collection item, never a copy of its data. One item can sit on several shelves. `owner_id` is included only so composite foreign keys can guarantee the shelf and the item share one owner.
 
 | Column | Type | Null | Notes |
@@ -925,6 +956,8 @@ A reference to a collection item, never a copy of its data. One item can sit on 
 - **Timestamps:** `created_at`, `updated_at`
 
 ### `wantlist_items`
+
+**Planned, not built.** Planned for the Wishlist milestone, after M10.
 
 A user can want one exact release, or a game on any platform or one platform.
 
@@ -1010,6 +1043,8 @@ Built in M7b-2b. Written only by `exclude_release` and `restore_exclusion`; no c
 
 ### `posts`
 
+**Planned, not built.** Social features aren't scheduled.
+
 Shared columns for all six post types. A `CHECK` enforces which reference columns each `kind` needs.
 
 | Column | Type | Null | Notes |
@@ -1067,6 +1102,8 @@ How each kind maps to the Phase 1 types:
 
 ### `post_images`
 
+**Planned, not built.** Social features aren't scheduled.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
@@ -1084,6 +1121,8 @@ How each kind maps to the Phase 1 types:
 - **Timestamps:** `created_at`
 
 ### `comments`
+
+**Planned, not built.** Social features aren't scheduled.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1104,6 +1143,8 @@ How each kind maps to the Phase 1 types:
 
 ### `likes`
 
+**Planned, not built.** Social features aren't scheduled.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` (v7) | No | |
@@ -1120,6 +1161,8 @@ How each kind maps to the Phase 1 types:
 
 ### `bookmarks`
 
+**Planned, not built.** Social features aren't scheduled.
+
 Private to the user.
 
 | Column | Type | Null | Notes |
@@ -1133,6 +1176,8 @@ Private to the user.
 - **Timestamps:** `created_at`
 
 ### `reviews`
+
+**Planned, not built.** Social features aren't scheduled.
 
 A review is a post with extra structure. Its text is in `posts.body` and its likes and comments attach to the post, so nothing is stored twice.
 
@@ -1156,6 +1201,8 @@ A review is a post with extra structure. Its text is in `posts.body` and its lik
 
 ### `achievements`
 
+**Planned, not built.** Social features aren't scheduled.
+
 Definitions, maintained by staff.
 
 | Column | Type | Null | Notes |
@@ -1169,6 +1216,8 @@ Definitions, maintained by staff.
 - **Timestamps:** `created_at`, `updated_at`
 
 ### `user_achievements`
+
+**Planned, not built.** Social features aren't scheduled.
 
 Awarded only by the server, so an achievement can't be forged.
 
@@ -1214,6 +1263,8 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 
 ### `conversations`
 
+**Planned, not built.** Messaging isn't scheduled.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
@@ -1232,6 +1283,8 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 
 ### `conversation_members`
 
+**Planned, not built.** Messaging isn't scheduled.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `conversation_id` | `uuid` | No | |
@@ -1247,6 +1300,8 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 - **Timestamps:** `created_at` (joined), `updated_at`
 
 ### `messages`
+
+**Planned, not built.** Messaging isn't scheduled.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -1267,6 +1322,8 @@ Built in M4b. Rows are written only by triggers, in the same transaction as the 
 ## Moderation
 
 ### `reports`
+
+**Planned, not built.** Reporting (L4) is required before public launch, but isn't scheduled yet.
 
 Exactly one target column is set. The snapshot preserves what was reported, even if it's later edited or deleted, and is the only route by which staff see message content.
 

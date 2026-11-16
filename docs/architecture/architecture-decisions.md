@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M10 is the accepted roadmap: M8 the Superadmin Foundation, M9 internationalization (EN/SR), M10 the admin panel expansion. M0 to M8 are implemented on the local stack; M8 isn't merged yet. Each later step needs the product owner's authorization.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e. Each step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -64,12 +64,13 @@ This records why the database is designed as it is, what each choice costs, and 
 | [054](#adr-054-merging-moves-every-copy-with-everything-recorded-never-changes-the-target-and-keeps-unpublished-merges-private) | Merging moves every copy with everything recorded, never changes the target, and keeps unpublished merges private |
 | [055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | The Owner is a protected record, its authority needs mature MFA, and recovery is an audited operator procedure |
 | [056](#adr-056-dark-mode-is-the-only-supported-appearance-for-the-initial-release) | Dark Mode is the only supported appearance for the initial release |
+| [057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database) | The admin overview shows role-scoped, bounded counts, decided in the database |
 
 ## Decisions requiring product-owner approval
 
 ### What still blocks migrations
 
-**Only the product owner's authorization of each step.** The [plan](#phase-2b-plan) is the accepted roadmap, with M0 and M1 implemented locally.
+**Only the product owner's authorization of each step.** The [plan](#phase-2b-plan) is the accepted roadmap. M0 to M8 are implemented and merged, and M10 is in progress.
 
 ### D1 to D9: product owner's decisions
 
@@ -206,6 +207,21 @@ Approved by the product owner on 2026-11-14, separate from the global decisions 
 | **D17** | Timings | **Approved.** A 72-hour recovery hold and a 72-hour transfer expiry |
 | **D18** | Hosted prerequisites | **Approved as launch blockers,** not M8 work: hosted TOTP, `pgaudit`, key custodians and alerts. See [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8) |
 | **D19** | Local TOTP | **Approved.** Enabled in `supabase/config.toml` for the local stack |
+
+### M10 decisions: the admin panel expansion
+
+Approved by the product owner on 2026-11-16, with the M10 plan. M10 is built in five steps, each authorized and reviewed on its own: M10a foundations and dashboard, M10b catalog search and record pages, M10c catalog editing, M10d reference data, imports and system, and M10e accounts, audit and staff. Every M8 guarantee stays in force.
+
+| # | Decision | Outcome |
+| --- | --- | --- |
+| **D1** | Internationalization | **Approved.** The planned M9 (English and Serbian) is cancelled for good. My Game Dex is an English-only international application, with no translations and no language switcher. |
+| **D2** | Staff-created records | **Approved.** A staff member must not verify or publish a game or release they created, so direct creation keeps the same no-self-review rule as member submissions. Before `submitted_by` changes, M10c reviews its whole lifecycle (publication, audit provenance, merges, tests) and proposes how the creator stays recorded until an independent review. |
+| **D3** | Fresh MFA for sensitive catalog work | **Approved.** Verifying, publishing and protected edits to published records need a TOTP verification in the last 10 minutes, checked in the database, so direct API calls are held to it too (M10c). |
+| **D4** | Catalog history for editors | **Approved.** Catalog editors may read a sanitized, bounded history of the catalog records they may work on. It shows no staff-account events, private account information, emails, purchase data or unrelated audit rows (M10b). |
+| **D5** | Reference data | **Approved.** Platforms, markets, regions and formats stay managed by migrations, and read-only in M10. |
+| **D6** | Genres and franchises | **Approved.** Deferred to the Game Details milestone. The schema document marks them, and every other designed-but-unbuilt table, as planned. **Done in M10a.** |
+| **D7** | System settings | **Approved.** A read-only view of the operational configuration. No editable settings or feature flags in M10 (M10d). |
+| **D8** | Imports | **Approved.** Import runs and provider information are for administrators only. Scraping, provider integration and automated importing aren't authorized in M10. Monitoring imports is read-only; resolving a reclassification item is an audited write, through the existing `resolve_catalog_review`, and is described as one (M10d). |
 
 ### Needed before launch, may need legal advice
 
@@ -774,7 +790,7 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Why.** Imports will bring thousands of candidates, and a source's record isn't proof that a physical edition exists as described. Keeping verification apart from publication lets editors check identity in bulk where evidence supports it, without anything reaching the public catalog by default. The shared staff lock keeps M4a's guarantee that a revoked or suspended editor can't act afterwards, without making editors wait for each other.
 
-**Trade-offs.** Editing an identity field of an unpublished record clears its verification, so editors may verify twice. Descriptive edits don't. Every change needs a reason, a small cost to editors, so the audit log never holds one made up for them. Correcting a published record keeps it published, so a mistaken correction is fixed by another correction until M7 adds exclusion and merging. Relations and pairings can't be removed in M5. `service_role` has no catalog access until a job needs it.
+**Trade-offs.** Editing an identity field of an unpublished record clears its verification, so editors may verify twice. Descriptive edits don't. Every change needs a reason, a small cost to editors, so the audit log never holds one made up for them. Correcting a published record keeps it published, so a mistaken correction is fixed by another correction. M7 later added exclusion and merging, for records that shouldn't stay. Relations and pairings can't be removed in M5. `service_role` has no catalog access until a job needs it.
 
 ### ADR-046: Imports run as a restricted role through audited functions
 
@@ -790,7 +806,7 @@ Most general game databases focus on games rather than physical releases. Expect
 
 **Why.** The read policies were written for owners and editors as well as the public, so search can't rely on them alone. Explicit filters and allowlists make what's public a property of the functions, which the tests and mutations check directly. Stored keys were needed for speed: computing them per row made a prefix search over 50,000 games take about a second.
 
-**Trade-offs.** The keys are generated columns, so the M5b revision trigger was replaced to ignore them; otherwise every update would raise a revision. Trigram thresholds are fixed by the function for each query, whatever the session has set, and aren't tuned per query. Japanese and other non-Latin titles match by prefix and trigram similarity only. The platform list counts the whole catalog on each call, about 170 ms at 150,000 releases, so the app caches it. Editors can't search unpublished records here; that comes with M7.
+**Trade-offs.** The keys are generated columns, so the M5b revision trigger was replaced to ignore them; otherwise every update would raise a revision. Trigram thresholds are fixed by the function for each query, whatever the session has set, and aren't tuned per query. Japanese and other non-Latin titles match by prefix and trigram similarity only. The platform list counts the whole catalog on each call, about 170 ms at 150,000 releases, so the app caches it. Editors can't search unpublished records here. M7 didn't add that; a staff catalog search is planned for M10b.
 
 ### ADR-048: Web sessions are handled only on the server
 
@@ -838,12 +854,12 @@ There's no sign-up or password-reset page, and nothing on a hosted project chang
 - **Replays and stale tabs.** A repeated request doesn't apply its details again. A stale tab that resends an addition after the copy was removed would add it back.
 - **Sorting large collections.** Sorting by title, platform or acquisition date reads the whole collection, so it slows as a collection nears the limit. See the [M6b benchmark](security-rls.md#collection-system).
 - **Title search.** The collection's title filter ignores case and Latin accents, but doesn't use the catalog's search keys, which callers can't reach.
-- **Preserved copies.** A copy whose release is no longer readable, such as an excluded one in M7, shows no release details. Letting the owners of preserved copies read the release comes with M7.
+- **Preserved copies.** A copy whose release is no longer readable, such as an excluded one in M7, shows no release details. M7b-2b added that read path for the owners of preserved copies (ADR-053).
 - **Wrong release.** A copy can't be moved to another release in M6; the owner removes it and adds the right one. M7 adds a proper relink.
 - **The limit costs a count.** Each addition counts the owner's copies.
 - **A capped list.** `get_my_release_copies` lists the newest 100 copies of one release; its count is always exact.
 
-**M7 compatibility.** M7 needs no change to these tables. `21_collection.test.sql` covers each step as M7 will take it:
+**M7 compatibility.** M7 needs no change to these tables. `21_collection.test.sql` covers each step as M7 takes it:
 
 | M7 step | What happens to copies |
 | --- | --- |
@@ -980,6 +996,23 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **A supported route to Light Mode would be a release blocker.** If a user could switch to it, through a switcher, a stored preference or the browser's setting, it would have to pass the same checks first.
 - **The stored preference does nothing.** `user_preferences.theme` (M2) still accepts `system`, `dark` and `light`, with no effect.
 
+### ADR-057: The admin overview shows role-scoped, bounded counts, decided in the database
+
+**Decision.** M10a. `/admin` shows operational counts from one read, `public.get_admin_overview()` (migration `20261119100000`).
+- **Who may read it:** staff with an active account, a live verified session and a staff role. Everyone else gets the generic refusal.
+- **Sections by role:** catalog editors get the review queue by status, the oldest waiting submission, open import reclassifications, unpublished games and releases, and merges in the last 30 days. Moderators get suspended accounts. Administrators get those plus active exclusions, staff by role and refused staff actions in the last 7 days. A section a caller may not read is null; the database decides, not the page.
+- **Aggregates only:** numbers, and one timestamp. No handle, email, title, reason or collection data.
+- **Bounded:** every count stops at 10,000, and the page says "10,000 or more".
+- **Not audited,** like the other staff reads, because it writes nothing.
+
+Also in M10a, every catalog page (review, merge, exclusion and their histories) uses the same access check as the rest of `/admin`. Staff signed in without their authenticator are sent to verify, and come back to the page. Everyone else gets `notFound()`. Who may open each page is unchanged.
+
+**Why.** Staff need to see the work waiting without opening each queue. The database is the boundary, so the scope of each count is enforced where the data is, and a direct API call gets the same answer as the page.
+
+**Trade-offs.**
+- **One more privileged read.** It's `SECURITY DEFINER` because the counts cover private tables. It's covered by `35_admin_overview` and the 15 `m10a` mutations.
+- **Counts, not trends.** There's no history or charting. A count above the cap isn't exact.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -1081,14 +1114,17 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 
 | Step | Contents | Why here |
 | --- | --- | --- |
-| **M0 Foundation** | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
+| **M0 Foundation** (done) | Extensions, `private` schema, enum types, timestamp trigger, CI schema guards | Everything uses these |
 | **M1 Reference data** (done) | `region_codes`, `markets`, `platforms`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, seeded | No dependencies, public read only |
 | **M2 Identity** (done) | `profiles`, `user_preferences`, `staff_roles`, `private.handle_holds`, sign-up trigger, role helpers, handle claim, `avatars` bucket | Everything is owned by a profile |
 | **M3 Authorization graph** (done) | `follows`, `blocked_users`, visibility helpers, controlled functions, block-aware profile cards | Later policies call these |
-| **M4 Audit and notices** (done, verified on the local stack only) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
-| **M5 Catalog** (M5a schema and editor functions committed; M5b importer built locally) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
-| **M6 Collection** (M6a sessions and M6b database built locally) | `collection_items`, `collection_item_private`, `collection_item_components`, and the collection functions ([ADR-049](#adr-049-collections-are-owner-only-copies-added-idempotently)). Shelves are deferred (D3) | Needs the catalog and visibility helpers |
-| **M7 Catalog workflow** | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
+| **M4 Audit and notices** (done) | `private.audit_events`, audited staff functions, a minimal `notifications` | Staff functions write to both |
+| **M5 Catalog** (done: M5a to M5c. The SNES import pilot waits for provider clearance) | `games`, `game_platforms`, `game_relations`, `releases`, `release_markets`, `release_components`, `release_hardware_requirements`, the `requirement_level` enum, `game_media` on `component_kind`, read helpers | Needs reference data and profiles |
+| **M6 Collection** (done) | `collection_items`, `collection_item_private`, `collection_item_components`, and the collection functions ([ADR-049](#adr-049-collections-are-owner-only-copies-added-idempotently)). Shelves are deferred (D3) | Needs the catalog and visibility helpers |
+| **M7 Catalog workflow** (done: M7a to M7b-2c) | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
+| **M8 Superadmin Foundation** (done) | The Owner record and its protections, live MFA for staff and factor maturity, the staff authority matrix, ownership transfer and recovery, the unified `/admin` and Settings → Security. See [ADR-055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | Staff work needs a protected Owner and verified staff first |
+| **M9 Internationalization** (cancelled) | Not built. The application is English-only ([M10 decision D1](#m10-decisions-the-admin-panel-expansion)) | |
+| **M10 Admin panel expansion** (in progress: M10a done) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). Then M10b catalog search and record pages, M10c catalog editing, M10d reference data, imports and system, and M10e accounts, audit and staff, each authorized separately ([M10 decisions](#m10-decisions-the-admin-panel-expansion)) | Staff tools before the collector-facing milestones |
 
 Later groups, in order:
 
@@ -1101,6 +1137,8 @@ Later groups, in order:
 | **L5 Messaging** | `conversations`, `conversation_members`, `messages` | D11, D16 |
 | **L6 Providers** | `external_providers`, `external_references`, `provider_records`, `catalog_field_locks`, `catalog_images.provider_code` | D14 |
 
+After M10, the product owner plans the collector-facing milestones: Collection Shelves, Game Details (with genres and franchises), Wishlist and Discovery. They take over the shelves and most of L1.
+
 Shelf photos need a storage bucket separately, using the upload rules in [security-rls.md](security-rls.md#storage). Avatars are part of M2, and described in [Avatar storage](security-rls.md#avatar-storage).
 
 ### Before implementation
@@ -1112,8 +1150,8 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | M0 to M3 apply to an empty database. M4 to M7 reviewed on paper only |
-| Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. No CI yet |
+| Migration dependencies | Every migration, M0 to M10a, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
+| Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`; the database, HTTP and browser suites run locally |
 | Reproducible workflow | `npm run db:verify` |
 
 **Gates that must be met along the way:**
@@ -1148,8 +1186,9 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The product owner reviews M5b, confirms each source's permissions, and approves the SNES pilot dataset.
-2. Run the pilot, then build M5c, M6 and M7, locally, one reviewed step at a time.
-3. Create the Supabase project in Frankfurt when authorized, and check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project).
+1. Continue M10 one authorized step at a time: M10b, M10c, M10d and M10e, each reviewed before the next.
+2. After M10, the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery.
+3. Create the Supabase project in Frankfurt when authorized, check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project), and meet the [production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.
+6. The SNES import pilot waits for each provider's clearance and the product owner's approval. M10 adds no importing ([M10 decision D8](#m10-decisions-the-admin-panel-expansion)).

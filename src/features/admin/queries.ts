@@ -74,6 +74,42 @@ export async function requireAdminSection(path: string, section: Section): Promi
   return { viewer, access };
 }
 
+/**
+ * The overview's counts (M10a), from get_admin_overview(). The database fills each
+ * section only for the roles that may read it and leaves the rest null; every count
+ * stops at `cap`. Aggregates only: no names, handles or records.
+ */
+export type AdminOverview = {
+  cap: number;
+  catalog: {
+    submissions_open: number;
+    submissions_in_review: number;
+    submissions_changes_requested: number;
+    oldest_waiting_at: string | null;
+    reclassifications_open: number;
+    games_unpublished: number;
+    releases_unpublished: number;
+    merges_30_days: number;
+  } | null;
+  accounts: { suspended: number } | null;
+  administration: {
+    exclusions_active: number;
+    staff_admins: number;
+    staff_moderators: number;
+    staff_catalog_editors: number;
+    refusals_7_days: number;
+  } | null;
+};
+
+/** The overview's counts, or null when they can't be read. */
+export async function getAdminOverview(): Promise<AdminOverview | null> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_admin_overview");
+  if (error || typeof data !== "object" || data === null || typeof (data as AdminOverview).cap !== "number") return null;
+  return data as AdminOverview;
+}
+
 export type StaffMember = {
   id: string;
   handle: string | null;

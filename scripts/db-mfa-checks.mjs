@@ -256,6 +256,36 @@ try {
     check("and it records the server's now(), never an earlier time", inserts.length === 1 && /pg_catalog\.now\(\)/.test(inserts[0]) && !/interval/.test(inserts[0]), inserts.join(" | "));
     check("no migration updates or deletes registrations", migrations.every((name) => !/(update|delete\s+from)\s+private\.mfa_factor_registrations/i.test(readFileSync(join(root, "supabase", "migrations", name), "utf8"))));
   }
+
+  // -------------------------------------------------------------------------
+  section("6. The admin overview over the API, scoped by role (M10a)");
+  {
+    const sections = (r) => ["catalog", "accounts", "administration"].map((k) => (r.body?.[k] && typeof r.body[k] === "object" ? k : "-")).join("/");
+    const anon = await fetch(`${api}/rest/v1/rpc/get_admin_overview`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: "{}" });
+    const anonBody = await anon.json().catch(() => ({}));
+    check("anon is refused by PostgreSQL itself", anon.status === 401 && anonBody.code === "42501" && anonBody.message === "permission denied for function get_admin_overview",
+      `${anon.status} ${anonBody.code} ${anonBody.message}`);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    check("a collector, even at aal2, is refused with the generic message", refused(await rpc(collectorAal2.access_token, "get_admin_overview")));
+    const editor = await createUser("catalog_editor");
+    const editorAal1 = await signIn(editor);
+    check("a catalog editor at aal1 is refused", refused(await rpc(editorAal1.access_token, "get_admin_overview")));
+    const editorAal2 = await elevate(api, anonKey, editorAal1);
+    const editorRead = await rpc(editorAal2.access_token, "get_admin_overview");
+    check("at aal2, a catalog editor gets the catalog counts only", editorRead.status === 200 && sections(editorRead) === "catalog/-/-", sections(editorRead));
+    const moderator = await createUser("moderator");
+    const moderatorRead = await rpc((await elevate(api, anonKey, await signIn(moderator))).access_token, "get_admin_overview");
+    check("a moderator gets the account counts only", moderatorRead.status === 200 && sections(moderatorRead) === "-/accounts/-", sections(moderatorRead));
+    const administrator = await createUser("admin");
+    const adminRead = await rpc((await elevate(api, anonKey, await signIn(administrator))).access_token, "get_admin_overview");
+    check("an administrator gets every section", adminRead.status === 200 && sections(adminRead) === "catalog/accounts/administration", sections(adminRead));
+    const text = JSON.stringify(adminRead.body);
+    check("and only numbers: no id, handle or email", !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(text) && !text.includes("@") && !/mf_[0-9a-f]/.test(text));
+    // Account status is read live, so the same aal2 token stops working at once.
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "get_admin_overview")));
+  }
 } catch (error) {
   check("the checks ran to the end", false, error.message);
 } finally {

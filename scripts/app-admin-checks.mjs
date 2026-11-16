@@ -21,6 +21,7 @@ import {
   createUser,
   decode,
   deleteUsers,
+  formById,
   formWith,
   forms,
   location,
@@ -47,6 +48,8 @@ const visible = (html) => plain(html.replace(/<script[\s\S]*?<\/script>/g, " "))
 const redirectsTo = (page) => location(page.response) || decode(/<meta[^>]+http-equiv="refresh"[^>]+content="\d+;\s*url=([^"]+)"/i.exec(page.html)?.[1] ?? "");
 const NOT_AVAILABLE = "This page isn't available";
 const UUIDS = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+/** The product code of the release section 11 submits, to find and remove it. */
+const SUBMISSION_CODE = `QZA-${process.pid}`;
 function uuidv7(at = Date.now()) {
   const bytes = randomBytes(16);
   for (let i = 0; i < 6; i += 1) bytes[i] = Math.floor(at / 2 ** (8 * (5 - i))) % 256;
@@ -370,6 +373,74 @@ try {
     }
   }
 
+  // -------------------------------------------------------------------------
+  section("11. M10a: the catalog pages in the admin frame, with step-up, and the overview's counts");
+  {
+    // A submission of a fixture game's missing release, and a fixture release, to open the catalog pages with.
+    const page = await collector.browser.get("/submit?game=starfall-odyssey");
+    const posted = await collector.browser.submit("/submit?game=starfall-odyssey", formById(page.html, "new-submission"), {
+      platform: "snes", media_format: "rom-cartridge", region: "pal", product_code: SUBMISSION_CODE, physical: "on",
+    });
+    const submission = location(posted.response).split("/")[2]?.split("?")[0] ?? "";
+    check("setup: a collector submits a missing release", UUIDS.test(submission), location(posted.response));
+    const release = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+    const editorPages = ["/admin/catalog", `/admin/catalog/${submission}`, `/admin/catalog/merge/${release}`, `/admin/catalog/exclude/${release}`, "/admin/catalog/merges"];
+    const adminPages = ["/admin/catalog/exclusions"];
+    // Unknown ids: the access check comes first, so a missing record can't change who is turned away.
+    const unknown = [`/admin/catalog/merges/${uuidv7()}`, `/admin/catalog/exclusions/${uuidv7()}`];
+    const turnedAway = (html) => plain(html).includes(NOT_AVAILABLE) && !html.includes('aria-label="Admin sections"') && !html.includes(SUBMISSION_CODE) && !visible(html).includes("Starfall");
+    const framed = (html) => html.includes('aria-label="Admin sections"') && /aria-current="page"[^>]*>Catalog</.test(html) && oneHeading(html);
+    for (const path of editorPages) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets ${path.replace(UUIDS, ":id")} in the admin frame, with one heading`, framed(p.html),
+        `nav ${p.html.includes('aria-label="Admin sections"')}, current ${/aria-current="page"[^>]*>Catalog</.test(p.html)}, one h1 ${oneHeading(p.html)}, to ${redirectsTo(p) || "-"}`);
+    }
+    for (const path of [...adminPages, unknown[1]]) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets the unavailable page at ${path.replace(UUIDS, ":id")}`, turnedAway(p.html));
+    }
+    check("an administrator gets the exclusions in the admin frame", framed((await admin.browser.get("/admin/catalog/exclusions")).html));
+    for (const [name, who] of [["a collector", collector], ["a moderator", moderator]]) {
+      let refused = true;
+      for (const path of [...editorPages, ...adminPages, ...unknown]) {
+        const p = await who.browser.get(path);
+        refused &&= turnedAway(p.html);
+      }
+      check(`${name} gets the unavailable page on every catalog page`, refused);
+    }
+    // Staff signed in with a password only: the catalog pages ask for the authenticator first (D8).
+    const unverified = new Browser();
+    const signIn = await unverified.get("/sign-in");
+    await unverified.submit("/sign-in", formWith(signIn.html, "password"), { email: editor.email, password: editor.password });
+    let steps = true;
+    for (const path of [...editorPages, ...unknown]) {
+      const p = await unverified.get(path);
+      steps &&= redirectsTo(p) === `/settings/security/verify?next=${encodeURIComponent(path)}` && !p.html.includes('aria-label="Admin sections"') && !p.html.includes(SUBMISSION_CODE);
+    }
+    check("an editor at aal1 is sent to verify from every catalog page, and sees nothing first", steps);
+    const back = await verifyBrowser(unverified, editor, `/admin/catalog/${submission}`);
+    check("verifying returns them to the submission", location(back.response) === `/admin/catalog/${submission}`, location(back.response));
+    check("which then opens in the frame", framed((await unverified.get(`/admin/catalog/${submission}`)).html));
+
+    // The overview's counts: each role sees only its own sections, and the numbers are the database's.
+    const cards = async (who) => {
+      const html = (await who.browser.get("/admin")).html;
+      return ["overview-catalog", "overview-accounts", "overview-administration"].map((id) => (html.includes(`id="${id}"`) ? id.slice(9) : "-")).join("/");
+    };
+    check("the overview shows an editor the catalog counts only", (await cards(editor)) === "catalog/-/-", await cards(editor));
+    check("a moderator the account counts only", (await cards(moderator)) === "-/accounts/-", await cards(moderator));
+    check("an administrator every section", (await cards(admin)) === "catalog/accounts/administration", await cards(admin));
+    const collectorOverview = (await collector.browser.get("/admin")).html;
+    check("and a collector the unavailable page", turnedAway(collectorOverview) && !collectorOverview.includes('id="overview-catalog"'));
+    const open = psql("select count(*) from public.catalog_change_requests where status = 'open';");
+    const suspended = psql("select count(*) from public.profiles where account_status = 'suspended';");
+    const admins = psql("select count(*) from public.staff_roles where role = 'admin';");
+    const text = visible((await admin.browser.get("/admin")).html);
+    check("the counts shown are the database's", Number(open) >= 1 && text.includes(`Not started ${open}`) && text.includes(`Suspended accounts ${suspended}`) && text.includes(`Administrators ${admins}`),
+      `open ${open}, suspended ${suspended}, admins ${admins}`);
+    check("and show no handle, email or title", !text.includes("@example.test") && !text.includes("Starfall") && !/@ad_[0-9a-f]/.test(text.replace(`@${admin.handle}`, "")));
+  }
+
   const errors = appErrorLines();
   check("the app logged no errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
@@ -377,13 +448,21 @@ try {
 } finally {
   stopApp();
   removeTestOwner(psql);
+  // Section 11's submission and its release, before the accounts, while they still name their submitter.
+  const submitters = people.map((p) => `'${p.id}'`).join(",") || "null";
+  psql(`begin;
+create temp table m10a_requests on commit drop as select * from public.catalog_change_requests where submitted_by in (${submitters});
+delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
+delete from public.catalog_change_requests where id in (select id from m10a_requests);
+commit;`);
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
   psql("delete from private.handle_holds where kind = 'released' and handle like 'ad\\_%';");
   removeFixture();
-  check("no account, Owner record, transfer, recovery, registration or audit row is left behind",
+  check("no account, Owner record, transfer, recovery, registration, submission or audit row is left behind",
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
+      + (select count(*) from public.releases where product_code = '${SUBMISSION_CODE}') + (select count(*) from public.catalog_change_requests where submitted_by in (${list}))
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }

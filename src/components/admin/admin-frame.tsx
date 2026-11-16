@@ -24,12 +24,27 @@ const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: Ad
  * The /admin heading and its sections, only those the viewer's live roles allow. It's
  * rendered after the access check, so nobody else ever sees what /admin contains.
  */
-export function AdminFrame({ access, current, title, children }: { access: AdminAccess; current: AdminSection; title: string; children: ReactNode }) {
+export function AdminFrame({
+  access,
+  current,
+  title,
+  titleId,
+  children,
+}: {
+  access: AdminAccess;
+  current: AdminSection;
+  title: string;
+  /** An id for the heading, for a page whose sections are labelled by it. */
+  titleId?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-3">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Admin</p>
-        <h1 className="text-xl font-semibold tracking-tight text-pretty">{title}</h1>
+        <h1 id={titleId} className="text-xl font-semibold tracking-tight text-pretty">
+          {title}
+        </h1>
         <nav aria-label="Admin sections">
           <ul className="flex flex-wrap gap-2">
             {SECTIONS.filter((s) => s.allowed(access)).map((s) => (
