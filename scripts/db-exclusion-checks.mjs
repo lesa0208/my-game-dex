@@ -283,6 +283,23 @@ try {
   check("an editor can't restore", error(await rpc(editor.headers, "restore_exclusion", { p_exclusion: excluded.body.exclusion_id, p_expected_version: 1, p_reason: "Api" }), "not permitted"));
   const restored = await rpc(admin.headers, "restore_exclusion", { p_exclusion: excluded.body.exclusion_id, p_expected_version: 1, p_reason: "Api check" });
   check("an administrator restores it", restored.status === 200 && restored.body.copies === 1 && copyStatus(item0) === "active" && releaseStatus(r0) === "published", restored.text);
+  {
+    // A restoration isn't verified again, so nothing may change what it brings back (M10c review).
+    const gx = makeGame("Frozen");
+    const rx = makeRelease(gx, "ntsc-uc");
+    const alias = psql(`insert into public.game_aliases (game_id, title, kind) values ('${gx}', '${PREFIX} Frozen alias', 'alternate') returning id;`);
+    const p = await rpc(editor.headers, "get_exclusion_preview", { p_release: rx });
+    const x = await rpc(editor.headers, "exclude_release", { p_release: rx, p_token: p.body.token, p_reason_code: "no_game_data", p_reason: "Api check", p_acknowledge_cascade: true });
+    const revisions = () => psql(`select g.revision || '/' || r.revision from public.games g, public.releases r where g.id = '${gx}' and r.id = '${rx}';`);
+    const before = revisions();
+    check("an exclusion takes the release's only game with it", x.status === 200 && psql(`select status from public.games where id = '${gx}';`) === "excluded", x.text);
+    check("an excluded game's alias can't be removed over the API", error(await rpc(editor.headers, "remove_game_alias", { p_alias: alias, p_reason: "Api check" }), "record unavailable"));
+    check("nor its release edited", error(await rpc(editor.headers, "update_release", { p_release: rx, p_changes: { packaging: "Box" }, p_reason: "Api check" }), "record unavailable"));
+    check("so neither revision moved", revisions() === before);
+    const back = await rpc(admin.headers, "restore_exclusion", { p_exclusion: x.body.exclusion_id, p_expected_version: 1, p_reason: "Api check" });
+    check("and a restoration brings them back as they were excluded", back.status === 200 && releaseStatus(rx) === "published"
+      && psql(`select count(*) from public.game_aliases where id = '${alias}';`) === "1", back.text);
+  }
 
   // -------------------------------------------------------------------------
   section("1. An exclusion and the deletion of a copy owner who verified the release");

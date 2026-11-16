@@ -1519,7 +1519,7 @@ History is a view of `private.audit_events` built from two allow-lists, so a new
 
 ## Catalog editing, provenance and no self-review (M10c)
 
-Catalog editors create, edit, verify and publish games and physical releases in `/admin`, with the M5 editing functions, and nobody verifies or publishes a record they created (decision D2). Verifying, publishing and changing published content need a recent TOTP verification (D3), and a verification counts only for the revision it attested (D-7). Migration `20261121100000` ([ADR-059](architecture-decisions.md#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)).
+Catalog editors create, edit, verify and publish games and physical releases in `/admin`, with the M5 editing functions, and nobody verifies or publishes a record they created (decision D2). Verifying, publishing and changing published content need a recent TOTP verification (D3), and a verification counts only for the revision it attested (D-7). Migrations `20261121100000` and `20261121100100`, the review fixes ([ADR-059](architecture-decisions.md#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)).
 
 ### Who created a record
 
@@ -1545,7 +1545,7 @@ The M7b-1 guard on `games` and `releases`, `private.guard_submitted_record()`, r
 
 - **Never its creator,** whatever their role: an administrator or the Owner too. `own record`. This covers a game published with one of its releases: someone else's release can't be published by the game's creator.
 - **Unknown or missing provenance fails closed:** only an administrator may verify or publish the record (`provenance unknown`), and not the same administrator who verified it (`independent review required`). Their verification and publication are audited with `provenance: unknown`.
-- **A first publication** (from unverified or in review) needs a verifier who's known and isn't the creator (`verification required`), so a record its creator verified before M10c is verified again by someone else. A restoration from an exclusion isn't a first publication; `restore_exclusion` checks its own rules.
+- **A first publication** (from unverified or in review) needs a verifier who's known and isn't the creator (`verification required`), so a record its creator verified before M10c is verified again by someone else. A restoration from an exclusion isn't a first publication; `restore_exclusion` checks its own rules, and brings the records back as they were excluded (see D-7 below).
 - **Submissions keep their rules** (`own submission`, `review required`).
 - **Merging and excluding** (D-4): `merge_release` refuses either release, or either release's game, created by the caller; `exclude_release` and `restore_exclusion` refuse the release, or a game it takes with it or brings back. `own record`.
 
@@ -1558,7 +1558,7 @@ Each function asks first, before its own checks, with `private.require_recent_mf
 | `verify_game`, `verify_release`, `publish_release` (and the game and pairing it publishes), `approve_submission` | Always |
 | `update_game`, `update_release`, `set_release_markets`, `set_release_components`, `set_release_requirements` | When the record is published |
 | `add_game_alias`, `remove_game_alias` | When the game is published |
-| `set_game_relation` | When both games are published |
+| `set_game_relation` | When either game is published: a relation raises both games' revisions, so it changes a published game's record even while it isn't public (review fix) |
 | `exclude_release` (D-5) | When the release is published |
 | `restore_exclusion` (D-5) | When it brings anything back as published |
 | `merge_release` | A published merge (M8d) |
@@ -1574,6 +1574,8 @@ Each function asks first, before its own checks, with `private.require_recent_mf
 - **A change ends it.** Any change to an unpublished, verified record ends its verification, through the M5b revision trigger: its fields, and its markets, pieces, hardware (M5b), aliases and relations (M10c). Edits report `verification_cleared` in their audit row. The descriptive fields that used to keep a verification no longer do.
 - **Publication checks it.** A release, and a game published with it, must have a verification of the revision it has, or `verification stale`. A status change (a review, an exclusion) raises the revision without ending the verification, so the record is verified again before it's published. A stale verification is replaced by verifying again; a current one returns false.
 - **Distinct verifications.** Each is timed with the statement's own clock, so two in one transaction are distinct.
+- **A restoration isn't verified again, so excluded records stay as they were.** Every editor function refuses an excluded or merged game or release, its aliases, relations, platforms, markets, pieces and requirements (`record unavailable`); the review fix added the last missing one, removing an alias. A restored record is therefore the content its earlier, independent publication attested. Restoring needs an administrator who isn't the excluder or the creator, with a recent TOTP verification when anything comes back published.
+- **No indirect publication.** Only `publish_release` (also through `approve_submission`) and `restore_exclusion` make a game, release or pairing published, and each does it by updating the row, so the guard's creator, provenance, MFA and, for a first publication, revision checks apply to the release and to the game published with it. A merge never publishes. A pairing has no content of its own beyond its game and platform: the commit-time check (M5, M7b-2b) refuses a published pairing without its published game and release, and its own trigger refuses a stale client publication, so a pairing is never a route to publishing anything.
 
 ### What editors see
 

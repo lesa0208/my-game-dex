@@ -890,4 +890,16 @@ export const m10cMutations = [
   sql("publication ignores the verified revision", "pgtap", rewrite(M10C_REVIEW_GUARD, "        if not private.verification_current(v_kind, new.id, old.revision, old.verified_at) then", "        if false then")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations };
+// M10c review fixes: relations, excluded records and pairings.
+const M10C_RELATION = "public.set_game_relation(uuid, uuid, public.game_relation_type, smallint, text, text)";
+const M10C_REMOVE_ALIAS = "public.remove_game_alias(uuid, text)";
+const M10C_PAIRING = "private.guard_pairing_publication()";
+export const m10cReviewMutations = [
+  sql("a relation needs a recent verification only between published games", "pgtap", rewrite(M10C_RELATION,
+    "  if exists (select 1 from public.games g where g.id in (p_source, p_target) and g.status = 'published') then",
+    "  if (select count(*) from public.games g where g.id in (p_source, p_target) and g.status = 'published') = 2 then")),
+  sql("an excluded game's alias can be removed", "pgtap", rewrite(M10C_REMOVE_ALIAS, "  if v_status in ('merged', 'excluded') then\n    raise exception 'record unavailable'", "  if false then\n    raise exception 'record unavailable'")),
+  sql("a pairing is published without a recent verification", "pgtap", rewrite(M10C_PAIRING, "     and not private.mfa_recent(interval '10 minutes') then", "     and false then")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations };

@@ -186,7 +186,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
 
             <RecordSection id="edit-relations" title="Related games">
               {gated ? (
-                <StepUpNotice path={path}>A relation between published games is public, so changing it needs a recent verification.</StepUpNotice>
+                <StepUpNotice path={path}>A published game&apos;s relations are part of its record, so changing one needs a recent verification.</StepUpNotice>
               ) : (
                 <EditForm id="set-relation" recordId={g.id} action={setRelation} plain={setRelationFromForm} submit="Save the relation" pending="Saving…">
                   <Hidden id={g.id} revision={g.revision} />

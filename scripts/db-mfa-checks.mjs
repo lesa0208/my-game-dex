@@ -394,6 +394,14 @@ try {
     check("editing the published release then needs a recent verification again",
       failedWith(await rpc(fresh.access_token, "update_release", { p_release: release, p_changes: { packaging: "Box" }, p_reason: "Editing checks" }), "reauthentication required")
       && psql(`select packaging is null from public.releases where id = '${release}';`) === "t");
+    const relations = () => psql(`select count(*) from public.game_relations where '${game}' in (source_game_id, target_game_id);`);
+    check("so does relating the published game to an unpublished one, in either direction",
+      failedWith(await rpc(fresh.access_token, "set_game_relation", { p_source: game, p_target: adminGame, p_relation: "remake_of", p_reason: "Editing checks" }), "reauthentication required")
+      && failedWith(await rpc(fresh.access_token, "set_game_relation", { p_source: adminGame, p_target: game, p_relation: "remaster_of", p_reason: "Editing checks" }), "reauthentication required")
+      && relations() === "0");
+    const freshAgain = await reverify(api, anonKey, fresh);
+    check("which a recent verification allows",
+      (await rpc(freshAgain.access_token, "set_game_relation", { p_source: adminGame, p_target: game, p_relation: "remaster_of", p_reason: "Editing checks" })).body === true && relations() === "1");
     const asCreator = (await rpc(creatorAal2.access_token, "get_release_record", { p_release: release })).body?.review;
     const asOther = (await rpc(fresh.access_token, "get_release_record", { p_release: release })).body?.review;
     check("the record tells each only what they did themselves", asCreator?.you_created === true && asCreator?.you_verified === false && asOther?.you_created === false && asOther?.you_verified === true);

@@ -3,7 +3,7 @@
 -- it attested (D-7). Runs in one transaction that rolls back, on the local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(117);
+select plan(141);
 
 -- Staff need a live aal2 session with a verified TOTP factor (M8b). claims() makes one
 -- whose TOTP verification is fresh; stale() one verified 11 minutes ago.
@@ -371,6 +371,14 @@ select is(pg_temp.as_user('e6', format($$select public.add_game_alias(%L, 'Prv L
 select pg_temp.keep('alias', pg_temp.as_user('e2', format($$select public.add_game_alias(%L, 'Prv Lantern Road', 'alternate', null, null, 'Provenance tests')::text$$, pg_temp.id('g'))));
 select is(pg_temp.as_user('e6', format($$select public.remove_game_alias(%L, 'Provenance tests')::text$$, pg_temp.id('alias'))), 'error: reauthentication required', 'removing one');
 select is(pg_temp.as_user('e6', format($$select public.set_game_relation(%L, %L, 'remake_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g'), pg_temp.id('ga'))), 'error: reauthentication required', 'and a relation between published games');
+-- A relation raises both games' revisions, so one published game is enough (review fix).
+create temp table revs as select 'g'::text as name, pg_temp.grev('g') as revision;
+select is(pg_temp.as_user('e6', format($$select public.set_game_relation(%L, %L, 'remake_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g'), pg_temp.id('g4'))), 'error: reauthentication required', 'a relation from a published game to an unpublished one');
+select is(pg_temp.as_user('e6', format($$select public.set_game_relation(%L, %L, 'remaster_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g4'), pg_temp.id('g'))), 'error: reauthentication required', 'or to a published game from an unpublished one');
+select is(pg_temp.as_user('e2', format($$select public.set_game_relation(%L, %L, 'remaster_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g4'), pg_temp.id('g'))), 'true', 'which a recent verification allows');
+select is(pg_temp.as_user('e6', format($$select public.set_game_relation(%L, %L, 'remaster_of', null, 'A new note', 'Provenance tests')::text$$, pg_temp.id('g4'), pg_temp.id('g'))), 'error: reauthentication required', 'and replacing it needs one too');
+select is((select note from public.game_relations where source_game_id = pg_temp.id('g4') and target_game_id = pg_temp.id('g')), null, 'so the relation is as it was');
+select is(pg_temp.grev('g'), (select revision + 1 from revs where name = 'g'), 'and the published game''s revision rose only for the allowed change');
 select is(pg_temp.as_user('e6', format($$select public.set_game_relation(%L, %L, 'remake_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g4'), pg_temp.id('g3'))), 'true', 'but not one between unpublished games');
 select is(pg_temp.exclude('e6', 'r2'), 'error: reauthentication required', 'excluding a published release needs a recent TOTP verification (D-5)');
 select is(pg_temp.restore('a7', 'r3'), 'error: reauthentication required', 'so does restoring one as published');
@@ -396,6 +404,36 @@ select is(pg_temp.as_user('e1', format('select (public.get_game_record(%L) -> ''
   '{"origin": "staff", "you_created": true, "you_verified": false, "verification_current": false}', 'the creator sees that they created the record, and that its verification ended with the last edit');
 select is(pg_temp.as_user('e2', format('select (public.get_release_record(%L) -> ''review'')::text', pg_temp.id('r7'))),
   '{"origin": "staff", "you_created": false, "you_verified": true, "verification_current": true}', 'the verifier sees that they verified it, and nothing about anyone else');
+
+-- ---------------------------------------------------------------------------
+-- 12. A restoration brings back what was excluded, unchanged (review fix)
+-- ---------------------------------------------------------------------------
+-- A restored record isn't verified again, so nothing may change it while excluded.
+select pg_temp.game('e1', 'gx', 'Prv Frozen Harbor');
+select pg_temp.release('e1', 'rx', 'gx', 'ntsc-uc', 'PRV-X1');
+select is(pg_temp.verify_game('e2', 'gx') || pg_temp.verify_release('e2', 'rx') || pg_temp.publish('a3', 'rx'), 'truetruetrue', 'a record is published by others');
+select pg_temp.keep('xalias', pg_temp.as_user('e2', format($$select public.add_game_alias(%L, 'Prv Frozen Bay', 'alternate', null, null, 'Provenance tests')::text$$, pg_temp.id('gx'))));
+select ok(pg_temp.exclude('a3', 'rx') like '{%', 'and excluded, with its game');
+select is(pg_temp.status('gx') || '/' || pg_temp.status('rx'), 'excluded/excluded', 'both are excluded');
+insert into revs values ('gx', pg_temp.grev('gx')), ('rx', pg_temp.rrev('rx'));
+select is(pg_temp.as_user('e2', format($$select public.remove_game_alias(%L, 'Provenance tests')::text$$, pg_temp.id('xalias'))), 'error: record unavailable', 'an excluded game''s alias can''t be removed');
+select is(pg_temp.as_user('e2', format($$select public.add_game_alias(%L, 'Prv Frozen Cove', 'alternate', null, null, 'Provenance tests')::text$$, pg_temp.id('gx'))), 'error: record unavailable', 'nor one added');
+select is(pg_temp.as_user('e2', format($$select public.update_game(%L, '{"summary": "Changed while excluded."}', 'Provenance tests')::text$$, pg_temp.id('gx'))), 'error: record unavailable', 'nor the game edited');
+select is(pg_temp.as_user('e2', format($$select public.set_game_relation(%L, %L, 'remake_of', null, null, 'Provenance tests')::text$$, pg_temp.id('g4'), pg_temp.id('gx'))), 'error: record unavailable', 'nor related to another game');
+select is(pg_temp.as_user('e2', format($$select public.update_release(%L, '{"variant_name": "Changed"}', 'Provenance tests')::text$$, pg_temp.id('rx'))), 'error: record unavailable', 'nor the release edited');
+select is(pg_temp.as_user('e2', format($$select public.set_release_markets(%L, array['US'], 'Provenance tests')::text$$, pg_temp.id('rx'))), 'error: record unavailable', 'nor its markets');
+select is(pg_temp.as_user('e2', format($$select public.set_release_components(%L, '[]', 'Provenance tests')::text$$, pg_temp.id('rx'))), 'error: record unavailable', 'its pieces');
+select is(pg_temp.as_user('e2', format($$select public.set_release_requirements(%L, '[]', 'Provenance tests')::text$$, pg_temp.id('rx'))), 'error: record unavailable', 'or its requirements');
+select is(pg_temp.as_user('e2', format($$select public.set_game_platform(%L, (select id from public.platforms where slug = 'nes'), 'Provenance tests')::text$$, pg_temp.id('gx'))), 'error: record unavailable', 'and no platform is added to the game');
+select is(pg_temp.grev('gx') || '/' || pg_temp.rrev('rx'), (select string_agg(revision::text, '/' order by name) from revs where name in ('gx', 'rx')), 'so neither revision moved');
+select is(pg_temp.restore('e1', 'rx'), 'error: not permitted', 'only an administrator restores');
+select ok(pg_temp.restore('a4', 'rx') like '{%', 'and a restoration brings them back');
+select is(pg_temp.status('gx') || '/' || pg_temp.status('rx') || '/' || (select count(*) from public.game_aliases where game_id = pg_temp.id('gx')), 'published/published/1', 'published, as they were excluded');
+
+-- A platform pairing is published only with a release (M5, M7b-2b); on its own, the
+-- commit-time check refuses it, so it's no way to publish anything.
+select is(pg_temp.as_user('e2', format('select pg_temp.definer_publish_pairing(%L)', pg_temp.id('g4'))), 'published', 'a fresh editor''s statement runs');
+select throws_ok('set constraints all immediate', '23514', 'a release can be published only with its game and platform', 'but the pairing can''t be committed as published on its own');
 
 select * from finish();
 rollback;
