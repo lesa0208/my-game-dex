@@ -11,6 +11,7 @@ My Game Dex is a social network and collection manager for physical video game c
 - **Node.js 22 or newer.** The `cn` class-merging package used by shadcn/ui requires it (`engines: >=22`), and it is the strictest requirement of any direct dependency. Next.js itself needs only 20.9. The requirement is declared in `package.json`. The project is tested on Node 22.23.
 - npm, which comes with Node.js.
 - Docker Desktop, only for the [local database](#local-database).
+- Microsoft Edge or Google Chrome, only for `npm run app:a11y-checks`. The checks drive the installed browser through `playwright-core` and download none.
 
 ## Getting started
 
@@ -57,10 +58,11 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run app:review-checks` | After a build, test catalog review (the queue, starting, correcting, approving, asking for changes, rejecting and resubmitting) in the running app against the local stack and catalog fixture |
 | `npm run admin:test` | Test the admin and security forms' rules: return paths, inputs, messages and the audit details shown |
 | `npm run app:admin-checks` | After a build, test `/admin` and Settings → Security in the running app against the local stack: access for each role, the staff matrix, step-up verification, real TOTP enrollment and removal, the audit log, transfer and recovery, and privacy |
+| `npm run app:a11y-checks` | After a build, test `/admin` and Settings → Security in a real browser with JavaScript (Edge, or Chrome; `A11Y_BROWSER=chrome` picks it): access and navigation for each role, TOTP enrollment, step-up without replay, keyboard focus, and axe-core accessibility and sideways scrolling at phone and desktop widths |
 | `npm run db:mutation` | Prove the tests detect real violations, one suite or all (see [Local database](#local-database)) |
 | `npm run mutation:campaign` | Run several mutation suites unattended. `-- --dry-run` checks readiness and runs nothing |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks`.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks` and `app:a11y-checks`.
 
 ## Local database
 
@@ -129,7 +131,7 @@ Then add an authenticator to that account and sign in again. Admin sections show
 
 **The Owner.** Don't assign one by hand. The record is permanent by design, and only `npm run db:reset` clears it locally. The test suites assign a temporary Owner on the local stack and remove it, and refuse to run if one already exists or if the API isn't on loopback.
 
-**Testing.** `npm run db:verify` runs the Owner, MFA and ownership checks with real TOTP sessions from the local Auth. `npm run app:admin-checks` needs a production build (`npm run build`), and drives the app as a browser without JavaScript would, enrolling and verifying real authenticators through the pages. The design is in [The Owner (M8)](docs/architecture/security-rls.md#the-owner-m8), [Staff authority (M8)](docs/architecture/security-rls.md#staff-authority-m8) and [ADR-055](docs/architecture/architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure).
+**Testing.** `npm run db:verify` runs the Owner, MFA and ownership checks with real TOTP sessions from the local Auth. `npm run app:admin-checks` needs a production build (`npm run build`), and drives the app as a browser without JavaScript would, enrolling and verifying real authenticators through the pages. `npm run app:a11y-checks` also needs the build, plus Edge or Chrome. It signs in through the pages with JavaScript and fails on any critical or serious axe-core finding (WCAG 2.0–2.2 A and AA) in the dark theme, the one the app renders. It also applies the prepared light tokens and lists their findings without failing, because light mode isn't shipped; `A11Y_LIGHT=enforce` makes them fail. If no browser starts, it prints `NOT RUN` and exits with status 2. It takes no screenshots, traces or videos, and redacts keys, codes and emails from what it prints. The design is in [The Owner (M8)](docs/architecture/security-rls.md#the-owner-m8), [Staff authority (M8)](docs/architecture/security-rls.md#staff-authority-m8) and [ADR-055](docs/architecture/architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure).
 
 ### Troubleshooting
 
@@ -225,8 +227,8 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 - Staff work in `/admin` (M8): catalog review, account lookup by handle, staff roles, the audit log and ownership. Bulk operations, analytics and new moderation workflows are for M10
 - JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show. Adding an authenticator needs JavaScript to show the QR code and setup key
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
-- Light mode has tokens but no switcher, and hasn't had a visual review
-- Frontend tests cover the catalog parser and the sign-in rules, plus an HTTP check of the auth flow. There are no component or browser tests
+- Light mode has tokens but no switcher. Its tokens fail WCAG AA color contrast in places: muted navigation labels, destructive buttons, and input text on light fields. `app:a11y-checks` lists each one
+- Frontend tests cover the catalog parser and the sign-in rules, plus HTTP checks of the app. Browser and accessibility checks (`app:a11y-checks`) cover only `/admin` and Settings → Security. There are no component tests
 - Seed artwork in `public/seed/` is still served by production builds, although nothing links to it while seed data is off
 - `npm audit` reports low and moderate advisories in `deepmerge` and `minimatch`, through the shadcn CLI's own dependencies. The app doesn't run that code at runtime; only the CLI uses it. Don't run `npm audit fix --force`, which proposes downgrading to `shadcn@1.0.0`
 
