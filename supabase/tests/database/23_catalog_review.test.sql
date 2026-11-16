@@ -120,15 +120,37 @@ where id in (select pg_temp.u(s) from unnest(array['a1', 'b2', 'c3', 'd4', 'e5',
 insert into public.staff_roles (user_id, role) values
   (pg_temp.u('c3'), 'catalog_editor'), (pg_temp.u('d4'), 'moderator'), (pg_temp.u('e5'), 'catalog_editor'),
   (pg_temp.u('e6'), 'catalog_editor'), (pg_temp.u('f7'), 'admin');
+
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'rev_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
 update public.profiles set account_status = 'suspended' where id = pg_temp.u('c3');
 
 -- A published game with a published release on SNES.
 select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
+select pg_temp.fx_on();
 insert into ids select 'g', public.create_game('Qzs Lantern Keep', 'game', null, null, null, 'unknown', 'Review tests');
+select pg_temp.fx_off();
 select public.verify_game(pg_temp.id('g'), 'Review tests', (select revision from public.games where id = pg_temp.id('g')));
+select pg_temp.fx_on();
 insert into ids select 'pub', public.create_release(pg_temp.id('g'), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
   '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "QZS-REV-1"}', 'Review tests');
+select pg_temp.fx_off();
 select public.verify_release(pg_temp.id('pub'), 'Review tests', (select revision from public.releases where id = pg_temp.id('pub')));
 select public.publish_release(pg_temp.id('pub'), 'Review tests', (select revision from public.releases where id = pg_temp.id('pub')));
 select set_config('role', 'none', true);
@@ -332,8 +354,10 @@ select is((select data ->> 'status' from public.notifications where recipient_id
 select is(pg_temp.subgame('og', 'e6', 'Qzs Harbor Lights'), 'submitted', 'the editor submits a new game');
 select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
+select pg_temp.fx_on();
 select ok(public.create_release(pg_temp.id('og-g'), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'pal', '{}', 'Found a second release') is not null,
           'another editor adds a release to that game');
+select pg_temp.fx_off();
 select set_config('role', 'none', true);
 select is(pg_temp.as_user('e6', format('select public.withdraw_my_submission(%L)::text', pg_temp.id('og'))), 'true', 'the submitter withdraws theirs; the game stays');
 select is(pg_temp.as_user('e6', format('select public.verify_game(%L, %L, %L)::text', pg_temp.id('og-g'), 'Mine',

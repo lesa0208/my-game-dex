@@ -112,6 +112,24 @@ update public.profiles set handle = 'mg_' || right(id::text, 2), handle_changed_
 where id in (select pg_temp.u(s) from unnest(array['c1', 'c2', 'c3', 'e5', 'e6', 'a7', 'a8']) s);
 insert into public.staff_roles (user_id, role) values
   (pg_temp.u('e5'), 'catalog_editor'), (pg_temp.u('e6'), 'catalog_editor'), (pg_temp.u('a7'), 'admin'), (pg_temp.u('a8'), 'admin');
+
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'mg_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
 -- A second physical format for SNES, so a format mismatch can be tested.
 insert into public.platform_media_formats (platform_id, media_format_code)
 select (select id from public.platforms where slug = 'snes'), (select code from public.media_formats where code <> 'rom-cartridge' order by code limit 1);
@@ -126,8 +144,10 @@ create function pg_temp.release(p_name text, p_game text, p_platform text, p_reg
                                 p_publish boolean default true, p_format text default 'rom-cartridge', p_edition text default null) returns void language plpgsql as $$
 declare r uuid;
 begin
+  perform pg_temp.fx_on();
   r := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = p_platform), p_format, p_region,
     format('{"edition_name": "%s", "edition_kind": "standard", "media_count": 1, "product_code": "%s"}', coalesce(p_edition, 'Standard'), p_code)::jsonb, 'Merge tests');
+  perform pg_temp.fx_off();
   perform public.set_release_components(r, p_pieces::jsonb, 'Merge tests');
   if p_publish then
     perform public.verify_release(r, 'Merge tests', (select revision from public.releases where id = r));
@@ -137,7 +157,9 @@ begin
 end $$;
 create function pg_temp.game_of(p_name text, p_title text) returns void language plpgsql as $$
 begin
+  perform pg_temp.fx_on();
   insert into ids select p_name, public.create_game(p_title, 'game', null, null, null, 'unknown', 'Merge tests');
+  perform pg_temp.fx_off();
   perform public.verify_game(pg_temp.id(p_name), 'Merge tests', (select revision from public.games where id = pg_temp.id(p_name)));
 end $$;
 grant execute on function pg_temp.release(text, text, text, text, text, text, boolean, text, text) to authenticated;

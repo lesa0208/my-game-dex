@@ -348,17 +348,20 @@ try {
 
   // M10b: a real merge and a real exclusion, made through the database functions as an
   // administrator and an editor would, so their detail pages are opened with data.
+  // Nobody reviews, merges or excludes a record they created (M10c): the editor creates
+  // the duplicate and the administrator publishes and merges it; the administrator
+  // creates the download code and the editor excludes it.
   const as = (user, sql) => psql(`begin; select set_config('request.jwt.claims', '${claimsFor(user.id)}', true); set local role authenticated; ${sql}; commit;`)
     .split("\n").filter((l) => l && l !== "BEGIN" && l !== "COMMIT").at(-1);
   const gameId = psql("select game_id from public.releases where product_code = 'SNS-ZSFE-USA';");
   const snes = psql("select id from public.platforms where slug = 'snes';");
   const dup = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'ntsc-uc', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "AYB-DUP"}', 'Browser checks: a duplicate')`);
-  as(editor, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
-  as(editor, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  as(admin, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  as(admin, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
   const merged = as(admin, `select public.merge_release('${dup}', '${releaseUs}', p ->> 'token', 'Browser checks: the same release', null,
     array(select d ->> 'field' from jsonb_array_elements(p -> 'differences') d), true)::text from (select public.get_merge_preview('${dup}', '${releaseUs}') as p) x`);
   const mergeId = psql(`select id from private.catalog_merges where source_release_id = '${dup}';`);
-  const excluded = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'pal', '{"product_code": "AYB-EXC"}', 'Browser checks: a download code')`);
+  const excluded = as(admin, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'pal', '{"product_code": "AYB-EXC"}', 'Browser checks: a download code')`);
   as(editor, `select public.exclude_release('${excluded}', p ->> 'token', 'download_code', 'Browser checks: not a physical release')::text from (select public.get_exclusion_preview('${excluded}') as p) x`);
   const exclusionId = psql(`select id from private.catalog_exclusions where release_id = '${excluded}';`);
   ok("setup: a real merge and a real exclusion", /^[0-9a-f-]{36}$/.test(mergeId) && /^[0-9a-f-]{36}$/.test(exclusionId)
@@ -370,6 +373,11 @@ try {
     ["game record", `/admin/catalog/games/${gameId}`],
     ["release record", `/admin/catalog/releases/${releaseUs}`],
     ["merged release record", `/admin/catalog/releases/${dup}`],
+    // M10c: the editing pages, on a published game and release (forms behind a recent verification).
+    ["new game", "/admin/catalog/games/new"],
+    ["game editing", `/admin/catalog/games/${gameId}/edit`],
+    ["new release", `/admin/catalog/releases/new?game=${gameId}`],
+    ["release editing", `/admin/catalog/releases/${releaseUs}/edit`],
   );
 
   for (const viewport of WIDTHS) {
@@ -624,6 +632,8 @@ delete from private.catalog_merge_copies where merge_id in (select m.id from pri
 delete from private.catalog_merges where source_release_id in (select id from public.releases where product_code = 'AYB-DUP');
 delete from private.catalog_exclusion_copies where exclusion_id in (select e.id from private.catalog_exclusions e join public.releases r on r.id = e.release_id where r.product_code = 'AYB-EXC');
 delete from private.catalog_exclusions where release_id in (select id from public.releases where product_code = 'AYB-EXC');
+delete from private.catalog_verifications where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
+delete from private.catalog_record_origins where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
 delete from public.releases where product_code in ('AYB-DUP', 'AYB-EXC');
 commit;`);
   // The submission and its release, before the accounts, while they still name their submitter.
@@ -643,6 +653,7 @@ commit;`);
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
       + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
       + (select count(*) from private.catalog_merges) + (select count(*) from private.catalog_exclusions)
+      + (select count(*) from private.catalog_record_origins) + (select count(*) from private.catalog_verifications)
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 

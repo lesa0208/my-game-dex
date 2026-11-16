@@ -92,7 +92,7 @@ returns uuid language plpgsql as $$
 declare v uuid;
 begin
   v := public.create_game(p_title, 'game', null, null, p_date, p_precision, 'Search tests');
-  perform public.verify_game(v, 'Search tests', (select revision from public.games where id = v));
+  perform pg_temp.rv_on(); perform public.verify_game(v, 'Search tests', (select revision from public.games where id = v)); perform pg_temp.rv_off();
   insert into ids values (p_name, v);
   return v;
 end $$;
@@ -102,9 +102,9 @@ declare v uuid;
 begin
   v := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = p_platform), p_format, p_region,
     '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}'::jsonb || p_details, 'Search tests');
-  perform public.verify_release(v, 'Search tests', (select revision from public.releases where id = v));
+  perform pg_temp.rv_on(); perform public.verify_release(v, 'Search tests', (select revision from public.releases where id = v)); perform pg_temp.rv_off();
   if p_publish then
-    perform public.publish_release(v, 'Search tests', (select revision from public.releases where id = v));
+    perform pg_temp.rv_on(); perform public.publish_release(v, 'Search tests', (select revision from public.releases where id = v)); perform pg_temp.rv_off();
   end if;
   insert into ids values (p_name, v);
   return v;
@@ -118,6 +118,24 @@ from unnest(array['e1', 'c2', 'b3']) as s;
 update public.profiles set handle = 'srch_' || right(id::text, 2), handle_changed_at = now()
 where id in (select pg_temp.u(s) from unnest(array['e1', 'c2', 'b3']) as s);
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e1'), 'catalog_editor');
+
+-- M10c (D2): nobody verifies or publishes a record they created, so the fixtures'
+-- records are verified and published by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'srch_rv', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as reviewer_ready;
+create function pg_temp.rv_on() returns void language plpgsql as $rv$
+begin
+  perform set_config('test.claims_before_review', coalesce(current_setting('request.jwt.claims', true), ''), true),
+         set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $rv$;
+create function pg_temp.rv_off() returns void language plpgsql as $rv$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_review', true), true);
+end $rv$;
+grant execute on function pg_temp.rv_on(), pg_temp.rv_off() to authenticated, anon;
 
 -- ---------------------------------------------------------------------------
 -- The test catalog, made by the editor

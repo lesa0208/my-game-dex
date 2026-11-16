@@ -113,6 +113,24 @@ where id in (select pg_temp.u(s) from unnest(array['c1', 'c2', 'c3', 'e5', 'e6',
 insert into public.staff_roles (user_id, role) values
   (pg_temp.u('e5'), 'catalog_editor'), (pg_temp.u('e6'), 'catalog_editor'), (pg_temp.u('a7'), 'admin'), (pg_temp.u('e9'), 'catalog_editor');
 
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'ex_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
+
 -- Catalog, made by e5:
 --   g "Exc Copper Coast": us, eu (SNES), nes (its only NES release)
 --   h "Exc Lone Star": lone, its only release
@@ -121,8 +139,10 @@ insert into public.staff_roles (user_id, role) values
 create function pg_temp.release(p_name text, p_game text, p_platform text, p_region text, p_pieces text, p_publish boolean default true) returns void language plpgsql as $$
 declare r uuid;
 begin
+  perform pg_temp.fx_on();
   r := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = p_platform), 'rom-cartridge', p_region,
     format('{"edition_name": "Standard %s", "edition_kind": "standard", "media_count": 1, "product_code": "EXC-%s"}', p_name, upper(p_name))::jsonb, 'Exclusion tests');
+  perform pg_temp.fx_off();
   perform public.set_release_components(r, p_pieces::jsonb, 'Exclusion tests');
   if p_publish then
     perform public.verify_release(r, 'Exclusion tests', (select revision from public.releases where id = r));
@@ -132,7 +152,9 @@ begin
 end $$;
 create function pg_temp.game_of(p_name text, p_title text, p_kind text default 'game') returns void language plpgsql as $$
 begin
+  perform pg_temp.fx_on();
   insert into ids select p_name, public.create_game(p_title, p_kind::public.game_kind, null, null, null, 'unknown', 'Exclusion tests');
+  perform pg_temp.fx_off();
   perform public.verify_game(pg_temp.id(p_name), 'Exclusion tests', (select revision from public.games where id = pg_temp.id(p_name)));
 end $$;
 grant execute on function pg_temp.release(text, text, text, text, text, boolean) to authenticated;
@@ -148,6 +170,9 @@ select pg_temp.release('lone', 'h', 'snes', 'ntsc-uc', '[]');
 select pg_temp.game_of('comp-g', 'Exc Twin Pack', 'compilation');
 select pg_temp.game_of('t', 'Exc Hidden Gem');
 select public.set_game_relation(pg_temp.id('comp-g'), pg_temp.id('t'), 'contains', null, null, 'Exclusion tests');
+-- M10c (D-7): a relation is part of what the games' verification attests, so they're verified again.
+select public.verify_game(pg_temp.id('comp-g'), 'Exclusion tests', (select revision from public.games where id = pg_temp.id('comp-g')));
+select public.verify_game(pg_temp.id('t'), 'Exclusion tests', (select revision from public.games where id = pg_temp.id('t')));
 select pg_temp.release('comp', 'comp-g', 'snes', 'ntsc-uc', '[]');
 select pg_temp.game_of('k', 'Exc Wide Field');
 select pg_temp.release('kr', 'k', 'snes', 'ntsc-uc', '[]');
@@ -346,6 +371,9 @@ select set_config('role', 'authenticated', true);
 select pg_temp.game_of('comp2-g', 'Exc Triple Pack', 'compilation');
 select pg_temp.game_of('t2', 'Exc Quiet Harbor');
 select public.set_game_relation(pg_temp.id('comp2-g'), pg_temp.id('t2'), 'contains', null, null, 'Exclusion tests');
+-- M10c (D-7): a relation is part of what the games' verification attests, so they're verified again.
+select public.verify_game(pg_temp.id('comp2-g'), 'Exclusion tests', (select revision from public.games where id = pg_temp.id('comp2-g')));
+select public.verify_game(pg_temp.id('t2'), 'Exclusion tests', (select revision from public.games where id = pg_temp.id('t2')));
 select pg_temp.release('comp2', 'comp2-g', 'snes', 'pal', '[]');
 select set_config('role', 'none', true);
 update public.games set status = 'published', slug = 'exc-quiet-harbor' where id = pg_temp.id('t2');

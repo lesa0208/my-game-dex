@@ -4,7 +4,7 @@ _Your collection. Your gaming identity._
 
 My Game Dex is a social network and collection manager for physical video game collectors. It combines a community feed, a game catalog and virtual shelves, so that a collection becomes part of a collector's identity online.
 
-**Status:** Phase 1 (frontend foundation) is complete. The Supabase backend is built on the local stack through M8, the Superadmin Foundation, and M10, the admin panel expansion, is in progress (M10a and M10b done). No hosted project exists. The application is English-only.
+**Status:** Phase 1 (frontend foundation) is complete. The Supabase backend is built on the local stack through M8, the Superadmin Foundation, and M10, the admin panel expansion, is in progress (M10a to M10c done). No hosted project exists. The application is English-only.
 
 ## Requirements
 
@@ -58,7 +58,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run app:review-checks` | After a build, test catalog review (the queue, starting, correcting, approving, asking for changes, rejecting and resubmitting) in the running app against the local stack and catalog fixture |
 | `npm run admin:test` | Test the admin and security forms' rules: return paths, inputs, messages and the audit details shown |
 | `npm run records:test` | Test the catalog records' search parameters and how a record's history reads |
+| `npm run editing:test` | Test the catalog editing forms' rules, that their lists match the database, and their messages |
 | `npm run app:admin-checks` | After a build, test `/admin` and Settings → Security in the running app against the local stack: access for each role, the catalog pages and the overview's counts (M10a), catalog search, records and history (M10b), the staff matrix, step-up verification, real TOTP enrollment and removal, the audit log, transfer and recovery, and privacy |
+| `npm run app:editing-checks` | After a build, test catalog editing in the running app against the local stack: who reaches the pages, creating games and releases, no self-review, a change ending a verification, step-up without replay, catalog metadata, and that no page names a creator (M10c) |
 | `npm run app:a11y-checks` | After a build, test `/admin` and Settings → Security in a real browser with JavaScript (Edge, or Chrome; `A11Y_BROWSER=chrome` picks it): access and navigation for each role, TOTP enrollment, step-up without replay, keyboard focus, and axe-core accessibility and sideways scrolling at phone and desktop widths |
 | `npm run db:mutation` | Prove the tests detect real violations, one suite or all (see [Local database](#local-database)) |
 | `npm run mutation:campaign` | Run several mutation suites unattended. `-- --dry-run` checks readiness and runs nothing |
@@ -225,7 +227,7 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 - Search covers the published game catalog only, not collectors
 - My Collection is private: there are no public collections, shelves, valuation, import or bulk editing yet, and the catalog has no cover artwork
 - Missing games and releases can be submitted, and catalog editors review, approve, send back or reject them. Duplicates are merged, out-of-scope releases excluded and restored, and owners relink their own copies (M7b-2), the notifications page isn't built yet, and the review page edits up to 30 listed pieces (the editor function allows 50)
-- Staff work in `/admin`: catalog review, account lookup by handle, staff roles, the audit log and ownership (M8), the overview's counts (M10a), and a search of every catalog record with read-only game and release records and their history (M10b). Catalog editing, read-only reference, import and system views, and account and audit improvements come in M10c to M10e. Bulk operations and analytics aren't planned
+- Staff work in `/admin`: catalog review, account lookup by handle, staff roles, the audit log and ownership (M8), the overview's counts (M10a), a search of every catalog record with game and release records and their history (M10b), and catalog editing: creating, editing, verifying and publishing games and releases, never by the record's own creator, with a recent verification for anything public (M10c). Read-only reference, import and system views, and account and audit improvements come in M10d and M10e. Bulk operations and analytics aren't planned
 - JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show. Adding an authenticator needs JavaScript to show the QR code and setup key
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
 - Dark Mode only. Light Mode isn't supported or offered, and isn't WCAG-conformant: its unused tokens fail color contrast in places (muted navigation labels, destructive buttons, input text on light fields), which `app:a11y-checks` lists as diagnostics. `user_preferences.theme` (M2) accepts `light`, but nothing reads it
@@ -243,7 +245,7 @@ Phase 2 replaces the seed viewer with real accounts:
 4. **Account UI:** the account menu and `getCurrentViewer()` use the real session (M6a). Profile editing and the remaining settings are still to do
 5. **Light mode:** deferred, not planned for the initial release (ADR-056)
 
-Current plan: M10, the admin panel expansion, step by step (M10c to M10e), then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
+Current plan: M10, the admin panel expansion, step by step (M10d and M10e), then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
 
 Later phases:
 

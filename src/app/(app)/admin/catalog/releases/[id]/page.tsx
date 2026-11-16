@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
 import { Facts, HistoryList, RecordSection, StatusBadge } from "@/components/admin/records";
+import { EditNotice, ReviewPanel } from "@/components/admin/review-panel";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -59,6 +60,7 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
     : null;
   const title = r.game?.title ?? "Release record";
   const editable = ["unverified", "under_review", "published"].includes(r.status);
+  const path = `/admin/catalog/releases/${r.id}`;
 
   return (
     <AdminFrame access={access} current="catalog" title={title} titleId="release-record-title">
@@ -68,6 +70,7 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
             Catalog records
           </Link>
         </p>
+        <EditNotice notice={param(search.notice)} />
         <header className="flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">
             Release record · {[r.platform?.name, r.region?.code === "unknown" ? "Region unknown" : r.region?.label, r.format?.name].filter(Boolean).join(" · ")}
@@ -91,7 +94,10 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
             </p>
           ) : null}
           {editable ? (
-            <p className="flex flex-wrap gap-x-4 text-sm">
+            <p className="flex flex-wrap gap-x-4 gap-y-3 text-sm">
+              <Link href={`${path}/edit`} className={linkClass}>
+                Edit the release
+              </Link>
               <Link href={`/admin/catalog/merge/${r.id}`} className={linkClass}>
                 Merge into another release
               </Link>
@@ -101,6 +107,19 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
             </p>
           ) : null}
         </header>
+
+        <ReviewPanel
+          entity="release"
+          id={r.id}
+          status={r.status}
+          revision={r.revision}
+          verified={Boolean(r.verified_at)}
+          review={r.review}
+          submissions={r.submissions}
+          recentMfa={access.recentMfa}
+          admin={access.admin}
+          path={path}
+        />
 
         <RecordSection id="release-details" title="Physical release">
           <Facts

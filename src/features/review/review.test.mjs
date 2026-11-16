@@ -81,8 +81,8 @@ test("a release listing a kind the form can't show isn't offered for editing", (
 });
 
 test("a reason is always typed, never supplied", () => {
-  assert.equal(readReason(form({})).error, "Give a reason for the record. Only editors see it.");
-  assert.equal(readReason(form({ reason: "   " })).error, "Give a reason for the record. Only editors see it.");
+  assert.equal(readReason(form({})).error, "Give a reason for the record. Other catalog staff can see it.");
+  assert.equal(readReason(form({ reason: "   " })).error, "Give a reason for the record. Other catalog staff can see it.");
   assert.equal(readReason(form({ reason: " Matches  the box " })).value, "Matches the box");
   assert.ok("error" in readReason(form({ reason: "x".repeat(501) })));
 });

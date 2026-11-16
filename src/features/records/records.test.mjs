@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { returnPath } from "../admin/form.ts";
-import { FIELD_LABELS, actorLabel, eventSummary, readSearchParams, recordFieldLabel, recordStatusLabel, searchHref } from "./form.ts";
+import { FIELD_LABELS, actorLabel, eventSummary, readSearchParams, recordStatusLabel, searchHref } from "./form.ts";
 
 const migration = readFileSync(new URL("../../../supabase/migrations/20261120100000_m10b_catalog_records.sql", import.meta.url), "utf8");
 

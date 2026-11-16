@@ -193,7 +193,7 @@ async function permissions() {
   }
 }
 
-async function flow(admin, editor) {
+async function flow(admin, editor, reviewer) {
   section("Editing through the API");
   const member = await createUser();
   const game = await createGame(editor, `Catalog checks ${randomBytes(3).toString("hex")}`);
@@ -202,22 +202,27 @@ async function flow(admin, editor) {
   check("anon can't see the unpublished game", (await get(`games?select=id&id=eq.${game}`, anon)).body?.length === 0);
   check("an ordinary user can't see the unpublished release", (await get(`releases?select=id&id=eq.${release}`, member.headers)).body?.length === 0);
   check("the editor can", (await get(`releases?select=id&id=eq.${release}`, editor.headers)).body?.length === 1);
-  check("an editor can't publish an unverified release", refusedWith(await call(editor, "publish_release", { p_release: release, p_reason: "Publish" }), "release not verified"));
-  check("an editor verifies the game", (await call(editor, "verify_game", { p_game: game, p_reason: "Checked" })).body === true);
-  check("and the release", (await call(editor, "verify_release", { p_release: release, p_reason: "Checked" })).body === true);
-  const published = await call(editor, "publish_release", { p_release: release, p_reason: "Publish" });
+  check("an editor can't publish an unverified release", refusedWith(await call(reviewer, "publish_release", { p_release: release, p_reason: "Publish" }), "release not verified"));
+  // M10c (D2): the creator can't verify their own record; another editor does.
+  check("the creator can't verify the game they created", refusedWith(await call(editor, "verify_game", { p_game: game, p_reason: "Checked" }), "own record"));
+  check("another editor verifies the game", (await call(reviewer, "verify_game", { p_game: game, p_reason: "Checked" })).body === true);
+  check("and the release", (await call(reviewer, "verify_release", { p_release: release, p_reason: "Checked" })).body === true);
+  check("the creator can't publish it", refusedWith(await call(editor, "publish_release", { p_release: release, p_reason: "Publish" }), "own record"));
+  const published = await call(reviewer, "publish_release", { p_release: release, p_reason: "Publish" });
   check("then publishes it, and the rules hold at commit", published.ok && published.body === true, published.message);
   const seen = await get(`releases?select=id,status,product_code,release_markets(market_code)&id=eq.${release}`, anon);
   const seenGame = await get(`games?select=slug,status&id=eq.${game}`, anon);
   check("anon sees the release, its markets and its game", seen.ok && seen.body?.[0]?.status === "published" && seen.body[0].release_markets.length === 2 && seenGame.body?.[0]?.status === "published", JSON.stringify(seen.body));
-  // Created twice, markets, verified twice, and published twice: the game with its first release.
-  check("every step was audited", Number(psql(`select count(*) from private.audit_events where actor_id = '${editor.id}' and metadata ->> 'id' in (${q(game)}, ${q(release)});`)) === 7);
+  // Created twice and markets by the editor; verified twice and published twice, the game
+  // with its first release, by the reviewer.
+  check("every step was audited", Number(psql(`select count(*) from private.audit_events where actor_id = '${editor.id}' and metadata ->> 'id' in (${q(game)}, ${q(release)});`)) === 3
+    && Number(psql(`select count(*) from private.audit_events where actor_id = '${reviewer.id}' and metadata ->> 'id' in (${q(game)}, ${q(release)});`)) === 4);
   check("an edit without a reason is refused", refusedWith(await call(editor, "update_game", { p_game: game, p_changes: { summary: "No reason." }, p_reason: null }), "reason required"));
   // An import changes a record between an editor reading it and verifying it.
   const late = await createRelease(editor, game, { ...complete, product_code: "SNS-CT2-USA" });
   const seenRevision = Number(psql(`select revision from public.releases where id = ${q(late)};`));
   const raced = await whileHeld(`update public.releases set publisher_name = 'Filled by an import' where id = ${q(late)};`, () =>
-    call(editor, "verify_release", { p_release: late, p_reason: "Checked", p_expected_revision: seenRevision }));
+    call(reviewer, "verify_release", { p_release: late, p_reason: "Checked", p_expected_revision: seenRevision }));
   check("a verification during an uncommitted change to the record waits for it", raced.waited > 500, `${raced.waited} ms`);
   check("then is refused, because the record changed since it was reviewed", refusedWith(raced.result, "record changed") && psql(`select verified_at is null from public.releases where id = ${q(late)};`) === "t", raced.result.message);
   check("an admin can edit the catalog", (await call(admin, "update_game", { p_game: game, p_changes: { summary: "Checked by an admin." }, p_reason: "Admin correction" })).body === true);
@@ -235,13 +240,31 @@ async function races(admin) {
   let game = await createGame(editorA, `Same identity ${randomBytes(3).toString("hex")}`);
   const first = await createRelease(editorA, game, { ...complete, product_code: "SNS-DUP-USA" });
   const second = await createRelease(editorB, game, { ...complete, product_code: "SNS-DUP-USA" });
-  await call(editorA, "verify_game", { p_game: game, p_reason: "Checked" });
-  await call(editorA, "verify_release", { p_release: first, p_reason: "Checked" });
-  await call(editorB, "verify_release", { p_release: second, p_reason: "Checked" });
-  held = await whileHeld(`${asUserSql(editorA)}\nselect public.publish_release('${first}', 'race', (select revision from public.releases where id = '${first}'));`, () => call(editorB, "publish_release", { p_release: second, p_reason: "race" }));
+  await call(editorB, "verify_game", { p_game: game, p_reason: "Checked" });
+  await call(editorB, "verify_release", { p_release: first, p_reason: "Checked" });
+  await call(editorA, "verify_release", { p_release: second, p_reason: "Checked" });
+  held = await whileHeld(`${asUserSql(editorB)}\nselect public.publish_release('${first}', 'race', (select revision from public.releases where id = '${first}'));`, () => call(editorA, "publish_release", { p_release: second, p_reason: "race" }));
   check("a publication during an uncommitted one of the same game waits for it", held.waited > 500, `${held.waited} ms`);
   check("then fails cleanly on the duplicate identity", !held.result.ok && held.result.code === "23505", `${held.result.status} ${held.result.message}`);
   check("exactly one is published, and the other is untouched", releaseStatus(first) === "published" && releaseStatus(second) === "under_review");
+
+  // M10c (D-7): another editor publishes while the creator's edit is uncommitted. The
+  // publication waits for it, then is refused: the record changed since it was read.
+  const editedGame = await createGame(editorA, `Edited while published ${randomBytes(3).toString("hex")}`);
+  const edited = await createRelease(editorA, editedGame, { ...complete, product_code: "SNS-EDT-USA" });
+  await call(editorB, "verify_game", { p_game: editedGame, p_reason: "Checked" });
+  await call(editorB, "verify_release", { p_release: edited, p_reason: "Checked" });
+  const read = Number(psql(`select revision from public.releases where id = ${q(edited)};`));
+  held = await whileHeld(`${asUserSql(editorA)}\nselect public.update_release('${edited}', '{"publisher_name": "Held edit"}', 'race');`, () =>
+    call(editorB, "publish_release", { p_release: edited, p_reason: "race", p_expected_revision: read }));
+  check("a publication during the creator's uncommitted edit waits for it", held.waited > 500, `${held.waited} ms`);
+  check("then is refused, because the record changed, and nothing is published", refusedWith(held.result, "record changed") && releaseStatus(edited) === "under_review", held.result.message);
+  check("and the edit ended the verification, so it's verified again before it's published", psql(`select verified_at is null from public.releases where id = ${q(edited)};`) === "t");
+  check("verified again", (await call(editorB, "verify_release", { p_release: edited, p_reason: "Checked again" })).body === true);
+  check("the creator still can't publish it", refusedWith(await call(editorA, "publish_release", { p_release: edited, p_reason: "Mine" }), "own record"));
+  const publishedEdit = await call(editorB, "publish_release", { p_release: edited, p_reason: "Published as it is now" });
+  check("the other editor publishes it, as it is now", publishedEdit.body === true && releaseStatus(edited) === "published"
+    && psql(`select publisher_name from public.releases where id = ${q(edited)};`) === "Held edit", publishedEdit.message);
 
   // Revocation and edits, in both orders.
   const revoked = await createUser();
@@ -268,8 +291,8 @@ async function races(admin) {
   // A suspension during a publication.
   const suspended = await createUser();
   await grant(admin, suspended, "catalog_editor");
-  game = await createGame(suspended, `Suspended editor ${randomBytes(3).toString("hex")}`);
-  const pending = await createRelease(suspended, game);
+  game = await createGame(editorA, `Suspended editor ${randomBytes(3).toString("hex")}`);
+  const pending = await createRelease(editorA, game);
   await call(suspended, "verify_game", { p_game: game, p_reason: "Checked" });
   await call(suspended, "verify_release", { p_release: pending, p_reason: "Checked" });
   held = await whileHeld(`${asUserSql(admin)}\nselect public.set_account_status('${suspended.id}', 'suspended', 'race');`, () => call(suspended, "publish_release", { p_release: pending, p_reason: "race" }));
@@ -282,11 +305,11 @@ async function races(admin) {
   const gameB = await createGame(editorB, title);
   const releaseA = await createRelease(editorA, gameA);
   const releaseB = await createRelease(editorB, gameB);
-  for (const [editor, g, r] of [[editorA, gameA, releaseA], [editorB, gameB, releaseB]]) {
+  for (const [editor, g, r] of [[editorB, gameA, releaseA], [editorA, gameB, releaseB]]) {
     await call(editor, "verify_game", { p_game: g, p_reason: "Checked" });
     await call(editor, "verify_release", { p_release: r, p_reason: "Checked" });
   }
-  held = await whileHeld(`${asUserSql(editorA)}\nselect public.publish_release('${releaseA}', 'race', (select revision from public.releases where id = '${releaseA}'));`, () => call(editorB, "publish_release", { p_release: releaseB, p_reason: "race" }));
+  held = await whileHeld(`${asUserSql(editorB)}\nselect public.publish_release('${releaseA}', 'race', (select revision from public.releases where id = '${releaseA}'));`, () => call(editorA, "publish_release", { p_release: releaseB, p_reason: "race" }));
   const slugs = psql(`select string_agg(slug, ',' order by slug) from public.games where id in (${q(gameA)}, ${q(gameB)});`).split(",");
   check("two publications with the same title both succeed", held.result.ok && releaseStatus(releaseA) === "published" && releaseStatus(releaseB) === "published", held.result.message);
   check("with different slugs", slugs.length === 2 && slugs[0] !== slugs[1] && slugs[1] === `${slugs[0]}-2`, slugs.join(" "));
@@ -294,14 +317,25 @@ async function races(admin) {
   // An editor's account deleted through Auth during their edit.
   const leaving = await createUser();
   await grant(admin, leaving, "catalog_editor");
-  game = await createGame(leaving, `Deleted editor ${randomBytes(3).toString("hex")}`);
-  const release = await createRelease(leaving, game);
+  game = await createGame(editorA, `Deleted editor ${randomBytes(3).toString("hex")}`);
+  const release = await createRelease(editorA, game);
   held = await whileHeld(`${asUserSql(leaving)}\nselect public.verify_release('${release}', 'Verified before leaving', (select revision from public.releases where id = '${release}'));`, () =>
     fetch(`${api}/auth/v1/admin/users/${leaving.id}`, { method: "DELETE", headers: service }),
   );
   check("a deletion during the editor's uncommitted edit waits for it", held.waited > 500, `${held.waited} ms`);
   check("then completes, without a deadlock", held.result.ok, `status ${held.result.status}`);
   check("the verification stays, without naming the deleted account", psql(`select (verified_at is not null)::text || '/' || coalesce(verified_by::text, 'none') from public.releases where id = ${q(release)};`) === "true/none");
+
+  // M10c: a creator's account deleted through Auth, which runs as its own role.
+  const creator = await createUser();
+  await grant(admin, creator, "catalog_editor");
+  const made = await createGame(creator, `Deleted creator ${randomBytes(3).toString("hex")}`);
+  check("a record's provenance names its creator", psql(`select origin || '/' || (creator_id = ${q(creator.id)}) from private.catalog_record_origins where game_id = ${q(made)};`) === "staff/true");
+  const gone = await fetch(`${api}/auth/v1/admin/users/${creator.id}`, { method: "DELETE", headers: service });
+  check("the creator's account can be deleted through Auth", gone.ok, `status ${gone.status}`);
+  check("the record keeps that a staff member created it, without their id",
+    psql(`select origin || '/' || coalesce(creator_id::text, 'none') || '/' || creator_removed from private.catalog_record_origins where game_id = ${q(made)};`) === "staff/none/true");
+  check("and another editor can verify it", (await call(editorB, "verify_game", { p_game: made, p_reason: "Checked" })).body === true);
 }
 
 /**
@@ -340,7 +374,9 @@ try {
   makeFirstAdmin(admin);
   const editor = await createUser();
   await grant(admin, editor, "catalog_editor");
-  await flow(admin, editor);
+  const reviewer = await createUser();
+  await grant(admin, reviewer, "catalog_editor");
+  await flow(admin, editor, reviewer);
   await races(admin);
 } catch (error) {
   failed += 1;

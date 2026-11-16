@@ -72,12 +72,32 @@ update public.profiles set handle = 'mp_' || right(id::text, 2), handle_changed_
 where id in (select pg_temp.u(s) from unnest(array['c1', 'c3', 'e5']) s);
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e5'), 'catalog_editor');
 
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'mp_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
+
 -- Catalog, made by e5: g "Mrg Quiet Valley" with pub, dup and old (published, SNES).
 create function pg_temp.release(p_name text, p_game text, p_region text, p_code text) returns void language plpgsql as $$
 declare r uuid;
 begin
+  perform pg_temp.fx_on();
   r := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', p_region,
     format('{"edition_name": "Standard %s", "edition_kind": "standard", "media_count": 1, "product_code": "%s"}', p_name, p_code)::jsonb, 'Merge tests');
+  perform pg_temp.fx_off();
   perform public.set_release_components(r, '[{"kind": "insert", "label": "Manual"}]'::jsonb, 'Merge tests');
   perform public.verify_release(r, 'Merge tests', (select revision from public.releases where id = r));
   perform public.publish_release(r, 'Merge tests', (select revision from public.releases where id = r));
@@ -86,7 +106,9 @@ end $$;
 grant execute on function pg_temp.release(text, text, text, text) to authenticated;
 select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
+select pg_temp.fx_on();
 insert into ids select 'g', public.create_game('Mrg Quiet Valley', 'game', null, null, null, 'unknown', 'Merge tests');
+select pg_temp.fx_off();
 select public.verify_game(pg_temp.id('g'), 'Merge tests', (select revision from public.games where id = pg_temp.id('g')));
 select pg_temp.release('pub', 'g', 'ntsc-uc', 'MRG-PUB');
 select pg_temp.release('dup', 'g', 'pal', 'MRG-DUP');

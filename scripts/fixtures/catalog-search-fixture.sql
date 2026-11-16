@@ -2,8 +2,9 @@
 --
 -- Local only: scripts/catalog-fixture.mjs runs this inside the local database
 -- container, and refuses anything else. Every title is fictional. Records are made
--- through the real editor functions, as a fixture catalog editor, so they are
--- verified and published the way an editor's would be. Cases that need M7 functions
+-- through the real editor functions, as a fixture catalog editor, and verified and
+-- published by a second fixture editor, the reviewer, the way an editor's would be: a
+-- creator never reviews their own record (M10c, D2). Cases that need M7 functions
 -- (merges, exclusions, a rejection) are then set directly.
 --
 -- Idempotent: if the fixture editor exists, nothing happens.
@@ -33,10 +34,28 @@ values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-0000000
 insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
 values (gen_random_uuid(), 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'totp', now(), now());
 
+-- The fixture reviewer, with the same Auth rows.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'authenticated', 'authenticated', 'catalog-fixture-reviewer@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'catalog_fixture_rv', handle_changed_at = now() where id = 'f1c5f1c5-0000-4000-8000-00000000c5c6';
+insert into public.staff_roles (user_id, role) values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'catalog_editor');
+insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'aal2', 'f1c5f1c5-0000-4000-8000-00000000c5c6', now(), now());
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'fixture', 'totp', 'verified', now(), now());
+insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+values (gen_random_uuid(), 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'totp', now(), now());
+
 create temp table fx (name text primary key, id uuid not null);
 grant all on fx to authenticated;
 
 create function pg_temp.fx_id(p text) returns uuid language sql stable as $$ select id from fx where name = p $$;
+
+-- Acts as the fixture editor ('editor') or the reviewer ('reviewer').
+create function pg_temp.fx_as(p text) returns void language sql as $$
+  select set_config('request.jwt.claims', pg_catalog.jsonb_build_object('sub', u, 'role', 'authenticated', 'aal', 'aal2', 'session_id', u)::text, true)
+  from (select case p when 'reviewer' then 'f1c5f1c5-0000-4000-8000-00000000c5c6' else 'f1c5f1c5-0000-4000-8000-00000000c5c5' end as u) x
+$$;
 
 -- A verified game, under review until a release is published.
 create function pg_temp.fx_game(p_name text, p_title text, p_year date, p_precision public.date_precision, p_kind public.game_kind default 'game')
@@ -44,7 +63,9 @@ returns uuid language plpgsql as $$
 declare v uuid;
 begin
   v := public.create_game(p_title, p_kind, null, null, p_year, p_precision, 'Catalog search fixture');
+  perform pg_temp.fx_as('reviewer');
   perform public.verify_game(v, 'Catalog search fixture', (select revision from public.games where id = v));
+  perform pg_temp.fx_as('editor');
   insert into fx values (p_name, v);
   return v;
 end $$;
@@ -65,15 +86,17 @@ begin
   if p_components is not null then
     perform public.set_release_components(v, p_components, 'Catalog search fixture');
   end if;
+  perform pg_temp.fx_as('reviewer');
   perform public.verify_release(v, 'Catalog search fixture', (select revision from public.releases where id = v));
   if p_publish then
     perform public.publish_release(v, 'Catalog search fixture', (select revision from public.releases where id = v));
   end if;
+  perform pg_temp.fx_as('editor');
   insert into fx values (p_name, v);
   return v;
 end $$;
 
-grant execute on function pg_temp.fx_id(text), pg_temp.fx_game(text, text, date, public.date_precision, public.game_kind),
+grant execute on function pg_temp.fx_id(text), pg_temp.fx_as(text), pg_temp.fx_game(text, text, date, public.date_precision, public.game_kind),
   pg_temp.fx_release(text, text, text, text, text, jsonb, text[], jsonb, boolean) to authenticated;
 
 select set_config('request.jwt.claims', '{"sub": "f1c5f1c5-0000-4000-8000-00000000c5c5", "role": "authenticated", "aal": "aal2", "session_id": "f1c5f1c5-0000-4000-8000-00000000c5c5"}', true);
@@ -168,6 +191,10 @@ select pg_temp.fx_release('meadow-r', 'meadow', 'snes', 'rom-cartridge', 'unknow
 select pg_temp.fx_game('hidden', 'Hidden Prototype Quest', '1995-01-01', 'year');
 select pg_temp.fx_release('hidden-r', 'hidden', 'snes', 'rom-cartridge', 'ntsc-uc', '{"product_code": "SNS-HPQE-USA"}', null, null, false);
 select public.add_game_alias(pg_temp.fx_id('hidden'), 'Secret Starfall Quest', 'alternate', null, null, 'Catalog search fixture');
+-- An alias is part of what the verification attests (M10c, D-7), so it's verified again.
+select pg_temp.fx_as('reviewer');
+select public.verify_game(pg_temp.fx_id('hidden'), 'Catalog search fixture', (select revision from public.games where id = pg_temp.fx_id('hidden')));
+select pg_temp.fx_as('editor');
 
 -- Published, then rejected, excluded or merged (below). A published game always has
 -- a published release: the database checks that at commit.

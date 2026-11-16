@@ -76,6 +76,12 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
           Review queue
         </Link>
       </p>
+      <p className="text-sm">
+        <Link href="/admin/catalog/games/new" className={linkClass}>
+          Add a new game
+        </Link>
+        <span className="text-muted-foreground"> · search first, so it isn&apos;t added twice. Releases are added from their game&apos;s record.</span>
+      </p>
       <div role="search" aria-label="Catalog records">
         <form method="get" action="/admin/catalog/search" className="grid gap-3 sm:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">

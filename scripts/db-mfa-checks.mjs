@@ -15,7 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { decodeClaims, elevate, totp } from "./lib/mfa-session.mjs";
+import { decodeClaims, elevate, reverify, totp } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -346,6 +346,61 @@ try {
     check("the full audit log is still administrators' only", refused(await rpc(editorAal2.access_token, "get_audit_events", { p_limit: 5 })));
     psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
     check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })));
+  }
+
+  section("8. Catalog editing over the API: the creator and a recent verification (M10c)");
+  {
+    const failedWith = (r, message) => r.status >= 400 && r.body?.message === message;
+    const revision = (table, id) => Number(psql(`select revision from public.${table} where id = '${id}';`));
+    /** Makes a session's TOTP verification 11 minutes old. Only postgres can age the claim like this. */
+    const age = (session) => psql(`update auth.mfa_amr_claims set updated_at = now() - interval '11 minutes' where session_id = '${decodeClaims(session.access_token).session_id}';`);
+    const creator = await createUser("catalog_editor");
+    const creatorAal2 = await elevate(api, anonKey, await signIn(creator));
+    const other = await createUser("catalog_editor");
+    const otherAal2 = await elevate(api, anonKey, await signIn(other));
+    const title = `${PREFIX} edited ${randomBytes(3).toString("hex")}`;
+    const game = (await rpc(creatorAal2.access_token, "create_game", { p_title: title, p_kind: "game", p_reason: "Editing checks" })).body;
+    const snes = psql("select id from public.platforms where slug = 'snes';");
+    const release = (await rpc(creatorAal2.access_token, "create_release", {
+      p_game: game, p_platform: snes, p_media_format_code: "rom-cartridge", p_region_code: "ntsc-uc",
+      p_details: { edition_name: "Standard", edition_kind: "standard", media_count: 1, product_code: `MF-${randomBytes(3).toString("hex")}` }, p_reason: "Editing checks",
+    })).body;
+    check("an editor creates a game and a release over the API", /^[0-9a-f-]{36}$/.test(game ?? "") && /^[0-9a-f-]{36}$/.test(release ?? ""));
+    const anonCreate = await fetch(`${api}/rest/v1/rpc/create_game`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_title: "x", p_kind: "game", p_reason: "x" }) });
+    check("anon is refused by PostgreSQL itself", anonCreate.status === 401);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    check("a collector at aal2 can't verify", refused(await rpc(collectorAal2.access_token, "verify_game", { p_game: game, p_reason: "x", p_expected_revision: revision("games", game) })));
+    check("the creator can't verify their game", failedWith(await rpc(creatorAal2.access_token, "verify_game", { p_game: game, p_reason: "Mine", p_expected_revision: revision("games", game) }), "own record"));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    const adminGame = (await rpc(adminAal2.access_token, "create_game", { p_title: `${PREFIX} admin ${randomBytes(3).toString("hex")}`, p_kind: "game", p_reason: "Editing checks" })).body;
+    check("nor can an administrator verify their own", failedWith(await rpc(adminAal2.access_token, "verify_game", { p_game: adminGame, p_reason: "Mine", p_expected_revision: revision("games", adminGame) }), "own record"));
+    age(otherAal2);
+    check("another editor with a verification 11 minutes old is asked to verify again",
+      failedWith(await rpc(otherAal2.access_token, "verify_game", { p_game: game, p_reason: "Checked", p_expected_revision: revision("games", game) }), "reauthentication required")
+      && psql(`select verified_at is null from public.games where id = '${game}';`) === "t");
+    check("while editing an unpublished game needs only the live session",
+      (await rpc(otherAal2.access_token, "update_game", { p_game: game, p_changes: { summary: "Described." }, p_reason: "Editing checks" })).body === true);
+    const fresh = await reverify(api, anonKey, otherAal2);
+    check("with a recent verification, the other editor verifies the game and the release",
+      (await rpc(fresh.access_token, "verify_game", { p_game: game, p_reason: "Checked", p_expected_revision: revision("games", game) })).body === true
+      && (await rpc(fresh.access_token, "verify_release", { p_release: release, p_reason: "Checked", p_expected_revision: revision("releases", release) })).body === true);
+    check("the creator can't publish it", failedWith(await rpc(creatorAal2.access_token, "publish_release", { p_release: release, p_reason: "Mine", p_expected_revision: revision("releases", release) }), "own record"));
+    check("the other editor publishes it, with its game",
+      (await rpc(fresh.access_token, "publish_release", { p_release: release, p_reason: "Ready", p_expected_revision: revision("releases", release) })).body === true
+      && psql(`select status from public.games where id = '${game}';`) === "published");
+    age(fresh);
+    check("editing the published release then needs a recent verification again",
+      failedWith(await rpc(fresh.access_token, "update_release", { p_release: release, p_changes: { packaging: "Box" }, p_reason: "Editing checks" }), "reauthentication required")
+      && psql(`select packaging is null from public.releases where id = '${release}';`) === "t");
+    const asCreator = (await rpc(creatorAal2.access_token, "get_release_record", { p_release: release })).body?.review;
+    const asOther = (await rpc(fresh.access_token, "get_release_record", { p_release: release })).body?.review;
+    check("the record tells each only what they did themselves", asCreator?.you_created === true && asCreator?.you_verified === false && asOther?.you_created === false && asOther?.you_verified === true);
+    const reviewText = JSON.stringify([asCreator, asOther]);
+    check("and names nobody", ![creator.id, other.id, creator.email, other.email].some((x) => reviewText.includes(x)));
+    check("no client can reach provenance", !(await fetch(`${api}/rest/v1/catalog_record_origins?select=id`, { headers: { ...asUser(creatorAal2.access_token), "Accept-Profile": "private" } })).ok);
+    psql(`delete from public.releases where game_id in ('${game}', '${adminGame}');`);
   }
 } catch (error) {
   check("the checks ran to the end", false, error.message);

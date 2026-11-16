@@ -93,7 +93,7 @@ export function MergeForm({
       <Field id="merge-owner-note" label="Note to owners (optional)" hint={`Shown to the submitter. Up to ${OWNER_NOTE_MAX.toLocaleString("en")} characters.`}>
         <textarea id="merge-owner-note" name="owner_note" maxLength={OWNER_NOTE_MAX} rows={3} aria-describedby="merge-owner-note-hint" className={cn(selectClassName, "h-auto py-2")} />
       </Field>
-      <Field id="merge-reason" label="Reason, for the record" hint="Kept in the audit log. Only staff see it.">
+      <Field id="merge-reason" label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
         <Input id="merge-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="merge-reason-hint" className="h-10" />
       </Field>
       <div>

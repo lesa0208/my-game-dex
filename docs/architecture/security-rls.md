@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8, M10a and M10b are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10c are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -944,9 +944,11 @@ The catalog is written only by catalog editors and administrators, through audit
 | `publish_release` | Needs a verified release, at the revision the editor reviewed (M5b), and a verified game. Publishes the game and its platform pairing in the same transaction, if they aren't yet |
 | `set_catalog_field_lock` | Locks or unlocks a field against imports |
 
-**Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited.
+**Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited. Since M10c, never a record they created ([D2](#no-self-review-d2)), and verifying and publishing need a recent TOTP verification ([D3](#recent-mfa-for-catalog-work-d3)).
 
 **Verification isn't publication.** Verifying records that an editor has checked a record's identity. Publishing makes it public, and requires that verification. Editing an identity field of an unpublished record clears its verification, because what was checked has changed. For a game that's the title, kind and first release date. For a release it's the region and its confirmation, edition name and kind, variant, packaging, product code, barcode, format, medium count and components. Descriptive fields, such as the summary, publisher, release date, languages, ratings, markets and hardware requirements, keep the verification. Editing a published record keeps it published and verified. There's no unpublishing in M5: a trigger refuses it even for the owner. Merging and exclusion come in M7.
+
+**Since M10c (D-7),** any change to an unpublished, verified record ends its verification, descriptive fields and aliases and relations too, and publication needs a verification of the record as it is ([details](#a-verification-is-bound-to-its-revision-d-7)).
 
 **Reviewed revisions (M5b).** Every content change to a game or release, including an import filling an empty field and any change to a release's markets, components or hardware requirements, raises its `revision`. `verify_game`, `verify_release` and `publish_release` take the revision the editor reviewed, and refuse with `record changed` if it moved on. The check is made after the row is locked, so a change committed while the call waited is seen. Verifying doesn't change the revision. Clients can read `revision` but never write it, and a direct write can only raise it by one.
 
@@ -1439,7 +1441,7 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | Section | Path | Who |
 | --- | --- | --- |
 | Overview, with counts for each role ([M10a](#the-admin-overview-m10a)) | `/admin` | Any staff |
-| Catalog: review, exclusion and merge, and search, records and history ([M10b](#catalog-records-and-history-m10b)) | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
+| Catalog: review, exclusion and merge, search, records and history ([M10b](#catalog-records-and-history-m10b)), and editing ([M10c](#catalog-editing-provenance-and-no-self-review-m10c)) | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
 | Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
 | Staff | `/admin/staff` | Administrators |
 | Audit log | `/admin/audit` | Administrators |
@@ -1514,6 +1516,70 @@ History is a view of `private.audit_events` built from two allow-lists, so a new
 - **The full audit log stays administrators' only** (`get_audit_events`), unchanged.
 
 **Tests.** `36_catalog_records` covers the grants, every refusal, search (unpublished records, filters, bounds, cursors), the fields of each record and what they leave out, and history: unrelated actions, other records and another record kind sharing an id, the allowed details, actors, reasons and paging, including more than a page of games and events. `db-mfa-checks` section 7 checks the same over the API with real sessions, and that the public reads are unchanged. `app:admin-checks` section 12 and `app:a11y-checks` cover the pages, the latter with a real merge and a real exclusion opened in a browser. The 20 `m10b` mutations prove the tests catch each weakening.
+
+## Catalog editing, provenance and no self-review (M10c)
+
+Catalog editors create, edit, verify and publish games and physical releases in `/admin`, with the M5 editing functions, and nobody verifies or publishes a record they created (decision D2). Verifying, publishing and changing published content need a recent TOTP verification (D3), and a verification counts only for the revision it attested (D-7). Migration `20261121100000` ([ADR-059](architecture-decisions.md#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)).
+
+### Who created a record
+
+Every game and release has one row in `private.catalog_record_origins`, written by an `AFTER INSERT` trigger in the same transaction as the record, from what the database itself knows about the session:
+
+| Origin | When | Creator |
+| --- | --- | --- |
+| `staff` | A signed-in staff member with the catalog role, through any function | Their account |
+| `submission` | A signed-in member's own submission: the row's `submitted_by` is the caller | Their account |
+| `import` | The importer's own login role, with no signed-in user | None |
+| `system` | Any other session: migrations, operators, tests | None |
+| `unknown` | Written only by the M10c backfill, for a record with no evidence | None |
+
+- **No client can pass as the importer or the system.** A client session (`authenticated`, `anon`, `service_role`) is the signed-in caller, and must be the staff member or the submitter; anything else is refused with `not permitted`, whatever function inserted the row. `authenticator`, `anon`, `authenticated` and `service_role` aren't members of `catalog_importer`.
+- **Nothing can change it.** The table has no grants to any client role or to the importer, and is in the private schema. A trigger refuses every update and delete, the table owner's included, except the two below.
+- **A deleted creator.** Deleting the account clears `creator_id` through its foreign key and marks `creator_removed`, so the row still says a person created it. Only that change is allowed, and only once their profile is gone. No copy of their id or anything else about them is kept here; the audit log keeps its plain ids, as for every account, under the same undecided retention (M4-D10). A new account is never recognized as the same person. Account deletion keeps working: the trigger is `SECURITY DEFINER`, as Auth deletes accounts as its own role.
+- **A deleted record** takes its row with it (maintenance only; catalog records aren't deleted).
+- **Legacy records.** The backfill classifies each record from the evidence, in this order: the review request that created it (a submission), then the audit row of its creation (a staff member, or the importer with its run), else `unknown`. A creator whose profile is gone is recorded as removed. Unknown is never guessed to be an import or the system. `private.legacy_catalog_origin()` does the classifying, and `37_catalog_provenance` tests it on crafted records.
+
+### No self-review (D2)
+
+The M7b-1 guard on `games` and `releases`, `private.guard_submitted_record()`, runs on every update. When a signed-in caller verifies a record, or makes it published:
+
+- **Never its creator,** whatever their role: an administrator or the Owner too. `own record`. This covers a game published with one of its releases: someone else's release can't be published by the game's creator.
+- **Unknown or missing provenance fails closed:** only an administrator may verify or publish the record (`provenance unknown`), and not the same administrator who verified it (`independent review required`). Their verification and publication are audited with `provenance: unknown`.
+- **A first publication** (from unverified or in review) needs a verifier who's known and isn't the creator (`verification required`), so a record its creator verified before M10c is verified again by someone else. A restoration from an exclusion isn't a first publication; `restore_exclusion` checks its own rules.
+- **Submissions keep their rules** (`own submission`, `review required`).
+- **Merging and excluding** (D-4): `merge_release` refuses either release, or either release's game, created by the caller; `exclude_release` and `restore_exclusion` refuse the release, or a game it takes with it or brings back. `own record`.
+
+### Recent MFA for catalog work (D3)
+
+Each function asks first, before its own checks, with `private.require_recent_mfa()`: a live aal2 session (M8b) and a TOTP verification in the last 10 minutes, or `reauthentication required`.
+
+| Operation | Recent TOTP verification |
+| --- | --- |
+| `verify_game`, `verify_release`, `publish_release` (and the game and pairing it publishes), `approve_submission` | Always |
+| `update_game`, `update_release`, `set_release_markets`, `set_release_components`, `set_release_requirements` | When the record is published |
+| `add_game_alias`, `remove_game_alias` | When the game is published |
+| `set_game_relation` | When both games are published |
+| `exclude_release` (D-5) | When the release is published |
+| `restore_exclusion` (D-5) | When it brings anything back as published |
+| `merge_release` | A published merge (M8d) |
+| `create_game`, `create_release`, `set_game_platform`, field locks, starting a review, asking for changes, rejecting, `resolve_catalog_review`, and the edits above on unpublished records | A live session only |
+
+**Behind the functions (D-8).** The guard refuses any client verification or publication of a game or release without a recent TOTP verification, and a trigger on `game_platforms` refuses a client publication of a pairing. So a function that forgets the check, or calls another, can't verify or publish anything.
+
+**In the app.** A form that needs a recent verification is shown only after one; otherwise the page links to the verification page, which comes back to it. If the verification expires while a form is open, the action changes nothing and the editor is sent to verify; the typed reason is kept in that browser tab only (`sessionStorage`) and put back in the form. Nothing is submitted for them: they check the record, whose revision the page reads again, and submit. Without JavaScript the form goes straight to verification.
+
+### A verification is bound to its revision (D-7)
+
+- **Kept with its revision.** `private.catalog_verifications` keeps each record's verification with the revision it attested, written by a trigger from the record row itself, under its row lock. No client role can read or write it.
+- **A change ends it.** Any change to an unpublished, verified record ends its verification, through the M5b revision trigger: its fields, and its markets, pieces, hardware (M5b), aliases and relations (M10c). Edits report `verification_cleared` in their audit row. The descriptive fields that used to keep a verification no longer do.
+- **Publication checks it.** A release, and a game published with it, must have a verification of the revision it has, or `verification stale`. A status change (a review, an exclusion) raises the revision without ending the verification, so the record is verified again before it's published. A stale verification is replaced by verifying again; a current one returns false.
+- **Distinct verifications.** Each is timed with the statement's own clock, so two in one transaction are distinct.
+
+### What editors see
+
+The game and release records (M10b) add `review`: how the record came to exist (`staff`, `submission`, `import`, `system` or `unknown`), whether the caller created it or verified it, and whether its verification is current. They name nobody. Reason fields everywhere history shows their reasons say "Visible to other catalog staff." The exclusion and restoration reasons, which history never shows, keep "Only staff see it."
+
+**Tests.** `37_catalog_provenance` covers provenance from each origin and from the definer path, its immutability and the account-deletion case, every self-review refusal with no administrator bypass, indirect publication, legacy and unknown provenance and the backfill's classification, merges and exclusions, the stale-MFA matrix with each function asking first, the trigger backstops, and revision binding. `db-mfa-checks` section 8 checks the creator rule, the recent verification and the review flags over the API with real sessions, and `db-catalog-checks` adds a creator and a verifier deleted through Auth, and a publication racing the creator's uncommitted edit. `app:editing-checks` drives the editing pages, including step-up without replay, and `app:a11y-checks` opens them in a browser. The 20 `m10c` mutations prove the tests catch each weakening.
 
 ## Production launch prerequisites (M8)
 

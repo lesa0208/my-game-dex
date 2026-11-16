@@ -180,25 +180,27 @@ const deadlocked = (result) => /deadlock/i.test(result?.err ?? "");
 const errorOf = (result) => /ERROR:\s+([^\n]+)/.exec(result?.err ?? "")?.[1] ?? "";
 
 // ---------------------------------------------------------------------------
-// Catalog records, made by an editor through the M5 functions
+// Catalog records, made by one editor through the M5 functions and verified and
+// published by another: nobody reviews, or excludes, a record they created (M10c).
 // ---------------------------------------------------------------------------
 const PREFIX = `Exx ${randomBytes(3).toString("hex")}`;
 let editor;
+let maker;
 let reviewer;
 let admin;
 let admin2;
 const snes = () => psql("select id from public.platforms where slug = 'snes';");
 function makeGame(title) {
-  return sqlAs(editor.id, `select g from public.create_game('${PREFIX} ${title}', 'game', null, null, null, 'unknown', 'Exclusion checks') g;
-    select public.verify_game(g.id, 'Exclusion checks', g.revision) from public.games g where g.title = '${PREFIX} ${title}';
+  sqlAs(maker.id, `select g from public.create_game('${PREFIX} ${title}', 'game', null, null, null, 'unknown', 'Exclusion checks') g;`);
+  return sqlAs(editor.id, `select public.verify_game(g.id, 'Exclusion checks', g.revision) from public.games g where g.title = '${PREFIX} ${title}';
     select id from public.games where title = '${PREFIX} ${title}';`);
 }
 let codes = 0;
 function makeRelease(game, region = "ntsc-uc") {
   codes += 1;
   const code = `EXX-${codes}-${randomBytes(2).toString("hex")}`;
-  return sqlAs(editor.id, `select public.create_release('${game}', '${snes()}', 'rom-cartridge', '${region}', '{"edition_name": "${code}", "edition_kind": "standard", "media_count": 1, "product_code": "${code}"}', 'Exclusion checks');
-    select public.verify_release(r.id, 'Exclusion checks', r.revision) from public.releases r where r.product_code = '${code}';
+  sqlAs(maker.id, `select public.create_release('${game}', '${snes()}', 'rom-cartridge', '${region}', '{"edition_name": "${code}", "edition_kind": "standard", "media_count": 1, "product_code": "${code}"}', 'Exclusion checks');`);
+  return sqlAs(editor.id, `select public.verify_release(r.id, 'Exclusion checks', r.revision) from public.releases r where r.product_code = '${code}';
     select public.publish_release(r.id, 'Exclusion checks', r.revision) from public.releases r where r.product_code = '${code}';
     select id from public.releases where product_code = '${code}';`);
 }
@@ -252,6 +254,7 @@ const c = new Session("excl_c");
 const d = new Session("excl_d");
 try {
   editor = await createUser("catalog_editor");
+  maker = await createUser("catalog_editor");
   reviewer = await createUser("catalog_editor");
   admin = await createUser("admin");
   admin2 = await createUser("admin");

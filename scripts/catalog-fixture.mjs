@@ -18,6 +18,8 @@ const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
 const container = `supabase_db_${projectId}`;
 export const FIXTURE_EDITOR = "f1c5f1c5-0000-4000-8000-00000000c5c5";
+/** Verifies and publishes what the fixture editor creates (M10c, D2). */
+export const FIXTURE_REVIEWER = "f1c5f1c5-0000-4000-8000-00000000c5c6";
 
 function assertLocal() {
   let status;
@@ -45,7 +47,7 @@ export function installFixture() {
 }
 
 /**
- * Removes everything the fixture made: its records, its audit rows and its editor.
+ * Removes everything the fixture made: its records, its audit rows and its editors.
  * Local copies of its fictional releases (M6) are removed first, because a copy keeps
  * its release from being deleted.
  */
@@ -60,11 +62,11 @@ delete from public.releases where game_id in (select id from fx_games) and merge
 delete from public.releases where game_id in (select id from fx_games);
 delete from public.games where id in (select id from fx_games) and merged_into_id is not null;
 delete from public.games where id in (select id from fx_games);
-delete from public.staff_roles where user_id = '${FIXTURE_EDITOR}';
-delete from auth.users where id = '${FIXTURE_EDITOR}';
-delete from private.handle_holds where kind = 'released' and handle = 'catalog_fixture';
+delete from public.staff_roles where user_id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}');
+delete from auth.users where id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}');
+delete from private.handle_holds where kind = 'released' and handle in ('catalog_fixture', 'catalog_fixture_rv');
 set local session_replication_role = replica;
-delete from private.audit_events where actor_id = '${FIXTURE_EDITOR}' or reason = 'Catalog search fixture';
+delete from private.audit_events where actor_id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}') or reason = 'Catalog search fixture';
 commit;`);
   return "Catalog search fixture removed.";
 }

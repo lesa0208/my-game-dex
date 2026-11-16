@@ -224,7 +224,7 @@ select is(pg_temp.as_user('c5', 'select count(*)::text from public.games where t
 -- 3. Records
 -- ---------------------------------------------------------------------------
 select is(pg_temp.keys(pg_temp.j('e4', format('select public.get_game_record(%L)::text', pg_temp.id('g')))),
-  'aliases,created_at,external_references,field_locks,first_release,id,kind,merged_into,platforms,relations,release_count,releases,revision,slug,sort_title,status,submissions,summary,title,updated_at,verified_at',
+  'aliases,created_at,external_references,field_locks,first_release,id,kind,merged_into,platforms,relations,release_count,releases,review,revision,slug,sort_title,status,submissions,summary,title,updated_at,verified_at',
   'a game record has exactly its fields');
 select is((select string_agg(e ->> 'title', ',') from jsonb_array_elements(pg_temp.j('e4', format('select public.get_game_record(%L)::text', pg_temp.id('g'))) -> 'aliases') e),
   'Recfix Aurora', 'with its alias');
@@ -241,7 +241,7 @@ select is(position(pg_temp.u('b8')::text in pg_temp.j('e4', format('select publi
   + position('rec_b8' in pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('sr')))::text), 0,
   'neither record of a submission names the submitter');
 select is(pg_temp.keys(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r')))),
-  'components,created_at,edition,evidence,exclusions,external_references,field_locks,format,game,id,identifiers,languages,local_title,markets,media_count,media_playability,merged_into,merged_publicly,merges,packaging,pairing_status,platform,publisher_name,rating_labels,region,region_unknown_confirmed,release_date,requirements,revision,status,submissions,updated_at,variant_name,verified_at',
+  'components,created_at,edition,evidence,exclusions,external_references,field_locks,format,game,id,identifiers,languages,local_title,markets,media_count,media_playability,merged_into,merged_publicly,merges,packaging,pairing_status,platform,publisher_name,rating_labels,region,region_unknown_confirmed,release_date,requirements,review,revision,status,submissions,updated_at,variant_name,verified_at',
   'a release record has exactly its fields');
 select is(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r'))) -> 'field_locks' -> 0 ->> 'field', 'edition_name', 'with its locked field');
 select is(pg_temp.keys(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r'))) -> 'field_locks' -> 0), 'field,locked_at',

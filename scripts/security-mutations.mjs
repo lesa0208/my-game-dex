@@ -850,4 +850,44 @@ export const m10bMutations = [
   sql("a cursor works with any search", "pgtap", rewrite(RECORDS_SEARCH, "if v_cursor ->> 0 is distinct from v_hash or c_sort is null", "if c_sort is null")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations };
+// M10c: creator provenance and no self-review (D2, D-1 to D-4), recent MFA for
+// sensitive catalog work (D3, D-5, D-6, D-8) and revision-bound verification (D-7).
+const M10C_ORIGIN = "private.record_catalog_origin()";
+const M10C_ORIGIN_GUARD = "private.guard_catalog_record_origin()";
+const M10C_REVIEW_GUARD = "private.guard_submitted_record()";
+const M10C_REVISION = "private.bump_catalog_revision()";
+const M10C_EDIT_RELEASE = "public.update_release(uuid, jsonb, text)";
+const M10C_VERIFY_RELEASE = "public.verify_release(uuid, text, bigint)";
+const M10C_PUBLISH = "public.publish_release(uuid, text, bigint)";
+const M10C_APPROVE = "public.approve_submission(uuid, integer, bigint, bigint, text, text)";
+const M10C_EXCLUDE = "public.exclude_release(uuid, text, text, text, text, boolean, boolean)";
+const M10C_MERGE = "public.merge_release(uuid, uuid, text, text, text, text[], boolean)";
+const M10C_FIRST_FRESH = "  perform private.require_recent_mfa();\n  v_reason := private.require_reason(p_reason);";
+export const m10cMutations = [
+  // Provenance, recorded from trusted context and never changed
+  sql("a game's provenance isn't recorded", "both", "alter table public.games disable trigger record_catalog_origin;"),
+  sql("any signed-in client counts as staff", "pgtap", rewrite(M10C_ORIGIN, "elsif private.has_staff_role('catalog_editor') then", "elsif true then")),
+  sql("provenance can be rewritten", "pgtap", "drop trigger guard_catalog_record_origin on private.catalog_record_origins;"),
+  sql("clients can read provenance", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_record_origins to authenticated;"),
+  sql("provenance blocks deleting the creator's account", "both", rewrite(M10C_ORIGIN_GUARD, "  if old.creator_id is not null and new.creator_id is null\n", "  if false and old.creator_id is not null and new.creator_id is null\n")),
+  // No self-review, with no administrator bypass
+  sql("the creator may verify and publish", "both", rewrite(M10C_REVIEW_GUARD, "if v_me is not null and v_origin.creator_id = v_me then", "if false then")),
+  sql("the creator rule covers releases only", "both", rewrite(M10C_REVIEW_GUARD, "if v_me is not null and v_origin.creator_id = v_me then", "if v_release and v_me is not null and v_origin.creator_id = v_me then")),
+  sql("the creator's own verification counts", "pgtap", rewrite(M10C_REVIEW_GUARD, "if old.verified_by is null or old.verified_by is not distinct from v_origin.creator_id then", "if old.verified_by is null then")),
+  sql("unknown provenance needs no administrator", "pgtap", rewrite(M10C_REVIEW_GUARD, "if v_unknown and not private.has_staff_role('admin') then", "if false then")),
+  sql("one administrator verifies and publishes unknown provenance", "pgtap", rewrite(M10C_REVIEW_GUARD, "if v_unknown and old.verified_by = v_me then", "if false then")),
+  sql("the creator merges their own release", "pgtap", rewrite(M10C_MERGE, "  if private.created_by(v_me, array[p_source, p_target],", "  if false and private.created_by(v_me, array[p_source, p_target],")),
+  sql("the creator excludes their own release", "pgtap", rewrite(M10C_EXCLUDE, "  if private.created_by(v_me, array[p_release], private.cascade_games(v_plan -> 'cascade')) then", "  if false then")),
+  // A TOTP verification in the last 10 minutes
+  sql("verifying a release asks for no recent verification first", "pgtap", rewrite(M10C_VERIFY_RELEASE, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("publishing asks for no recent verification first", "pgtap", rewrite(M10C_PUBLISH, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("approving asks for no recent verification first", "pgtap", rewrite(M10C_APPROVE, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("editing a published release needs no recent verification", "pgtap", rewrite(M10C_EDIT_RELEASE, "  if v_status = 'published' then\n    perform private.require_recent_mfa();", "  if false then\n    perform private.require_recent_mfa();")),
+  sql("excluding a published release needs no recent verification", "pgtap", rewrite(M10C_EXCLUDE, "  if rel.status = 'published' then\n    perform private.require_recent_mfa();", "  if false then\n    perform private.require_recent_mfa();")),
+  sql("the guard's recent-verification backstop is gone", "pgtap", rewrite(M10C_REVIEW_GUARD, "      if not private.mfa_recent(interval '10 minutes') then", "      if false then")),
+  // A verification is bound to the revision it attested
+  sql("an edit keeps the verification", "both", rewrite(M10C_REVISION, "      new.verified_at := null;\n      new.verified_by := null;", "      null;")),
+  sql("publication ignores the verified revision", "pgtap", rewrite(M10C_REVIEW_GUARD, "        if not private.verification_current(v_kind, new.id, old.revision, old.verified_at) then", "        if false then")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations };

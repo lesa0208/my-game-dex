@@ -77,6 +77,13 @@ export type SourceReference = { provider: string; external_id: string };
 export type FieldLock = { field: string; locked_at: string };
 export type LinkedSubmission = { id: string; kind: string; status: string; created_at: string };
 
+/**
+ * What the caller may do with a record (M10c), naming nobody: how it came to exist,
+ * whether the caller created or verified it, and whether its verification matches the
+ * record as it is.
+ */
+export type RecordReview = { origin: "staff" | "submission" | "import" | "system" | "unknown"; you_created: boolean; you_verified: boolean; verification_current: boolean };
+
 export type GameRecord = {
   id: string;
   slug: string | null;
@@ -88,10 +95,11 @@ export type GameRecord = {
   status: string;
   verified_at: string | null;
   revision: number;
+  review: RecordReview;
   created_at: string;
   updated_at: string;
   merged_into: { id: string; title: string; status: string } | null;
-  aliases: { title: string; kind: string; language_code: string | null; region_code: string | null }[];
+  aliases: { id: string; title: string; kind: string; language_code: string | null; region_code: string | null }[];
   platforms: (Platform & { status: string })[];
   relations: { direction: "outgoing" | "incoming"; relation: string; position: number | null; game: { id: string; title: string; status: string } }[];
   release_count: number;
@@ -125,6 +133,7 @@ export type ReleaseRecord = {
   status: string;
   verified_at: string | null;
   revision: number;
+  review: RecordReview;
   merged_publicly: boolean;
   created_at: string;
   updated_at: string;

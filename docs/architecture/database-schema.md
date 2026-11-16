@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8, M10a and M10b are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10c are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 
@@ -1567,6 +1567,43 @@ Fields an editor has fixed. Imports never overwrite them. Editors set and clear 
 - **Foreign keys:** `game_id` and `release_id` on delete cascade; `locked_by` → `public.profiles(id)` on delete set null
 - **Unique:** `NULLS NOT DISTINCT (game_id, release_id, field_name)`
 - **Timestamps:** `locked_at`
+
+### `catalog_record_origins`
+
+How each game and release came to exist, and who created it (M10c, D2). Written only by an insert trigger on `games` and `releases`, from the session; nothing changes or removes a row, except the cases below. No client role or the importer has any privilege on it ([security-rls.md](security-rls.md#who-created-a-record)).
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` | No | UUID v7 |
+| `game_id` | `uuid` | Yes | Exactly one of these two |
+| `release_id` | `uuid` | Yes | |
+| `origin` | `text` | No | `staff`, `submission`, `import`, `system`, or `unknown` (the M10c backfill only) |
+| `creator_id` | `uuid` | Yes | For `staff` and `submission`, while the creator's account exists |
+| `creator_removed` | `boolean` | No | Set when the creator's account was deleted. Default `false` |
+
+- **Primary key:** `id`
+- **Foreign keys:** `game_id` → `games(id)` and `release_id` → `releases(id)`, each on delete cascade; `creator_id` → `profiles(id)` on delete set null, which also sets `creator_removed`
+- **Unique:** `game_id`; `release_id`
+- **Checks:** exactly one record; for `staff` and `submission`, either a creator or a removed one; for the others, neither
+- **Index:** `creator_id`, where not null
+- **Trigger:** `guard_catalog_record_origin` refuses every update but clearing a deleted creator, and every delete but its record's own
+- **Timestamps:** `recorded_at`, the record's creation time for backfilled rows
+
+### `catalog_verifications`
+
+The verification each game and release holds, with the revision it attested (M10c, D-7). Written by a trigger on `games` and `releases` when a verification is set or ends; publication needs one that matches the record's revision. No client role or the importer has any privilege on it.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` | No | UUID v7 |
+| `game_id` | `uuid` | Yes | Exactly one of these two |
+| `release_id` | `uuid` | Yes | |
+| `revision` | `bigint` | No | The record's revision when it was verified |
+| `verified_at` | `timestamptz` | No | The record's `verified_at` |
+
+- **Primary key:** `id`
+- **Foreign keys:** `game_id` → `games(id)` and `release_id` → `releases(id)`, each on delete cascade
+- **Unique:** `game_id`; `release_id`
 
 ---
 

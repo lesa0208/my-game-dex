@@ -72,16 +72,40 @@ from unnest(array['a1', 'a2', 'e5']) as s;
 update public.profiles set handle = 'imp_' || right(id::text, 2), handle_changed_at = now() where id in (pg_temp.u('a1'), pg_temp.u('a2'), pg_temp.u('e5'));
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e5'), 'catalog_editor');
 
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'imp_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
+
 -- Published and editor-made games, which imports keep matching.
 select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
+select pg_temp.fx_on();
 insert into ids select 'pub', public.create_game('Zqp Harbor Run', 'game', null, null, null, 'unknown', 'Import privacy tests');
+select pg_temp.fx_off();
 select public.verify_game(pg_temp.id('pub'), 'Import privacy tests', (select revision from public.games where id = pg_temp.id('pub')));
+select pg_temp.fx_on();
 insert into ids select 'pub-r', public.create_release(pg_temp.id('pub'), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
   '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "ZQP-PUB"}', 'Import privacy tests');
+select pg_temp.fx_off();
 select public.verify_release(pg_temp.id('pub-r'), 'Import privacy tests', (select revision from public.releases where id = pg_temp.id('pub-r')));
 select public.publish_release(pg_temp.id('pub-r'), 'Import privacy tests', (select revision from public.releases where id = pg_temp.id('pub-r')));
+select pg_temp.fx_on();
 insert into ids select 'draft', public.create_game('Zqp Editor Draft', 'game', null, null, null, 'unknown', 'Import privacy tests');
+select pg_temp.fx_off();
 select public.set_game_platform(pg_temp.id('draft'), (select id from public.platforms where slug = 'snes'), 'Import privacy tests');
 select set_config('role', 'none', true);
 

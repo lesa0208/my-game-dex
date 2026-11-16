@@ -36,11 +36,13 @@
     "merge:test": "node --experimental-strip-types --no-warnings --test src/features/merge/merge.test.mjs",
     "admin:test": "node --experimental-strip-types --no-warnings --test src/features/admin/admin.test.mjs",
     "records:test": "node --experimental-strip-types --no-warnings --test src/features/records/records.test.mjs",
+    "editing:test": "node --experimental-strip-types --no-warnings --test src/features/editing/editing.test.mjs",
     "app:review-checks": "node scripts/app-review-checks.mjs",
     "app:relink-checks": "node scripts/app-relink-checks.mjs",
     "app:exclusion-checks": "node scripts/app-exclusion-checks.mjs",
     "app:merge-checks": "node scripts/app-merge-checks.mjs",
     "app:admin-checks": "node scripts/app-admin-checks.mjs",
+    "app:editing-checks": "node scripts/app-editing-checks.mjs",
     "app:a11y-checks": "node scripts/app-a11y-checks.mjs",
     "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs",
     "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs"

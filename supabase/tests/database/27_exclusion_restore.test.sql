@@ -109,11 +109,31 @@ where id in (select pg_temp.u(s) from unnest(array['c1', 'c2', 'c3', 'e5', 'e6',
 insert into public.staff_roles (user_id, role) values
   (pg_temp.u('e5'), 'catalog_editor'), (pg_temp.u('e6'), 'catalog_editor'), (pg_temp.u('a7'), 'admin'), (pg_temp.u('a8'), 'admin');
 
+-- M10c (D2): nobody verifies, publishes, excludes or merges a record they created, so
+-- the fixtures' records are created by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'rs_fx', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as fixture_editor_ready;
+create function pg_temp.fx_on() returns void language plpgsql as $fx$
+begin
+  perform set_config('test.claims_before_fixture', coalesce(current_setting('request.jwt.claims', true), ''), true);
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $fx$;
+create function pg_temp.fx_off() returns void language plpgsql as $fx$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_fixture', true), true);
+end $fx$;
+grant execute on function pg_temp.fx_on(), pg_temp.fx_off() to authenticated, anon;
+
 create function pg_temp.release(p_name text, p_game text, p_platform text, p_region text, p_pieces text) returns void language plpgsql as $$
 declare r uuid;
 begin
+  perform pg_temp.fx_on();
   r := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = p_platform), 'rom-cartridge', p_region,
     format('{"edition_name": "Standard %s", "edition_kind": "standard", "media_count": 1, "product_code": "RST-%s"}', p_name, upper(p_name))::jsonb, 'Restore tests');
+  perform pg_temp.fx_off();
   perform public.set_release_components(r, p_pieces::jsonb, 'Restore tests');
   perform public.verify_release(r, 'Restore tests', (select revision from public.releases where id = r));
   perform public.publish_release(r, 'Restore tests', (select revision from public.releases where id = r));
@@ -121,7 +141,9 @@ begin
 end $$;
 create function pg_temp.game_of(p_name text, p_title text) returns void language plpgsql as $$
 begin
+  perform pg_temp.fx_on();
   insert into ids select p_name, public.create_game(p_title, 'game', null, null, null, 'unknown', 'Restore tests');
+  perform pg_temp.fx_off();
   perform public.verify_game(pg_temp.id(p_name), 'Restore tests', (select revision from public.games where id = pg_temp.id(p_name)));
 end $$;
 grant execute on function pg_temp.release(text, text, text, text, text) to authenticated;

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
 import { Facts, HistoryList, RecordSection, StatusBadge } from "@/components/admin/records";
+import { editable, EditNotice, ReviewPanel } from "@/components/admin/review-panel";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -46,6 +47,7 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
   const g = outcome.data;
   if (!g) notFound();
   const kind = gameKindLabel(g.kind as "game" | "compilation" | "expansion");
+  const path = `/admin/catalog/games/${g.id}`;
 
   return (
     <AdminFrame access={access} current="catalog" title={g.title} titleId="game-record-title">
@@ -55,6 +57,7 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
             Catalog records
           </Link>
         </p>
+        <EditNotice notice={param(search.notice)} />
         <header className="flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">Game record{kind ? ` · ${kind}` : ""}</p>
           <p className="flex flex-wrap items-center gap-2 text-sm">
@@ -75,7 +78,30 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
               ({recordStatusLabel(g.merged_into.status)}).
             </p>
           ) : null}
+          {editable(g.status) ? (
+            <p className="flex flex-wrap gap-x-4 gap-y-3 text-sm">
+              <Link href={`${path}/edit`} className={linkClass}>
+                Edit the game
+              </Link>
+              <Link href={`/admin/catalog/releases/new?game=${g.id}`} className={linkClass}>
+                Add a physical release
+              </Link>
+            </p>
+          ) : null}
         </header>
+
+        <ReviewPanel
+          entity="game"
+          id={g.id}
+          status={g.status}
+          revision={g.revision}
+          verified={Boolean(g.verified_at)}
+          review={g.review}
+          submissions={g.submissions}
+          recentMfa={access.recentMfa}
+          admin={access.admin}
+          path={path}
+        />
 
         <RecordSection id="game-details" title="Details">
           <Facts
