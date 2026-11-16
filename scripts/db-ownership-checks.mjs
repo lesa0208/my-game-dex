@@ -414,8 +414,21 @@ try {
     check("the Owner names a successor over the API", bodyOutcome(result) === "changed" && psql("select successor_id from private.platform_owner;") === target.id, bodyOutcome(result));
     result = await rpc(owner.session.access_token, "register_succession_document", { p_fingerprint: randomBytes(32).toString("hex"), p_reason: "Signed document" });
     check("and registers the succession document", bodyOutcome(result) === "changed", bodyOutcome(result));
-    const anon = await post("/rest/v1/rpc/accept_ownership_transfer", { apikey: anonKey, "Content-Type": "application/json" }, { p_transfer: randomUUID() });
-    check("anon has no EXECUTE on the transfer functions", anon.status === 401 || anon.status === 403 || anon.status === 404, `status ${anon.status}`);
+    // Anon must be stopped by PostgreSQL's EXECUTE check, before the function runs. A
+    // wrong grant would still be refused by the function's own staff check, with the same
+    // 401 and 42501, so only the message tells the two apart: "permission denied for
+    // function <name>" from PostgreSQL, "not permitted" from require_active_staff.
+    for (const [name, args] of [
+      ["start_ownership_transfer", { p_to: randomUUID(), p_reason: "x" }],
+      ["accept_ownership_transfer", { p_transfer: randomUUID() }],
+      ["cancel_ownership_transfer", { p_transfer: randomUUID(), p_reason: "x" }],
+    ]) {
+      const response = await post(`/rest/v1/rpc/${name}`, { apikey: anonKey, "Content-Type": "application/json" }, args);
+      const body = await response.json().catch(() => ({}));
+      check(`anon has no EXECUTE on ${name}: PostgreSQL refuses before the function runs`,
+        response.status === 401 && body.code === "42501" && body.message === `permission denied for function ${name}`,
+        `${response.status} ${body.code} ${body.message}`);
+    }
   }
 } catch (error) {
   check("the checks ran to the end", false, error.message);
