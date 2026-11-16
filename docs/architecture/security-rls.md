@@ -74,7 +74,7 @@ These are accepted for M0 and stay open until each is resolved:
 | `anon` | Signed-out visitors | Publishable | No |
 | `authenticated` | Signed-in users | Publishable + user session | No |
 | `service_role` | Server jobs only | Secret | **Yes** |
-| Staff | Signed-in users with a `staff_roles` row | Publishable + user session | No |
+| Staff | Signed-in users with a `staff_roles` row, in a live session verified with a TOTP factor (M8) | Publishable + user session | No |
 | `catalog_importer` | The operator's import tool only (M5b). A database login, never an API key | Its own password, set per environment | No. It has no table privileges at all |
 
 - Staff are normal `authenticated` users, and read policies check `staff_roles`. **Grants apply per role, not per user, so a column grant can't let staff write what users can't.** All staff writes therefore go through functions that check `private.require_active_staff()` and record a `private.audit_events` row in the same transaction, which also guarantees every staff change is audited. See [Staff actions](#staff-actions). Wherever this document says "Staff" or "Catalog staff" under writes, it means through those functions.
@@ -89,8 +89,10 @@ These live in the `private` schema, which the Data API doesn't expose. They use 
 | Function | Returns true when |
 | --- | --- |
 | `private.is_active_user()` | Caller has `account_status = 'active'`, a claimed handle and a verified email |
-| `private.has_staff_role(role)` | Caller holds that role, or `admin`. Doesn't check the account, so staff functions use `require_active_staff` |
-| `private.require_active_staff(role)` | Raises `not permitted` unless the caller holds the role and is active, verified and has a handle (M4) |
+| `private.has_staff_role(role)` | Caller holds that role, or `admin`, **and since M8 is in a live session verified with a TOTP factor** (`mfa_session_ok()`). Doesn't check the account, so staff functions use `require_active_staff` |
+| `private.require_active_staff(role)` | Raises `not permitted` unless the caller holds the role, through `has_staff_role`, and is active, verified and has a handle (M4) |
+| `private.mfa_session_ok()`, `private.require_mfa()`, `private.require_recent_mfa()` | The live MFA checks (M8). See [MFA for staff](#mfa-for-staff-m8) |
+| `private.is_designated_owner(user)`, `private.owner_authority_refusal()` | Owner identity and Owner eligibility, kept apart (M8). See [The Owner](#the-owner-m8) |
 | `private.is_accepted_follower(owner)` | Caller has an **accepted** follow of `owner`, and caller's own account is active |
 | `private.is_blocked_between(other)` | A block exists in either direction |
 | `private.can_view_level(owner, level)` | Caller is the owner; or `owner` is active, no block exists, and `level` allows it. The core rule. Never reads staff status |
@@ -652,7 +654,8 @@ No single layer covers everything. The last column lists what the database can't
 | No box-only or manual-only items | No enum value expresses it. `media_condition` can't be `not_included` | | | Declaration when adding an item |
 | Medium really holds game data | `media_format_code` required, physical formats only, with a `CHECK` backstop | Users can't approve | One approval function | **Editorial only.** Editors follow written guidelines (A3), and unclear cases stay in review |
 | Medium is really present | | | | **User's declaration only.** Can't be verified |
-| Staff actions are authorized and audited | | Protected columns have no client grant | Functions check for active staff and write `private.audit_events` in the same transaction | Limit who holds roles and owner credentials |
+| Staff actions are authorized and audited | | Protected columns have no client grant | Functions check for active staff in a live verified session, recent MFA and the M8 matrix, and write `private.audit_events` in the same transaction | Limit who holds roles and owner credentials |
+| The Owner can't be removed or bypassed (M8) | `platform_owner` singleton, foreign key `on delete restrict` | No client privilege on any Owner table | Protection triggers keyed on designated ownership. Owner authority needs two mature factors | No rule outside the staff matrix mentions the Owner. Recovery by the runbook only |
 | Only staff approve the catalog | `status` constraints | `status` has no client grant | One approval function | |
 | Public queries and search exclude invalid records | Search indexes are partial on `published` | Read policies on `status` | | Jobs using the secret key filter on status |
 | Provider imports exclude invalid records | | Provider data has no client access | Matching skips excluded records | Adapters drop digital-only data |
@@ -745,8 +748,8 @@ The app signs users in with `@supabase/ssr` and `@supabase/supabase-js`, followi
 | Account | `getCurrentViewer()` reads `get_my_account()` (M2) as the user, so account status and handle come from the database on every request, not from the token |
 | Cookies | `sb-<ref>-auth-token`, possibly in chunks: `httpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` in production builds. `httpOnly` works only because no browser client exists. Adding one would need it removed |
 | Keys | `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are server-only variables, never `NEXT_PUBLIC_`. No secret key is used. `npm run secrets:bundle` checks the browser bundles |
-| Protected pages | `/collection`, `/profile`, `/settings` and `/welcome`. The proxy redirects signed-out visitors as an early check. Each page checks again with `requireViewer()` or `requireViewerWithHandle()`, which send an account without a handle to `/welcome` |
-| Server Actions | Sign-in, sign-out and the handle claim. Each reads the session itself, and Next.js refuses an action posted from another origin. They return only fixed messages, and on success call `refresh()` so the browser doesn't reuse pages rendered before the change. That refreshes only the client router, not server caches |
+| Protected pages | `/collection`, `/profile`, `/settings`, `/welcome` and, since M8, `/admin`. The proxy redirects signed-out visitors as an early check. Each page checks again with `requireViewer()` or `requireViewerWithHandle()`, which send an account without a handle to `/welcome` |
+| Server Actions | Sign-in, sign-out and the handle claim. Since M8, sign-in continues to `/settings/security/verify` when the account has a verified TOTP factor; see [MFA for staff](#mfa-for-staff-m8). Each reads the session itself, and Next.js refuses an action posted from another origin. They return only fixed messages, and on success call `refresh()` so the browser doesn't reuse pages rendered before the change. That refreshes only the client router, not server caches |
 | Refresh cost | Only an access token within 90 seconds of expiry is refreshed. Otherwise `getClaims()` verifies the signature against keys cached for 10 minutes per server process, so ordinary requests make no Auth call and write no cookies. Static files and images skip the proxy |
 | Redirects | `safeNextPath()` accepts only a path on this site. Absolute URLs, `//host`, backslashes, control characters and over-long values fall back to `/home` |
 | Caching | Session reads call `connection()` first, so they're never prerendered, prefetched or cached. Nothing per-user is in `'use cache'`, `'use cache: private'` or a shared cache |
@@ -802,6 +805,8 @@ Registration stays closed. `enable_signup = true` applies to the local stack onl
 
 ## Staff actions
 
+**M8 changed this section's rules.** Since M8, staff need a live verified session and a verification in the last 10 minutes; these functions return `jsonb` instead of `boolean`; only the Owner grants or revokes `admin`, which replaces the last-administrator rule; and refused attempts are audited. [Staff authority (M8)](#staff-authority-m8) is current. What follows describes M4, and still holds for locking, reasons, suspension and `READ COMMITTED`.
+
 Staff are ordinary `authenticated` users. Every staff change goes through one of these functions, which check the caller, make the change and write an audit row in one transaction. A call that changes nothing returns `false` and records nothing.
 
 | Function | Caller | Rules |
@@ -843,7 +848,8 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 | `id` | UUIDv7, so ordering by id follows insertion time, to the millisecond. Not a guaranteed commit order |
 | `occurred_at` | When the transaction started, not when the change committed |
 | `actor_id` | Staff member. Null for an operator working in SQL |
-| `action` | `staff_role_granted`, `staff_role_revoked`, `account_suspended`, `account_reinstated`, `operator_action` |
+| `action` | `staff_role_granted`, `staff_role_revoked`, `account_suspended`, `account_reinstated`, `operator_action`, and the catalog actions of M5 to M7. M8 adds the Owner's: `owner_assigned`, `owner_recovery_started`, `owner_recovery_confirmed`, `owner_recovery_cancelled`, `owner_recovery_completed`, `owner_status_set_by_operator`, `ownership_transfer_started`, `ownership_transfer_accepted`, `ownership_transfer_cancelled`, `owner_successor_set`, `owner_succession_registered`, and the refusals `owner_protection_refused` and `staff_change_refused` |
+| `outcome` | Since M8, generated from the action: `refused` for the two refusals, `operator` for operator steps (actor null), `succeeded` otherwise. Generated, so no row is rewritten |
 | `target_profile_id` | |
 | `reason` | Required |
 | `metadata` | Before and after values, such as `{"from": "active", "to": "suspended"}`. At most 2 KB |
@@ -858,11 +864,11 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 
 So the log is append-only for application and API roles, not immutable.
 
-**Every staff change is audited, or doesn't happen.** The audit row is written in the same transaction, and a failed write rolls the change back. A refused call rolls back too, so refusals aren't logged. Logging them would need a separate connection, and is left to the API layer.
+**Every staff change is audited, or doesn't happen.** The audit row is written in the same transaction, and a failed write rolls the change back. In M4, a refused call rolled back too, so refusals weren't logged. **Since M8, a refusal of verified staff is returned instead of raised,** and commits with its audit row and nothing else, rate-limited to one row per actor, action, target and code every 10 minutes ([Staff authority](#staff-authority-m8)). What still isn't logged: errors (not signed in, no MFA, invalid input), refusals by triggers, which must raise and leave only a server log line, suppressed repeats, and anything done directly by `postgres` or a superuser.
 
 **Neither timestamps nor ids guarantee commit order.** This matters most when transactions run concurrently. `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written. For staff functions that happens under the staff lock, so the id usually follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. A row the owner writes directly, without the lock, has no ordering guarantee at all. In the stress tests, id order always matched commit order, but that's an observation, not a guarantee. Don't treat either column as commit order. A strict order would need a sequence column, which can be added if audits ever need one.
 
-**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names.
+**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names. Since M8d, `get_audit_events` looks up the current handles of actor and target when read, so a deleted account shows none.
 
 **Retention is undecided (M4-D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
 
@@ -1113,7 +1119,7 @@ Withdrawn requests are kept too, and a user can't delete their own submission hi
 
 Catalog editors review submissions: they start a review, correct the records, then approve (verify and publish), ask for changes or reject. A submitter answers requested changes, and may resubmit a rejected submission. Merging, exclusion, restoration and relinking copies come with M7b-2.
 
-**Who.** Active catalog editors and administrators only, through `private.begin_catalog_edit()` like every M5a editor function: the shared staff lock, the active-role check, then the caller's profile. Visitors, collectors, moderators, suspended or revoked editors and `service_role` can't review. The app's `/review` pages show anyone else the same unavailable page as an address that doesn't exist, and only editors see what the page is.
+**Who.** Active catalog editors and administrators only, through `private.begin_catalog_edit()` like every M5a editor function: the shared staff lock, the active-role check, then the caller's profile. Visitors, collectors, moderators, suspended or revoked editors and `service_role` can't review. The app's review pages (`/review` until M8d, now `/admin/catalog`) show anyone else the same unavailable page as an address that doesn't exist, and only editors see what the page is.
 
 **Functions.** All `SECURITY DEFINER` with an empty `search_path`, executable by `authenticated` only, and checking the role themselves. The review record still has no client grant.
 
@@ -1295,11 +1301,199 @@ The third part of M7b-2, approved with decisions D1 to D15 and the M7b-2c safegu
 
 **Retention.** Merge records keep staff ids, the staff reason and the note to owners, and the submission's fields before keep a reviewer's id after their account is deleted, as the audit log does. A moved copy's row goes with the copy. Nothing is deleted by age; the retention policy is still a production-launch blocker (A2, D10, M4-D10).
 
+## The Owner (M8)
+
+M8, the Superadmin Foundation, approved with decisions D1 to D19 (cited in M8 code and documents without a prefix; see [ADR-055](architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure)). Migrations: `20261116100000_m8a_owner_types.sql`, `20261116100100_m8a_owner.sql`, `20261116200000_m8b_mfa.sql`, `20261117100000_m8c_staff_authority.sql` and `20261118100000_m8d_admin.sql`. The operator procedures are in the [Owner recovery and succession runbook](../operations/owner-recovery-runbook.md).
+
+**The Owner is a record, not a role (D1).** `private.platform_owner` has at most one row: its key can only be `true`. Once assigned, it can't be deleted or truncated, and the account it names changes only inside a transfer or a recovery, which set a transaction-local flag that the row's trigger requires. Every change of hands increases its `version`. There's no `owner` value in `staff_role`, and nothing reads ownership from a token or metadata. No API role has any privilege on the table.
+
+**Identity is separate from eligibility (A1).**
+
+| Helper | True when | Used for |
+| --- | --- | --- |
+| `private.is_designated_owner(user)` | The Owner record names this account. Nothing else is checked | Every protection |
+| `private.owner_authority_refusal()` | Returns null when the caller is the designated Owner, in good standing, in a live verified session, with **two mature TOTP factors**, no recovery pending and a verification in the last 10 minutes. Otherwise the reason: `owner_only`, `mfa_required`, `owner_ineligible`, `recovery_pending` or `reauthentication_required` | Only to allow Owner-only actions |
+| `private.can_exercise_owner_authority()` | `owner_authority_refusal()` is null | The same |
+| `private.account_standing(user)` | Returns null when the Auth user exists, isn't soft-deleted or banned, has a verified email, and the profile is active with a handle. Otherwise why not, including `auth_contract_broken` | Eligibility, transfer and recovery targets |
+
+**Losing eligibility never removes protection.** An Owner who lost a factor, was suspended by an operator, or whose Auth account is damaged is still fully protected. Owner authority returns only when every condition holds again. While one factor and a live verified session remain, the Owner keeps the ordinary administrator abilities, and can enroll a replacement, which then matures for 24 hours (D13).
+
+**Protections (D12), all keyed on designated ownership:**
+
+| Layer | What it refuses |
+| --- | --- |
+| `protect_owner_profile` trigger on `profiles` | Deleting the Owner's profile by any path: the Auth Admin API, the cascade from `auth.users`, or SQL. Also truncating `profiles`. Otherwise it closes the deleted account's pending transfers and recoveries |
+| `platform_owner.user_id` foreign key, `on delete restrict` | The same deletion, even with user triggers disabled |
+| `protect_owner_status` trigger | Changing the Owner's `account_status`, except through `private.operator_set_owner_status`. Nobody can suspend the Owner from the app, the Owner included |
+| `protect_owner_admin_role` trigger on `staff_roles` | Removing or changing the Owner's administrator role, and truncating `staff_roles` while an Owner exists |
+| `public.account_deletion_blocked(user)` | Checked by the server's account deletion, for `service_role` only, before anything (storage included) is touched |
+| `private.owner_integrity()` | Reports anything wrong, for operators and tests. It returns findings rather than failing, even if Auth's tables change |
+| The staff functions | Refuse any change to the Owner with `owner_protected`, audited as `owner_protection_refused` |
+
+The layers are tested in `30_owner.test.sql` and `scripts/db-owner-checks.mjs`, through each supported deletion path: Auth's Admin API, SQL on `auth.users` and `profiles`, the server's account deletion, and truncation. Each layer has its own mutation in the `m8` suite, so each is shown to matter on its own.
+
+**What these protections don't cover:** `postgres` and superusers can disable triggers or use replica mode. The foreign key still holds against a disabled user trigger, but not against someone who drops it. See [Infrastructure limitations](../operations/owner-recovery-runbook.md#infrastructure-limitations).
+
+**Assignment (D2)** is an operator step, `private.assign_initial_owner(handle, approval)`, executable by `postgres` only. It refuses when an Owner exists, when the account isn't in good standing, or with fewer than two verified TOTP factors. It grants `admin` if needed and writes `owner_assigned`. There's no endpoint, no automatic Owner, and no hidden second Owner. No real Owner has been assigned. Tests assign a temporary one on the local stack only, through `scripts/lib/test-owner.mjs`, which refuses unless the API is on loopback, and remove it after.
+
+**Ownership transfer (D5)** is two steps, both in `/admin/ownership`:
+1. The Owner, with Owner authority, offers ownership to another administrator in good standing with two verified factors (`start_ownership_transfer`). One transfer can be pending at a time. It expires after 72 hours.
+2. The target accepts within 72 hours, from a session verified in the last 10 minutes (`accept_ownership_transfer`). Everything is checked again under the locks: still pending and unexpired, offered by the current Owner, no recovery pending, and the target still eligible. Ownership moves, and the successor and succession document are cleared. **The previous Owner stays an administrator.**
+
+The Owner cancels with a fresh verification; the target declines from a verified session (`cancel_ownership_transfer`). A pending transfer is cancelled when its target is suspended, loses the administrator role or is deleted, or when a recovery starts, each audited. Ownership is never in a token: every check reads `platform_owner` under the staff lock, so a previous Owner's session gains nothing after a transfer.
+
+**Succession (D14, D6a).** The Owner may designate another administrator in good standing as successor (`set_owner_successor`). It's visible to every administrator and gives nothing; it's cleared if they lose the administrator role. The Owner may also register the SHA-256 fingerprint of a signed succession document kept outside the database by two custodians (`register_succession_document`). Administrators see only whether one is registered. Both need Owner authority and a fresh verification.
+
+**Recovery (D6, D17).** Opened and completed by an operator in SQL after a 72-hour hold, during which Owner authority is frozen and every protection holds. One recovery can be pending at a time, and opening it cancels a pending transfer.
+
+| Kind | What completion does |
+| --- | --- |
+| `factor_reset` | Nothing to ownership. The operator may then remove the Owner's factors through the Auth Admin API, and the Owner enrolls new ones, which mature for 24 hours |
+| `reassign` | Needs the target's confirmation in the app with a fresh verification (`confirm_owner_recovery`), their good standing and two verified factors, and a matching succession fingerprint if one is registered. Moves ownership, grants the target `admin`, **removes the previous Owner's administrator role** (D6c) and clears the successor and fingerprint, in one transaction |
+
+The designated Owner may cancel a pending recovery in the app (`cancel_owner_recovery`) with a fresh verification and good standing, without full Owner authority, so a real Owner who lost a factor can stop a takeover (D6b). After such a cancellation, an operator may open a **disputed** recovery within 30 days, which only an operator can cancel, so a compromised session can't block recovery indefinitely. The runbook has the dispute procedure.
+
+**Lock order**, shared by every staff, transfer and recovery function: `lock_staff_changes()`, then profiles `FOR KEY SHARE` in id order, then `platform_owner` `FOR UPDATE`, then the transfer or recovery row. `scripts/db-ownership-checks.mjs` forces the races with held-open transactions: two transfers started at once; an acceptance against a cancellation, against the target's admin role being revoked, against their suspension and against their account deletion; recoveries meeting transfers; and concurrent refusals, recorded once. It also checks authority live: a stale session of the previous Owner, factor changes and freshness. `scripts/db-owner-checks.mjs` races two assignments, and an assignment against the candidate's deletion. Exactly one Owner exists in every committed state.
+
+## MFA for staff (M8)
+
+**Staff privileges exist only in a live, verified session (D3, D16).** `private.has_staff_role()` now also requires `private.mfa_session_ok()`, so every staff check needs it: `require_active_staff` (every staff function), the catalog editors' read policies, `can_review_submissions` and `is_catalog_editor`. Without it, a staff member has an ordinary user's access.
+
+**The token alone isn't trusted.** A token keeps claiming `aal2` after sign-out or factor removal until it expires (local finding F5). So `mfa_session_ok()` requires all of:
+- the token's `aal` is `aal2`, and its `session_id` names a session that still exists for the caller;
+- that session is `aal2` in `auth.sessions` and hasn't passed `not_after`;
+- the factor that verified the session (`sessions.factor_id`) still exists, verified, and is a TOTP factor of the caller.
+
+**Fresh MFA for sensitive actions.** `private.require_recent_mfa()` raises `reauthentication required` unless this session verified a TOTP code in the last 10 minutes, by Auth's live claim row (`auth.mfa_amr_claims.updated_at`). A refreshed token never extends it (F2), and a time more than 60 seconds ahead of the database is refused. It's required by every staff-management, transfer, succession and recovery function, and **by `merge_release` for a published source** (M8d), so direct API calls can't skip it.
+
+**Factor maturity (D13).** A factor counts toward Owner authority 24 hours after it's first registered, never earlier than its verification. `auth.mfa_factors.created_at` records enrollment, not verification (preflight finding B2), so maturity uses our own ledger:
+
+- `private.mfa_factor_registrations` holds one row per verified factor: its id, its user, Auth's `created_at`, and `registered_at`.
+- The only writer is `public.register_my_verified_factors()`. It takes **no arguments**, needs a live verified session, and records the caller's verified factors not yet recorded, at the database's `now()`. The app calls it after every verification. If it fails, the factor stays unregistered, and counts for nothing until a later verification registers it.
+- `private.mature_totp_factor_count(user)` counts a factor only if it's still verified in Auth, registered for that user with the same `created_at`, and registered at least 24 hours ago.
+
+**The backdating review (M8d requirement 3).** Verified, with a test for each point:
+
+| Claim | Evidence |
+| --- | --- |
+| No app-reachable function accepts a client timestamp | `register_my_verified_factors()` has no parameters, and inserts `now()`. A call with a timestamp gets 404 or 400 from the API (`db-mfa-checks`). No other function writes the ledger (`34_admin`) |
+| Clients can't insert, update, delete or backdate registrations | No API role has any privilege on the table, and REST inserts, updates and deletes are refused, as `service_role` too |
+| The ledger is immutable through app paths | A trigger refuses every update, even by `postgres`. No function deletes rows: they go only with their profile, by the foreign key's cascade. `postgres` could still delete or insert directly, as with any table; see the [infrastructure limitations](../operations/owner-recovery-runbook.md#infrastructure-limitations) |
+| Migrations don't write it with an earlier time | Only the M8b migration inserts, using `now()` with no interval, and no migration updates or deletes it (`db-mfa-checks` scans them) |
+| Backdating helpers are never deployed | The test helpers that mature factors are Node scripts in `scripts/lib/test-owner.mjs`, never database functions. They refuse unless the API is on loopback |
+| The database decides the 24 hours | A factor registered 23 hours 59 minutes ago doesn't count; 24 hours 1 minute ago does (`34_admin`) |
+| Removed, unverified or replaced factors don't qualify | An unverified factor, a removed one, a different factor under a reused id, and a registration in another user's name all count as zero (`32_mfa`, `34_admin`) |
+
+**Settings → Security** (`/settings/security`), for every signed-in user:
+- **Add an authenticator:** Supabase Auth's TOTP enrollment (`auth.mfa.enroll`) shows a QR code and the setup key, once, in that response only. Verifying the first code (`challengeAndVerify`) registers the factor. **Showing the QR code and key needs JavaScript:** without it, Next.js doesn't render the action's result. Someone who scanned the code but left before entering it finishes from the "Finish setting up" form, which works without JavaScript.
+- **Each factor** shows whether it's verified and when it matures (`get_my_factor_status()`), never its secret.
+- **Remove** needs a confirmation box. Staff can't remove their last verified factor from the app, because that would end their staff access. Auth itself allows it, and the result fails closed.
+- **Verification** (`/settings/security/verify?next=`): signing in with a password redirects here when the account has a verified factor. Staff at `aal1` opening `/admin` are sent here first. A sensitive action refused with `reauthentication required` sends the member here, then **back to the page they were on, where they submit again: nothing is replayed.** The `next` path must be an `/admin` or `/settings` path.
+
+**The GoTrue dependency (D16).** The checks read `auth.sessions`, `auth.mfa_factors` and `auth.mfa_amr_claims` through `SECURITY DEFINER` functions owned by `postgres`, which has `SELECT` on them. Nothing writes to `auth`, and no client can read those tables. Each helper catches a changed schema (`undefined_column`, `undefined_table`, `undefined_object`) and fails closed: staff are refused with `not permitted`, and the server log gets a `mygamedex: auth schema contract broken` line. `31_auth_contract.test.sql` asserts the columns read and the privileges. **Run it, and `npm run db:verify`, before any Supabase CLI or hosted upgrade.**
+
+**Known limits:**
+- **TOTP replay (F4).** GoTrue accepted the same code twice within one 30-second window. Someone who already holds a session and captures a code can replay it for about 30 seconds. It doesn't defeat the 10-minute window. There's no custom TOTP implementation.
+- **No recovery codes (F9).** This Auth version refuses the `recovery_code` factor type, so the second authenticator is the backup.
+- **Hosted TOTP isn't configured.** `[auth.mfa.totp]` is enabled in the local `config.toml` only (D19).
+
+## Staff authority (M8)
+
+**The matrix (D4, D7), enforced in the staff functions and nowhere else:**
+
+| Action | Who |
+| --- | --- |
+| Grant or revoke `admin` | The Owner, with Owner authority |
+| Grant or revoke `catalog_editor` or `moderator` | Any administrator, the Owner included |
+| Suspend or reinstate an administrator | The Owner, with Owner authority |
+| Suspend or reinstate a catalog editor or moderator | Any administrator |
+| Suspend or reinstate an account with no role | Any moderator or administrator |
+| Any change to the Owner | Nobody: `owner_protected` |
+| Any change to oneself | Nobody: `self_change` |
+
+Every one of these needs a verification in the last 10 minutes. The Owner gains nothing else: **no collection, purchase-data, catalog, review or no-self-review rule mentions the Owner.** `34_admin` and `app:admin-checks` confirm the Owner can't read another member's copy or its purchase details through the API.
+
+**The result contract (D9, D15).** `grant_staff_role`, `revoke_staff_role` and `set_account_status` returned `boolean` before M8c. They now return `jsonb`, like every M8 function the app calls:
+
+| Outcome | Response | Written |
+| --- | --- | --- |
+| Success | `{"ok": true, "result": "changed" \| "unchanged", "audit_id": "<uuid>" \| null}` | The change and its audit row, together. `unchanged` writes nothing |
+| Refusal of verified staff | `{"ok": false, "refusal": "<code>", "audit_id": "<uuid>" \| null}` | **Only** the refusal's audit row. `audit_id` is null when the same refusal was recorded in the last 10 minutes |
+| Error | `42501` 'not permitted', `P0001` 'reauthentication required', `22023` invalid input, `P0001` 'user unavailable', or a retryable lock error | Nothing |
+
+Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `recovery_pending`, `reauthentication_required`, `self_change`, `admin_required`, `target_ineligible`, `transfer_pending`, `transfer_expired`, `recovery_disputed`. The app shows a fixed message for each.
+
+**How refusals are committed without partial changes.** Each function runs in fixed phases: take the staff lock, authenticate (may raise), validate (may raise), lock and load the rows, evaluate the whole matrix, and only then write. A refusal returns before any write except its own audit row, so the transaction commits with that row alone. `private.record_refusal` requires the staff lock, so concurrent attempts are counted one at a time, and if the audit row can't be written it raises, so nothing commits. `33_ownership` compares staff roles, profiles, the Owner record, transfers and recoveries before and after every refusal.
+
+**The migration from `boolean` (A2).** PostgreSQL can't change a return type with `create or replace`, so M8c drops and recreates the four functions, guarded. A block first asserts each one's exact signature, result type, `SECURITY DEFINER`, `search_path`, owner and privileges, that it has no overload and that nothing depends on it; any difference stops the migration, which then changes nothing. Then `drop function` with the exact signature and no `CASCADE`, the new function, and the same privileges: `EXECUTE` for `authenticated` only. Every M4 authorization and audit assertion was ported to the new results. M8d changed `get_audit_events` the same way.
+
+**What changed from M4:**
+- **"At least one administrator remains" is now "the Owner is always an administrator".** Only the Owner revokes `admin`, never their own, and the Owner's role can't be removed. Before an Owner is assigned, no one can grant or revoke `admin`.
+- **Admins no longer grant `admin` (M4-D12 is superseded by D4).**
+- **Refused attempts are audited.** M4 rolled them back; M8 commits them as described above.
+
+### The unified `/admin` (M8d)
+
+`/admin` replaces `/review`. Every page asks the database for the viewer's live access (`get_my_admin_access()`), per request and never cached, so a role removed a moment ago is gone.
+
+| Section | Path | Who |
+| --- | --- | --- |
+| Overview | `/admin` | Any staff |
+| Catalog: review, exclusion and merge | `/admin/catalog/*` | Catalog editors and administrators |
+| Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
+| Staff | `/admin/staff` | Administrators |
+| Audit log | `/admin/audit` | Administrators |
+| Ownership | `/admin/ownership` | Administrators. Owner actions show only for the Owner |
+
+- **Anyone without the section's role gets the page that doesn't exist (D8).** Staff signed in without verifying their authenticator are sent to verify first.
+- The navigation lists only the sections the viewer's roles allow. The pages offer only what the matrix allows, and the database checks every action again.
+- **`/review` and `/review/*` redirect permanently (308) to `/admin/catalog`**, keeping the query (D10). The review, exclusion and merge pages behave as before.
+- Every form works without JavaScript, and each action redirects back with a fixed notice or error code.
+
+**Reads for the pages,** each checking its caller and returning no email, TOTP secret, purchase detail or collection:
+
+| Function | Caller | Returns |
+| --- | --- | --- |
+| `get_my_admin_access()` | Anyone signed in | The caller's own roles and live state: whether verified recently, the Owner's authority, a pending recovery, a transfer offered to them, a recovery to confirm |
+| `get_staff_members()` | Administrators | Handle, display name, status and roles of everyone with a role, and who is Owner and successor |
+| `find_account_by_handle(handle)` | Moderators and administrators | One account by its **exact** handle (D11): handle, display name, status, roles, whether it's the Owner. Anything that isn't a valid handle, an email included, is refused |
+| `get_ownership_status()` | Administrators | The Owner, the successor, whether a succession document is registered (never its fingerprint), a pending transfer or recovery, and whether the Owner's factors changed in the last 24 hours |
+| `get_my_factor_status()` | Anyone signed in | The caller's own factors and their maturity |
+| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
+
+The audit page shows 50 rows a page, and only an allow-list of plain metadata fields.
+
+**Tested by** `33_ownership.test.sql`, `34_admin.test.sql`, `scripts/db-ownership-checks.mjs`, `npm run admin:test` and `npm run app:admin-checks`, which drives the built app over HTTP as each role: access and navigation, the matrix through the pages and through crafted forms, step-up without replay, real TOTP enrollment and removal, the audit filters, transfer and recovery, and privacy scans of every admin and security page.
+
+## Production launch prerequisites (M8)
+
+**None of M8 has run on a hosted project.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
+
+| Prerequisite | Why |
+| --- | --- |
+| **Enable TOTP on the hosted project** (`[auth.mfa.totp]`), then rerun `31_auth_contract`, `db-mfa-checks`, `db-owner-checks`, `db-ownership-checks` and `app:admin-checks` against staging | Local only so far (D19). Without it no staff member can act |
+| **Infrastructure key holders (D18):** name the people holding the database password, the Auth secret key and dashboard access; require MFA on dashboard accounts; enable `pgaudit` for DDL and writes to the Owner, staff and audit tables; alert on Owner changes, recoveries and trigger refusals in the server log | `postgres`, superusers and the secret key bypass every protection here |
+| **Rehearse the [runbook](../operations/owner-recovery-runbook.md) on staging**, each scenario end to end, including the Admin API factor removal | The procedures are tested locally by the suites, not by people |
+| **Assign the real Owner** only by the runbook, with the product owner's written approval, two authenticators, a successor and a registered succession document | No real Owner exists |
+| **The Auth contract test before every upgrade** of the Supabase CLI or the hosted Auth version | Staff are locked out if Auth's tables change |
+| **The retention policy** (A2, D10, M4-D10), now also covering refused attempts, recovery records, case references and factor registrations | Nothing is deleted by age |
+| **Copy the audit log to write-once storage** | The log is append-only for application roles, not immutable |
+
+**Unresolved risks, accepted for now:**
+- **TOTP replay for about 30 seconds** by someone who already holds a session (F4). A GoTrue limitation.
+- **The GoTrue internals dependency.** The checks read Auth tables that Supabase may change. Fails closed, guarded by the contract test.
+- **Suspension doesn't end Auth sessions** (M4-D7). The database refuses every protected action.
+- **Staff can remove their last factor through Auth directly,** bypassing the app's guard. The result is no staff access.
+- **The procedural controls:** that the operator isn't the beneficiary, that approvers are independent, and identity checks, are recorded in case files outside the database.
+- **Enrolling an authenticator needs JavaScript** to show the QR code and setup key.
+
 ## Assigning the first administrator
 
 **No real administrator has been assigned, and nothing does this automatically.** There's no bootstrap endpoint, and no API role can write to `staff_roles`, including `service_role`. Staff status comes from this table only. It's never read from metadata or JWT claims. Tests confirm a signup, a JWT claim, a profile update, a direct write and an API request can't grant a role.
 
-The first administrator is assigned by a named operator, who has direct database access, as a deliberate manual step:
+**Since M8, the first administrator is the Owner.** `private.assign_initial_owner` assigns the Owner and grants `admin` in one audited step, as described in the [runbook](../operations/owner-recovery-runbook.md#assigning-the-first-owner). After that, only the Owner grants or revokes `admin`. The M4 procedure below is kept for reference. Don't use it on a project that will have an Owner: an administrator added this way can't be removed until an Owner exists.
+
+The M4 procedure, by a named operator with direct database access, as a deliberate manual step:
 
 1. The product owner approves in writing who will hold the role.
 2. That person creates an account, verifies their email and claims a handle, like anyone else.
@@ -1323,7 +1517,7 @@ commit;
 
 5. The operator also keeps the written approval outside the database.
 
-After that, staff are managed only through the audited functions in [Staff actions](#staff-actions). The operator steps in again only if no active administrator remains, using the same procedure.
+After that, staff are managed only through the audited functions in [Staff actions](#staff-actions) and [Staff authority (M8)](#staff-authority-m8). Since M8 the Owner is always an administrator, so the case of no active administrator remaining is a recovery, by the [runbook](../operations/owner-recovery-runbook.md).
 
 ## Handles
 
@@ -1482,6 +1676,12 @@ Upload rules, for the buckets still to be built. Avatars are stricter, and `cata
 | Staff changes are authorized, serialized and audited (M4) | Functions only, requiring active staff, under one lock, with the audit row in the same transaction. Tested directly, through the API and with held-open transactions |
 | The audit log can't be read or changed by clients (M4) | `private` schema, no privileges for any API role, append-only triggers. Owners and superusers aren't constrained, as documented |
 | Suspension applies to existing sessions (M4) | Every write path reads `account_status` from the database. Tested with a suspended user's live session |
+| Staff privileges need live MFA (M8) | `has_staff_role` reads Auth's live session, factor and claim rows, never the token alone. Sensitive actions, published merges included, need a verification in the last 10 minutes. Tested through direct API calls with stale, signed-out and downgraded tokens |
+| The Owner stays protected whatever its MFA (M8) | Protections use `is_designated_owner` only. Owner authority (`owner_authority_refusal`) is checked separately, and needs two factors registered for 24 hours |
+| Factor maturity can't be backdated (M8) | One writer with no arguments, at `now()`. No client privilege on the ledger, and an immutable trigger |
+| Only the Owner changes administrators, nobody changes themselves (M8) | The staff functions' matrix, refused attempts audited. Tested directly, through the API and through crafted forms |
+| Exactly one Owner in every committed state (M8) | Singleton key, the owner-change trigger and one lock order, with forced races in `db-ownership-checks` |
+| Admin pages reveal nothing private (M8) | Read functions return no email, secret, purchase detail or collection. `notFound()` for anyone without the section's role. Privacy scans in `app:admin-checks` |
 | Notifications are private to their recipient (M4b) | No privileges on the table for any API role. Four functions that take the recipient from `auth.uid()` |
 | Notifications keep M3's promises (M4b) | Created from status transitions, so a cooldown retry notifies nobody. Withdrawn when a request leaves pending, removed on block, hidden while the actor isn't visible |
 | Notifications can't reveal staff reasons (M4b) | A check constraint allows only the status in a moderation notice, and it never names the actor |

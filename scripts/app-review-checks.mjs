@@ -42,7 +42,7 @@ const count = (sql) => Number(psql(sql));
 const status = (id) => psql(`select status from public.catalog_change_requests where id = '${id}';`);
 
 async function account(role) {
-  const user = await createUser({ prefix: "rvw" });
+  const user = await createUser({ prefix: "rvw", mfa: Boolean(role) });
   users.push(user.id);
   const browser = new Browser();
   await signInAs(browser, user, "/home");
@@ -66,10 +66,10 @@ async function submitRelease(owner, extra = {}) {
   return id;
 }
 async function decide(editor, id, decision, values) {
-  const page = await editor.browser.get(`/review/${id}`);
+  const page = await editor.browser.get(`/admin/catalog/${id}`);
   const form = formById(page.html, `decision-${decision}`);
   if (!form) return { response: null, form: null };
-  const posted = await editor.browser.submit(`/review/${id}`, form, values);
+  const posted = await editor.browser.submit(`/admin/catalog/${id}`, form, values);
   return { response: posted.response, form };
 }
 const releaseOf = (id) => psql(`select release_id from public.catalog_change_requests where id = '${id}';`);
@@ -86,23 +86,24 @@ try {
   const editor2 = await account("catalog_editor");
   const first = await submitRelease(owner, { note: "Bought at a fair" });
   const visitor = new Browser();
-  const out = await visitor.get("/review");
-  check("a visitor is sent to sign in", isRedirect(out.response) && location(out.response).includes(`next=${encodeURIComponent("/review")}`));
+  const out = await visitor.get("/admin/catalog");
+  check("a visitor is sent to sign in", isRedirect(out.response) && location(out.response).includes(`next=${encodeURIComponent("/admin/catalog")}`));
   for (const [name, who] of [["a collector", collector], ["a moderator", moderator]]) {
-    const queue = await who.browser.get("/review");
-    const one = await who.browser.get(`/review/${first}`);
+    const queue = await who.browser.get("/admin/catalog");
+    const one = await who.browser.get(`/admin/catalog/${first}`);
     // The page streams, so the status is already sent; what matters is what it shows.
     check(`${name} gets the unavailable page, for the queue and a submission`, [queue, one].every((p) => plain(p.html).includes("This page isn't available")
       && !plain(p.html).includes("Review submissions") && !plain(p.html).includes("Bought at a fair") && !plain(p.html).includes("Starfall Odyssey")));
   }
   // The menu's items render only when it opens, so this reads the flag the page sends it.
-  check("the account menu offers reviewing to editors only",
-    (await editor.browser.get("/home")).html.includes('canReview\\":true') && (await collector.browser.get("/home")).html.includes('canReview\\":false'));
+  // M8d: the menu offers /admin to staff, which checks each section's role again.
+  check("the account menu offers admin to staff only",
+    (await editor.browser.get("/home")).html.includes('isStaff\\":true') && (await collector.browser.get("/home")).html.includes('isStaff\\":false'));
 
   section("The queue and a review page");
-  const queue = await editor.browser.get("/review");
+  const queue = await editor.browser.get("/admin/catalog");
   check("an editor sees the submission, from its submitter's handle", plain(queue.html).includes("Starfall Odyssey") && plain(queue.html).includes(`@${owner.handle}`));
-  const page = await editor.browser.get(`/review/${first}`);
+  const page = await editor.browser.get(`/admin/catalog/${first}`);
   check("the review page shows what was submitted and the record now", plain(page.html).includes("What was submitted") && plain(page.html).includes("The record now") && plain(page.html).includes("Bought at a fair"));
   check("never an email address", !queue.html.includes(owner.email) && !page.html.includes(owner.email) && !page.html.includes("@example.test"));
   check("possible duplicates are listed", plain(page.html).includes("Possible duplicates") && page.html.includes("SNS-ZSFE-USA"));
@@ -110,28 +111,28 @@ try {
 
   section("Starting, correcting and approving, without JavaScript");
   const started = await decide(editor, first, "start", { reason: "Checking it" });
-  check("starting lands on the review page", started.response?.status === 303 && location(started.response) === `/review/${first}?notice=started`);
+  check("starting lands on the review page", started.response?.status === 303 && location(started.response) === `/admin/catalog/${first}?notice=started`);
   check("it's in review", status(first) === "in_review");
   const mine = await owner.browser.get(`/submissions/${first}`);
   check("the submitter sees it in review, and can't change or withdraw it", plain(mine.html).includes("In review") && !formById(mine.html, "edit-submission") && !formById(mine.html, "withdraw-submission"));
-  const stale = await editor2.browser.submit(`/review/${first}`, started.form, { reason: "Me too" });
+  const stale = await editor2.browser.submit(`/admin/catalog/${first}`, started.form, { reason: "Me too" });
   check("a second start from an old page changes nothing", stale.response.status !== 303 && count(`select count(*) from private.audit_events where action = 'catalog_submission_review_started' and metadata ->> 'request_id' = '${first}';`) === 1);
 
-  let review = await editor.browser.get(`/review/${first}`);
+  let review = await editor.browser.get(`/admin/catalog/${first}`);
   const correction = formById(review.html, "correct-release");
   check("the review offers corrections and decisions", Boolean(correction) && ["decision-approve", "decision-changes", "decision-reject"].every((f) => formById(review.html, f)));
   const early = await decide(editor, first, "approve", { reason: "Looks right" });
   check("approving an incomplete release is refused, and says why", early.response?.status !== 303 && status(first) === "in_review");
   const fields = { edition_name: "Standard", edition_kind: "standard", media_count: "1", region_code: "pal", product_code: correction.values?.product_code ?? "", release_year: "" };
   const productCode = psql(`select product_code from public.releases where id = '${releaseOf(first)}';`);
-  const corrected = await editor.browser.submit(`/review/${first}`, correction, { ...fields, product_code: productCode, reason: "From the photos" });
-  check("a correction is saved", location(corrected.response) === `/review/${first}?notice=corrected`
+  const corrected = await editor.browser.submit(`/admin/catalog/${first}`, correction, { ...fields, product_code: productCode, reason: "From the photos" });
+  check("a correction is saved", location(corrected.response) === `/admin/catalog/${first}?notice=corrected`
     && psql(`select edition_name || ' ' || edition_kind || ' ' || media_count from public.releases where id = '${releaseOf(first)}';`) === "Standard standard 1");
-  const repeat = await editor.browser.submit(`/review/${first}`, correction, { ...fields, product_code: productCode, edition_name: "Deluxe", reason: "Again" });
+  const repeat = await editor.browser.submit(`/admin/catalog/${first}`, correction, { ...fields, product_code: productCode, edition_name: "Deluxe", reason: "Again" });
   check("a correction from a page read before the last one is refused", repeat.response.status !== 303
     && psql(`select edition_name from public.releases where id = '${releaseOf(first)}';`) === "Standard");
   const approved = await decide(editor, first, "approve", { reason: "Matches the box", note: "Thanks for the photos." });
-  check("approving lands on the review page", location(approved.response) === `/review/${first}?notice=approved` && status(first) === "approved");
+  check("approving lands on the review page", location(approved.response) === `/admin/catalog/${first}?notice=approved` && status(first) === "approved");
   check("the release is published", psql(`select status from public.releases where id = '${releaseOf(first)}';`) === "published");
   const theirs = await owner.browser.get(`/submissions/${first}`);
   check("the submitter sees it published, with the note and a link", plain(theirs.html).includes("Published") && plain(theirs.html).includes("Thanks for the photos.") && plain(theirs.html).includes("See it in the catalog"));
@@ -146,23 +147,23 @@ try {
   const recorded = () => count(`select count(*) from public.collection_item_components c join public.collection_items i on i.id = c.item_id
     where i.owner_id = '${owner.id}' and i.release_id = '${releaseOf(pieced)}' and c.label = 'Instruction manual';`);
   check("the submitter's copy records the listed manual", recorded() === 1);
-  check("the pieces can't be corrected before the review starts", !formById((await editor.browser.get(`/review/${pieced}`)).html, "correct-pieces"));
+  check("the pieces can't be corrected before the review starts", !formById((await editor.browser.get(`/admin/catalog/${pieced}`)).html, "correct-pieces"));
   await decide(editor, pieced, "start", { reason: "Checking it" });
-  let piecesPage = await editor.browser.get(`/review/${pieced}`);
+  let piecesPage = await editor.browser.get(`/admin/catalog/${pieced}`);
   let piecesForm = formById(piecesPage.html, "correct-pieces");
   check("in review, the pieces form lists them, with room to add", Boolean(piecesForm) && piecesForm.hidden.piece_rows === "6" && piecesPage.html.includes('value="Instruction manual"'));
   const listed = () => psql(`select coalesce(string_agg(kind || ':' || label || 'x' || quantity, ',' order by label), '') from public.release_components where release_id = '${releaseOf(pieced)}';`);
-  const twice = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "insert", piece_label_1: "Instruction manual", reason: "Twice" });
+  const twice = await editor.browser.submit(`/admin/catalog/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "insert", piece_label_1: "Instruction manual", reason: "Twice" });
   check("a piece listed twice is refused, and nothing changes", twice.response.status !== 303 && listed() === "insert:Instruction manualx1");
-  const noReason = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "artwork", piece_label_1: "Poster" });
+  const noReason = await editor.browser.submit(`/admin/catalog/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "Instruction manual", piece_kind_1: "artwork", piece_label_1: "Poster" });
   check("so is a change without a reason", noReason.response.status !== 303 && listed() === "insert:Instruction manualx1");
-  const someoneElse = await collector.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "artwork", piece_label_0: "Forged", reason: "Mine" });
+  const someoneElse = await collector.browser.submit(`/admin/catalog/${pieced}`, piecesForm, { piece_kind_0: "artwork", piece_label_0: "Forged", reason: "Mine" });
   check("a collector's forged change is refused", someoneElse.response.status !== 303 && listed() === "insert:Instruction manualx1");
-  const saved = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "", piece_kind_1: "artwork", piece_label_1: "Poster", piece_quantity_1: "2", reason: "From the photos" });
-  check("an editor replaces the manual with two posters", location(saved.response) === `/review/${pieced}?notice=corrected` && listed() === "artwork:Posterx2");
+  const saved = await editor.browser.submit(`/admin/catalog/${pieced}`, piecesForm, { piece_kind_0: "insert", piece_label_0: "", piece_kind_1: "artwork", piece_label_1: "Poster", piece_quantity_1: "2", reason: "From the photos" });
+  check("an editor replaces the manual with two posters", location(saved.response) === `/admin/catalog/${pieced}?notice=corrected` && listed() === "artwork:Posterx2");
   check("the change is audited with the reason", count(`select count(*) from private.audit_events where action = 'catalog_record_updated' and metadata ->> 'id' = '${releaseOf(pieced)}' and reason = 'From the photos' and actor_id = '${editor.id}';`) === 1);
   check("the submitter's copy keeps its record of the manual", recorded() === 1);
-  const stalePieces = await editor.browser.submit(`/review/${pieced}`, piecesForm, { piece_kind_0: "map", piece_label_0: "Map", reason: "Old page" });
+  const stalePieces = await editor.browser.submit(`/admin/catalog/${pieced}`, piecesForm, { piece_kind_0: "map", piece_label_0: "Map", reason: "Old page" });
   check("a pieces form from before the change is refused", stalePieces.response.status !== 303 && listed() === "artwork:Posterx2");
 
   section("Asking for changes, and answering them");
@@ -192,19 +193,19 @@ try {
   check("resubmitting makes a new, linked submission", third && third !== second && status(third) === "open"
     && psql(`select previous_request_id from public.catalog_change_requests where id = '${third}';`) === second);
   check("which links back to the rejected one", (await owner.browser.get(`/submissions/${third}`)).html.includes(`href="/submissions/${second}"`));
-  check("and editors see both rounds", plain((await editor.browser.get(`/review/${third}`)).html).includes("Earlier rounds"));
+  check("and editors see both rounds", plain((await editor.browser.get(`/admin/catalog/${third}`)).html).includes("Earlier rounds"));
 
   section("No self-review, and a deleted submitter");
   const own = await submitRelease(editor);
-  const ownPage = await editor.browser.get(`/review/${own}`);
+  const ownPage = await editor.browser.get(`/admin/catalog/${own}`);
   check("an editor's own submission offers them no decisions", plain(ownPage.html).includes("You submitted this, so another editor has to review it.") && !formById(ownPage.html, "decision-start"));
-  const forged = await editor.browser.submit(`/review/${own}`, started.form, { request_id: own, version: psql(`select version from public.catalog_change_requests where id = '${own}';`), reason: "Mine" });
+  const forged = await editor.browser.submit(`/admin/catalog/${own}`, started.form, { request_id: own, version: psql(`select version from public.catalog_change_requests where id = '${own}';`), reason: "Mine" });
   check("and a forged start is refused", forged.response.status !== 303 && status(own) === "open");
   const leaving = await account();
   const orphan = await submitRelease(leaving);
   psql(`delete from auth.users where id = '${leaving.id}';`);
   await decide(editor, orphan, "start", { reason: "Checking it" });
-  const orphanPage = await editor.browser.get(`/review/${orphan}`);
+  const orphanPage = await editor.browser.get(`/admin/catalog/${orphan}`);
   check("a submission from a deleted account says so, and can't be sent back", plain(orphanPage.html).includes("A deleted account") && plain(orphanPage.html).includes("The submitter's account was deleted")
     && !formById(orphanPage.html, "decision-changes") && Boolean(formById(orphanPage.html, "decision-reject")));
 

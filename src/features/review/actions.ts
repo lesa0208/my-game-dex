@@ -76,7 +76,7 @@ export async function decideSubmission(_state: ReviewState, formData: FormData):
   }
   if (error) return { status: "error", message: reviewErrorMessage(error.message) };
   refresh();
-  redirect(`/review/${id}?notice=${NOTICE[decision]}`);
+  redirect(`/admin/catalog/${id}?notice=${NOTICE[decision]}`);
 }
 
 export async function decideSubmissionFromForm(formData: FormData): Promise<void> {
@@ -132,7 +132,7 @@ export async function correctSubmission(_state: ReviewState, formData: FormData)
     if (error) return { status: "error", message: reviewErrorMessage(error.message) };
   }
   refresh();
-  redirect(`/review/${id}?notice=corrected`);
+  redirect(`/admin/catalog/${id}?notice=corrected`);
 }
 
 export async function correctSubmissionFromForm(formData: FormData): Promise<void> {

@@ -10,6 +10,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -87,7 +88,7 @@ commit;`);
   createdUsers.delete(user.id);
   return { result, deletion };
 }
-const asUserSql = (user) => `select set_config('request.jwt.claims', '{"sub":"${user.id}","role":"authenticated"}', true);\nset local role authenticated;`;
+const asUserSql = (user) => `select set_config('request.jwt.claims', '${claimsFor(user.id)}', true);\nset local role authenticated;`;
 
 const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
 const api = status.API_URL;
@@ -112,7 +113,7 @@ async function createUser() {
   if (!response.ok) throw new Error(`could not create a test user: status ${response.status}`);
   createdUsers.add(user.id);
   response = await post("/auth/v1/token?grant_type=password", anon, { email, password });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const handle = `nt_${randomBytes(6).toString("hex")}`;
   response = await post("/rest/v1/rpc/claim_handle", asUser(session.access_token), { p_handle: handle });
   if (!response.ok) throw new Error(`could not claim a handle: status ${response.status}`);
@@ -251,7 +252,7 @@ async function flow() {
   makeFirstAdmin(admin);
   const member = await createUser();
   let result = await setStatus(admin, member, "suspended", "Notification checks: internal note ZQX");
-  check("an admin suspends an account", result.body === true, result.message);
+  check("an admin suspends an account", result.body?.ok === true && result.body?.result === "changed", result.message);
   rows = await list(member);
   check(
     "the suspended account sees a notice holding only the new status",

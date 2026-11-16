@@ -15,6 +15,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -80,7 +81,7 @@ async function createUser(role = null) {
   createdUsers.add(user.id);
   everyUser.add(user.id);
   response = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const claimed = await rpc(asUser(session.access_token), "claim_handle", { p_handle: `xm_${randomBytes(6).toString("hex")}` });
   if (claimed.status !== 200) throw new Error(`could not claim a handle: status ${claimed.status}`);
   if (role) psql(`insert into public.staff_roles (user_id, role) values ('${user.id}', '${role}');`);
@@ -88,7 +89,7 @@ async function createUser(role = null) {
 }
 /** Runs SQL as a signed-in user in its own transaction, and returns the last line. */
 function sqlAs(userId, sql) {
-  const out = psql(`begin; select set_config('request.jwt.claims', '{"sub": "${userId}", "role": "authenticated"}', true); set local role authenticated; ${sql} commit;`);
+  const out = psql(`begin; select set_config('request.jwt.claims', '${claimsFor(userId)}', true); set local role authenticated; ${sql} commit;`);
   return out.split("\n").filter((line) => line !== "" && !line.startsWith("{\"sub\"")).at(-1) ?? "";
 }
 
@@ -126,7 +127,7 @@ class Session {
   }
   /** Runs SQL as a signed-in user inside the session's open transaction. */
   asUser(userId, sql) {
-    return this.run(`select set_config('request.jwt.claims', '{"sub": "${userId}", "role": "authenticated"}', true); set local role authenticated; ${sql} reset role;`);
+    return this.run(`select set_config('request.jwt.claims', '${claimsFor(userId)}', true); set local role authenticated; ${sql} reset role;`);
   }
   close() {
     this.child.stdin.end();
@@ -294,6 +295,13 @@ try {
     check("an editor can't merge a published release", error(await rpc(editor.headers, "merge_release", args), "not permitted"));
     check("one acknowledgement short is refused with a plain message", error(await rpc(admin.headers, "merge_release", { ...args, p_acknowledged: args.p_acknowledged.slice(1) }), "acknowledgement required"));
     check("a stale token is refused with a plain message", error(await rpc(admin.headers, "merge_release", { ...args, p_token: "stale" }), "preview stale"));
+    // M8d (D3): a published merge needs a TOTP verification in the last 10 minutes,
+    // through the API as through the app. Only postgres can age the claim like this.
+    const session = JSON.parse(claimsFor(admin.id)).session_id;
+    psql(`update auth.mfa_amr_claims set updated_at = now() - interval '11 minutes' where session_id = '${session}';`);
+    check("with a verification 11 minutes old, an administrator must reauthenticate to merge a published release",
+      error(await rpc(admin.headers, "merge_release", args), "reauthentication required") && releaseStatus(s) === "published" && copyOn(item) === s);
+    psql(`update auth.mfa_amr_claims set updated_at = now() where session_id = '${session}';`);
     const done = await rpc(admin.headers, "merge_release", args);
     check("an administrator merges it", done.status === 200 && done.body.copies === 1 && copyOn(item) === t && releaseStatus(s) === "merged", done.text);
     check("which leaves the copy's updated_at as its owner last left it", touched() === touchedBefore);

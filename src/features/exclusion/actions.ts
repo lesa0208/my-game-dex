@@ -53,7 +53,7 @@ export async function excludeRelease(_state: ExclusionState, formData: FormData)
   if (error) return { status: "error", message: exclusionErrorMessage(error.message) };
   const copies = typeof (data as { copies?: unknown })?.copies === "number" ? (data as { copies: number }).copies : 0;
   refresh();
-  redirect(`/review/exclude/${releaseId}?notice=excluded&copies=${copies}`);
+  redirect(`/admin/catalog/exclude/${releaseId}?notice=excluded&copies=${copies}`);
 }
 
 export async function excludeReleaseFromForm(formData: FormData): Promise<void> {
@@ -74,7 +74,7 @@ export async function restoreExclusion(_state: ExclusionState, formData: FormDat
   const { error } = await supabase.rpc("restore_exclusion", { p_exclusion: id, p_expected_version: version, p_reason: reason.value });
   if (error) return { status: "error", message: exclusionErrorMessage(error.message) };
   refresh();
-  redirect(`/review/exclusions/${id}?notice=restored`);
+  redirect(`/admin/catalog/exclusions/${id}?notice=restored`);
 }
 
 export async function restoreExclusionFromForm(formData: FormData): Promise<void> {

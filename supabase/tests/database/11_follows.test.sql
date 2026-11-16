@@ -4,6 +4,22 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(140);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 
 -- Runs a statement and returns its result, or the error as text, so that an unexpected
@@ -22,7 +38,7 @@ create function pg_temp.call(p_actor text, p_fn text, p_target text default null
 declare r text; v_sql text;
 begin
   v_sql := format('select public.%I(%L)::text', p_fn, pg_temp.u(p_target));
-  perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute v_sql into r;
   perform set_config('role', 'none', true);
@@ -33,7 +49,7 @@ end $$;
 create function pg_temp.rows(p_actor text, p_sql text) returns jsonb language plpgsql as $$
 declare r jsonb;
 begin
-  perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute format('select coalesce(jsonb_agg(t), ''[]'') from (%s) t', p_sql) into r;
   perform set_config('role', 'none', true);
@@ -260,7 +276,7 @@ create function pg_temp.call_cap(p_actor text, p_g int) returns text language pl
 declare r text; t uuid;
 begin
   select id into t from cap_users where g = p_g;
-  perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute format('select public.request_follow(%L)', t) into r;
   perform set_config('role', 'none', true);

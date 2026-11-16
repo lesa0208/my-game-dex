@@ -1307,12 +1307,26 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 | `target_profile_id` | `uuid` | Yes | |
 | `reason` | `text` | No | Trimmed, 1 to 500 characters |
 | `metadata` | `jsonb` | No | Before and after values. An object of at most 2 KB. Default `{}` |
+| `outcome` | `text` | No | M8. Generated from `action` and `actor_id`: `refused`, `operator` or `succeeded` |
 
 - **Primary key:** `id`
 - **Foreign keys:** none, deliberately. Deleting an account doesn't change the log, and rows hold no copies of profile data. L4 Reporting adds a report reference
-- **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null
+- **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null; `(actor_id, action, occurred_at DESC)` for the two refusal actions, for the rate limit (M8)
 - **Timestamps:** `occurred_at`. Rows are never updated
 - **Retention:** undecided (M4-D10). Nothing removes rows, which is an interim state, not a commitment
+
+### Owner and MFA tables (M8)
+
+All in the `private` schema, with RLS on and no privilege for any API role. Written only by the M8 functions. See [The Owner (M8)](security-rls.md#the-owner-m8) and [MFA for staff (M8)](security-rls.md#mfa-for-staff-m8).
+
+| Table | Holds | Notes |
+| --- | --- | --- |
+| `platform_owner` | The Owner record: `user_id`, `assigned_at`, `version`, `successor_id`, `succession_fingerprint`, `succession_registered_at` | At most one row (key `id boolean`, always true). `user_id` → `profiles(id)` on delete restrict. A trigger refuses delete, truncate and any change of hands outside a transfer or recovery |
+| `ownership_transfers` | Two-step transfers: from, to, status (`pending`, `accepted`, `declined`, `cancelled`, `expired`), expiry, decision and cause | One pending, by partial unique index. Profile references on delete set null |
+| `owner_recoveries` | Break-glass recoveries: kind (`factor_reset`, `reassign`), status, Owner and target, case reference, disputed, fingerprint matched, hold, confirmation, decision and cause | One pending, by partial unique index |
+| `mfa_factor_registrations` | One row per verified TOTP factor: `factor_id`, `user_id`, Auth's `factor_created_at`, `registered_at` | Written only by `register_my_verified_factors()`, at `now()`. A trigger refuses updates. `user_id` → `profiles(id)` on delete cascade |
+
+- **Retention:** undecided, with the audit log (M4-D10). Recovery records hold case references, which must contain no personal information
 
 ---
 

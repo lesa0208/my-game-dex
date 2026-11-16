@@ -32,6 +32,10 @@ insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
   ('get_my_account()', 'authenticated'),
   ('set_avatar_path(uuid,text)', 'service_role'),
+  -- M8a: the server's account deletion asks whether the account is the Owner's.
+  ('account_deletion_blocked(uuid)', 'service_role'),
+  -- M8b: registering one's own verified factors, from a live aal2 session.
+  ('register_my_verified_factors()', 'authenticated'),
   ('private.is_active_user()', 'authenticated'),
   -- M3: clients act only through these. follows and blocked_users have no client grants.
   ('request_follow(uuid)', 'authenticated'),
@@ -52,7 +56,15 @@ insert into approved_function_grants values
   ('grant_staff_role(uuid,staff_role,text)', 'authenticated'),
   ('revoke_staff_role(uuid,staff_role,text)', 'authenticated'),
   ('set_account_status(uuid,account_status,text)', 'authenticated'),
-  ('get_audit_events(integer,uuid)', 'authenticated'),
+  ('get_audit_events(integer,uuid,text,text,text,timestamp with time zone,timestamp with time zone)', 'authenticated'),
+  -- M8c: ownership transfer, succession and the app side of recovery. Each checks the caller itself.
+  ('start_ownership_transfer(uuid,text)', 'authenticated'), ('accept_ownership_transfer(uuid)', 'authenticated'),
+  ('cancel_ownership_transfer(uuid,text)', 'authenticated'), ('set_owner_successor(uuid,text)', 'authenticated'),
+  ('register_succession_document(text,text)', 'authenticated'), ('confirm_owner_recovery(uuid)', 'authenticated'),
+  ('cancel_owner_recovery(uuid,text)', 'authenticated'),
+  -- M8d: reads for /admin and Settings → Security. Each checks the caller itself.
+  ('get_my_admin_access()', 'authenticated'), ('get_staff_members()', 'authenticated'), ('find_account_by_handle(text)', 'authenticated'),
+  ('get_ownership_status()', 'authenticated'), ('get_my_factor_status()', 'authenticated'),
   -- M4b: notifications have no client grants; clients use only these.
   ('get_my_notifications(integer,uuid)', 'authenticated'),
   ('get_unread_notification_count()', 'authenticated'),

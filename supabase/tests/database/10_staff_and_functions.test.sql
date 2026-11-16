@@ -3,9 +3,25 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(49);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.as_user(p_id uuid, p_extra jsonb default '{}') returns void language plpgsql as $$
 begin
-  perform set_config('request.jwt.claims', (jsonb_build_object('sub', p_id, 'role', 'authenticated') || p_extra)::text, true);
+  perform set_config('request.jwt.claims', (pg_temp.claims(p_id) || p_extra)::text, true);
 end $$;
 
 insert into auth.users (id, aud, role, email, email_confirmed_at, raw_user_meta_data, raw_app_meta_data, instance_id) values
@@ -67,25 +83,25 @@ select is(
 select is(
   (select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef),
   array[
-    'accept_follow_request(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'approve_submission(uuid,integer,bigint,bigint,text,text)', 'block_user(uuid)', 'can_review_submissions()',
-    'cancel_follow_request(uuid)', 'claim_handle(text)', 'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)', 'delete_notification(uuid)',
-    'exclude_release(uuid,text,text,text,text,boolean,boolean)', 'get_audit_events(integer,uuid)', 'get_catalog_review_queue(integer)', 'get_exclusion(uuid)', 'get_exclusion_preview(uuid)',
+    'accept_follow_request(uuid)', 'accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'approve_submission(uuid,integer,bigint,bigint,text,text)', 'block_user(uuid)', 'can_review_submissions()',
+    'cancel_follow_request(uuid)', 'cancel_owner_recovery(uuid,text)', 'cancel_ownership_transfer(uuid,text)', 'claim_handle(text)', 'confirm_owner_recovery(uuid)', 'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)', 'delete_notification(uuid)',
+    'exclude_release(uuid,text,text,text,text,boolean,boolean)', 'find_account_by_handle(text)', 'get_audit_events(integer,uuid,text,text,text,timestamp with time zone,timestamp with time zone)', 'get_catalog_review_queue(integer)', 'get_exclusion(uuid)', 'get_exclusion_preview(uuid)',
     'get_exclusions(text,uuid,integer)', 'get_follow_state(uuid)', 'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)',
-    'get_merge(uuid)', 'get_merge_candidates(uuid)', 'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_blocks(integer,timestamp with time zone,uuid)',
-    'get_my_merged_submission(uuid)', 'get_my_notifications(integer,uuid)', 'get_my_preserved_release(uuid)', 'get_my_preserved_titles(uuid[])', 'get_my_submission(uuid)', 'get_profile_counts(uuid)',
-    'get_received_follow_requests(integer,timestamp with time zone,uuid)', 'get_release_picker(text,text,text,uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)',
+    'get_merge(uuid)', 'get_merge_candidates(uuid)', 'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_admin_access()', 'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_my_factor_status()',
+    'get_my_merged_submission(uuid)', 'get_my_notifications(integer,uuid)', 'get_my_preserved_release(uuid)', 'get_my_preserved_titles(uuid[])', 'get_my_submission(uuid)', 'get_ownership_status()', 'get_profile_counts(uuid)',
+    'get_received_follow_requests(integer,timestamp with time zone,uuid)', 'get_release_picker(text,text,text,uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'get_staff_members()',
     'get_submission_queue(text,uuid,integer)', 'get_submission_review(uuid)', 'get_unread_notification_count()', 'grant_staff_role(uuid,staff_role,text)', 'list_catalog_platforms()',
-    'mark_notifications_read(uuid)', 'merge_release(uuid,uuid,text,text,text,text[],boolean)', 'my_catalog_submissions(uuid,integer)', 'my_submission_for_release(uuid)', 'private.block_peers()',
+    'mark_notifications_read(uuid)', 'merge_release(uuid,uuid,text,text,text,text[],boolean)', 'my_catalog_submissions(uuid,integer)', 'my_submission_for_release(uuid)', 'private.account_standing(uuid)', 'private.block_peers()', 'private.can_exercise_owner_authority()',
     'private.can_read_release(uuid)', 'private.can_use_release(uuid)', 'private.can_view_collection(uuid)', 'private.can_view_connections(uuid)', 'private.can_view_level(uuid,visibility_level)',
     'private.check_catalog_publication()', 'private.check_moved_copy_release()', 'private.check_new_copy_release()', 'private.handle_new_user()', 'private.has_staff_role(staff_role)',
-    'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)', 'private.is_active_user()', 'private.is_blocked_between(uuid)', 'private.is_catalog_editor()',
-    'private.lock_usable_release(uuid,uuid)', 'private.my_preserved_releases(uuid[])', 'private.notify_follow_change()', 'private.require_active_user()', 'private.require_verified_user()',
-    'private.validate_display_name()', 'publish_release(uuid,text,bigint)', 'reject_follow_request(uuid)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)',
+    'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)', 'private.is_active_user()', 'private.is_blocked_between(uuid)', 'private.is_catalog_editor()', 'private.is_designated_owner(uuid)',
+    'private.lock_usable_release(uuid,uuid)', 'private.mature_totp_factor_count(uuid)', 'private.mfa_recent(interval)', 'private.mfa_session_ok()', 'private.my_preserved_releases(uuid[])', 'private.notify_follow_change()', 'private.owner_authority_refusal()', 'private.owner_integrity()', 'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.require_active_user()', 'private.require_verified_user()',
+    'private.totp_factor_count(uuid,interval)', 'private.validate_display_name()', 'publish_release(uuid,text,bigint)', 'register_my_verified_factors()', 'register_succession_document(text,text)', 'reject_follow_request(uuid)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)',
     'remove_follower(uuid)', 'remove_game_alias(uuid,text)', 'request_follow(uuid)', 'request_submission_changes(uuid,integer,text,text)', 'resolve_catalog_review(uuid,text)',
     'resolve_merged_release(uuid)', 'restore_exclusion(uuid,integer,text)', 'resubmit_my_submission(uuid,text)', 'revoke_staff_role(uuid,staff_role,text)', 'search_catalog(text,text[],integer,text)',
     'set_account_status(uuid,account_status,text)', 'set_avatar_path(uuid,text)', 'set_catalog_field_lock(text,uuid,text,boolean,text)', 'set_game_platform(uuid,uuid,text)',
-    'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)',
-    'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)',
+    'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_owner_successor(uuid,text)', 'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)',
+    'start_ownership_transfer(uuid,text)', 'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)',
     'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)', 'verify_game(uuid,text,bigint)',
     'verify_release(uuid,text,bigint)', 'withdraw_my_submission(uuid)'
   ],

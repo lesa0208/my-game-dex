@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -88,7 +89,7 @@ async function createUser() {
   createdUsers.add(user.id);
   everyUser.add(user.id);
   response = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: anon, body: JSON.stringify({ email, password }) });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const claimed = await rpc(asUser(session.access_token), "claim_handle", { p_handle: `rk_${randomBytes(6).toString("hex")}` });
   if (claimed.status !== 200) throw new Error(`could not claim a handle: status ${claimed.status}`);
   return { id: user.id, headers: asUser(session.access_token) };
@@ -129,7 +130,7 @@ class Session {
   }
   /** Runs SQL as a signed-in user, inside the session's open transaction. */
   asUser(userId, sql) {
-    return this.run(`select set_config('request.jwt.claims', '{"sub": "${userId}", "role": "authenticated"}', true); set local role authenticated; ${sql} reset role;`);
+    return this.run(`select set_config('request.jwt.claims', '${claimsFor(userId)}', true); set local role authenticated; ${sql} reset role;`);
   }
   close() {
     this.child.stdin.end();
@@ -220,7 +221,7 @@ try {
     // 1. The release changes first; adding a copy waits, then sees the change.
     await a.run(`begin; update public.releases set status = 'excluded' where id = '${jp}';`);
     const item1 = uuidv7();
-    const adding = b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${owner.id}", "role": "authenticated"}', true); set local role authenticated; select public.add_collection_item('${item1}', '${jp}', '{}');`);
+    const adding = b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(owner.id)}', true); set local role authenticated; select public.add_collection_item('${item1}', '${jp}', '{}');`);
     check("adding a copy waits for a release whose status is changing", await waitingOnLock("relink_b"));
     await a.run("commit;");
     const added = await adding;
@@ -230,7 +231,7 @@ try {
 
     // 2. A copy is added first; the status change waits, then sees the copy.
     const item2 = uuidv7();
-    const first = await b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${owner.id}", "role": "authenticated"}', true); set local role authenticated; select public.add_collection_item('${item2}', '${jp}', '{}'); reset role;`);
+    const first = await b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(owner.id)}', true); set local role authenticated; select public.add_collection_item('${item2}', '${jp}', '{}'); reset role;`);
     check("a copy is being added", !first.err, first.err);
     const changing = a.run(`begin; update public.releases set status = 'excluded' where id = '${jp}';`);
     check("a status change waits for the copy being added", await waitingOnLock("relink_a"));
@@ -242,7 +243,7 @@ try {
 
     // 3. The target changes first; relinking waits, then is refused.
     await a.run(`begin; update public.releases set status = 'excluded' where id = '${us}';`);
-    const relinking = b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${owner.id}", "role": "authenticated"}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${us}');`);
+    const relinking = b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(owner.id)}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${us}');`);
     check("relinking waits for a target whose status is changing", await waitingOnLock("relink_b"));
     await a.run("commit;");
     const relinked = await relinking;
@@ -251,7 +252,7 @@ try {
     psql(`update public.releases set status = 'published' where id = '${us}';`);
 
     // 4. Relinking first; the status change waits for it.
-    const firstMove = await b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${owner.id}", "role": "authenticated"}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${us}'); reset role;`);
+    const firstMove = await b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(owner.id)}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${us}'); reset role;`);
     check("a copy is being moved", !firstMove.err, firstMove.err);
     const changing2 = a.run(`begin; update public.releases set status = 'excluded' where id = '${us}';`);
     check("a status change of the target waits for the move", await waitingOnLock("relink_a"));
@@ -263,7 +264,7 @@ try {
 
     // 5. The copy's current release changes; relinking away waits, then succeeds.
     await a.run(`begin; update public.releases set status = 'excluded' where id = '${us}';`);
-    const away = b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${owner.id}", "role": "authenticated"}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${eu}'); reset role;`);
+    const away = b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(owner.id)}', true); set local role authenticated; select public.relink_my_copy('${copy}', '${eu}'); reset role;`);
     check("relinking away from a release being changed waits for it, release before copy", await waitingOnLock("relink_b"));
     await a.run("rollback;");
     const awayDone = await away;
@@ -275,7 +276,7 @@ try {
     const own = submitted(await rpc(leaving.headers, "submit_release", { p_game: starfall, p_platform: "snes", p_media_format: "rom-cartridge", p_region: "ntsc-j", p_details: { product_code: "RLK-LEAVE" }, p_components: [], p_physical: true }));
     await a.run(`begin; delete from auth.users where id = '${leaving.id}';`);
     const item3 = uuidv7();
-    const addingOwn = b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${leaving.id}", "role": "authenticated"}', true); set local role authenticated; select public.add_collection_item('${item3}', '${own.body?.release_id}', '{}');`);
+    const addingOwn = b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(leaving.id)}', true); set local role authenticated; select public.add_collection_item('${item3}', '${own.body?.release_id}', '{}');`);
     check("adding a copy waits for its owner's account deletion", await waitingOnLock("relink_b"));
     const deletedFirst = await a.run("commit;");
     const addedLate = await addingOwn;
@@ -286,7 +287,7 @@ try {
     const leaving2 = await createUser();
     const own2 = submitted(await rpc(leaving2.headers, "submit_release", { p_game: starfall, p_platform: "snes", p_media_format: "rom-cartridge", p_region: "ntsc-uc", p_details: { product_code: "RLK-LEAVE2" }, p_components: [], p_physical: true }));
     const item4 = uuidv7();
-    const addFirst = await b.run(`begin; select set_config('request.jwt.claims', '{"sub": "${leaving2.id}", "role": "authenticated"}', true); set local role authenticated; select public.add_collection_item('${item4}', '${own2.body?.release_id}', '{}'); reset role;`);
+    const addFirst = await b.run(`begin; select set_config('request.jwt.claims', '${claimsFor(leaving2.id)}', true); set local role authenticated; select public.add_collection_item('${item4}', '${own2.body?.release_id}', '{}'); reset role;`);
     check("an owner adds a copy of their own pending release", !addFirst.err, addFirst.err);
     const deleting = a.run(`begin; delete from auth.users where id = '${leaving2.id}';`);
     check("their account deletion waits for it", await waitingOnLock("relink_a"));

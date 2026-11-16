@@ -5,6 +5,22 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(23);
 
+-- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
+-- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
+-- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
+create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values (p_user, p_user, 'aal2', p_user, now(), now()) on conflict (id) do nothing;
+    insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
+      select p_user, p_user, 'test session factor', 'totp', 'verified', now(), now()
+      where not exists (select 1 from auth.mfa_factors where id = p_user);
+    insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
+      values (gen_random_uuid(), p_user, 'totp', now(), now()) on conflict do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal2', 'session_id', p_user);
+end $mfa$;
+
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 grant execute on function pg_temp.u(text) to authenticated, anon;
 create temp table ids (name text primary key, id uuid not null);
@@ -15,7 +31,7 @@ grant execute on function pg_temp.id(text) to authenticated, anon;
 create function pg_temp.as_user(p_actor text, p_sql text) returns text language plpgsql as $t$
 declare r text;
 begin
-  perform set_config('request.jwt.claims', json_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.claims(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute p_sql into r;
   perform set_config('role', 'none', true);
@@ -57,7 +73,7 @@ update public.profiles set handle = 'imp_' || right(id::text, 2), handle_changed
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e5'), 'catalog_editor');
 
 -- Published and editor-made games, which imports keep matching.
-select set_config('request.jwt.claims', json_build_object('sub', pg_temp.u('e5'), 'role', 'authenticated')::text, true);
+select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);
 insert into ids select 'pub', public.create_game('Zqp Harbor Run', 'game', null, null, null, 'unknown', 'Import privacy tests');
 select public.verify_game(pg_temp.id('pub'), 'Import privacy tests', (select revision from public.games where id = pg_temp.id('pub')));

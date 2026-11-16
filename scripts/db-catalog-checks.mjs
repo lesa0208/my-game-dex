@@ -10,6 +10,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -59,7 +60,7 @@ async function whileHeld(setupSql, during) {
   await session;
   return { result, waited };
 }
-const asUserSql = (user) => `select set_config('request.jwt.claims', '{"sub":"${user.id}","role":"authenticated"}', true);\nset local role authenticated;`;
+const asUserSql = (user) => `select set_config('request.jwt.claims', '${claimsFor(user.id)}', true);\nset local role authenticated;`;
 
 const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
 const api = status.API_URL;
@@ -85,7 +86,7 @@ async function createUser() {
   if (!response.ok) throw new Error(`could not create a test user: status ${response.status}`);
   createdUsers.add(user.id);
   response = await post("/auth/v1/token?grant_type=password", anon, { email, password });
-  const session = await response.json();
+  const session = await elevate(api, anonKey, await response.json());
   const handle = `ct_${randomBytes(6).toString("hex")}`;
   response = await post("/rest/v1/rpc/claim_handle", asUser(session.access_token), { p_handle: handle });
   if (!response.ok) throw new Error(`could not claim a handle: status ${response.status}`);
@@ -256,7 +257,7 @@ async function races(admin) {
   game = await createGame(editing, `Edited before revocation ${randomBytes(3).toString("hex")}`);
   held = await whileHeld(`${asUserSql(editing)}\nselect public.update_game('${game}', '{"summary": "Edited first."}', 'race');`, () => revoke(admin, editing, "catalog_editor"));
   check("a revocation during an uncommitted edit waits for it", held.waited > 500, `${held.waited} ms`);
-  check("then completes, and the edit came first", held.result.ok && held.result.body === true && psql(`select summary from public.games where id = ${q(game)};`) === "Edited first.", held.result.message);
+  check("then completes, and the edit came first", held.result.ok && held.result.body?.result === "changed" && psql(`select summary from public.games where id = ${q(game)};`) === "Edited first.", held.result.message);
   check("the revoked editor is refused afterwards", refusedWith(await call(editing, "update_game", { p_game: game, p_changes: { summary: "Later." } }), "not permitted"));
 
   // Editors don't wait for each other.
