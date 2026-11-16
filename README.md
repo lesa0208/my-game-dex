@@ -131,7 +131,7 @@ Then add an authenticator to that account and sign in again. Admin sections show
 
 **The Owner.** Don't assign one by hand. The record is permanent by design, and only `npm run db:reset` clears it locally. The test suites assign a temporary Owner on the local stack and remove it, and refuse to run if one already exists or if the API isn't on loopback.
 
-**Testing.** `npm run db:verify` runs the Owner, MFA and ownership checks with real TOTP sessions from the local Auth. `npm run app:admin-checks` needs a production build (`npm run build`), and drives the app as a browser without JavaScript would, enrolling and verifying real authenticators through the pages. `npm run app:a11y-checks` also needs the build, plus Edge or Chrome. It signs in through the pages with JavaScript and fails on any critical or serious axe-core finding (WCAG 2.0–2.2 A and AA) in the dark theme, the one the app renders. It also applies the prepared light tokens and lists their findings without failing, because light mode isn't shipped; `A11Y_LIGHT=enforce` makes them fail. If no browser starts, it prints `NOT RUN` and exits with status 2. It takes no screenshots, traces or videos, and redacts keys, codes and emails from what it prints. The design is in [The Owner (M8)](docs/architecture/security-rls.md#the-owner-m8), [Staff authority (M8)](docs/architecture/security-rls.md#staff-authority-m8) and [ADR-055](docs/architecture/architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure).
+**Testing.** `npm run db:verify` runs the Owner, MFA and ownership checks with real TOTP sessions from the local Auth. `npm run app:admin-checks` needs a production build (`npm run build`), and drives the app as a browser without JavaScript would, enrolling and verifying real authenticators through the pages. `npm run app:a11y-checks` also needs the build, plus Edge or Chrome. It signs in through the pages with JavaScript and fails on any critical or serious axe-core finding (WCAG 2.0–2.2 A and AA) in Dark Mode, the only supported appearance. It also runs the same checks on the unsupported light tokens as diagnostics: their results are listed apart, are never counted as passes, aren't a release requirement and say nothing about Light Mode being accessible. `A11Y_LIGHT=enforce` makes them failing checks, for future Light Mode work. If no browser starts, it prints `NOT RUN` and exits with status 2. It takes no screenshots, traces or videos, and redacts keys, codes and emails from what it prints. The design is in [The Owner (M8)](docs/architecture/security-rls.md#the-owner-m8), [Staff authority (M8)](docs/architecture/security-rls.md#staff-authority-m8) and [ADR-055](docs/architecture/architecture-decisions.md#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure).
 
 ### Troubleshooting
 
@@ -194,7 +194,7 @@ src/
 
 ### Color tokens
 
-All colors are CSS variables in `src/app/globals.css`, with light and dark sets defined. The app renders dark through `class="dark"` on `<html>`.
+All colors are CSS variables in `src/app/globals.css`. **The app supports Dark Mode only**, a product decision for the initial release ([ADR-056](docs/architecture/architecture-decisions.md#adr-056-dark-mode-is-the-only-supported-appearance-for-the-initial-release)). It renders dark through an unconditional `class="dark"` on `<html>`, with no theme switcher. The light set in `globals.css` is unused and unsupported.
 
 Purple is split into three tokens, because neither white nor dark text reaches the 4.5:1 AA minimum on the brand accent:
 
@@ -208,7 +208,7 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 
 ## Phase 1: completed
 
-- Design tokens, with a dark theme by default and light tokens prepared
+- Design tokens for the dark theme (an unused light set also exists)
 - Responsive shell: bottom navigation on mobile, icon rail on tablet, full sidebar on desktop, and a contextual right sidebar from 1280px
 - Header with global search form and account menu
 - Home feed with For You, Following and Latest filters
@@ -227,7 +227,7 @@ The default `Button` variant already uses `primary-solid`. shadcn components add
 - Staff work in `/admin` (M8): catalog review, account lookup by handle, staff roles, the audit log and ownership. Bulk operations, analytics and new moderation workflows are for M10
 - JavaScript is required for form feedback. Without it, forms still submit, but their success and error messages don't show. Adding an authenticator needs JavaScript to show the QR code and setup key
 - Likes and bookmarks aren't saved; comments, following and post creation don't exist
-- Light mode has tokens but no switcher. Its tokens fail WCAG AA color contrast in places: muted navigation labels, destructive buttons, and input text on light fields. `app:a11y-checks` lists each one
+- Dark Mode only. Light Mode isn't supported or offered, and isn't WCAG-conformant: its unused tokens fail color contrast in places (muted navigation labels, destructive buttons, input text on light fields), which `app:a11y-checks` lists as diagnostics. `user_preferences.theme` (M2) accepts `light`, but nothing reads it
 - Frontend tests cover the catalog parser and the sign-in rules, plus HTTP checks of the app. Browser and accessibility checks (`app:a11y-checks`) cover only `/admin` and Settings → Security. There are no component tests
 - Seed artwork in `public/seed/` is still served by production builds, although nothing links to it while seed data is off
 - `npm audit` reports low and moderate advisories in `deepmerge` and `minimatch`, through the shadcn CLI's own dependencies. The app doesn't run that code at runtime; only the CLI uses it. Don't run `npm audit fix --force`, which proposes downgrading to `shadcn@1.0.0`
@@ -240,7 +240,7 @@ Phase 2 replaces the seed viewer with real accounts:
 2. **Authentication:** sign in, sign out and protected routes are done locally (M6a). Sign-up and password reset wait for the public-authentication blockers
 3. **Profiles:** schema with Row Level Security, profile page and profile editing
 4. **Account UI:** the account menu and `getCurrentViewer()` use the real session (M6a). Profile editing and the remaining settings are still to do
-5. **Light mode:** add the switcher and review the light theme
+5. **Light mode:** deferred, not planned for the initial release (ADR-056)
 
 Later phases:
 

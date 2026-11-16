@@ -9,11 +9,14 @@
  * is tried, then Chrome. If neither starts, the run says so and fails: missing coverage
  * is never reported as a pass.
  *
- * Every audited page is checked at a phone width (390 px) and a desktop width (1280 px),
- * dark and light, with axe-core (WCAG 2.0–2.2 A and AA rules; critical or serious
- * findings fail) and for sideways scrolling. The app renders dark (class="dark" on
- * <html>); "light" removes that class, which applies the light tokens globals.css
- * already defines, so they're checked before the light theme ships.
+ * Every audited page is checked at a phone width (390 px) and a desktop width (1280 px)
+ * with axe-core (WCAG 2.0–2.2 A and AA rules; critical or serious findings fail) and for
+ * sideways scrolling, in Dark Mode: the only supported appearance (class="dark" on
+ * <html>, with no way to change it). Light Mode is unsupported. As a diagnostic only,
+ * the same checks run with that class removed, on the light tokens in globals.css; their
+ * findings are listed and counted apart, never as passes and never as release checks,
+ * and say nothing about Light Mode being accessible. A11Y_LIGHT=enforce turns them into
+ * failing checks, for future Light Mode work.
  *
  * Throwaway accounts only, on the local stack; the test Owner's factors are recorded as
  * 25 hours old by postgres (scripts/lib/test-owner.mjs). Everything is removed at the
@@ -38,9 +41,10 @@ const WIDTHS = [
   { tag: "desktop", width: 1280, height: 900 },
 ];
 const SCHEMES = ["dark", "light"];
-// The light theme isn't shipped: its findings are listed, not enforced, unless asked.
+// Light Mode is unsupported: its results are diagnostics, not checks, unless asked.
 const ENFORCE_LIGHT = process.env.A11Y_LIGHT === "enforce";
 const lightFindings = [];
+let lightStates = 0;
 const NOT_AVAILABLE = "This page isn't available";
 const PREFIX = "a11y";
 
@@ -102,14 +106,17 @@ async function audit(page, name, tag) {
     const minor = found.filter((v) => !blocking.includes(v));
     for (const v of minor) console.log(`note ${tag} ${scheme} ${name}: ${v.impact} ${v.id} (${v.count}) ${redact(v.target)}`);
     const describe = (v) => `${v.impact} ${v.id}(${v.count}) ${v.target} ${v.message}`;
-    if (scheme === "light" && !ENFORCE_LIGHT) {
-      // Reported, counted and summarized at the end; never counted as a pass.
-      for (const v of blocking) lightFindings.push(redact(`${tag} ${name}: ${describe(v)}`));
-    } else {
-      ok(`${tag} ${scheme} ${name}: no critical or serious axe findings`, blocking.length === 0, blocking.map(describe).join("; "));
-    }
     const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, view: window.innerWidth }));
-    ok(`${tag} ${scheme} ${name}: no sideways scrolling`, overflow.scroll <= overflow.view, `${overflow.scroll} > ${overflow.view}`);
+    if (scheme === "light" && !ENFORCE_LIGHT) {
+      // A diagnostic: listed and summarized at the end, never counted as a pass.
+      lightStates += 1;
+      for (const v of blocking) lightFindings.push(redact(`${tag} ${name}: ${describe(v)}`));
+      if (overflow.scroll > overflow.view) lightFindings.push(`${tag} ${name}: sideways scrolling ${overflow.scroll} > ${overflow.view}`);
+      continue;
+    }
+    const mode = scheme === "dark" ? "Dark Mode" : "Light Mode (enforced diagnostic)";
+    ok(`${tag} ${mode} ${name}: no critical or serious axe findings`, blocking.length === 0, blocking.map(describe).join("; "));
+    ok(`${tag} ${mode} ${name}: no sideways scrolling`, overflow.scroll <= overflow.view, `${overflow.scroll} > ${overflow.view}`);
   }
   await applyScheme(page, "dark");
 }
@@ -475,14 +482,15 @@ try {
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 
-if (lightFindings.length) {
+console.log(`\nDark Mode (supported): every check above. ${results.passed} passed, ${results.failed} failed.`);
+if (lightStates) {
   const kinds = new Map();
   for (const line of lightFindings) {
-    const kind = /: (?:critical|serious) ([\w-]+)\(/.exec(line)?.[1] ?? "other";
+    const kind = /: (?:critical|serious) ([\w-]+)\(/.exec(line)?.[1] ?? (/sideways scrolling/.test(line) ? "sideways-scrolling" : "other");
     kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
   }
-  console.log(`\nLight theme (not shipped, not enforced; A11Y_LIGHT=enforce fails on these): ${lightFindings.length} page states with critical or serious findings`);
-  console.log(`  by rule: ${[...kinds].map(([k, n]) => `${k} ${n}`).join(", ")}`);
+  console.log(`\nLight Mode diagnostics (unsupported; not a release check; not counted above; not evidence of WCAG conformance).`);
+  console.log(`  ${lightStates} page states checked, ${lightFindings.length} findings${kinds.size ? ` (${[...kinds].map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}. A11Y_LIGHT=enforce makes them failing checks.`);
   for (const line of lightFindings) console.log(`  light ${line}`);
 }
 console.log(`\n${results.passed} passed, ${results.failed} failed`);

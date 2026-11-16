@@ -63,6 +63,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [053](#adr-053-exclusion-preserves-every-copy-cascades-only-what-the-publication-rules-need-and-is-restored-by-another-administrator) | Exclusion preserves every copy, cascades only what the publication rules need, and is restored by another administrator |
 | [054](#adr-054-merging-moves-every-copy-with-everything-recorded-never-changes-the-target-and-keeps-unpublished-merges-private) | Merging moves every copy with everything recorded, never changes the target, and keeps unpublished merges private |
 | [055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | The Owner is a protected record, its authority needs mature MFA, and recovery is an audited operator procedure |
+| [056](#adr-056-dark-mode-is-the-only-supported-appearance-for-the-initial-release) | Dark Mode is the only supported appearance for the initial release |
 
 ## Decisions requiring product-owner approval
 
@@ -962,6 +963,22 @@ M7 still has to add a staff function for each step, owners' read access to an ex
 - **A single lock** serializes every staff, transfer and recovery change, as in M4. Fine at staff volumes.
 - **Enrollment needs JavaScript** to show the QR code and setup key.
 - **More privileged code.** Nineteen new or replaced public `SECURITY DEFINER` functions, covered by the 92 `m8` mutations.
+
+### ADR-056: Dark Mode is the only supported appearance for the initial release
+
+**Decision.** This is a product and visual-design decision by the product owner, made at the end of M8. My Game Dex supports Dark Mode only for its initial release: dark charcoal backgrounds, purple accents, warm lighting and premium retro-collector visuals.
+- The root layout's `class="dark"` stays unconditional.
+- There's no theme switcher and no `prefers-color-scheme` rule.
+- Nothing reads `user_preferences.theme`.
+- Light Mode isn't offered or advertised, and the light set in `globals.css` is unused.
+
+**Why.** The planned visual direction is dark. A second appearance would double the visual and accessibility review for no initial benefit.
+
+**Consequences.**
+- **Accessibility requirements apply to Dark Mode.** `npm run app:a11y-checks` enforces them there.
+- **Light Mode is diagnostics only.** The suite also applies the light tokens, but only as diagnostics: listed apart, never counted as passes, and not a release requirement. Those tokens currently fail WCAG AA color contrast, so Light Mode must not be described as accessible. `A11Y_LIGHT=enforce` keeps the strict checks for future Light Mode work.
+- **A supported route to Light Mode would be a release blocker.** If a user could switch to it, through a switcher, a stored preference or the browser's setting, it would have to pass the same checks first.
+- **The stored preference does nothing.** `user_preferences.theme` (M2) still accepts `system`, `dark` and `light`, with no effect.
 
 ## Risks to watch
 
