@@ -4,7 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
+import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-frame";
+import { HistoryPanel } from "@/components/admin/records";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
@@ -91,6 +92,9 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
               <span className="font-medium">{m.source.game.title}</span>
               <span className="block text-muted-foreground">{releaseLabelLine(m.source)}</span>
               <span className="mt-1 block text-xs text-muted-foreground">Was {catalogStatusLabel(m.previous_status).toLowerCase()}</span>
+              <Link href={`/admin/catalog/releases/${m.source.id}`} className={`mt-1 inline-block ${linkClass}`}>
+                Release record
+              </Link>
             </dd>
           </div>
           <div>
@@ -104,6 +108,9 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
                 <span className="font-medium">{m.target.game.title}</span>
               )}
               <span className="block text-muted-foreground">{releaseLabelLine(m.target)}</span>
+              <Link href={`/admin/catalog/releases/${m.target.id}`} className={`mt-1 inline-block ${linkClass}`}>
+                Release record
+              </Link>
             </dd>
           </div>
         </dl>
@@ -174,6 +181,8 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
           </ul>
         </Section>
       ) : null}
+
+      <HistoryPanel id="merge-detail-history" entity="release" recordId={m.source.id} title="History of the merged release" admin={access.admin} />
     </article>,
     "merge-detail-title",
   );

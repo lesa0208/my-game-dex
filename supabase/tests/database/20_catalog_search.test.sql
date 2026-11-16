@@ -3,7 +3,7 @@
 -- with "Qzv", so results don't depend on other data, such as the dev fixture.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(129);
+select plan(130);
 
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
@@ -191,8 +191,12 @@ select is((select count(*)::int from pg_proc p where p.proname like 'catalog\_%'
 select is((select string_agg(p.proname || ':' || p.provolatile::text || ':' || p.prosecdef::text, ',' order by p.proname) from pg_proc p
   where p.oid in ('public.search_catalog(text, text[], integer, text)'::regprocedure, 'public.get_release_picker(text, text, text, uuid)'::regprocedure, 'public.list_catalog_platforms()'::regprocedure)),
   'get_release_picker:s:true,list_catalog_platforms:s:true,search_catalog:s:true', 'the search functions are STABLE, so they can''t write');
-select is((select count(*)::int from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%search%' and indexdef not like '%status = ''published''%'), 0,
-  'every game and release search index is partial on published');
+select is((select count(*)::int from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%search%' and indexname not like '%\_staff\_%' and indexdef not like '%status = ''published''%'), 0,
+  'every game and release search index for the public search is partial on published');
+-- M10b: the staff search (search_catalog_records) reaches every status, with its own
+-- indexes, named _staff_. These three are the only ones, and the public search never needs them.
+select is((select string_agg(indexname, ',' order by indexname) from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%\_staff\_%'),
+  'games_staff_search_trgm_idx,releases_staff_local_title_trgm_idx,releases_staff_product_code_idx', 'the staff search has exactly its three indexes over every status');
 select is((select string_agg(column_name, ',' order by column_name) from information_schema.column_privileges where table_schema = 'public' and table_name = 'game_aliases' and grantee = 'anon' and privilege_type = 'SELECT'),
   'created_at,game_id,id,kind,language_code,region_code,title,updated_at', 'anon reads only the alias fields');
 

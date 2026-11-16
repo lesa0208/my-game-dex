@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8, M10a and M10b are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 
@@ -487,7 +487,7 @@ The underlying video game, with no platform, region or edition.
 - **Primary key:** `id`
 - **Foreign keys:** `merged_into_id` → `games(id)` on delete restrict; `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:** partial `slug` where not null
-- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words` and trigram GIN on `search_key`, all where `status = 'published'`; `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
+- **Indexes:** `search_key` (pattern ops), `search_compact`, GIN on `search_words` and trigram GIN on `search_key`, all where `status = 'published'`; trigram GIN on `search_key` for every status, for the staff search (M10b); `(status, sort_title)`; `merged_into_id` where not null; `submitted_by` where not null
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK ((status = 'merged') = (merged_into_id IS NOT NULL))`
@@ -597,6 +597,7 @@ One specific physical edition: platform, region code, physical format, packaging
   - `barcode` where not null, for scanning
   - `product_code` where not null
   - `local_title_key` (pattern ops) and trigram GIN on it, `upper(product_code)`, `(game_id, platform_id)` and `(platform_id, game_id)`, all where `status = 'published'` (M5c)
+  - Trigram GIN on `local_title_key`, and `upper(product_code)`, each where not null and for every status, for the staff search (M10b)
   - `(status, created_at)` where `status IN ('unverified', 'under_review')`, for the review queue
   - `merged_into_id` where not null
   - `submitted_by` where not null
@@ -1368,7 +1369,7 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 
 - **Primary key:** `id`
 - **Foreign keys:** none, deliberately. Deleting an account doesn't change the log, and rows hold no copies of profile data. L4 Reporting adds a report reference
-- **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null; `(actor_id, action, occurred_at DESC)` for the two refusal actions, for the rate limit (M8)
+- **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null; `(actor_id, action, occurred_at DESC)` for the two refusal actions, for the rate limit (M8); `metadata ->> 'id'` where present (M5b); and `(metadata ->> 'id', id DESC)`, `(metadata ->> 'release_id', id DESC)`, `(metadata ->> 'game_id', id DESC)` and `(metadata ->> 'target_id', id DESC)`, each where the key is present, for a catalog record's history (M10b)
 - **Timestamps:** `occurred_at`. Rows are never updated
 - **Retention:** undecided (M4-D10). Nothing removes rows, which is an interim state, not a commitment
 

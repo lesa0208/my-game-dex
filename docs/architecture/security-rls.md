@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8, M10a and M10b are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -1038,7 +1038,7 @@ Tested by `24_import_submission_privacy.test.sql` (title, word-break, main-title
 
 ## Catalog search
 
-Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included. A staff search of unpublished records is planned for M10b, as a separate function.
+Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included. Staff search unpublished records with a separate function, [`search_catalog_records`](#catalog-records-and-history-m10b) (M10b).
 
 **Three functions, read-only.** `search_catalog(query, platforms, limit, cursor)`, `get_release_picker(game, platform, region, release)` and `list_catalog_platforms()` are granted to `anon` and `authenticated` only. Each is `STABLE`, so it can't write, and `SECURITY DEFINER` with an empty `search_path`, so it can read the stored search keys, which clients can't. The app calls them on the server, as anon, so no session is sent and results can be cached.
 
@@ -1439,7 +1439,7 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | Section | Path | Who |
 | --- | --- | --- |
 | Overview, with counts for each role ([M10a](#the-admin-overview-m10a)) | `/admin` | Any staff |
-| Catalog: review, exclusion and merge | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
+| Catalog: review, exclusion and merge, and search, records and history ([M10b](#catalog-records-and-history-m10b)) | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
 | Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
 | Staff | `/admin/staff` | Administrators |
 | Audit log | `/admin/audit` | Administrators |
@@ -1482,6 +1482,38 @@ The audit page shows 50 rows a page, and only an allow-list of plain metadata fi
 - **Tests.** `35_admin_overview` covers the grants, every refusal, the section each role gets, the fixed keys and each count's filter. `db-mfa-checks` section 6 does the same over the API with real sessions, `app:admin-checks` section 11 and `app:a11y-checks` cover the page, and the 15 `m10a` mutations prove the tests catch each weakening.
 
 **Tested by** `33_ownership.test.sql`, `34_admin.test.sql`, `scripts/db-ownership-checks.mjs`, `npm run admin:test` and `npm run app:admin-checks`, which drives the built app over HTTP as each role: access and navigation, the matrix through the pages and through crafted forms, step-up without replay, real TOTP enrollment and removal, the audit filters, transfer and recovery, and privacy scans of every admin and security page.
+
+## Catalog records and history (M10b)
+
+Catalog editors and administrators can search every game and release, open a read-only record of each, and read that record's history (decision D4). Four reads in migration `20261120100000` ([ADR-058](architecture-decisions.md#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). Nothing here writes: the pages link to the existing review, merge and exclusion actions, which keep their own checks.
+
+| Function | Returns |
+| --- | --- |
+| `search_catalog_records(kind, query, platform, status, limit, cursor)` | Games or releases of any status, merged, excluded and rejected ones included. Matched by the normalized title, an alias or a release's local title anywhere in the title, an exact id, or for releases an exact product code or barcode. A release search for a game's id lists that game's releases. Filtered by one platform and one status |
+| `get_game_record(game)` | The game's catalog fields and revision, other titles, platform pairings with their status, related games in both directions, its release count and first 100 releases, its external references and field locks, and its 20 latest submissions |
+| `get_release_record(release)` | The release's fields as the public release view lists them, plus status, verification time, revision, pairing status and where it was merged; its external references, which provider supports which field (counts only), field locks, the merges it took part in, its 20 latest submissions, and for administrators its exclusions |
+| `get_catalog_record_history(entity, id, limit, before)` | One game's or release's events from the audit log, newest first |
+
+- **Who.** Each function starts with `require_active_staff('catalog_editor')`: an active account, the role (administrators have every role) and a session verified with the authenticator (M8b). Collectors, moderators, aal1 sessions and suspended staff get the generic `not permitted`. Only `authenticated` has `EXECUTE`, so PostgreSQL refuses anon before the function runs. Editors could already read every game and release through the RLS policies; these add search over unpublished records, the private provenance and the history.
+- **The pages.** `/admin/catalog/search`, `/admin/catalog/games/:id` and `/admin/catalog/releases/:id` use the same access check as every catalog page: anyone else gets the page that doesn't exist, and staff without a verified session are sent to verify and come back, to the same search too. The review page links to both records and shows the release's latest history; the merge preview shows both releases' history, and the merge detail the merged release's. The exclusion detail links to the release record.
+- **No people.** No record or result names who submitted, verified, locked or merged anything: `submitted_by`, `verified_by`, `locked_by` and `merged_by` are never read into a response. Submissions are listed by id, kind, status and date; the submission's own page says who sent it, as before. No collection data of any kind, no copy or owner counts, no purchase data, notes or emails.
+- **No raw provenance.** External references give the provider's name and its id for the record. Evidence gives the field, the provider and how many entries support it, never a provider entry, its payload or an import run.
+- **Exclusions stay administrators'.** Only administrators get a release's exclusions, and in history only they get the exclusion's id to open it. History shows an exclusion's reason code, never the staff reason, the cascade or the copies.
+- **Bounded and stable.** Pages hold at most 50 results or events, however many are asked for. Search is ordered by sort title, then id, and history by event id, newest first; both page by keyset. A search cursor is opaque and tied to the query and filters it came from, and anything else is `invalid cursor`. Queries have at most 100 characters and need two letters or digits. Records list at most 100 releases, 20 submissions and 20 merges.
+- **Public reads are unchanged.** `search_catalog` and the picker still return published records only, and the read policies are as they were.
+
+### What history shows (D4)
+
+History is a view of `private.audit_events` built from two allow-lists, so a new kind of event or a new metadata key never appears until it is added on purpose.
+
+- **Only the record's events.** A game's history is the events recorded on the game, its platform pairings and its relations (either side), and submissions naming it. A release's is the events recorded on it, merges into it and its submissions. An event is matched by the record's id in a named field and by the kind of record, so an event on a release can't appear in a game's history because the ids match. The record must exist: an id that is no record is `record unavailable`, even when events name it.
+- **Only catalog actions.** `history_actions()` lists the 22 catalog actions history may show: record changes, verification, publication, field locks, aliases, reclassification, the submission lifecycle, exclusion, restoration and merging. Staff role, account, Owner, import-run and provider events never appear, even when their metadata names the record.
+- **Only allow-listed details.** `history_event_json()` copies a fixed list of metadata keys, each a plain value or a list of them: which fields changed, the revision, the related records' ids, the alias, reason and status codes. Import runs, provider entries, copy, owner and reference counts, and anything else in the stored metadata are left out. The stored metadata is never returned.
+- **Who acted, as a kind.** An import; the submitter, never by name; or a staff member by handle, as the review page already shows reviewers. An event whose actor's account is gone shows a former staff member.
+- **Reasons.** A staff member's reason is shown, as it is in the review history. Imports' run notes, submitters' fixed texts and exclusion reasons are not.
+- **The full audit log stays administrators' only** (`get_audit_events`), unchanged.
+
+**Tests.** `36_catalog_records` covers the grants, every refusal, search (unpublished records, filters, bounds, cursors), the fields of each record and what they leave out, and history: unrelated actions, other records and another record kind sharing an id, the allowed details, actors, reasons and paging, including more than a page of games and events. `db-mfa-checks` section 7 checks the same over the API with real sessions, and that the public reads are unchanged. `app:admin-checks` section 12 and `app:a11y-checks` cover the pages, the latter with a real merge and a real exclusion opened in a browser. The 20 `m10b` mutations prove the tests catch each weakening.
 
 ## Production launch prerequisites (M8)
 

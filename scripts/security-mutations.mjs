@@ -813,4 +813,41 @@ export const m10aMutations = [
   sql("refusals have no time window", "pgtap", rewrite(OVERVIEW, " and a.occurred_at > pg_catalog.now() - interval '7 days' limit v_cap", " limit v_cap")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations };
+// M10b: catalog search, records and history (D4). Who may read them, that history is
+// only the record's allow-listed events and fields, that records leave out who did
+// what to whom, and that pages stay bounded.
+const RECORDS_SEARCH = "public.search_catalog_records(text, text, text, text, integer, text)";
+const RECORDS_GAME = "public.get_game_record(uuid)";
+const RECORDS_RELEASE = "public.get_release_record(uuid)";
+const RECORDS_HISTORY = "public.get_catalog_record_history(text, uuid, integer, uuid)";
+const RECORDS_EVENT = "private.history_event_json(private.audit_events)";
+const RECORDS_STAFF_CHECK = "perform private.require_active_staff('catalog_editor');";
+const RECORDS_LIMIT = "v_limit integer := least(greatest(coalesce(p_limit, 25), 1), 50);";
+export const m10bMutations = [
+  // Who may read them
+  sql("search needs no staff role", "both", rewrite(RECORDS_SEARCH, RECORDS_STAFF_CHECK, "")),
+  sql("a game record needs no staff role", "both", rewrite(RECORDS_GAME, RECORDS_STAFF_CHECK, "")),
+  sql("a release record needs no staff role", "both", rewrite(RECORDS_RELEASE, RECORDS_STAFF_CHECK, "")),
+  sql("history needs no staff role", "both", rewrite(RECORDS_HISTORY, RECORDS_STAFF_CHECK, "")),
+  sql("a suspended editor searches", "both", rewrite(RECORDS_SEARCH, RECORDS_STAFF_CHECK, "if not private.has_staff_role('catalog_editor') then raise exception 'not permitted' using errcode = '42501'; end if;")),
+  sql("search is granted to anon", "both", `grant execute on function ${RECORDS_SEARCH} to anon;`),
+  sql("history is granted to service_role", "pgtap", `grant execute on function ${RECORDS_HISTORY} to service_role;`),
+  // History: the record's allow-listed events only
+  sql("history shows any action", "pgtap", rewrite(RECORDS_HISTORY, "where x.action = any (v_actions)", "where true")),
+  sql("history ignores the record's kind", "pgtap", rewrite(RECORDS_HISTORY, "\n        and a.metadata ->> 'entity' = any (case when p_entity = 'game' then array['game', 'game_platform', 'game_relation'] else array['release'] end)", "")),
+  sql("history returns the raw metadata", "pgtap", rewrite(RECORDS_EVENT, "'details', pg_catalog.jsonb_strip_nulls(", "'details', p_event.metadata || pg_catalog.jsonb_strip_nulls(")),
+  sql("history names the submitter", "pgtap", rewrite(RECORDS_EVENT, "then pg_catalog.jsonb_build_object('kind', 'submitter')", "then pg_catalog.jsonb_build_object('kind', 'submitter', 'handle', (select p.handle from public.profiles p where p.id = p_event.actor_id))")),
+  sql("history shows an exclusion's staff reason", "pgtap", rewrite(RECORDS_EVENT, "'catalog_submission_resubmitted', 'catalog_release_excluded', 'catalog_exclusion_restored')", "'catalog_submission_resubmitted')")),
+  sql("history gives editors the exclusion id", "pgtap", rewrite(RECORDS_EVENT, "'exclusion_id', case when private.has_staff_role('admin') then m -> 'exclusion_id' end,", "'exclusion_id', m -> 'exclusion_id',")),
+  sql("history counts the copies", "pgtap", rewrite(RECORDS_EVENT, "'merge_id', m -> 'merge_id',", "'merge_id', m -> 'merge_id', 'copies', m -> 'copies',")),
+  // Records: nothing about who
+  sql("a game record names its submitter", "both", rewrite(RECORDS_GAME, "'status', g.status, 'verified_at', g.verified_at,", "'status', g.status, 'submitted_by', g.submitted_by, 'verified_at', g.verified_at,")),
+  sql("a release record names who locked a field", "pgtap", rewrite(RECORDS_RELEASE, "pg_catalog.jsonb_build_object('field', fl.field_name, 'locked_at', fl.locked_at)", "pg_catalog.jsonb_build_object('field', fl.field_name, 'locked_at', fl.locked_at, 'locked_by', fl.locked_by)")),
+  sql("editors get a release's exclusions", "pgtap", rewrite(RECORDS_RELEASE, "'exclusions', case when private.has_staff_role('admin') then", "'exclusions', case when true then")),
+  // Bounded, stable pages
+  sql("a search page has no upper bound", "pgtap", rewrite(RECORDS_SEARCH, RECORDS_LIMIT, "v_limit integer := greatest(coalesce(p_limit, 25), 1);")),
+  sql("a history page has no upper bound", "pgtap", rewrite(RECORDS_HISTORY, RECORDS_LIMIT, "v_limit integer := greatest(coalesce(p_limit, 25), 1);")),
+  sql("a cursor works with any search", "pgtap", rewrite(RECORDS_SEARCH, "if v_cursor ->> 0 is distinct from v_hash or c_sort is null", "if c_sort is null")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations };

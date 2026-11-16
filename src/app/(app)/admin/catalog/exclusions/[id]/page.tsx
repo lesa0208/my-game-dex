@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
+import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-frame";
 import { RestoreForm } from "@/components/exclusion/restore-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -88,7 +88,10 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
       <header>
         <p className="text-sm text-muted-foreground">{releaseLabelLine(ex.release)}</p>
         <p className="mt-2 text-sm">
-          <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{restored ? "Restored" : "Excluded"}</span>
+          <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{restored ? "Restored" : "Excluded"}</span>{" "}
+          <Link href={`/admin/catalog/releases/${ex.release.id}`} className={linkClass}>
+            Release record
+          </Link>
         </p>
       </header>
 

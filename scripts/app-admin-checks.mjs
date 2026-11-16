@@ -441,6 +441,85 @@ try {
     check("and show no handle, email or title", !text.includes("@example.test") && !text.includes("Starfall") && !/@ad_[0-9a-f]/.test(text.replace(`@${admin.handle}`, "")));
   }
 
+  section("12. M10b: catalog search, game and release records, and their history");
+  {
+    const game = psql("select id from public.games where slug = 'starfall-odyssey';");
+    const published = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+    const pending = psql(`select id from public.releases where product_code = '${SUBMISSION_CODE}';`);
+    const submission = psql(`select id from public.catalog_change_requests where release_id = '${pending}';`);
+    check("setup: section 11's submission is still pending", UUIDS.test(pending) && UUIDS.test(submission));
+    const pages = [
+      "/admin/catalog/search",
+      `/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`,
+      `/admin/catalog/games/${game}`,
+      `/admin/catalog/releases/${pending}`,
+      `/admin/catalog/releases/${published}`,
+    ];
+    const framed = (html) => html.includes('aria-label="Admin sections"') && /aria-current="page"[^>]*>Catalog</.test(html) && oneHeading(html);
+    // The search's own address holds the code, so it's looked for in what is shown; the record's id anywhere.
+    const turnedAway = (html, path) => plain(html).includes(NOT_AVAILABLE) && !html.includes('aria-label="Admin sections"') && (path.includes(pending) || !html.includes(pending))
+      && !visible(html).includes(SUBMISSION_CODE) && !visible(html).includes("Starfall");
+    for (const path of pages) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets ${path.replace(UUIDS, ":id")} in the admin frame, with one heading and labelled fields`, p.response.status === 200 && framed(p.html) && labelled(p.html),
+        `${p.response.status}, framed ${framed(p.html)}, labelled ${labelled(p.html)}`);
+    }
+    for (const [name, who] of [["a collector", collector], ["a moderator", moderator]]) {
+      const shown = [];
+      for (const path of [...pages, `/admin/catalog/games/${uuidv7()}`]) if (!turnedAway((await who.browser.get(path)).html, path)) shown.push(path.replace(UUIDS, ":id"));
+      check(`${name} gets the unavailable page on every record page`, shown.length === 0, shown.join(" "));
+    }
+    const unverified = new Browser();
+    const signIn = await unverified.get("/sign-in");
+    await unverified.submit("/sign-in", formWith(signIn.html, "password"), { email: editor.email, password: editor.password });
+    const notSent = [];
+    for (const path of pages) {
+      const p = await unverified.get(path);
+      if (!(redirectsTo(p) === `/settings/security/verify?next=${encodeURIComponent(path)}` && !p.html.includes('aria-label="Admin sections"') && (path.includes(pending) || !p.html.includes(pending))
+        && !visible(p.html).includes(SUBMISSION_CODE)))
+        notSent.push(`${path.replace(UUIDS, ":id")} -> ${redirectsTo(p) || "-"}`);
+    }
+    check("an editor at aal1 is sent to verify from every record page, and sees nothing first", notSent.length === 0, notSent.join(" | "));
+    const searchPath = `/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`;
+    const back = await verifyBrowser(unverified, editor, searchPath);
+    check("verifying returns them to the same search", location(back.response) === searchPath, location(back.response));
+
+    // Search: the pending release is found by its code, links to its record, and says where it stands.
+    const found = (await editor.browser.get(`/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`)).html;
+    check("search finds the collector's pending release by its product code", found.includes(`href="/admin/catalog/releases/${pending}"`) && /Pending|In review/.test(visible(found)));
+    const gamesFound = visible((await editor.browser.get("/admin/catalog/search?q=starfall")).html);
+    check("and the fixture game by a word of its title", gamesFound.includes("Starfall Odyssey"));
+    const odd = await editor.browser.get("/admin/catalog/search?kind=accounts&status=deleted&platform=SNES%3B&cursor=a%20b");
+    check("unknown search parameters are ignored, not an error", odd.response.status === 200 && framed(odd.html) && !visible(odd.html).includes("didn't work"));
+    const tooShort = visible((await editor.browser.get("/admin/catalog/search?q=a")).html);
+    check("a one-letter search asks for more", tooShort.includes("Type a little more"));
+
+    // Records: what they show, and what they never show.
+    const gamePage = visible((await editor.browser.get(`/admin/catalog/games/${game}`)).html);
+    check("the game record shows its title, releases, sources and history", gamePage.includes("Starfall Odyssey") && gamePage.includes("Releases (") && gamePage.includes("Sources and locks") && gamePage.includes("History"));
+    const gameHtml = (await editor.browser.get(`/admin/catalog/games/${game}`)).html;
+    check("and links to each of its releases", gameHtml.includes(`href="/admin/catalog/releases/${published}"`) && gameHtml.includes(`href="/admin/catalog/releases/${pending}"`));
+    const pendingHtml = (await editor.browser.get(`/admin/catalog/releases/${pending}`)).html;
+    const pendingPage = visible(pendingHtml);
+    check("the pending release's record shows it isn't verified, and its submission", pendingPage.includes("Not verified") && pendingHtml.includes(`href="/admin/catalog/${submission}"`) && pendingPage.includes(SUBMISSION_CODE));
+    check("its history shows the submission, by the submitter, never by name", pendingPage.includes("The submitter · Submitted it") && !pendingPage.includes(collector.handle) && !pendingPage.includes("@example.test"),
+      pendingPage.slice(pendingPage.indexOf("History"), pendingPage.indexOf("History") + 200));
+    const publishedPage = visible((await editor.browser.get(`/admin/catalog/releases/${published}`)).html);
+    check("a published release's record shows its physical details", publishedPage.includes("Physical release") && publishedPage.includes("SNS-ZSFE-USA") && publishedPage.includes("Verified"));
+    check("and no exclusions section for an editor", !publishedPage.includes("Exclusions"));
+    check("an unknown release is the unavailable page", plain((await editor.browser.get(`/admin/catalog/releases/${uuidv7()}`)).html).includes(NOT_AVAILABLE));
+    const badBefore = await editor.browser.get(`/admin/catalog/releases/${pending}?before=not-an-id`);
+    check("a bad history cursor is ignored", badBefore.response.status === 200 && visible(badBefore.html).includes("Submitted it"));
+
+    // Navigation: the review page links to the records and shows the release's history.
+    const review = (await editor.browser.get(`/admin/catalog/${submission}`)).html;
+    check("the review page links to the release and game records", review.includes(`href="/admin/catalog/releases/${pending}"`) && review.includes(`href="/admin/catalog/games/${game}"`));
+    check("and shows the release's latest history", visible(review).includes("Release history") && visible(review).includes("Submitted it"));
+    const mergePreview = visible((await editor.browser.get(`/admin/catalog/merge/${pending}?into=${published}`)).html);
+    check("the merge preview shows both releases' history", mergePreview.includes("History of the release to merge") && mergePreview.includes("History of the release to keep"));
+    check("the queue links to the records", (await editor.browser.get("/admin/catalog")).html.includes('href="/admin/catalog/search"'));
+  }
+
   const errors = appErrorLines();
   check("the app logged no errors", errors.length === 0, errors.join(" | "));
 } catch (error) {

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
+import { HistoryPanel } from "@/components/admin/records";
 import { MergeForm } from "@/components/merge/merge-form";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -171,6 +172,9 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
           </div>
         </dl>
       </Section>
+
+      <HistoryPanel id="merge-source-history" entity="release" recordId={p.source_id} title="History of the release to merge" admin={access.admin} />
+      <HistoryPanel id="merge-target-history" entity="release" recordId={p.target_id} title="History of the release to keep" admin={access.admin} />
 
       <Section id="merge-differences" title={p.differences.length ? `What differs (${p.differences.length})` : "What differs"}>
         {p.differences.length ? (

@@ -286,6 +286,67 @@ try {
     psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
     check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "get_admin_overview")));
   }
+
+  section("7. Catalog search, records and history over the API (M10b)");
+  {
+    const title = `${PREFIX} Unpublished Record`;
+    const editor = await createUser("catalog_editor");
+    const editorAal1 = await signIn(editor);
+    const editorAal2 = await elevate(api, anonKey, editorAal1);
+    const created = await rpc(editorAal2.access_token, "create_game", { p_title: title, p_kind: "game", p_reason: "Adding a record to search for" });
+    const game = created.body;
+    check("setup: an editor adds an unpublished game", created.status === 200 && typeof game === "string", `${created.status}`);
+    const calls = [
+      ["search_catalog_records", { p_kind: "games", p_query: title }],
+      ["get_game_record", { p_game: game }],
+      ["get_release_record", { p_release: game }],
+      ["get_catalog_record_history", { p_entity: "game", p_id: game }],
+    ];
+    let anonRefused = true;
+    for (const [fn, args] of calls) {
+      const r = await fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+      const body = await r.json().catch(() => ({}));
+      anonRefused &&= r.status === 401 && body.code === "42501" && body.message === `permission denied for function ${fn}`;
+    }
+    check("anon is refused by PostgreSQL itself, for all four", anonRefused);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    const moderator = await createUser("moderator");
+    const moderatorAal2 = await elevate(api, anonKey, await signIn(moderator));
+    for (const [name, token] of [["a collector at aal2", collectorAal2.access_token], ["a moderator at aal2", moderatorAal2.access_token], ["a catalog editor at aal1", editorAal1.access_token]]) {
+      let all = true;
+      for (const [fn, args] of calls) all &&= refused(await rpc(token, fn, args));
+      check(`${name} is refused by all four, with the generic message`, all);
+    }
+    const search = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title });
+    check("an editor's search finds the unpublished game", search.status === 200 && search.body.items?.length === 1 && search.body.items[0].id === game && search.body.items[0].status === "under_review",
+      JSON.stringify(search.body?.items?.map((i) => i.status)));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    check("so does an administrator's", (await rpc(adminAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })).body?.items?.length === 1);
+    const record = await rpc(editorAal2.access_token, "get_game_record", { p_game: game });
+    check("the game's record opens for the editor", record.status === 200 && record.body?.title === title && record.body?.status === "under_review");
+    const history = await rpc(editorAal2.access_token, "get_catalog_record_history", { p_entity: "game", p_id: game });
+    const created1 = history.body?.items?.find((e) => e.action === "catalog_record_created");
+    check("its history names the editor by handle, with their reason", created1?.actor?.kind === "staff" && /^mf_/.test(created1.actor.handle ?? "") && created1.reason === "Adding a record to search for",
+      JSON.stringify(created1?.actor));
+    const text = JSON.stringify([search.body, record.body, history.body]);
+    check("nothing in them holds an email or an account id", !text.includes("@") && !text.includes(editor.id) && !text.includes("submitted_by") && !text.includes("verified_by"));
+    const bounded = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "releases", p_limit: 1000 });
+    check("a page holds at most 50 results, however many are asked for", bounded.status === 200 && bounded.body.items.length <= 50, `${bounded.body?.items?.length}`);
+    const historyBounded = await rpc(editorAal2.access_token, "get_catalog_record_history", { p_entity: "game", p_id: game, p_limit: 1000 });
+    check("and a history page at most 50 events", historyBounded.status === 200 && historyBounded.body.items.length <= 50);
+    const badCursor = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_cursor: "bm90LWEtY3Vyc29y" });
+    check("a made-up cursor is refused", badCursor.status === 400 && badCursor.body?.message === "invalid cursor", `${badCursor.status} ${badCursor.body?.message}`);
+    // The public reads are unchanged: the unpublished game stays out of them.
+    const collectorRead = await fetch(`${api}/rest/v1/games?select=id&id=eq.${game}`, { headers: asUser(collectorAal2.access_token) });
+    check("a collector still can't read the unpublished game directly", (await collectorRead.json()).length === 0);
+    const publicSearch = await fetch(`${api}/rest/v1/rpc/search_catalog`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_query: title }) });
+    check("and the public search doesn't find it", (await publicSearch.json()).items?.length === 0);
+    check("the full audit log is still administrators' only", refused(await rpc(editorAal2.access_token, "get_audit_events", { p_limit: 5 })));
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })));
+  }
 } catch (error) {
   check("the checks ran to the end", false, error.message);
 } finally {

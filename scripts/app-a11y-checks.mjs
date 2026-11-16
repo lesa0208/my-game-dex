@@ -31,7 +31,7 @@ import { chromium } from "playwright-core";
 
 import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
-import { addFactor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
+import { addFactor, claimsFor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
 import { matureFactors, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
 
 requireNoOwner(psql, api);
@@ -346,6 +346,32 @@ try {
     ["merge history", "/admin/catalog/merges"],
   ];
 
+  // M10b: a real merge and a real exclusion, made through the database functions as an
+  // administrator and an editor would, so their detail pages are opened with data.
+  const as = (user, sql) => psql(`begin; select set_config('request.jwt.claims', '${claimsFor(user.id)}', true); set local role authenticated; ${sql}; commit;`)
+    .split("\n").filter((l) => l && l !== "BEGIN" && l !== "COMMIT").at(-1);
+  const gameId = psql("select game_id from public.releases where product_code = 'SNS-ZSFE-USA';");
+  const snes = psql("select id from public.platforms where slug = 'snes';");
+  const dup = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'ntsc-uc', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "AYB-DUP"}', 'Browser checks: a duplicate')`);
+  as(editor, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  as(editor, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  const merged = as(admin, `select public.merge_release('${dup}', '${releaseUs}', p ->> 'token', 'Browser checks: the same release', null,
+    array(select d ->> 'field' from jsonb_array_elements(p -> 'differences') d), true)::text from (select public.get_merge_preview('${dup}', '${releaseUs}') as p) x`);
+  const mergeId = psql(`select id from private.catalog_merges where source_release_id = '${dup}';`);
+  const excluded = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'pal', '{"product_code": "AYB-EXC"}', 'Browser checks: a download code')`);
+  as(editor, `select public.exclude_release('${excluded}', p ->> 'token', 'download_code', 'Browser checks: not a physical release')::text from (select public.get_exclusion_preview('${excluded}') as p) x`);
+  const exclusionId = psql(`select id from private.catalog_exclusions where release_id = '${excluded}';`);
+  ok("setup: a real merge and a real exclusion", /^[0-9a-f-]{36}$/.test(mergeId) && /^[0-9a-f-]{36}$/.test(exclusionId)
+    && psql(`select status from public.releases where id = '${dup}';`) === "merged" && psql(`select status from public.releases where id = '${excluded}';`) === "excluded", merged ?? "");
+  CATALOG_PAGES.push(
+    ["merge detail", `/admin/catalog/merges/${mergeId}`],
+    ["catalog search", "/admin/catalog/search?q=starfall"],
+    ["release search", "/admin/catalog/search?q=starfall&kind=releases"],
+    ["game record", `/admin/catalog/games/${gameId}`],
+    ["release record", `/admin/catalog/releases/${releaseUs}`],
+    ["merged release record", `/admin/catalog/releases/${dup}`],
+  );
+
   for (const viewport of WIDTHS) {
     const tag = viewport.tag;
 
@@ -417,6 +443,21 @@ try {
       await keyboard(e.page, "submission review page", tag);
       await e.page.goto(`${origin}/admin/catalog/exclusions`, { waitUntil: "networkidle" });
       ok(`${tag} an editor gets the unavailable page for exclusions`, (await visibleText(e.page)).includes(NOT_AVAILABLE) && (await sectionsShown(e.page)).length === 0);
+      // M10b: the records with real data, and the history's links between them.
+      await e.page.goto(`${origin}/admin/catalog/merges/${mergeId}`, { waitUntil: "networkidle" });
+      const mergeText = await visibleText(e.page);
+      ok(`${tag} the merge detail shows the real merge and the merged release's history`,
+        mergeText.includes("Starfall Odyssey merged") && mergeText.includes("History of the merged release") && mergeText.includes("Merged this release into another"));
+      await e.page.goto(`${origin}/admin/catalog/releases/${releaseUs}`, { waitUntil: "networkidle" });
+      ok(`${tag} the kept release's history shows the merge, linked`, (await visibleText(e.page)).includes("Merged another release into this one")
+        && (await e.page.locator(`#history a[href="/admin/catalog/merges/${mergeId}"]`).count()) > 0);
+      await keyboard(e.page, "release record page", tag);
+      await e.page.goto(`${origin}/admin/catalog/search?q=starfall&kind=releases`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "catalog search page", tag);
+      await e.page.goto(`${origin}/admin/catalog/releases/${excluded}`, { waitUntil: "networkidle" });
+      const excludedText = await visibleText(e.page);
+      ok(`${tag} an editor sees the excluded release and its exclusion, but no exclusion record or staff reason`,
+        excludedText.includes("Excluded the release") && !excludedText.includes("not a physical release") && (await e.page.locator('a[href^="/admin/catalog/exclusions/"]').count()) === 0);
       await e.context.close();
     }
 
@@ -432,6 +473,8 @@ try {
         ["ownership", "/admin/ownership"],
         ["catalog review", "/admin/catalog"],
         ["exclusions", "/admin/catalog/exclusions"],
+        ["exclusion detail", `/admin/catalog/exclusions/${exclusionId}`],
+        ["excluded release record", `/admin/catalog/releases/${excluded}`],
         ["verification", "/settings/security/verify?next=%2Fadmin"],
         ["security settings", "/settings/security"],
       ]) {
@@ -439,6 +482,12 @@ try {
         await audit(a.page, `admin ${name}`, tag);
         await structure(a.page, `admin ${name}`, tag);
       }
+      await a.page.goto(`${origin}/admin/catalog/exclusions/${exclusionId}`, { waitUntil: "networkidle" });
+      ok(`${tag} the exclusion detail shows the real exclusion, linked to its release record`, (await visibleText(a.page)).includes("Browser checks: not a physical release")
+        && (await a.page.locator(`a[href="/admin/catalog/releases/${excluded}"]`).count()) > 0);
+      await a.page.goto(`${origin}/admin/catalog/releases/${excluded}`, { waitUntil: "networkidle" });
+      ok(`${tag} an administrator's release record lists the exclusion, linked`, (await a.page.locator(`#release-exclusions a[href="/admin/catalog/exclusions/${exclusionId}"]`).count()) > 0
+        && (await a.page.locator(`#history a[href="/admin/catalog/exclusions/${exclusionId}"]`).count()) > 0);
       await a.page.goto(`${origin}/admin/staff`, { waitUntil: "networkidle" });
       await keyboard(a.page, "admin staff page", tag);
       await a.page.goto(`${origin}/settings/security/verify?next=%2Fadmin`, { waitUntil: "networkidle" });
@@ -568,6 +617,15 @@ try {
   await browser.close();
   stopApp();
   removeTestOwner(psql);
+  // M10b's merge and exclusion are permanent by design; this test data goes with the triggers off.
+  psql(`begin; set local session_replication_role = replica;
+delete from private.catalog_merge_references where merge_id in (select m.id from private.catalog_merges m join public.releases r on r.id = m.source_release_id where r.product_code = 'AYB-DUP');
+delete from private.catalog_merge_copies where merge_id in (select m.id from private.catalog_merges m join public.releases r on r.id = m.source_release_id where r.product_code = 'AYB-DUP');
+delete from private.catalog_merges where source_release_id in (select id from public.releases where product_code = 'AYB-DUP');
+delete from private.catalog_exclusion_copies where exclusion_id in (select e.id from private.catalog_exclusions e join public.releases r on r.id = e.release_id where r.product_code = 'AYB-EXC');
+delete from private.catalog_exclusions where release_id in (select id from public.releases where product_code = 'AYB-EXC');
+delete from public.releases where product_code in ('AYB-DUP', 'AYB-EXC');
+commit;`);
   // The submission and its release, before the accounts, while they still name their submitter.
   const submitters = [...handles.keys()].map((id) => `'${id}'`).join(",") || "null";
   psql(`begin;
@@ -584,6 +642,7 @@ commit;`);
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
       + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
+      + (select count(*) from private.catalog_merges) + (select count(*) from private.catalog_exclusions)
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 

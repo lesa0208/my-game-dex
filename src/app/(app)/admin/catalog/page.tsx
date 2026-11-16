@@ -32,6 +32,9 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
     <AdminFrame access={access} current="catalog" title="Review submissions">
       <p className="text-sm text-muted-foreground">
         Missing games and releases sent by collectors. Oldest first.{" "}
+        <Link href="/admin/catalog/search" className="text-primary-text underline underline-offset-4">
+          Catalog records
+        </Link>{" "}
         <Link href="/admin/catalog/merges" className="text-primary-text underline underline-offset-4">
           Merges
         </Link>

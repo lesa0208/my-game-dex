@@ -4,7 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
+import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-frame";
+import { HistoryPanel } from "@/components/admin/records";
 import { CorrectionForm, PiecesForm } from "@/components/review/correction-form";
 import { DecisionForm } from "@/components/review/decision-form";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -123,6 +124,20 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
             <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{requestStatusLabel(request.status)}</span>
             {request.kind === "new_game" ? "New game" : "Missing release"} · From {submitterLabel(submitter)} · {formatDay(request.created_at)}
           </p>
+          {release || game ? (
+            <p className="mt-2 flex flex-wrap gap-x-4 text-sm">
+              {release ? (
+                <Link href={`/admin/catalog/releases/${release.id}`} className={linkClass}>
+                  Release record
+                </Link>
+              ) : null}
+              {game ? (
+                <Link href={`/admin/catalog/games/${game.id}`} className={linkClass}>
+                  Game record
+                </Link>
+              ) : null}
+            </p>
+          ) : null}
         </header>
 
         {request.own ? (
@@ -242,6 +257,8 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
             <p className="text-sm text-muted-foreground">No release of this game on this platform, and nothing with the same product code or barcode.</p>
           )}
         </Section>
+
+        {release ? <HistoryPanel id="review-record-history" entity="release" recordId={release.id} title="Release history" admin={access.admin} /> : null}
 
         {item.history.length > 1 ? (
           <Section id="review-history" title="Earlier rounds">

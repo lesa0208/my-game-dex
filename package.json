@@ -35,6 +35,7 @@
     "exclusion:test": "node --experimental-strip-types --no-warnings --test src/features/exclusion/exclusion.test.mjs",
     "merge:test": "node --experimental-strip-types --no-warnings --test src/features/merge/merge.test.mjs",
     "admin:test": "node --experimental-strip-types --no-warnings --test src/features/admin/admin.test.mjs",
+    "records:test": "node --experimental-strip-types --no-warnings --test src/features/records/records.test.mjs",
     "app:review-checks": "node scripts/app-review-checks.mjs",
     "app:relink-checks": "node scripts/app-relink-checks.mjs",
     "app:exclusion-checks": "node scripts/app-exclusion-checks.mjs",
