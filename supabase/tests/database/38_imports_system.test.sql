@@ -5,7 +5,7 @@
 -- catalog record. Runs in one transaction that rolls back, on the local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(83);
+select plan(93);
 
 -- Staff need a live aal2 session with a verified TOTP factor (M8b). e6 is an editor
 -- whose verification is 11 minutes old; everyone else's is fresh.
@@ -80,7 +80,7 @@ insert into ids values ('run1', '01900000-0000-7000-8000-000000000001'), ('run2'
 insert into private.import_runs (id, provider_code, platform_id, source_name, source_sha256, source_fetched_at, terms_sha256, status, checkpoint, stats, started_at, finished_at, reason, lease_id, lease_expires_at)
 values
   (pg_temp.id('run1'), 'no-intro', (select id from public.platforms where slug = 'snes'), 'Imp SNES snapshot 1.dat', repeat('a', 64), now() - interval '3 days', repeat('c', 64),
-   'completed', '{"after": "secret-position"}', '{"staged_new": 3, "staged_ignored": 1, "note": "not a number"}', now() - interval '3 days', now() - interval '3 days' + interval '1 hour', 'Imp pilot', null, null),
+   'completed', '{"after": "secret-position"}', '{"staged_new": 3, "staged_ignored": 1, "note": "not a number", "lease_secret": 9}', now() - interval '3 days', now() - interval '3 days' + interval '1 hour', 'Imp pilot', null, null),
   (pg_temp.id('run2'), 'no-intro', (select id from public.platforms where slug = 'snes'), 'Imp SNES snapshot 2.dat', repeat('b', 64), now() - interval '2 days', repeat('c', 64),
    'failed', '{}', '{}', now() - interval '2 days', now() - interval '2 days' + interval '5 minutes', 'Imp second', null, null),
   (pg_temp.id('run3'), 'no-intro', (select id from public.platforms where slug = 'snes'), 'Imp SNES snapshot 3.dat', repeat('d', 64), now() - interval '1 day', repeat('c', 64),
@@ -95,8 +95,8 @@ insert into ids select 'release', pg_temp.as_user('e1', format('select public.cr
 insert into ids select 'release2', pg_temp.as_user('e1', format('select public.create_release(%L, (select id from public.platforms where slug = ''snes''), ''rom-cartridge'', ''pal'', ''{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "IMP-2"}'', ''Import tests'')::text', pg_temp.id('game')))::uuid;
 insert into private.provider_records (id, provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, match_tier, match_notes, matched_game_id, matched_release_id, review_reason)
 values
-  ('01900000-0000-7000-8000-0000000000a1', 'no-intro', 'release', 'imp-1', '{"title": "Imp Harbor Lights", "secret_field": "payload only"}', repeat('1', 64), pg_temp.id('run1'), 'promoted', 'A', '{"candidates": ["x"]}', pg_temp.id('game'), pg_temp.id('release'), null),
-  ('01900000-0000-7000-8000-0000000000a2', 'no-intro', 'release', 'imp-2', '{"title": "Imp Broken Entry"}', repeat('2', 64), pg_temp.id('run1'), 'failed', null, '{"error": "unknown medium"}', null, null, null),
+  ('01900000-0000-7000-8000-0000000000a1', 'no-intro', 'release', 'imp-1', '{"title": "Imp Harbor Lights", "secret_field": "payload only", "release_type": "payload-type", "flags": ["payload-flag"]}', repeat('1', 64), pg_temp.id('run1'), 'promoted', 'A', '{"candidates": ["x"]}', pg_temp.id('game'), pg_temp.id('release'), null),
+  ('01900000-0000-7000-8000-0000000000a2', 'no-intro', 'release', 'imp-2', '{"title": "Imp Broken Entry"}', repeat('2', 64), pg_temp.id('run1'), 'failed', null, '{"error": "duplicate key value violates unique constraint \"releases_internal_key\""}', null, null, null),
   ('01900000-0000-7000-8000-0000000000a3', 'no-intro', 'release', 'imp-3', '{"title": "Imp Held Entry"}', repeat('3', 64), pg_temp.id('run1'), 'needs_review', null, '{"serial_also_on": ["y"]}', null, null, 'nintendo power flash'),
   ('01900000-0000-7000-8000-0000000000a4', 'no-intro', 'release', 'imp-4', '{"title": "Imp Prototype"}', repeat('4', 64), pg_temp.id('run1'), 'ignored', null, '{"ignored": "prototype"}', null, null, null),
   ('01900000-0000-7000-8000-0000000000a5', 'no-intro', 'release', 'imp-5', '{"title": "Imp Second Candidate"}', repeat('5', 64), pg_temp.id('run1'), 'promoted', 'B', '{}', pg_temp.id('game'), pg_temp.id('release2'), null);
@@ -169,7 +169,7 @@ select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.r
   'finished_at,id,lease_expires_at,lease_live,platform,provider_code,provider_name,reason,source_fetched_at,source_name,source_sha256,started_at,stats,status,terms_sha256',
   'with fixed keys: no lease id or checkpoint');
 select is((select count(*)::int from jsonb_array_elements(pg_temp.runs()) r where r::text like '%beef%' or r::text like '%cafe%' or r::text like '%secret-position%'), 0, 'and neither appears anywhere in the result');
-select is((select r -> 'stats' from jsonb_array_elements(pg_temp.runs()) r where r ->> 'id' = pg_temp.id('run1')::text), '{"staged_new": 3, "staged_ignored": 1}'::jsonb, 'stats keeps only numbers');
+select is((select r -> 'stats' from jsonb_array_elements(pg_temp.runs()) r where r ->> 'id' = pg_temp.id('run1')::text), '{"staged_new": 3, "staged_ignored": 1}'::jsonb, 'stats keeps only the staging counts: no other key, even a number (M10e)');
 select is((select string_agg(r ->> 'reason' || '=' || (r ->> 'lease_live'), ',') from jsonb_array_elements(pg_temp.runs()) r where r ->> 'status' = 'running'), 'Imp stalled=false,Imp running=true', 'a running run shows whether its lease is live');
 select is((select r -> 'platform' ->> 'slug' from jsonb_array_elements(pg_temp.runs()) r where r ->> 'id' = pg_temp.id('run1')::text), 'snes', 'and its platform');
 select is(jsonb_array_length(pg_temp.runs('1')), 1, 'a page of one');
@@ -199,6 +199,29 @@ select is((pg_temp.run('run1') -> 'report' ->> 'releases_created')::int, 2, 'and
 select is(pg_temp.run('run1') ->> 'failed' || '/' || (pg_temp.run('run1') ->> 'needs_review'), '1/1', 'one failed, one waiting for review');
 select is(pg_temp.run('run1') -> 'report' -> 'ignored_reasons', '{"prototype": 1}'::jsonb, 'ignored entries by reason');
 select is(pg_temp.run('run1') -> 'report' -> 'held_reasons', '{"nintendo power flash": 1}'::jsonb, 'held entries by reason');
+-- The report is an allow-list (M10e): fixed keys, and nothing from the payload.
+select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.run('run1') -> 'report') k),
+  'by_status,by_tier,games_created,held_reasons,ignored_reasons,possible_duplicates,published_or_verified,queued_for_review,releases_created,releases_missing,shared_serials,source_records,suggested,withdrawn,word_break_matches',
+  'the report has fixed keys: no release types or flags from the payload');
+select is((pg_temp.run('run1') -> 'report')::text ~ 'payload', false, 'no payload value appears anywhere in it');
+select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.run('run1') -> 'report' -> 'releases_missing') k),
+  'edition,languages,media_count,packaging,product_code,region,release_date,releases', 'missing details: eight fixed counts');
+select is((select bool_and(k ~ '^(game|release):[a-zA-Z_]+$') from jsonb_object_keys(pg_temp.run('run1') -> 'report' -> 'by_status') k), true, 'status keys are of the known form');
+select is(private.import_report_safe('{"by_status": {"release:promoted": 2, "release:<script>": 1, "x": 3}, "by_tier": {"game:A": "two"}, "source_records": "5"}') - 'releases_missing',
+  '{"by_tier": {}, "suggested": null, "withdrawn": null, "by_status": {"release:promoted": 2}, "held_reasons": {}, "games_created": null, "shared_serials": null, "source_records": null, "ignored_reasons": {}, "releases_created": null, "queued_for_review": null, "word_break_matches": null, "possible_duplicates": null, "published_or_verified": null}'::jsonb,
+  'an unknown key, a key of the wrong form or a value that isn''t a number is dropped');
+insert into ids values ('run5', '01900000-0000-7000-8000-000000000005');
+insert into private.import_runs (id, provider_code, source_name, source_sha256, source_fetched_at, status, started_at, finished_at)
+values (pg_temp.id('run5'), 'wikidata', 'Imp many reasons', repeat('9', 64), now(), 'completed', now() - interval '5 days', now() - interval '5 days');
+insert into private.provider_records (provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, match_notes)
+select 'wikidata', 'game', 'imp-why-' || i, '{}', lpad(to_hex(1000 + i), 64, '0'), pg_temp.id('run5'), 'ignored',
+  jsonb_build_object('ignored', case when i <= 2 then repeat('w', 300) when i <= 6 then 'common reason' else 'reason ' || i end)
+from generate_series(1, 30) i;
+insert into private.import_run_records (import_run_id, provider_record_id, position)
+select pg_temp.id('run5'), id, row_number() over (order by id) from private.provider_records where import_run_id = pg_temp.id('run5');
+select is((select count(*)::int from jsonb_object_keys(pg_temp.run('run5') -> 'report' -> 'ignored_reasons')), 20, 'at most 20 reasons');
+select is((pg_temp.run('run5') -> 'report' -> 'ignored_reasons' ->> 'common reason')::int, 4, 'the most frequent first');
+select is((select max(length(k)) from jsonb_object_keys(pg_temp.run('run5') -> 'report' -> 'ignored_reasons') k), 200, 'each at most 200 characters');
 select is((select string_agg(c ->> 'action', ',' order by c ->> 'action') from jsonb_array_elements(pg_temp.run('run2') -> 'reclassifications') c), 'queued,withdrawn', 'the run that reconsidered candidates lists them');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.run('run2') -> 'reclassifications' -> 0) k), 'action,created_at,id,reason,release_id,resolution,resolved_at', 'each with fixed keys: nobody named');
 select is((pg_temp.run('run2') ->> 'reclassifications_total')::int, 2, 'and how many there are');
@@ -211,10 +234,12 @@ select is((select count(*)::int from jsonb_each_text(pg_temp.run('run3') -> 'run
 create function pg_temp.records(p_args text) returns jsonb language sql as $$ select pg_temp.as_user('a1', format('select public.get_import_run_records(%L%s)::text', pg_temp.id('run1'), p_args))::jsonb $$;
 select is((select string_agg(r ->> 'external_id', ',') from jsonb_array_elements(pg_temp.records('')) r), 'imp-1,imp-2,imp-3,imp-4,imp-5', 'entries in source order');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.records('') -> 0) k),
-  'entity_type,error,external_id,id,ignored,match_tier,matched_game_id,matched_release_id,position,possible_duplicate,review_reason,shared_serial,status,title',
-  'with fixed keys: no raw payload or match notes');
+  'entity_type,external_id,id,ignored,match_tier,matched_game_id,matched_release_id,position,possible_duplicate,review_reason,shared_serial,status,title',
+  'with fixed keys: no raw payload, match notes or error message');
 select is((select count(*)::int from jsonb_array_elements(pg_temp.records('')) r where r::text like '%payload only%'), 0, 'nothing else from the payload appears');
-select is((select r ->> 'error' from jsonb_array_elements(pg_temp.records('')) r where r ->> 'external_id' = 'imp-2'), 'unknown medium', 'a failure shows its error');
+select is((select r ->> 'status' from jsonb_array_elements(pg_temp.records('')) r where r ->> 'external_id' = 'imp-2'), 'failed', 'a failure shows its status');
+select is(pg_temp.records('')::text ~ 'duplicate key|releases_internal_key', false, 'but never the importer''s database error (M10e)');
+select is((select max(length(r ->> 'ignored')) from jsonb_array_elements(pg_temp.as_user('a1', format('select public.get_import_run_records(%L)::text', pg_temp.id('run5')))::jsonb) r), 200, 'an ignore reason is at most 200 characters');
 select is((select (r ->> 'review_reason') || '/' || (r ->> 'shared_serial') from jsonb_array_elements(pg_temp.records('')) r where r ->> 'external_id' = 'imp-3'), 'nintendo power flash/true', 'a held entry its reason and a shared serial');
 select is((select (r ->> 'ignored') || '/' || (r ->> 'status') from jsonb_array_elements(pg_temp.records('')) r where r ->> 'external_id' = 'imp-4'), 'prototype/ignored', 'an ignored one why');
 select is((select (r ->> 'possible_duplicate') || '/' || (r ->> 'matched_release_id') from jsonb_array_elements(pg_temp.records('')) r where r ->> 'external_id' = 'imp-1'), 'true/' || pg_temp.id('release'), 'a created candidate links to its release');

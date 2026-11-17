@@ -68,7 +68,6 @@ export type ImportRecord = {
   match_tier: string | null;
   review_reason: string | null;
   ignored: string | null;
-  error: string | null;
   possible_duplicate: boolean;
   shared_serial: boolean;
   matched_game_id: string | null;

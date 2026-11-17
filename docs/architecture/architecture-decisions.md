@@ -1077,6 +1077,8 @@ The full audit log (`get_audit_events`) stays administrators' only.
 - **Reference data is cached for hours,** which is right while only a migration changes it.
 - **Covered by** `38_imports_system`, `db-mfa-checks` section 9, `app:reference-checks`, `app:a11y-checks` and the 18 `m10d` mutations.
 
+**M10e privacy review** (migration `20261123100000`). Reusing the pilot report whole also passed on what it counts by: values copied from the raw source payload (release types and flags), and an unbounded number of reasons. And a failed entry showed the importer's database error message, an internal diagnostic. Nothing secret was reachable, and only administrators could read it, but the reads no longer rely on that. The report is now rebuilt from an explicit allow-list (`private.import_report_safe`). A failed entry shows only its status, an ignore reason is cut to 200 characters, and a run's stats keep only the five staging counts.
+
 ## Risks to watch
 
 | Risk | Mitigation |

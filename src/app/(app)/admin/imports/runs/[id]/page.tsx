@@ -206,7 +206,9 @@ async function RunView({ params, searchParams }: { params: PageProps<"/admin/imp
                   </Cell>
                   <Cell className="break-words">
                     {[
-                      e.error ? `Error: ${e.error}` : null,
+                      // The importer's error message is a database diagnostic, so it isn't shown:
+                      // the operator's log has it (M10e).
+                      e.status === "failed" ? "Couldn't be applied; the importer's log has the detail" : null,
                       e.review_reason ? `Held: ${e.review_reason}` : null,
                       e.ignored ? `Ignored: ${e.ignored}` : null,
                       e.possible_duplicate ? "Possible duplicate" : null,

@@ -151,7 +151,7 @@ try {
   const runPage = await admin.browser.get(`/admin/imports/runs/${run1}`);
   const runText = visible(runPage.html);
   check("a run shows its report, staging counts and entries", runText.includes(`${TAG} pilot`) && runText.includes("New entries") && runText.includes(`${TAG} Harbor`));
-  check("a failed entry shows its error", runText.includes(`${TAG} unknown medium`));
+  check("a failed entry says so, without the importer's error message (M10e)", runText.includes("Couldn't be applied") && !runText.includes(`${TAG} unknown medium`));
   check("a created candidate links to its release record", hrefs(runPage.html).includes(`/admin/catalog/releases/${releaseId}`));
   const failedEntries = visible((await admin.browser.get(`/admin/imports/runs/${run1}?status=failed`)).html);
   check("entries can be filtered by status", failedEntries.includes(`${TAG} Broken`) && !failedEntries.includes(`${TAG} Harbor`));

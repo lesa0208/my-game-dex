@@ -923,7 +923,7 @@ export const m10dMutations = [
   // What they return
   sql("a run shows its lease id", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'lease_id', p_run.lease_id,\n    'lease_live', p_run.status = 'running'")),
   sql("a run shows its checkpoint", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'checkpoint', p_run.checkpoint,\n    'lease_live', p_run.status = 'running'")),
-  sql("a run's stats keep anything", "pgtap", rewrite(M10D_SUMMARY, "              where pg_catalog.jsonb_typeof(s.value) = 'number')", "              where true)")),
+  sql("a run's stats keep anything", "pgtap", rewrite(M10D_SUMMARY, "              where s.key in ('staged_new', 'staged_unchanged', 'staged_changed', 'staged_ignored', 'staged_repeated')\n                and pg_catalog.jsonb_typeof(s.value) = 'number')", "              where true)")),
   sql("a staged entry shows its raw payload", "pgtap", rewrite(M10D_RECORDS, "      'title', pg_catalog.left(pr.payload ->> 'title', 200),", "      'title', pr.payload::text,")),
   sql("the system view names the importer's connection limit", "pgtap", rewrite(M10D_SYSTEM, "      'login_enabled', coalesce(", "      'connection_limit', (select r.rolconnlimit from pg_catalog.pg_roles r where r.rolname = 'catalog_importer'),\n      'login_enabled', coalesce(")),
   // Bounds and filters
