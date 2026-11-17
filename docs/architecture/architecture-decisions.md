@@ -70,6 +70,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables) | Imports and the system are read-only views for administrators, and reference data is the public tables |
 | [061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions) | Accounts, audit and staff are allow-listed reads over the M8 functions |
 | [062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators) | The M10 integration review retires the raw admin reads and withholds staff reasons from moderators |
+| [063](#adr-063-invitations-are-supabase-native-sent-with-a-server-only-secret-key-after-the-database-authorizes) | Invitations are Supabase-native, sent with a server-only secret key after the database authorizes |
 
 ## Decisions requiring product-owner approval
 
@@ -821,7 +822,7 @@ Most general game databases focus on games rather than physical releases. Expect
 - Server code takes identity only from `getClaims()`.
 - `getCurrentViewer()` reads the account through the existing `get_my_account()`.
 
-There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
+There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. **Amended by [ADR-063](#adr-063-invitations-are-supabase-native-sent-with-a-server-only-secret-key-after-the-database-authorizes):** the server now also holds the Supabase secret key, for two Auth Admin calls behind invitations, and has an invitation confirmation page and a password step. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
 
 There's no sign-up or password-reset page, and nothing on a hosted project changed. The seed viewer no longer appears in the header; seed content stays limited to the development preview feed. The design is in [security-rls.md](security-rls.md#web-sessions-m6a).
 
@@ -1110,6 +1111,27 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **A script that called the retired reads breaks,** by design. None exists in the repository; operators read `private.audit_events` with SQL, as before.
 - **A moderator can't read a colleague's reasoning** for a suspension; they ask an administrator, who sees it in the account and the audit log.
 - **Covered by** `14_audit`, `34_admin`, `39_accounts_audit_staff` (85), `db-audit-checks`, `db-mfa-checks`, `app:admin-checks`, and six `m10i` mutations; the historical mutations on the retired reads now target the replacements.
+
+### ADR-063: Invitations are Supabase-native, sent with a server-only secret key after the database authorizes
+
+**Decision.** M11a-1 (migrations `20261125100000`, `20261125100100`; [security-rls.md](security-rls.md#invitations-and-registration-m11a-1)), local development only. The private beta is invitation only:
+
+- **Auth sends the invitations.** The server calls Auth's Admin API (`inviteUserByEmail`) with the secret key; Auth sends the email (Mailpit locally) with the app's own template, which links to `/auth/confirm` with the token's hash.
+- **The database decides first, and checks Auth after.** Every action starts with a SECURITY DEFINER function in the administrator's own session: active administrator, a verification in the last 10 minutes, a reason, limits (20 open per administrator, 200 in all; one resend per 10 minutes, five per invitation), an audited ledger row (`private.account_invitations`, no API access). Only then the Admin API call, with what the function returned. The database then reads `auth.users` itself to record the outcome, never the server's word.
+- **The secret key** is the server-only `SUPABASE_SECRET_KEY`, used only in `src/features/auth-admin/server.ts` (marked `server-only`), for two operations: send an invitation and ban an invitee. No deletion, no unbanning, no generated links, no data queries, nothing logged. This amends [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server).
+- **Revocation never deletes an account.** It's recorded and audited first, which at once blocks the invitee's password step and handle claim in the database; then the server bans the account in Auth; then reconciliation reads the ban back. A ban that fails leaves "revoking", which still blocks onboarding and can be retried. An invitee who accepted before the ban is recorded as revoked after acceptance and stays banned; nothing unbans them automatically. An invitee who has already chosen a handle has a working account: that's a suspension.
+- **Accepting is an explicit POST.** `/auth/confirm`'s GET shows a button; only its POST calls `verifyOtp`, so mail scanners can't spend the single-use token. Then `/welcome/password`, then the existing handle claim.
+- **The password step is authoritative.** `complete_my_password_setup` records it only when Auth's own log (`auth.audit_log_entries`, `user_updated_password` for this account, after it accepted) shows the change, and `claim_handle` refuses an invitee whose step isn't recorded or whose invitation is being revoked. Accounts not made by invitation are unaffected.
+- **Hosted:** `[auth] enable_signup = false` with the email provider left on, documented for the pre-beta launch tasks and tested on the isolated test stack (configuration B). Hosted settings, SMTP and real invitations are pre-beta tasks, not part of this milestone.
+
+**Why.** The M11a-0 spike showed Auth's invitation works with public sign-up off, that turning the email provider off breaks sign-in and recovery, that Auth's delete has no guard against an accepted account, that a ban makes the invite link fail, that a GET on Auth's own link spends the token, and that simultaneous verifications of one token can all succeed. The design keeps public registration closed, reuses Auth's email delivery, keeps every rule in the database, and makes every step safe to repeat.
+
+**Trade-offs.**
+- **A secret key in the server runtime** widens what a server compromise exposes. Narrow use, server-only, bundle scans (`secrets:bundle`) and no logging limit it.
+- **The password step depends on Auth's audit log table**, a GoTrue internal. It fails closed (the step stays undone) if that table changes; hosted projects must keep writing Auth audit logs to the database (a pre-beta check).
+- **Revoked invitees' accounts remain in Auth, banned.** Removing them is an operator task, under the retention policy (D10).
+- **The invitation flow needs the template**, set on the test stack only; the development stack keeps its configuration, so invitations aren't available there until it's given the template and the key.
+- **Lost authenticators** are operator-assisted only ([runbook](../operations/lost-authenticator-runbook.md)).
 
 ## Risks to watch
 

@@ -29,7 +29,7 @@ import { createRequire } from "node:module";
 
 import { chromium } from "playwright-core";
 
-import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, service, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { addFactor, claimsFor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
 import { matureFactors, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
@@ -156,7 +156,9 @@ async function structure(page, name, tag) {
     const fields = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(visible);
     const unnamed = fields.filter((el) => !(el.labels?.length || el.getAttribute("aria-label") || el.getAttribute("aria-labelledby"))).map((el) => el.id || el.name || el.tagName);
     const buttons = [...document.querySelectorAll("button, a[href]")].filter(visible).filter((el) => !(el.innerText.trim() || el.getAttribute("aria-label") || el.getAttribute("title"))).map((el) => el.outerHTML.slice(0, 80));
-    return { h1: document.querySelectorAll("h1").length, unnamed, buttons };
+    // Rendered headings only: after a client-side navigation Next.js can keep the previous
+    // page mounted with display: none, out of the accessibility tree (seen in M11a-1).
+    return { h1: [...document.querySelectorAll("h1")].filter(visible).length, unnamed, buttons };
   });
   await collapse();
   ok(`${tag} ${name}: one main heading`, facts.h1 === 1, `${facts.h1} h1`);
@@ -332,7 +334,7 @@ try {
     (now() - interval '1 day', '${moderator.id}', 'staff_change_refused', '${admin.id}', 'Refused: admin_required', '{"code": "admin_required", "operation": "set_account_status", "status": "suspended"}');`);
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
-  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
+  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/invitations", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
 
   // M10a: a collector's submission and the fixture's releases, for the catalog pages.
   const form = await collector.http.get("/submit?game=starfall-odyssey");
@@ -428,7 +430,7 @@ try {
       const expected = {
         editor: { who: editor, sections: ["Overview", "Catalog", "Reference"], pages: ["/admin", "/admin/catalog", "/admin/reference"] },
         moderator: { who: moderator, sections: ["Overview", "Accounts"], pages: ["/admin", "/admin/accounts"] },
-        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
+        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Invitations", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
       };
       for (const [name, { who, sections, pages }] of Object.entries(expected)) {
         const s = await signIn(browser, viewport, who);
@@ -513,6 +515,36 @@ try {
       await e.context.close();
     }
 
+    section(`${tag}: 2d. An invitee's pages (M11a-1)`);
+    {
+      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const page = await context.newPage();
+      for (const [name, path] of [["invitation confirmation", "/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=invite"], ["an unusable invitation link", "/auth/confirm?type=invite"]]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=invite`, { waitUntil: "networkidle" });
+      await keyboard(page, "invitation confirmation", tag);
+      // The invitee's real path: Auth issues an invitation, the ledger records it, and the
+      // confirmation page's button (a POST, with JavaScript here) accepts it.
+      const inviteeEmail = `${PREFIX}-invitee-${tag}-${randomBytes(3).toString("hex")}@example.test`;
+      const issued = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "invite", email: inviteeEmail }) })).json();
+      psql(`insert into private.account_invitations (email, invited_by, state, reason, first_sent_at, last_sent_at)
+        values ('${inviteeEmail}', '${admin.id}', 'sent', 'Browser checks', now(), now());`);
+      await page.goto(`${origin}/auth/confirm?token_hash=${issued.hashed_token ?? issued.properties?.hashed_token}&type=invite`, { waitUntil: "networkidle" });
+      await page.click('main button[type="submit"]');
+      await page.waitForURL((u) => u.pathname === "/welcome/password");
+      // /welcome redirects here from its streamed section, so the URL changes before the form renders.
+      await page.waitForSelector("#password", { state: "visible" });
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} accepting an invitation takes the invitee to set a password`, new URL(page.url()).pathname === "/welcome/password");
+      await audit(page, "password step", tag);
+      await structure(page, "password step", tag);
+      await keyboard(page, "password step", tag);
+      await context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -525,6 +557,8 @@ try {
         ["account with history", `/admin/accounts?handle=${collector.handle}`],
         ["account search refused", "/admin/accounts?handle=x"],
         ["audit log", "/admin/audit"],
+        ["invitations", "/admin/invitations"],
+        ["invitations with a refusal", "/admin/invitations?error=resend_too_soon"],
         ["audit log by kind and outcome", "/admin/audit?kind=accounts&outcome=succeeded"],
         ["audit log with a refused filter", "/admin/audit?kind=everything"],
         ["ownership", "/admin/ownership"],
@@ -555,6 +589,8 @@ try {
       ok(`${tag} the account shows its moderation summary and history`, (await visibleText(a.page)).includes("Browser checks: appeal") && /Reinstated\s+Once/.test(await visibleText(a.page)));
       await a.page.goto(`${origin}/admin/audit?kind=accounts`, { waitUntil: "networkidle" });
       await keyboard(a.page, "filtered audit log", tag);
+      await a.page.goto(`${origin}/admin/invitations`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "invitations page", tag);
       await a.page.goto(`${origin}/settings/security/verify?next=%2Fadmin`, { waitUntil: "networkidle" });
       await keyboard(a.page, "verification page", tag);
       await a.context.close();
@@ -706,6 +742,10 @@ create temp table m10a_requests on commit drop as select * from public.catalog_c
 delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
 delete from public.catalog_change_requests where id in (select id from m10a_requests);
 commit;`);
+  psql(`delete from private.account_invitations where email like '${PREFIX}-%';`);
+  for (const id of psql(`select coalesce(string_agg(id::text, ','), '') from auth.users where email like '${PREFIX}-invitee-%';`).split(",").filter(Boolean)) {
+    await fetch(`${api}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: service });
+  }
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);

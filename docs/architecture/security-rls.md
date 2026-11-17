@@ -1605,12 +1605,43 @@ The review of M10a to M10e together (migration `20261124100000`) found no new gr
 
 **Tests.** The retired functions are asserted absent under every schema (`14_audit`, `34_admin`) and uncallable over the API (`db-audit-checks`); every assertion that used them now uses the replacement (`14`, `32`, `34`, `36`, `db-mfa-checks`); `39_accounts_audit_staff` (85) covers the moderator projection and that administrators keep reasons; `app:admin-checks` checks both views of the page. Six `m10i` mutations bring back each retired read, show moderators the reasons, claim reasons are shown, strip moderators' details, and hide administrators' reasons. The historical `m4` and `m8` mutations that targeted the retired functions now target their replacements and are still detected.
 
+## Invitations and registration (M11a-1)
+
+Local development only: invitations go to Mailpit on the isolated test stack. No hosted setting, SMTP or real invitation is part of this milestone. Design: [ADR-063](architecture-decisions.md#adr-063-invitations-are-supabase-native-sent-with-a-server-only-secret-key-after-the-database-authorizes).
+
+**The ledger.** `private.account_invitations` (RLS on, no privilege for any API role): the normalized address, the invited account once Auth holds it, who invited, a state (`pending`, `sent`, `send_failed`, `revoke_pending`, `revoked`, `revoked_after_acceptance`), the reason, send and resend times, the revocation request and the password marker. One open invitation per address.
+
+| Function | Who | What it does |
+| --- | --- | --- |
+| `create_account_invitation(email, reason)` | Administrators, recent MFA | Records a pending invitation and an audit row. An address with an account or an open invitation gets the same answer with no id (audited without the address). 20 open per administrator, 200 in all |
+| `record_invitation_delivery(id, operation, sent)` | Administrators, recent MFA | Records what the server's Auth call did; "sent" only if Auth really holds an invited, unconfirmed account for the address, which is then linked. A send that lands after a revocation returns the account to ban |
+| `request_invitation_resend(id, reason)` | Administrators, recent MFA | One more email for an unaccepted invitation: 10 minutes after the last, five in all, counted when asked. Returns the address to the server only |
+| `request_invitation_revocation(id, reason)` | Administrators, recent MFA | Records and audits the revocation before anything changes in Auth; refuses an invitee who has chosen a handle (suspend instead). Returns the account to ban |
+| `retry_invitation_revocation(id)` | Administrators, recent MFA | The account to ban again, for a revocation not yet confirmed |
+| `reconcile_invitation(id)` | Administrators | Reads Auth's `banned_until` and the confirmation: a held ban completes the revocation (`revoked`, or `revoked_after_acceptance` if they confirmed first); without one it stays pending |
+| `get_account_invitations(limit, before)` | Administrators | Newest first, 1 to 100: masked address (`j***@e***.com`), status derived from the ledger and Auth, who invited, times, resends left. Never the address, the reason or an account id |
+| `get_my_onboarding()` | The caller | Whether they came from an invitation, whether its password step is done, whether it was revoked |
+| `complete_my_password_setup()` | The caller | Records the password step, only if Auth logged a password change for this account after it accepted (`auth.audit_log_entries`, read-only). Once; repeating it changes nothing; a revoked invitation refuses; fails closed if Auth's log can't be read |
+
+All are SECURITY DEFINER with an empty `search_path`, executable by `authenticated` only. **`claim_handle` now also refuses an account whose invitation is being revoked or whose password step isn't recorded**; accounts that didn't come from an invitation are unaffected. The audit log's "accounts" kind includes the five new invitation actions, through the same allow-list (status, operation, refusal code), never an address.
+
+**Revocation, conservatively.** Recorded first, which immediately blocks onboarding in the database; then the ban in Auth; then reconciliation reads it back. Auth's Admin delete has no guard against an accepted account (M11a-0), so **nothing in the invitation workflow deletes or unbans an account**. A ban that fails leaves the invitation revoking, still blocking, and retryable. An access token issued before the ban stays valid until it expires (an hour), but can't refresh, record a password or claim a handle. Banned, unaccepted accounts stay in Auth until an operator removes them under the retention policy.
+
+**Acceptance.** The email links to `/auth/confirm?token_hash=…&type=invite`. The GET shows a button and uses nothing (a mail scanner fetching the link can't spend the single-use token; Auth's own link is spent by a GET, M11a-0); the POST calls `verifyOtp`, which signs the invitee in and confirms the address. The page sends `Referrer-Policy: no-referrer` and isn't indexed. Then `/welcome/password` (12 characters at least, 72 bytes at most), then the existing handle claim. Several simultaneous verifications of one token can all succeed (Auth), so every step is safe to repeat: the marker is set once, and `claim_handle`'s locks leave one handle.
+
+**The secret key.** Server-only (`SUPABASE_SECRET_KEY`, never `NEXT_PUBLIC_`), used only by `src/features/auth-admin/server.ts` to send an invitation and ban an invitee, after the database authorized the administrator. `secrets:bundle` checks it never reaches a browser bundle. Without it, the page says invitations aren't available.
+
+**Lost authenticators:** operator-assisted only; see the [runbook](../operations/lost-authenticator-runbook.md).
+
+**Tests.** `40_account_invitations` (84): grants and definitions, every refusal (collector, editor, moderator, administrator without MFA or with a stale verification, anon), creation and the generic answer, delivery checked against Auth, resend rules, revocation and reconciliation in each state, the masked list, the password marker (no evidence, someone else's, before acceptance, once), the onboarding gate and the audit allow-list. `db-invitation-checks` (54 with sign-up on; configuration B adds recovery) drives real Auth and Mailpit: invite to handle, concurrent acceptance, resending, expiry, revocation with and without a ban, five acceptance-against-revocation races and the limits. `app:invitation-checks` (35) drives the pages, including GET-without-consuming and step-up without replay; `app:a11y-checks` covers the new pages; 17 `m11a1` mutations.
+
 ## Production launch prerequisites (M8)
 
 **None of M8 or M10 has run on a hosted project, and none of these is resolved.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
 
 | Prerequisite | Why |
 | --- | --- |
+| **Invite-only registration (M11a-1):** hosted `[auth] enable_signup = false` with the email provider **left on** (turning it off also blocks password sign-in and recovery, M11a-0); the invitation template (`supabase/templates/invite.html`) set in hosted Auth; `SUPABASE_SECRET_KEY` set server-only on the host; Auth audit logs still written to the database (the password step needs them); then rerun `db-invitation-checks` in configuration B and `app:invitation-checks` against staging | Tested locally only. Real invitations wait for hosting, SMTP and these checks |
 | **Enable TOTP on the hosted project** (`[auth.mfa.totp]`), then rerun `31_auth_contract`, `db-mfa-checks`, `db-owner-checks`, `db-ownership-checks` and `app:admin-checks` against staging | Local only so far (D19). Without it no staff member can act |
 | **Infrastructure key holders (D18):** name the people holding the database password, the Auth secret key and dashboard access; require MFA on dashboard accounts; enable `pgaudit` for DDL and writes to the Owner, staff and audit tables; alert on Owner changes, recoveries and trigger refusals in the server log | `postgres`, superusers and the secret key bypass every protection here |
 | **Rehearse the [runbook](../operations/owner-recovery-runbook.md) on staging**, each scenario end to end, including the Admin API factor removal | The procedures are tested locally by the suites, not by people |

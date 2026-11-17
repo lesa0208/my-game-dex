@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { CurrentTabIntoView } from "@/components/admin/current-tab-into-view";
 import { adminControl, AdminField } from "@/components/admin/form-controls";
 
-export type AdminSection = "overview" | "catalog" | "reference" | "imports" | "accounts" | "staff" | "audit" | "ownership" | "system";
+export type AdminSection = "overview" | "catalog" | "reference" | "imports" | "accounts" | "invitations" | "staff" | "audit" | "ownership" | "system";
 
 const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: AdminAccess) => boolean }[] = [
   { id: "overview", label: "Overview", href: "/admin", allowed: (a) => a.staff },
@@ -19,6 +19,7 @@ const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: Ad
   { id: "reference", label: "Reference", href: "/admin/reference", allowed: (a) => a.editor },
   { id: "imports", label: "Imports", href: "/admin/imports", allowed: (a) => a.admin },
   { id: "accounts", label: "Accounts", href: "/admin/accounts", allowed: (a) => a.moderator },
+  { id: "invitations", label: "Invitations", href: "/admin/invitations", allowed: (a) => a.admin },
   { id: "staff", label: "Staff", href: "/admin/staff", allowed: (a) => a.admin },
   { id: "audit", label: "Audit log", href: "/admin/audit", allowed: (a) => a.admin },
   { id: "ownership", label: "Ownership", href: "/admin/ownership", allowed: (a) => a.admin },

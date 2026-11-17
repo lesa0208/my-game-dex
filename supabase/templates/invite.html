@@ -1,0 +1,10 @@
+<!--
+  The invitation email (M11a-1). Used by the isolated test stack (scripts/test-stack.mjs);
+  a hosted project sets the same template in its Auth settings before the beta. The link
+  carries the token's hash to the app's own confirmation page, which verifies it only on
+  an explicit POST, so a mail scanner fetching the link can't use the single-use token.
+-->
+<h2>You're invited to My Game Dex</h2>
+<p>You've been invited to the My Game Dex private beta, a place to catalog your physical game collection.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite">Accept the invitation</a></p>
+<p>The link works once, for an hour. If it has expired, ask the person who invited you to send a new one. If you weren't expecting this, you can ignore it.</p>

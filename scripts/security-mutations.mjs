@@ -996,4 +996,39 @@ export const m10iMutations = [
   sql("administrators lose the reasons too", "pgtap", rewrite(M10I_SUMMARY, "case when v_admin then private.audit_event_view(e)", "case when false then private.audit_event_view(e)")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations };
+// M11a-1: invitations, revocation, the password marker and the onboarding gate.
+const M11A1_CREATE = "public.create_account_invitation(text, text)";
+const M11A1_DELIVERY = "public.record_invitation_delivery(uuid, text, boolean)";
+const M11A1_RESEND = "public.request_invitation_resend(uuid, text)";
+const M11A1_REVOKE = "public.request_invitation_revocation(uuid, text)";
+const M11A1_RECONCILE = "public.reconcile_invitation(uuid)";
+const M11A1_LIST = "public.get_account_invitations(integer, uuid)";
+const M11A1_MARKER = "public.complete_my_password_setup()";
+const M11A1_BLOCKED = "private.invitation_onboarding_blocked(uuid)";
+
+export const m11a1Mutations = [
+  // Who may invite
+  sql("moderators may invite", "both", rewrite(M11A1_CREATE, "v_me := private.require_active_staff('admin');", "v_me := private.require_active_staff('moderator');")),
+  sql("inviting needs no recent verification", "pgtap", rewrite(M11A1_CREATE, "  perform private.require_recent_mfa();\n  v_reason := private.require_reason(p_reason);\n  v_email", "  v_reason := private.require_reason(p_reason);\n  v_email")),
+  sql("anon may invite", "both", `grant execute on function ${M11A1_CREATE} to anon;`),
+  sql("the ledger is readable by clients", "pgtap", "grant usage on schema private to authenticated; grant select on private.account_invitations to authenticated;"),
+  // Limits and resending
+  sql("no per-administrator limit", "both", rewrite(M11A1_CREATE, "if private.outstanding_invitations(v_me) >= 20 then", "if false then")),
+  sql("an address with an account is invited", "pgtap", rewrite(M11A1_CREATE, "if exists (select 1 from auth.users u where pg_catalog.lower(u.email) = v_email)", "if false and exists (select 1 from auth.users u where pg_catalog.lower(u.email) = v_email)")),
+  sql("no wait between resends", "both", rewrite(M11A1_RESEND, "elsif greatest(i.last_sent_at, i.last_resend_requested_at) > pg_catalog.now() - interval '10 minutes' then", "elsif false then")),
+  sql("resending needs no recent verification", "pgtap", rewrite(M11A1_RESEND, "  perform private.require_recent_mfa();\n", "")),
+  // Trusting the server about Auth
+  sql("a claimed send is believed without Auth", "pgtap", rewrite(M11A1_DELIVERY, "v_ok := p_sent and v_user is not null;", "v_ok := p_sent;")),
+  sql("a revocation completes without a ban", "both", rewrite(M11A1_RECONCILE, "  elsif v_banned then", "  elsif true then")),
+  sql("a joined invitee can be revoked", "both", rewrite(M11A1_REVOKE, "if exists (select 1 from public.profiles p where p.id = v_user and p.handle is not null) then", "if false then")),
+  // The password marker and the onboarding gate
+  sql("the password marker needs no evidence", "both", rewrite(M11A1_MARKER, "  if not v_evidence then", "  if false then")),
+  sql("anyone's password change counts", "pgtap", rewrite(M11A1_MARKER, "\n        and a.payload ->> 'actor_id' = v_me::text", "")),
+  sql("a revoked invitee records a password", "both", rewrite(M11A1_MARKER, "  if i.state in ('revoke_pending', 'revoked', 'revoked_after_acceptance') then\n    return pg_catalog.jsonb_build_object('ok', false, 'refusal', 'invitation_revoked');", "  if false then\n    return pg_catalog.jsonb_build_object('ok', false, 'refusal', 'invitation_revoked');")),
+  sql("a revoked invitee with a password onboards", "pgtap", rewrite(M11A1_BLOCKED, "i.state in ('revoke_pending', 'revoked', 'revoked_after_acceptance') or i.password_set_at is null", "i.password_set_at is null")),
+  sql("claim_handle ignores invitations", "both", rewrite("public.claim_handle(text)", "  ) or private.invitation_onboarding_blocked(v_me) then", "  ) then")),
+  // Privacy
+  sql("the list shows addresses", "both", rewrite(M11A1_LIST, "'email', private.mask_email(x.email),", "'email', x.email,")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations };
