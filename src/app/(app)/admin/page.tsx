@@ -130,7 +130,7 @@ async function OverviewView() {
               { label: "Administrators", value: count(administration.staff_admins, cap), href: "/admin/staff" },
               { label: "Moderators", value: count(administration.staff_moderators, cap), href: "/admin/staff" },
               { label: "Catalog editors", value: count(administration.staff_catalog_editors, cap), href: "/admin/staff" },
-              { label: "Refused staff actions in the last 7 days", value: count(administration.refusals_7_days, cap), href: "/admin/audit" },
+              { label: "Refused staff actions in the last 7 days", value: count(administration.refusals_7_days, cap), href: "/admin/audit?outcome=refused" },
             ]}
           />
         </AdminCard>

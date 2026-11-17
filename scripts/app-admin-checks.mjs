@@ -519,6 +519,7 @@ try {
     const text = visible((await admin.browser.get("/admin")).html);
     check("the counts shown are the database's", Number(open) >= 1 && text.includes(`Not started ${open}`) && text.includes(`Suspended accounts ${suspended}`) && text.includes(`Administrators ${admins}`),
       `open ${open}, suspended ${suspended}, admins ${admins}`);
+    check("the refusals count opens the refused events (M10 integration review)", (await admin.browser.get("/admin")).html.includes('href="/admin/audit?outcome=refused"'));
     check("and show no handle, email or title", !text.includes("@example.test") && !text.includes("Starfall") && !/@ad_[0-9a-f]/.test(text.replace(`@${admin.handle}`, "")));
   }
 
