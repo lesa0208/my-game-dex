@@ -14,7 +14,7 @@ export default function ReviewNotFound() {
           icon={FileX}
           title="This page isn't available"
           action={
-            <Button asChild variant="secondary" size="lg">
+            <Button asChild variant="secondary" size="control">
               <Link href="/">Go home</Link>
             </Button>
           }

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { requireAdminSection } from "@/features/admin/queries";
 import { matchesQuery, readQuery } from "@/features/reference/form";
 import { getReferenceData } from "@/features/reference/queries";
+import { adminControl } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Regions and markets",
@@ -48,13 +49,13 @@ async function RegionsView({ searchParams }: { searchParams: PageProps<"/admin/r
                 <label htmlFor="market-q" className="text-sm font-medium">
                   Country or code
                 </label>
-                <Input id="market-q" name="q" maxLength={60} defaultValue={query ?? ""} autoComplete="off" className="h-10" />
+                <Input id="market-q" name="q" maxLength={60} defaultValue={query ?? ""} autoComplete="off" className={adminControl} />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                <Button type="submit" variant="secondary" size="control">
                   Show
                 </Button>
-                <Button asChild variant="ghost" size="lg" className="h-10 px-4">
+                <Button asChild variant="ghost" size="control">
                   <Link href="/admin/reference/regions">Clear</Link>
                 </Button>
               </div>

@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Input } from "@/components/ui/input";
 import { REQUIREMENT_LEVELS, REQUIREMENT_LIMIT, type GameFields } from "@/features/editing/form";
 import { PIECE_LIMIT, pieceRows, type Piece, type ReleaseRecord as ReleaseFieldValues } from "@/features/review/form";
 import { EDITION_KINDS, GAME_KINDS, PIECE_KINDS } from "@/features/submissions/form";
-import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminSelect, adminTextarea } from "@/components/admin/form-controls";
 
 /**
  * The editing forms' fields (M10c), for features/editing/actions.ts. Each starts from
@@ -18,9 +17,9 @@ export function GameInputs({ id, game }: { id: string; game: GameFields | null }
   return (
     <>
       <Field id={`${id}-title`} label="Title">
-        <Input id={`${id}-title`} name="title" required maxLength={200} defaultValue={game?.title ?? ""} autoComplete="off" className="h-10" />
+        <Input id={`${id}-title`} name="title" required maxLength={200} defaultValue={game?.title ?? ""} autoComplete="off" className={adminControl} />
       </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         <Field id={`${id}-sort_title`} label="Sort title (optional)" hint="How the title sorts, such as without a leading “The”. Empty means the title.">
           <Input
             id={`${id}-sort_title`}
@@ -29,11 +28,11 @@ export function GameInputs({ id, game }: { id: string; game: GameFields | null }
             defaultValue={game && game.sort_title !== game.title ? game.sort_title : ""}
             autoComplete="off"
             aria-describedby={`${id}-sort_title-hint`}
-            className="h-10"
+            className={adminControl}
           />
         </Field>
         <Field id={`${id}-kind`} label="Type">
-          <select id={`${id}-kind`} name="kind" defaultValue={game?.kind ?? "game"} className={selectClassName}>
+          <select id={`${id}-kind`} name="kind" defaultValue={game?.kind ?? "game"} className={adminSelect}>
             {GAME_KINDS.map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
@@ -50,7 +49,7 @@ export function GameInputs({ id, game }: { id: string; game: GameFields | null }
             defaultValue={game?.first_release_year ? String(game.first_release_year) : ""}
             autoComplete="off"
             aria-describedby={`${id}-year-hint`}
-            className="h-10"
+            className={adminControl}
           />
         </Field>
       </div>
@@ -62,7 +61,7 @@ export function GameInputs({ id, game }: { id: string; game: GameFields | null }
           rows={4}
           defaultValue={game?.summary ?? ""}
           aria-describedby={`${id}-summary-hint`}
-          className={cn(selectClassName, "h-auto py-2")}
+          className={adminTextarea}
         />
       </Field>
     </>
@@ -82,9 +81,9 @@ export function PlatformInputs({
   const [platform, setPlatform] = useState(platforms[0]?.slug ?? "");
   const usable = formats.filter((f) => f.platform === platform);
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid items-start gap-4 sm:grid-cols-2">
       <Field id={`${id}-platform`} label="Platform">
-        <select id={`${id}-platform`} name="platform" value={platform} onChange={(e) => setPlatform(e.target.value)} className={selectClassName}>
+        <select id={`${id}-platform`} name="platform" value={platform} onChange={(e) => setPlatform(e.target.value)} className={adminSelect}>
           {platforms.map((p) => (
             <option key={p.slug} value={p.slug}>
               {p.name}
@@ -93,7 +92,7 @@ export function PlatformInputs({
         </select>
       </Field>
       <Field id={`${id}-format`} label="Physical format">
-        <select id={`${id}-format`} name="format" key={platform} defaultValue={usable[0]?.code ?? ""} className={selectClassName}>
+        <select id={`${id}-format`} name="format" key={platform} defaultValue={usable[0]?.code ?? ""} className={adminSelect}>
           {usable.map((f) => (
             <option key={f.code} value={f.code}>
               {f.name}
@@ -113,12 +112,12 @@ export function ReleaseInputs({ id, release, regions }: { id: string; release: R
   };
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         <Field id={`${id}-edition_name`} label="Edition">
-          <Input id={`${id}-edition_name`} name="edition_name" maxLength={120} defaultValue={text("edition_name")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-edition_name`} name="edition_name" maxLength={120} defaultValue={text("edition_name")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-edition_kind`} label="Edition type">
-          <select id={`${id}-edition_kind`} name="edition_kind" defaultValue={text("edition_kind")} className={selectClassName}>
+          <select id={`${id}-edition_kind`} name="edition_kind" defaultValue={text("edition_kind")} className={adminSelect}>
             <option value="">Not recorded</option>
             {EDITION_KINDS.map((k) => (
               <option key={k.value} value={k.value}>
@@ -128,10 +127,10 @@ export function ReleaseInputs({ id, release, regions }: { id: string; release: R
           </select>
         </Field>
         <Field id={`${id}-media_count`} label="Discs or cartridges">
-          <Input id={`${id}-media_count`} name="media_count" inputMode="numeric" maxLength={2} defaultValue={text("media_count")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-media_count`} name="media_count" inputMode="numeric" maxLength={2} defaultValue={text("media_count")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-region_code`} label="Region">
-          <select id={`${id}-region_code`} name="region_code" value={region} onChange={(e) => setRegion(e.target.value)} className={selectClassName}>
+          <select id={`${id}-region_code`} name="region_code" value={region} onChange={(e) => setRegion(e.target.value)} className={adminSelect}>
             {regions.map((r) => (
               <option key={r.code} value={r.code}>
                 {r.code === "unknown" ? "Unknown" : r.label}
@@ -154,24 +153,24 @@ export function ReleaseInputs({ id, release, regions }: { id: string; release: R
           </label>
         </div>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         <Field id={`${id}-variant_name`} label="Variant (optional)">
-          <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={text("variant_name")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={text("variant_name")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-packaging`} label="Packaging (optional)">
-          <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={text("packaging")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={text("packaging")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-product_code`} label="Product code (optional)">
-          <Input id={`${id}-product_code`} name="product_code" maxLength={40} defaultValue={text("product_code")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-product_code`} name="product_code" maxLength={40} defaultValue={text("product_code")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-barcode`} label="Barcode (optional)">
-          <Input id={`${id}-barcode`} name="barcode" inputMode="numeric" maxLength={20} defaultValue={text("barcode")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-barcode`} name="barcode" inputMode="numeric" maxLength={20} defaultValue={text("barcode")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-local_title`} label="Title on the package (optional)">
-          <Input id={`${id}-local_title`} name="local_title" maxLength={200} defaultValue={text("local_title")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-local_title`} name="local_title" maxLength={200} defaultValue={text("local_title")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-publisher_name`} label="Publisher (optional)">
-          <Input id={`${id}-publisher_name`} name="publisher_name" maxLength={120} defaultValue={text("publisher_name")} autoComplete="off" className="h-10" />
+          <Input id={`${id}-publisher_name`} name="publisher_name" maxLength={120} defaultValue={text("publisher_name")} autoComplete="off" className={adminControl} />
         </Field>
         <Field id={`${id}-release_year`} label="Release year (optional)">
           <Input
@@ -181,7 +180,7 @@ export function ReleaseInputs({ id, release, regions }: { id: string; release: R
             maxLength={4}
             defaultValue={release?.release_date ? release.release_date.slice(0, 4) : ""}
             autoComplete="off"
-            className="h-10"
+            className={adminControl}
           />
         </Field>
       </div>
@@ -205,7 +204,7 @@ export function PieceRows({ id, pieces }: { id: string; pieces: Piece[] }) {
             <label className="sr-only" htmlFor={`${id}-kind-${i}`}>
               Piece {i + 1} type
             </label>
-            <select id={`${id}-kind-${i}`} name={`piece_kind_${i}`} defaultValue={piece?.kind ?? "insert"} className={selectClassName}>
+            <select id={`${id}-kind-${i}`} name={`piece_kind_${i}`} defaultValue={piece?.kind ?? "insert"} className={adminSelect}>
               {PIECE_KINDS.map((k) => (
                 <option key={k.value} value={k.value}>
                   {k.label}
@@ -215,7 +214,7 @@ export function PieceRows({ id, pieces }: { id: string; pieces: Piece[] }) {
             <label className="sr-only" htmlFor={`${id}-label-${i}`}>
               Piece {i + 1} name
             </label>
-            <Input id={`${id}-label-${i}`} name={`piece_label_${i}`} maxLength={120} defaultValue={piece?.label ?? ""} autoComplete="off" aria-describedby={`${id}-hint`} className="h-10" />
+            <Input id={`${id}-label-${i}`} name={`piece_label_${i}`} maxLength={120} defaultValue={piece?.label ?? ""} autoComplete="off" aria-describedby={`${id}-hint`} className={adminControl} />
             <label className="sr-only" htmlFor={`${id}-quantity-${i}`}>
               Piece {i + 1} quantity
             </label>
@@ -227,7 +226,7 @@ export function PieceRows({ id, pieces }: { id: string; pieces: Piece[] }) {
               defaultValue={piece ? String(piece.quantity) : ""}
               placeholder="1"
               autoComplete="off"
-              className="h-10"
+              className={adminControl}
             />
           </div>
         );
@@ -260,7 +259,7 @@ export function RequirementRows({
             <label className="sr-only" htmlFor={`${id}-code-${i}`}>
               Hardware {i + 1}
             </label>
-            <select id={`${id}-code-${i}`} name={`requirement_${i}`} defaultValue={row?.code ?? ""} aria-describedby={`${id}-hint`} className={selectClassName}>
+            <select id={`${id}-code-${i}`} name={`requirement_${i}`} defaultValue={row?.code ?? ""} aria-describedby={`${id}-hint`} className={adminSelect}>
               <option value="">None</option>
               {choices.map((c) => (
                 <option key={c.code} value={c.code}>
@@ -271,7 +270,7 @@ export function RequirementRows({
             <label className="sr-only" htmlFor={`${id}-level-${i}`}>
               Hardware {i + 1}: how it&apos;s needed
             </label>
-            <select id={`${id}-level-${i}`} name={`requirement_level_${i}`} defaultValue={row?.level ?? "required"} className={selectClassName}>
+            <select id={`${id}-level-${i}`} name={`requirement_level_${i}`} defaultValue={row?.level ?? "required"} className={adminSelect}>
               {REQUIREMENT_LEVELS.map((l) => (
                 <option key={l.value} value={l.value}>
                   {l.label}
@@ -281,7 +280,7 @@ export function RequirementRows({
             <label className="sr-only" htmlFor={`${id}-note-${i}`}>
               Hardware {i + 1}: note
             </label>
-            <Input id={`${id}-note-${i}`} name={`requirement_note_${i}`} maxLength={300} defaultValue={row?.note ?? ""} placeholder="Note (optional)" autoComplete="off" className="h-10" />
+            <Input id={`${id}-note-${i}`} name={`requirement_note_${i}`} maxLength={300} defaultValue={row?.note ?? ""} placeholder="Note (optional)" autoComplete="off" className={adminControl} />
           </div>
         );
       })}

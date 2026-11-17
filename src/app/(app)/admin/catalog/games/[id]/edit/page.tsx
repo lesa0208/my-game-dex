@@ -8,7 +8,6 @@ import { GameInputs } from "@/components/admin/edit-fields";
 import { EditForm, ReasonField } from "@/components/admin/edit-form";
 import { RecordSection, StatusBadge } from "@/components/admin/records";
 import { editable, EditNotice, StepUpNotice } from "@/components/admin/review-panel";
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Input } from "@/components/ui/input";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -32,6 +31,8 @@ import { ALIAS_KINDS, LOCKABLE_FIELDS, needsRecentVerification, RELATIONS } from
 import { getEditingOptions } from "@/features/editing/queries";
 import { recordFieldLabel } from "@/features/records/form";
 import { getGameRecord } from "@/features/records/queries";
+import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminSelect } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Edit game",
@@ -55,7 +56,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
   if (!outcome.ok || !options) {
     if (!outcome.ok && outcome.reason === "refused") notFound();
     return (
-      <AdminFrame access={access} current="catalog" title="Edit game">
+      <AdminFrame narrow access={access} current="catalog" title="Edit game">
         <EmptyState icon={PlugZap} title="This record isn't available">
           It can&apos;t be loaded right now. Try again later.
         </EmptyState>
@@ -71,7 +72,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
   const locked = new Set(g.field_locks.map((l) => l.field));
 
   return (
-    <AdminFrame access={access} current="catalog" title={`Edit ${g.title}`} titleId="edit-game-heading">
+    <AdminFrame narrow access={access} current="catalog" title={`Edit ${g.title}`} titleId="edit-game-heading">
       <div className="flex flex-col gap-4">
         <p className="text-sm">
           <Link href={record} className={linkClass}>
@@ -134,12 +135,12 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                 <div className="flex flex-col gap-6">
                   <EditForm id="add-alias" recordId={g.id} action={addAlias} plain={addAliasFromForm} submit="Add the title" pending="Adding…">
                     <Hidden id={g.id} revision={g.revision} />
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid items-start gap-4 sm:grid-cols-2">
                       <Field id="add-alias-title" label="Other title">
-                        <Input id="add-alias-title" name="alias_title" required maxLength={200} autoComplete="off" className="h-10" />
+                        <Input id="add-alias-title" name="alias_title" required maxLength={200} autoComplete="off" className={adminControl} />
                       </Field>
                       <Field id="add-alias-kind" label="What kind of title">
-                        <select id="add-alias-kind" name="alias_kind" defaultValue="alternate" className={selectClassName}>
+                        <select id="add-alias-kind" name="alias_kind" defaultValue="alternate" className={adminSelect}>
                           {ALIAS_KINDS.map((k) => (
                             <option key={k.value} value={k.value}>
                               {k.label}
@@ -148,10 +149,10 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                         </select>
                       </Field>
                       <Field id="add-alias-language" label="Language (optional)" hint="A code, such as ja or pt-br.">
-                        <Input id="add-alias-language" name="alias_language" maxLength={20} autoComplete="off" aria-describedby="add-alias-language-hint" className="h-10" />
+                        <Input id="add-alias-language" name="alias_language" maxLength={20} autoComplete="off" aria-describedby="add-alias-language-hint" className={adminControl} />
                       </Field>
                       <Field id="add-alias-region" label="Region (optional)">
-                        <select id="add-alias-region" name="alias_region" defaultValue="" className={selectClassName}>
+                        <select id="add-alias-region" name="alias_region" defaultValue="" className={adminSelect}>
                           <option value="">Any region</option>
                           {options.regions
                             .filter((r) => r.code !== "unknown")
@@ -169,7 +170,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                     <EditForm id="remove-alias" recordId={g.id} action={removeAlias} plain={removeAliasFromForm} submit="Remove the title" pending="Removing…">
                       <Hidden id={g.id} revision={g.revision} />
                       <Field id="remove-alias-id" label="Title to remove">
-                        <select id="remove-alias-id" name="alias_id" className={selectClassName}>
+                        <select id="remove-alias-id" name="alias_id" className={adminSelect}>
                           {g.aliases.map((a) => (
                             <option key={a.id} value={a.id}>
                               {a.title}
@@ -190,9 +191,9 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
               ) : (
                 <EditForm id="set-relation" recordId={g.id} action={setRelation} plain={setRelationFromForm} submit="Save the relation" pending="Saving…">
                   <Hidden id={g.id} revision={g.revision} />
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid items-start gap-4 sm:grid-cols-2">
                     <Field id="set-relation-relation" label={`${g.title}…`}>
-                      <select id="set-relation-relation" name="relation" defaultValue="remake_of" className={selectClassName}>
+                      <select id="set-relation-relation" name="relation" defaultValue="remake_of" className={adminSelect}>
                         {RELATIONS.map((r) => (
                           <option key={r.value} value={r.value}>
                             {r.label}
@@ -201,13 +202,13 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                       </select>
                     </Field>
                     <Field id="set-relation-target" label="The other game's record id" hint="Shown at the end of the other game's record.">
-                      <Input id="set-relation-target" name="target_id" required maxLength={36} autoComplete="off" spellCheck={false} aria-describedby="set-relation-target-hint" className="h-10 font-mono" />
+                      <Input id="set-relation-target" name="target_id" required maxLength={36} autoComplete="off" spellCheck={false} aria-describedby="set-relation-target-hint" className={cn(adminControl, "font-mono")} />
                     </Field>
                     <Field id="set-relation-position" label="Position in the compilation (optional)">
-                      <Input id="set-relation-position" name="position" inputMode="numeric" maxLength={3} autoComplete="off" className="h-10" />
+                      <Input id="set-relation-position" name="position" inputMode="numeric" maxLength={3} autoComplete="off" className={adminControl} />
                     </Field>
                     <Field id="set-relation-note" label="Note (optional)">
-                      <Input id="set-relation-note" name="relation_note" maxLength={500} autoComplete="off" className="h-10" />
+                      <Input id="set-relation-note" name="relation_note" maxLength={500} autoComplete="off" className={adminControl} />
                     </Field>
                   </div>
                   <ReasonField id="set-relation" />
@@ -231,7 +232,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                 <EditForm id="add-platform" recordId={g.id} action={addPlatform} plain={addPlatformFromForm} submit="Add the platform" pending="Adding…">
                   <Hidden id={g.id} revision={g.revision} />
                   <Field id="add-platform-platform" label="Platform" hint="It's in review until a release on it is published.">
-                    <select id="add-platform-platform" name="platform" aria-describedby="add-platform-platform-hint" className={selectClassName}>
+                    <select id="add-platform-platform" name="platform" aria-describedby="add-platform-platform-hint" className={adminSelect}>
                       {unpaired.map((p) => (
                         <option key={p.slug} value={p.slug}>
                           {p.name}
@@ -251,9 +252,9 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
               <EditForm id="set-lock" recordId={g.id} action={setLock} plain={setLockFromForm} submit="Save the lock" pending="Saving…">
                 <Hidden id={g.id} revision={g.revision} />
                 <input type="hidden" name="entity" value="game" />
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid items-start gap-4 sm:grid-cols-2">
                   <Field id="set-lock-field" label="Field">
-                    <select id="set-lock-field" name="field" className={selectClassName}>
+                    <select id="set-lock-field" name="field" className={adminSelect}>
                       {LOCKABLE_FIELDS.game.map((f) => (
                         <option key={f} value={f}>
                           {recordFieldLabel(f)}
@@ -263,7 +264,7 @@ async function EditGameView({ params, searchParams }: { params: PageProps<"/admi
                     </select>
                   </Field>
                   <Field id="set-lock-locked" label="Lock">
-                    <select id="set-lock-locked" name="locked" defaultValue="yes" className={selectClassName}>
+                    <select id="set-lock-locked" name="locked" defaultValue="yes" className={adminSelect}>
                       <option value="yes">Lock it</option>
                       <option value="no">Unlock it</option>
                     </select>

@@ -12,13 +12,12 @@ import { RECORD_STATUSES, SEARCH_KINDS, readSearchParams, searchHref } from "@/f
 import { searchCatalogRecords } from "@/features/records/queries";
 import type { GameSummary, ReleaseSummary } from "@/features/records/queries";
 import { getSubmissionOptions } from "@/features/submissions/queries";
+import { adminControl, AdminField, adminLabel, adminSelect, FieldGrid, FormActions } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Catalog records",
 };
 
-const selectClass =
-  "h-10 w-full rounded-lg border border-input bg-transparent px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring md:text-sm dark:bg-input/30";
 const rowClass =
   "flex flex-col gap-1 rounded-lg border bg-card p-3 outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring";
 
@@ -83,57 +82,53 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
         <span className="text-muted-foreground"> · search first, so it isn&apos;t added twice. Releases are added from their game&apos;s record.</span>
       </p>
       <div role="search" aria-label="Catalog records">
-        <form method="get" action="/admin/catalog/search" className="grid gap-3 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
-            <label htmlFor="records-q" className="text-sm font-medium">
-              Search
-            </label>
-            <Input id="records-q" name="q" type="search" maxLength={100} defaultValue={params.query} autoComplete="off" spellCheck={false} className="h-10" />
-          </div>
-          <fieldset className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
-            <legend className="mb-1.5 text-sm font-medium">Show</legend>
-            <div className="flex flex-wrap gap-4">
+        <form method="get" action="/admin/catalog/search" className="flex flex-col gap-4">
+          <FieldGrid columns={4}>
+            <AdminField id="records-q" label="Search" className="sm:col-span-2">
+              <Input id="records-q" name="q" type="search" maxLength={100} defaultValue={params.query} autoComplete="off" spellCheck={false} className={adminControl} />
+            </AdminField>
+            <AdminField id="records-platform" label="Platform">
+              <select id="records-platform" name="platform" defaultValue={params.platform ?? ""} className={adminSelect}>
+                <option value="">Any platform</option>
+                {(options?.platforms ?? []).map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+            <AdminField id="records-status" label="Status">
+              <select id="records-status" name="status" defaultValue={params.status ?? ""} className={adminSelect}>
+                <option value="">Any status</option>
+                {RECORD_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+          </FieldGrid>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <fieldset className="flex min-w-0 flex-wrap items-center gap-x-4">
+              <legend className="sr-only">Show</legend>
+              <span aria-hidden="true" className={adminLabel}>
+                Show
+              </span>
               {SEARCH_KINDS.map((k) => (
                 <div key={k.value} className="flex min-h-10 items-center gap-2 text-sm">
                   <input id={`records-kind-${k.value}`} type="radio" name="kind" value={k.value} defaultChecked={params.kind === k.value} className="size-4 accent-primary" />
                   <label htmlFor={`records-kind-${k.value}`}>{k.label}</label>
                 </div>
               ))}
-            </div>
-          </fieldset>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="records-platform" className="text-sm font-medium">
-              Platform
-            </label>
-            <select id="records-platform" name="platform" defaultValue={params.platform ?? ""} className={selectClass}>
-              <option value="">Any platform</option>
-              {(options?.platforms ?? []).map((p) => (
-                <option key={p.slug} value={p.slug}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="records-status" className="text-sm font-medium">
-              Status
-            </label>
-            <select id="records-status" name="status" defaultValue={params.status ?? ""} className={selectClass}>
-              <option value="">Any status</option>
-              {RECORD_STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
-              Search
-            </Button>
-            <Button asChild variant="ghost" size="lg" className="h-10 px-4">
-              <Link href="/admin/catalog/search">Clear</Link>
-            </Button>
+            </fieldset>
+            <FormActions>
+              <Button type="submit" variant="secondary" size="control">
+                Search
+              </Button>
+              <Button asChild variant="ghost" size="control">
+                <Link href="/admin/catalog/search">Clear</Link>
+              </Button>
+            </FormActions>
           </div>
         </form>
       </div>
@@ -181,14 +176,14 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
           {params.cursor || outcome.data.next_cursor ? (
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {params.cursor ? (
-                <Button asChild variant="ghost" size="lg">
+                <Button asChild variant="ghost" size="control">
                   <Link href={first}>First page</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {outcome.data.next_cursor ? (
-                <Button asChild variant="secondary" size="lg">
+                <Button asChild variant="secondary" size="control">
                   <Link href={searchHref({ ...params, cursor: outcome.data.next_cursor })}>Next page</Link>
                 </Button>
               ) : null}

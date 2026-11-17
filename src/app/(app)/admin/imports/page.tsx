@@ -3,13 +3,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { AdminCard, AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
-import { Cell, DataTable, StatusPill, selectClass, when } from "@/components/admin/data-table";
+import { Cell, DataTable, StatusPill, when } from "@/components/admin/data-table";
 import { Facts } from "@/components/admin/records";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { requireAdminSection } from "@/features/admin/queries";
 import { RUN_STATUSES, readId, readProvider, readRunStatus, runStatusLabel, runTone, shortHash } from "@/features/imports/form";
 import { getImportProviders, getImportRuns } from "@/features/imports/queries";
+import { adminSelect } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Imports",
@@ -53,7 +54,7 @@ async function ImportsView({ searchParams }: { searchParams: PageProps<"/admin/i
         ) : !providers.length ? (
           <p className="text-sm text-muted-foreground">No source is recorded.</p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             {providers.map((p) => (
               <AdminCard key={p.code} id={`provider-${p.code}`} title={p.name}>
                 <p className="mb-3">
@@ -89,12 +90,12 @@ async function ImportsView({ searchParams }: { searchParams: PageProps<"/admin/i
         <h2 id="runs-heading" className="text-sm font-semibold">
           Runs, newest first
         </h2>
-        <form method="get" action="/admin/imports" className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <form method="get" action="/admin/imports" className="grid items-end gap-x-4 gap-y-4 rounded-xl border bg-card p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:p-5">
           <div className="flex min-w-0 flex-col gap-1.5">
             <label htmlFor="runs-provider" className="text-sm font-medium">
               Source
             </label>
-            <select id="runs-provider" name="provider" defaultValue={provider ?? ""} className={selectClass}>
+            <select id="runs-provider" name="provider" defaultValue={provider ?? ""} className={adminSelect}>
               <option value="">Any source</option>
               {!("error" in providers)
                 ? providers.map((p) => (
@@ -109,7 +110,7 @@ async function ImportsView({ searchParams }: { searchParams: PageProps<"/admin/i
             <label htmlFor="runs-status" className="text-sm font-medium">
               Status
             </label>
-            <select id="runs-status" name="status" defaultValue={status ?? ""} className={selectClass}>
+            <select id="runs-status" name="status" defaultValue={status ?? ""} className={adminSelect}>
               <option value="">Any status</option>
               {RUN_STATUSES.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -119,10 +120,10 @@ async function ImportsView({ searchParams }: { searchParams: PageProps<"/admin/i
             </select>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+            <Button type="submit" variant="secondary" size="control">
               Show
             </Button>
-            <Button asChild variant="ghost" size="lg" className="h-10 px-4">
+            <Button asChild variant="ghost" size="control">
               <Link href="/admin/imports">Clear</Link>
             </Button>
           </div>
@@ -161,14 +162,14 @@ async function ImportsView({ searchParams }: { searchParams: PageProps<"/admin/i
             {before || last ? (
               <nav aria-label="Pages of runs" className="flex flex-wrap items-center justify-between gap-2">
                 {before ? (
-                  <Button asChild variant="ghost" size="lg">
+                  <Button asChild variant="ghost" size="control">
                     <Link href={`/admin/imports${query.size ? `?${query}` : ""}`}>Newest</Link>
                   </Button>
                 ) : (
                   <span />
                 )}
                 {last ? (
-                  <Button asChild variant="secondary" size="lg">
+                  <Button asChild variant="secondary" size="control">
                     <Link href={`/admin/imports?${new URLSearchParams([...query, ["before", last]])}`}>Older</Link>
                   </Button>
                 ) : null}

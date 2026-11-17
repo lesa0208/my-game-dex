@@ -236,14 +236,14 @@ async function RunView({ params, searchParams }: { params: PageProps<"/admin/imp
             {after !== null || next !== null ? (
               <nav aria-label="Pages of entries" className="flex flex-wrap items-center justify-between gap-2">
                 {after !== null ? (
-                  <Button asChild variant="ghost" size="lg">
+                  <Button asChild variant="ghost" size="control">
                     <Link href={filterHref(status)}>First entries</Link>
                   </Button>
                 ) : (
                   <span />
                 )}
                 {next !== null ? (
-                  <Button asChild variant="secondary" size="lg">
+                  <Button asChild variant="secondary" size="control">
                     <Link href={`${base}?${new URLSearchParams([...(status ? [["status", status]] : []), ["after", String(next)]])}#run-records`}>Next entries</Link>
                   </Button>
                 ) : null}

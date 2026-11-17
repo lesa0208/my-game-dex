@@ -47,7 +47,7 @@ async function SystemView() {
       ) : (
         <>
           <p className="text-xs text-muted-foreground">Checked {when(status.checked_at)}.</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <AdminCard id="system-database" title="Database">
               <Facts
                 rows={[

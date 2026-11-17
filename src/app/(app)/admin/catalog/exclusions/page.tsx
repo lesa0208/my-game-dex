@@ -90,14 +90,14 @@ async function ExclusionsView({ searchParams }: { searchParams: PageProps<"/admi
           {after || outcome.data.next ? (
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {after ? (
-                <Button asChild variant="ghost" size="lg">
+                <Button asChild variant="ghost" size="control">
                   <Link href={filterHref(status)}>First page</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {outcome.data.next ? (
-                <Button asChild variant="secondary" size="lg">
+                <Button asChild variant="secondary" size="control">
                   <Link href={`/admin/catalog/exclusions?status=${status}&after=${outcome.data.next}`}>Next page</Link>
                 </Button>
               ) : null}

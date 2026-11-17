@@ -51,7 +51,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
   // Administrators only (D8); staff signed in without their authenticator verify first.
   const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/exclusions/${id}` : "/admin/catalog/exclusions", "admin");
   const frame = (title: string, body: ReactNode, titleId?: string) => (
-    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+    <AdminFrame narrow access={access} current="catalog" title={title} titleId={titleId}>
       {body}
     </AdminFrame>
   );

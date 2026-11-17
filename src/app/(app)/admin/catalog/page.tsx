@@ -107,14 +107,14 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
           {after || queue.next_after ? (
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {after ? (
-                <Button asChild variant="ghost" size="lg">
+                <Button asChild variant="ghost" size="control">
                   <Link href={filterHref(status)}>First page</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {queue.next_after ? (
-                <Button asChild variant="secondary" size="lg">
+                <Button asChild variant="secondary" size="control">
                   <Link href={`/admin/catalog?status=${status}&after=${queue.next_after}`}>Next page</Link>
                 </Button>
               ) : null}

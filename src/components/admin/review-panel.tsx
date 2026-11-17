@@ -51,7 +51,7 @@ export function StepUpNotice({ path, children }: { path: string; children: React
         <span>{children} Verify with your authenticator, and you&apos;ll come back here.</span>
       </p>
       <div>
-        <Button asChild variant="outline" size="lg" className="h-10 px-4">
+        <Button asChild variant="outline" size="control">
           <Link href={stepUpHref(path)}>Verify to continue</Link>
         </Button>
       </div>

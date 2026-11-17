@@ -3,12 +3,11 @@
 import { CircleAlert } from "lucide-react";
 import { startTransition, useActionState } from "react";
 
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { mergeRelease, mergeReleaseFromForm, type MergeState } from "@/features/merge/actions";
 import { fieldLabel, OWNER_NOTE_MAX, STAFF_REASON_MAX } from "@/features/merge/form";
-import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminTextarea } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: MergeState, formData: FormData) => Promise<MergeState>) {
   return async (state: MergeState, formData: FormData): Promise<MergeState> => {
@@ -91,13 +90,13 @@ export function MergeForm({
         ) : null}
       </fieldset>
       <Field id="merge-owner-note" label="Note to owners (optional)" hint={`Shown to the submitter. Up to ${OWNER_NOTE_MAX.toLocaleString("en")} characters.`}>
-        <textarea id="merge-owner-note" name="owner_note" maxLength={OWNER_NOTE_MAX} rows={3} aria-describedby="merge-owner-note-hint" className={cn(selectClassName, "h-auto py-2")} />
+        <textarea id="merge-owner-note" name="owner_note" maxLength={OWNER_NOTE_MAX} rows={3} aria-describedby="merge-owner-note-hint" className={adminTextarea} />
       </Field>
       <Field id="merge-reason" label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
-        <Input id="merge-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="merge-reason-hint" className="h-10" />
+        <Input id="merge-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="merge-reason-hint" className={adminControl} />
       </Field>
       <div>
-        <Button type="submit" variant="destructive" size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+        <Button type="submit" variant="destructive" size="control" aria-disabled={pending || undefined}>
           {pending ? "Merging…" : "Merge into this release"}
         </Button>
       </div>

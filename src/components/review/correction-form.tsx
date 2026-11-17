@@ -3,12 +3,12 @@
 import { CircleAlert } from "lucide-react";
 import { startTransition, useActionState, useState } from "react";
 
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { correctSubmission, correctSubmissionFromForm, type ReviewState } from "@/features/review/actions";
 import { type GameRecord, type Piece, PIECE_LIMIT, pieceRows, type ReleaseRecord } from "@/features/review/form";
 import { EDITION_KINDS, GAME_KINDS } from "@/features/submissions/form";
+import { AdminField as Field, adminControl, adminSelect } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: ReviewState, formData: FormData) => Promise<ReviewState>) {
   return async (state: ReviewState, formData: FormData): Promise<ReviewState> => {
@@ -38,7 +38,7 @@ function Errors({ state }: { state: ReviewState }) {
 function Reason({ id }: { id: string }) {
   return (
     <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
-      <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className="h-10" />
+      <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className={adminControl} />
     </Field>
   );
 }
@@ -81,7 +81,7 @@ export function PiecesForm({ requestId, revision, pieces, kinds }: { requestId: 
               <label className="sr-only" htmlFor={`${id}-kind-${i}`}>
                 Piece {i + 1} type
               </label>
-              <select id={`${id}-kind-${i}`} name={`piece_kind_${i}`} defaultValue={piece?.kind ?? "insert"} className={selectClassName}>
+              <select id={`${id}-kind-${i}`} name={`piece_kind_${i}`} defaultValue={piece?.kind ?? "insert"} className={adminSelect}>
                 {kinds.map((k) => (
                   <option key={k.value} value={k.value}>
                     {k.label}
@@ -91,7 +91,7 @@ export function PiecesForm({ requestId, revision, pieces, kinds }: { requestId: 
               <label className="sr-only" htmlFor={`${id}-label-${i}`}>
                 Piece {i + 1} name
               </label>
-              <Input id={`${id}-label-${i}`} name={`piece_label_${i}`} maxLength={120} defaultValue={piece?.label ?? ""} autoComplete="off" aria-describedby={`${id}-hint`} className="h-10" />
+              <Input id={`${id}-label-${i}`} name={`piece_label_${i}`} maxLength={120} defaultValue={piece?.label ?? ""} autoComplete="off" aria-describedby={`${id}-hint`} className={adminControl} />
               <label className="sr-only" htmlFor={`${id}-quantity-${i}`}>
                 Piece {i + 1} quantity
               </label>
@@ -103,7 +103,7 @@ export function PiecesForm({ requestId, revision, pieces, kinds }: { requestId: 
                 defaultValue={piece ? String(piece.quantity) : ""}
                 placeholder="1"
                 autoComplete="off"
-                className="h-10"
+                className={adminControl}
               />
             </div>
           );
@@ -111,7 +111,7 @@ export function PiecesForm({ requestId, revision, pieces, kinds }: { requestId: 
       </fieldset>
       <Reason id={id} />
       <div>
-        <Button type="submit" variant="outline" size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+        <Button type="submit" variant="outline" size="control" aria-disabled={pending || undefined}>
           {pending ? "Saving…" : "Save the pieces"}
         </Button>
       </div>
@@ -151,11 +151,11 @@ export function CorrectionForm(
       {props.target === "game" ? (
         <>
           <Field id={`${id}-title`} label="Title">
-            <Input id={`${id}-title`} name="title" required maxLength={200} defaultValue={props.game.title} autoComplete="off" className="h-10" />
+            <Input id={`${id}-title`} name="title" required maxLength={200} defaultValue={props.game.title} autoComplete="off" className={adminControl} />
           </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <Field id={`${id}-kind`} label="Type">
-              <select id={`${id}-kind`} name="kind" defaultValue={props.game.kind} className={selectClassName}>
+              <select id={`${id}-kind`} name="kind" defaultValue={props.game.kind} className={adminSelect}>
                 {GAME_KINDS.map((k) => (
                   <option key={k.value} value={k.value}>
                     {k.label}
@@ -171,19 +171,19 @@ export function CorrectionForm(
                 maxLength={4}
                 defaultValue={props.game.first_release_year ? String(props.game.first_release_year) : ""}
                 autoComplete="off"
-                className="h-10"
+                className={adminControl}
               />
             </Field>
           </div>
         </>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <Field id={`${id}-edition_name`} label="Edition">
-              <Input id={`${id}-edition_name`} name="edition_name" maxLength={120} defaultValue={props.release.edition_name ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-edition_name`} name="edition_name" maxLength={120} defaultValue={props.release.edition_name ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-edition_kind`} label="Edition type">
-              <select id={`${id}-edition_kind`} name="edition_kind" defaultValue={props.release.edition_kind ?? ""} className={selectClassName}>
+              <select id={`${id}-edition_kind`} name="edition_kind" defaultValue={props.release.edition_kind ?? ""} className={adminSelect}>
                 <option value="">Not recorded</option>
                 {EDITION_KINDS.map((k) => (
                   <option key={k.value} value={k.value}>
@@ -200,11 +200,11 @@ export function CorrectionForm(
                 maxLength={2}
                 defaultValue={props.release.media_count ? String(props.release.media_count) : ""}
                 autoComplete="off"
-                className="h-10"
+                className={adminControl}
               />
             </Field>
             <Field id={`${id}-region_code`} label="Region">
-              <select id={`${id}-region_code`} name="region_code" value={region} onChange={(e) => setRegion(e.target.value)} className={selectClassName}>
+              <select id={`${id}-region_code`} name="region_code" value={region} onChange={(e) => setRegion(e.target.value)} className={adminSelect}>
                 {props.regions.map((r) => (
                   <option key={r.code} value={r.code}>
                     {r.code === "unknown" ? "Unknown" : r.label}
@@ -227,24 +227,24 @@ export function CorrectionForm(
               </label>
             </div>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             <Field id={`${id}-variant_name`} label="Variant">
-              <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={props.release.variant_name ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={props.release.variant_name ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-packaging`} label="Packaging">
-              <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={props.release.packaging ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={props.release.packaging ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-product_code`} label="Product code">
-              <Input id={`${id}-product_code`} name="product_code" maxLength={40} defaultValue={props.release.product_code ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-product_code`} name="product_code" maxLength={40} defaultValue={props.release.product_code ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-barcode`} label="Barcode">
-              <Input id={`${id}-barcode`} name="barcode" inputMode="numeric" maxLength={20} defaultValue={props.release.barcode ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-barcode`} name="barcode" inputMode="numeric" maxLength={20} defaultValue={props.release.barcode ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-local_title`} label="Title on the package">
-              <Input id={`${id}-local_title`} name="local_title" maxLength={200} defaultValue={props.release.local_title ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-local_title`} name="local_title" maxLength={200} defaultValue={props.release.local_title ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-publisher_name`} label="Publisher">
-              <Input id={`${id}-publisher_name`} name="publisher_name" maxLength={120} defaultValue={props.release.publisher_name ?? ""} autoComplete="off" className="h-10" />
+              <Input id={`${id}-publisher_name`} name="publisher_name" maxLength={120} defaultValue={props.release.publisher_name ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-release_year`} label="Release year">
               <Input
@@ -254,7 +254,7 @@ export function CorrectionForm(
                 maxLength={4}
                 defaultValue={props.release.release_date ? props.release.release_date.slice(0, 4) : ""}
                 autoComplete="off"
-                className="h-10"
+                className={adminControl}
               />
             </Field>
           </div>
@@ -262,7 +262,7 @@ export function CorrectionForm(
       )}
       <Reason id={id} />
       <div>
-        <Button type="submit" variant="outline" size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+        <Button type="submit" variant="outline" size="control" aria-disabled={pending || undefined}>
           {pending ? "Saving…" : props.target === "game" ? "Save the game's corrections" : "Save the release's corrections"}
         </Button>
       </div>

@@ -41,7 +41,7 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
   // Catalog editors only (D8); staff signed in without their authenticator verify first.
   const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/merges/${id}` : "/admin/catalog/merges", "editor");
   const frame = (title: string, body: ReactNode, titleId?: string) => (
-    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+    <AdminFrame narrow access={access} current="catalog" title={title} titleId={titleId}>
       {body}
     </AdminFrame>
   );

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { EditState } from "@/features/editing/actions";
 import { draftKey } from "@/features/editing/form";
+import { adminControl } from "@/components/admin/form-controls";
 
 type Action = (state: EditState, formData: FormData) => Promise<EditState>;
 
@@ -107,11 +108,11 @@ export function EditForm({
         const data = new FormData(event.currentTarget);
         startTransition(() => run(data));
       }}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-4"
     >
       {children}
-      <div>
-        <Button type="submit" variant={variant} size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" variant={variant} size="control" aria-disabled={pending || undefined}>
           {pending ? pendingLabel : submit}
         </Button>
       </div>
@@ -131,7 +132,7 @@ export function EditForm({
 export function ReasonField({ id }: { id: string }) {
   return (
     <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
-      <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className="h-10" />
+      <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className={adminControl} />
     </Field>
   );
 }

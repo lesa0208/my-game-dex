@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { setAccountStatus } from "@/features/admin/actions";
 import { AUTHORITY, ownerAuthorityBlocked, pageError, pageNotice, readHandle, readHandleQuery, roleLabel, statusLabel } from "@/features/admin/form";
 import { type Account, type AdminAccess, getAccountSummary, requireAdminSection, searchAccounts } from "@/features/admin/queries";
+import { adminControl, AdminField, FieldAction, FormActions, InlineFieldRow } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Accounts",
@@ -46,22 +47,20 @@ async function AccountsView({ searchParams }: { searchParams: PageProps<"/admin/
     <AdminFrame access={access} current="accounts" title="Accounts">
       <PageMessage notice={pageNotice(param(search.notice))} error={pageError(param(search.error))} />
       <AdminCard id="accounts-find" title="Find an account">
-        <form method="get" action="/admin/accounts" role="search" aria-label="Find an account by handle" className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label htmlFor="account-handle" className="text-sm font-medium">
-              Handle
-            </label>
-            <Input id="account-handle" name="handle" required maxLength={25} defaultValue={query ?? ""} autoComplete="off" spellCheck={false} aria-describedby="account-handle-hint" className="h-10" />
-            <p id="account-handle-hint" className="text-xs text-muted-foreground">
-              A handle, or its first letters. Accounts are found by handle only, never by email or name.
-            </p>
-          </div>
-          <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
-            Find
-          </Button>
+        <form method="get" action="/admin/accounts" role="search" aria-label="Find an account by handle">
+          <InlineFieldRow>
+            <AdminField id="account-handle" label="Handle" hint="A handle, or its first letters. Accounts are found by handle only, never by email or name.">
+              <Input id="account-handle" name="handle" required maxLength={25} defaultValue={query ?? ""} autoComplete="off" spellCheck={false} aria-describedby="account-handle-hint" className={adminControl} />
+            </AdminField>
+            <FieldAction>
+              <Button type="submit" variant="secondary" size="control">
+                Find
+              </Button>
+            </FieldAction>
+          </InlineFieldRow>
         </form>
       </AdminCard>
-      <div role="alert" aria-live="assertive">
+      <div role="alert" aria-live="assertive" className="empty:-mt-5">
         {typed && !query ? <p className="text-sm text-destructive">Enter a handle: 2 to 24 letters, numbers or underscores.</p> : null}
       </div>
       {summary === "error" || matches === "error" ? <p className="text-sm text-muted-foreground">Accounts can&apos;t be looked up right now. Try again later.</p> : null}
@@ -115,13 +114,12 @@ async function AccountsView({ searchParams }: { searchParams: PageProps<"/admin/
                 <input type="hidden" name="user_id" value={account.id} />
                 <input type="hidden" name="status" value={account.account_status === "suspended" ? "active" : "suspended"} />
                 <input type="hidden" name="back" value={back} />
-                <ReasonInput id="status-reason" />
-                <p className="text-xs text-muted-foreground">Kept in the audit log. A suspended account can sign in but can&apos;t change anything.</p>
-                <div>
-                  <Button type="submit" variant={account.account_status === "suspended" ? "default" : "destructive"} size="lg" className="h-10 px-4">
+                <ReasonInput id="status-reason" hint="Kept in the audit log. Only staff see it. A suspended account can sign in but can't change anything." />
+                <FormActions>
+                  <Button type="submit" variant={account.account_status === "suspended" ? "default" : "destructive"} size="control">
                     {account.account_status === "suspended" ? "Reinstate account" : "Suspend account"}
                   </Button>
-                </div>
+                </FormActions>
               </form>
             ) : (
               <p className="mt-4 text-sm text-muted-foreground">
