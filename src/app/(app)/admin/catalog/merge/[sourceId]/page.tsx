@@ -96,7 +96,7 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
   const { access } = await requireAdminSection(UUID.test(sourceId) ? `/admin/catalog/merge/${sourceId}` : "/admin/catalog", "editor");
   if (!UUID.test(sourceId)) notFound();
   const frame = (title: string, body: ReactNode, titleId?: string) => (
-    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+    <AdminFrame narrow access={access} current="catalog" title={title} titleId={titleId}>
       {body}
     </AdminFrame>
   );

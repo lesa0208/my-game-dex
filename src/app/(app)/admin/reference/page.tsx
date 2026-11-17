@@ -26,7 +26,7 @@ async function ReferenceView() {
       {!data ? (
         <ReferenceUnavailable />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           <AdminCard id="reference-platforms" title="Platforms">
             <p className="text-sm">
               {data.platforms.length} platforms in {platformFamilies(data.platforms).length} families, with {data.names.length} regional names.

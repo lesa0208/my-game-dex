@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { restoreExclusion, restoreExclusionFromForm, type ExclusionState } from "@/features/exclusion/actions";
 import { STAFF_REASON_MAX } from "@/features/exclusion/form";
+import { adminControl } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: ExclusionState, formData: FormData) => Promise<ExclusionState>) {
   return async (state: ExclusionState, formData: FormData): Promise<ExclusionState> => {
@@ -44,10 +45,10 @@ export function RestoreForm({ exclusionId, version, description }: { exclusionId
         {description}
       </p>
       <Field id="restore-reason" label="Reason, for the record" hint="Kept in the audit log. Only staff see it.">
-        <Input id="restore-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="restore-reason-hint" className="h-10" />
+        <Input id="restore-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="restore-reason-hint" className={adminControl} />
       </Field>
       <div>
-        <Button type="submit" size="lg" className="h-10 px-4" aria-describedby="restore-description" aria-disabled={pending || undefined}>
+        <Button type="submit" size="control" aria-describedby="restore-description" aria-disabled={pending || undefined}>
           {pending ? "Restoring…" : "Restore"}
         </Button>
       </div>

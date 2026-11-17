@@ -4,13 +4,16 @@ import type { ReactNode } from "react";
 export function PageLayout({
   children,
   aside,
+  wide = false,
 }: {
   children: ReactNode;
   aside?: ReactNode;
+  /** The full column, for the admin panel's tables and filters; reading pages stay at 40rem. */
+  wide?: boolean;
 }) {
   return (
     <div className="mx-auto flex w-full max-w-[1120px] justify-center gap-8 px-0 md:px-6 md:py-6 wide:gap-12">
-      <div className="w-full max-w-160 min-w-0">{children}</div>
+      <div className={wide ? "w-full max-w-6xl min-w-0" : "w-full max-w-160 min-w-0"}>{children}</div>
       {aside ? (
         <aside
           aria-label="Discover"

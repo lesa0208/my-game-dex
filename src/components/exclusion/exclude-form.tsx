@@ -3,12 +3,11 @@
 import { CircleAlert } from "lucide-react";
 import { startTransition, useActionState } from "react";
 
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { excludeRelease, excludeReleaseFromForm, type ExclusionState } from "@/features/exclusion/actions";
 import { EXCLUSION_REASONS, OWNER_NOTE_MAX, STAFF_REASON_MAX } from "@/features/exclusion/form";
-import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminSelect, adminTextarea } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: ExclusionState, formData: FormData) => Promise<ExclusionState>) {
   return async (state: ExclusionState, formData: FormData): Promise<ExclusionState> => {
@@ -68,7 +67,7 @@ export function ExcludeForm({
       <input type="hidden" name="needs_cascade" value={cascade.length ? "yes" : "no"} />
       <input type="hidden" name="needs_copies" value={copies ? "yes" : "no"} />
       <Field id="exclude-reason-code" label="Why it's outside the catalog's scope" hint="Owners of preserved copies see this.">
-        <select id="exclude-reason-code" name="reason_code" required defaultValue="" aria-describedby="exclude-reason-code-hint" className={selectClassName}>
+        <select id="exclude-reason-code" name="reason_code" required defaultValue="" aria-describedby="exclude-reason-code-hint" className={adminSelect}>
           <option value="" disabled>
             Choose a reason
           </option>
@@ -86,11 +85,11 @@ export function ExcludeForm({
           maxLength={OWNER_NOTE_MAX}
           rows={3}
           aria-describedby="exclude-owner-note-hint"
-          className={cn(selectClassName, "h-auto py-2")}
+          className={adminTextarea}
         />
       </Field>
       <Field id="exclude-reason" label="Reason, for the record" hint="Kept in the audit log. Only staff see it.">
-        <Input id="exclude-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="exclude-reason-hint" className="h-10" />
+        <Input id="exclude-reason" name="reason" required maxLength={STAFF_REASON_MAX} autoComplete="off" aria-describedby="exclude-reason-hint" className={adminControl} />
       </Field>
       <fieldset className="flex flex-col gap-3 rounded-lg border border-destructive/30 p-3">
         <legend className="px-1 text-sm font-medium">Confirm the effects</legend>
@@ -108,7 +107,7 @@ export function ExcludeForm({
         {!copies && !cascade.length ? <p className="text-sm text-muted-foreground">Only this release is excluded. No copies or other records are affected.</p> : null}
       </fieldset>
       <div>
-        <Button type="submit" variant="destructive" size="lg" className="h-10 px-4" aria-disabled={pending || undefined}>
+        <Button type="submit" variant="destructive" size="control" aria-disabled={pending || undefined}>
           {pending ? "Excluding…" : "Exclude from the catalog"}
         </Button>
       </div>

@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { AdminCard, AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
-import { Cell, DataTable, REFERENCE_PAGES, ReferenceUnavailable, SubNav, selectClass } from "@/components/admin/data-table";
+import { Cell, DataTable, REFERENCE_PAGES, ReferenceUnavailable, SubNav } from "@/components/admin/data-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requireAdminSection } from "@/features/admin/queries";
 import { PLATFORM_KIND_OPTIONS, filterPlatforms, platformFamilies, platformKindLabel, readPlatformKind, readQuery } from "@/features/reference/form";
 import { getReferenceData } from "@/features/reference/queries";
+import { adminControl, adminSelect } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Platforms",
@@ -34,18 +35,18 @@ async function PlatformsView({ searchParams }: { searchParams: PageProps<"/admin
       ) : (
         <>
           <AdminCard id="platform-filters" title="Filter">
-            <form method="get" action="/admin/reference/platforms" className="grid gap-3 sm:grid-cols-3">
+            <form method="get" action="/admin/reference/platforms" className="grid items-start gap-4 sm:grid-cols-3">
               <div className="flex min-w-0 flex-col gap-1.5">
                 <label htmlFor="platform-q" className="text-sm font-medium">
                   Name or maker
                 </label>
-                <Input id="platform-q" name="q" maxLength={60} defaultValue={query ?? ""} autoComplete="off" className="h-10" />
+                <Input id="platform-q" name="q" maxLength={60} defaultValue={query ?? ""} autoComplete="off" className={adminControl} />
               </div>
               <div className="flex min-w-0 flex-col gap-1.5">
                 <label htmlFor="platform-kind" className="text-sm font-medium">
                   Kind
                 </label>
-                <select id="platform-kind" name="kind" defaultValue={kind ?? ""} className={selectClass}>
+                <select id="platform-kind" name="kind" defaultValue={kind ?? ""} className={adminSelect}>
                   <option value="">Any kind</option>
                   {PLATFORM_KIND_OPTIONS.map((k) => (
                     <option key={k.value} value={k.value}>
@@ -58,7 +59,7 @@ async function PlatformsView({ searchParams }: { searchParams: PageProps<"/admin
                 <label htmlFor="platform-family" className="text-sm font-medium">
                   Family
                 </label>
-                <select id="platform-family" name="family" defaultValue={family ?? ""} className={selectClass}>
+                <select id="platform-family" name="family" defaultValue={family ?? ""} className={adminSelect}>
                   <option value="">Any family</option>
                   {families.map((f) => (
                     <option key={f} value={f}>
@@ -68,10 +69,10 @@ async function PlatformsView({ searchParams }: { searchParams: PageProps<"/admin
                 </select>
               </div>
               <div className="flex flex-wrap gap-2 sm:col-span-3">
-                <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                <Button type="submit" variant="secondary" size="control">
                   Show
                 </Button>
-                <Button asChild variant="ghost" size="lg" className="h-10 px-4">
+                <Button asChild variant="ghost" size="control">
                   <Link href="/admin/reference/platforms">Clear</Link>
                 </Button>
               </div>

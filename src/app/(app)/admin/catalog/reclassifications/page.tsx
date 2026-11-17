@@ -12,6 +12,7 @@ import { QUEUE_ERRORS, QUEUE_NOTICES } from "@/features/imports/form";
 import { getReclassificationQueue } from "@/features/imports/queries";
 import { recordStatusLabel } from "@/features/records/form";
 import { formatWhen } from "@/features/submissions/display";
+import { adminControl, AdminField, FieldAction, InlineFieldRow } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Reclassification queue",
@@ -64,20 +65,18 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
                     <span className="text-xs text-muted-foreground">Queued {formatWhen(item.created_at)}</span>
                   </p>
                   <p className="mt-1 wrap-break-word">{item.reason}</p>
-                  <form action={resolveReclassification} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <form action={resolveReclassification} className="mt-3">
                     <input type="hidden" name="item_id" value={item.id} />
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <label htmlFor={`${formId}-resolution`} className="text-sm font-medium">
-                        How it was resolved
-                      </label>
-                      <Input id={`${formId}-resolution`} name="resolution" required maxLength={500} autoComplete="off" aria-describedby={`${formId}-hint`} className="h-10" />
-                      <p id={`${formId}-hint`} className="text-xs text-muted-foreground">
-                        Kept in the audit log. Visible to other catalog staff.
-                      </p>
-                    </div>
-                    <Button type="submit" variant="secondary" size="lg" className="h-10 px-4 sm:mb-5">
-                      Resolve
-                    </Button>
+                    <InlineFieldRow>
+                      <AdminField id={`${formId}-resolution`} label="How it was resolved" hint="Kept in the audit log. Visible to other catalog staff.">
+                        <Input id={`${formId}-resolution`} name="resolution" required maxLength={500} autoComplete="off" aria-describedby={`${formId}-resolution-hint`} className={adminControl} />
+                      </AdminField>
+                      <FieldAction>
+                        <Button type="submit" variant="secondary" size="control">
+                          Resolve
+                        </Button>
+                      </FieldAction>
+                    </InlineFieldRow>
                   </form>
                 </li>
               );

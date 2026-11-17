@@ -34,7 +34,7 @@ async function NewReleaseView({ searchParams }: { searchParams: PageProps<"/admi
   if (!outcome.ok || !options) {
     if (!outcome.ok && outcome.reason === "refused") notFound();
     return (
-      <AdminFrame access={access} current="catalog" title="New physical release">
+      <AdminFrame narrow access={access} current="catalog" title="New physical release">
         <EmptyState icon={PlugZap} title="This page isn't available">
           It can&apos;t be loaded right now. Try again later.
         </EmptyState>
@@ -45,7 +45,7 @@ async function NewReleaseView({ searchParams }: { searchParams: PageProps<"/admi
   if (!g) notFound();
 
   return (
-    <AdminFrame access={access} current="catalog" title={`New release of ${g.title}`} titleId="new-release-heading">
+    <AdminFrame narrow access={access} current="catalog" title={`New release of ${g.title}`} titleId="new-release-heading">
       <div className="flex flex-col gap-4">
         <p className="text-sm">
           <Link href={`/admin/catalog/games/${g.id}`} className={linkClass}>

@@ -3,13 +3,14 @@ import Link from "next/link";
 
 import { AdminCard, AdminFrame, AdminShell, linkClass, PageMessage, param, ReasonInput } from "@/components/admin/admin-frame";
 import { AuditEntryItem } from "@/components/admin/audit-entry";
-import { selectClass, StatusPill, when } from "@/components/admin/data-table";
+import { StatusPill, when } from "@/components/admin/data-table";
 import { Facts } from "@/components/admin/records";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { grantRole, revokeRole } from "@/features/admin/actions";
 import { mfaReadiness, ownerAuthorityBlocked, pageError, pageNotice, ROLES, roleChangeBlocked, roleLabel, standingLabel } from "@/features/admin/form";
 import { getStaffOverview, requireAdminSection } from "@/features/admin/queries";
+import { adminControl, AdminField, adminSelect, FieldAction, FieldGrid, FormActions, InlineFieldRow } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Staff",
@@ -91,16 +92,18 @@ async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/sta
                           {blocked ? (
                             <p className="text-xs text-muted-foreground">{blocked}</p>
                           ) : (
-                            <form action={revokeRole} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                            <form action={revokeRole}>
                               <input type="hidden" name="user_id" value={m.id} />
                               <input type="hidden" name="role" value={role} />
                               <input type="hidden" name="back" value="/admin/staff" />
-                              <div className="min-w-0 flex-1">
+                              <InlineFieldRow>
                                 <ReasonInput id={`revoke-${m.id}-${role}`} />
-                              </div>
-                              <Button type="submit" variant="destructive" size="lg" className="h-10 px-4">
-                                Remove {roleLabel(role).toLowerCase()}
-                              </Button>
+                                <FieldAction>
+                                  <Button type="submit" variant="destructive" size="control">
+                                    Remove {roleLabel(role).toLowerCase()}
+                                  </Button>
+                                </FieldAction>
+                              </InlineFieldRow>
                             </form>
                           )}
                         </li>
@@ -116,33 +119,26 @@ async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/sta
       <AdminCard id="staff-grant" title="Give a role">
         <form action={grantRole} className="flex flex-col gap-3">
           <input type="hidden" name="back" value="/admin/staff" />
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="grant-handle" className="text-sm font-medium">
-              Handle
-            </label>
-            <Input id="grant-handle" name="handle" required maxLength={25} autoComplete="off" spellCheck={false} aria-describedby="grant-handle-hint" className="h-10" />
-            <p id="grant-handle-hint" className="text-xs text-muted-foreground">
-              The exact handle, without @. Only active, verified accounts can hold a role.
-            </p>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="grant-role" className="text-sm font-medium">
-              Role
-            </label>
-            <select id="grant-role" name="role" required className={selectClass}>
-              {grantable.map((r) => (
-                <option key={r} value={r}>
-                  {roleLabel(r)}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FieldGrid>
+            <AdminField id="grant-handle" label="Handle" hint="The exact handle, without @. Only active, verified accounts can hold a role.">
+              <Input id="grant-handle" name="handle" required maxLength={25} autoComplete="off" spellCheck={false} aria-describedby="grant-handle-hint" className={adminControl} />
+            </AdminField>
+            <AdminField id="grant-role" label="Role">
+              <select id="grant-role" name="role" required className={adminSelect}>
+                {grantable.map((r) => (
+                  <option key={r} value={r}>
+                    {roleLabel(r)}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+          </FieldGrid>
           <ReasonInput id="grant-reason" />
-          <div>
-            <Button type="submit" size="lg" className="h-10 px-4">
+          <FormActions>
+            <Button type="submit" size="control">
               Give role
             </Button>
-          </div>
+          </FormActions>
         </form>
         {access.owner ? null : <p className="mt-3 text-sm text-muted-foreground">Only the Owner can make someone an administrator.</p>}
         {access.owner && authorityBlocked ? <p className="mt-3 text-sm text-muted-foreground">Administrator changes wait until Owner authority returns.</p> : null}

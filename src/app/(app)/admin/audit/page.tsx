@@ -3,21 +3,18 @@ import Link from "next/link";
 
 import { AdminCard, AdminFrame, AdminShell, param } from "@/components/admin/admin-frame";
 import { AuditEntryItem } from "@/components/admin/audit-entry";
-import { selectClass } from "@/components/admin/data-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, AUDIT_OUTCOMES, isAuditAction, isAuditCategory, isAuditOutcome, readDay, readHandle } from "@/features/admin/form";
 import { type AuditFilters, getAuditLog, requireAdminSection } from "@/features/admin/queries";
 import { UUID } from "@/features/collection/uuid";
+import { adminControl, adminDate, AdminField, adminHint, adminSelect, FieldGrid, FormActions } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Audit log",
 };
 
 const DAY = 24 * 60 * 60 * 1000;
-// Tab moves between a date field's parts (month, day, year), and the field itself then
-// matches only :focus-within, so its ring follows that, not :focus-visible.
-const DATE_INPUT = "h-10 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring";
 
 async function AuditView({ searchParams }: { searchParams: PageProps<"/admin/audit">["searchParams"] }) {
   const search = await searchParams;
@@ -73,87 +70,69 @@ async function AuditView({ searchParams }: { searchParams: PageProps<"/admin/aud
         account ids, fingerprints and anything else recorded stay out of the page.
       </p>
       <AdminCard id="audit-filters" title="Filter">
-        <form method="get" action="/admin/audit" className="grid gap-3 sm:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="audit-kind" className="text-sm font-medium">
-              Kind
-            </label>
-            <select id="audit-kind" name="kind" defaultValue={filters.category ?? ""} className={selectClass}>
-              <option value="">Any kind</option>
-              {AUDIT_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="audit-action" className="text-sm font-medium">
-              Action
-            </label>
-            <select id="audit-action" name="action" defaultValue={filters.action ?? ""} className={selectClass}>
-              <option value="">Any action</option>
-              {AUDIT_ACTIONS.map((a) => (
-                <option key={a.value} value={a.value}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="audit-outcome" className="text-sm font-medium">
-              Outcome
-            </label>
-            <select id="audit-outcome" name="outcome" defaultValue={filters.outcome ?? ""} className={selectClass}>
-              <option value="">Any outcome</option>
-              {AUDIT_OUTCOMES.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="audit-actor" className="text-sm font-medium">
-              By handle
-            </label>
-            <Input id="audit-actor" name="actor" maxLength={25} defaultValue={filters.actor ?? ""} autoComplete="off" spellCheck={false} className="h-10" />
-          </div>
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <label htmlFor="audit-target" className="text-sm font-medium">
-              About handle
-            </label>
-            <Input id="audit-target" name="target" maxLength={25} defaultValue={filters.target ?? ""} autoComplete="off" spellCheck={false} className="h-10" />
-          </div>
-          <fieldset className="grid min-w-0 grid-cols-2 gap-3">
-            <legend className="sr-only">Dates, in UTC, at most a year apart</legend>
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <label htmlFor="audit-from" className="text-sm font-medium">
-                From
-              </label>
-              <Input id="audit-from" name="from" type="date" defaultValue={fromDay ? from ?? "" : ""} aria-describedby="audit-dates-hint" className={DATE_INPUT} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <label htmlFor="audit-to" className="text-sm font-medium">
-                To
-              </label>
-              <Input id="audit-to" name="to" type="date" defaultValue={toDay ? to ?? "" : ""} aria-describedby="audit-dates-hint" className={DATE_INPUT} />
-            </div>
-            <p id="audit-dates-hint" className="col-span-2 text-xs text-muted-foreground">
-              In UTC, at most a year apart. One date alone covers the year after or before it.
-            </p>
-          </fieldset>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+        <form method="get" action="/admin/audit" className="flex flex-col gap-4">
+          <FieldGrid columns={3}>
+            <AdminField id="audit-kind" label="Kind">
+              <select id="audit-kind" name="kind" defaultValue={filters.category ?? ""} className={adminSelect}>
+                <option value="">Any kind</option>
+                {AUDIT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+            <AdminField id="audit-action" label="Action">
+              <select id="audit-action" name="action" defaultValue={filters.action ?? ""} className={adminSelect}>
+                <option value="">Any action</option>
+                {AUDIT_ACTIONS.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+            <AdminField id="audit-outcome" label="Outcome">
+              <select id="audit-outcome" name="outcome" defaultValue={filters.outcome ?? ""} className={adminSelect}>
+                <option value="">Any outcome</option>
+                {AUDIT_OUTCOMES.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </AdminField>
+            <AdminField id="audit-actor" label="By handle">
+              <Input id="audit-actor" name="actor" maxLength={25} defaultValue={filters.actor ?? ""} autoComplete="off" spellCheck={false} className={adminControl} />
+            </AdminField>
+            <AdminField id="audit-target" label="About handle">
+              <Input id="audit-target" name="target" maxLength={25} defaultValue={filters.target ?? ""} autoComplete="off" spellCheck={false} className={adminControl} />
+            </AdminField>
+            {/* Tab moves between a date field's parts, so its ring follows focus-within (adminDate). */}
+            <fieldset className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1.5">
+              <legend className="sr-only">Dates, in UTC, at most a year apart</legend>
+              <AdminField id="audit-from" label="From">
+                <Input id="audit-from" name="from" type="date" defaultValue={fromDay ? from ?? "" : ""} aria-describedby="audit-dates-hint" className={adminDate} />
+              </AdminField>
+              <AdminField id="audit-to" label="To">
+                <Input id="audit-to" name="to" type="date" defaultValue={toDay ? to ?? "" : ""} aria-describedby="audit-dates-hint" className={adminDate} />
+              </AdminField>
+              <p id="audit-dates-hint" className={`col-span-2 ${adminHint}`}>
+                In UTC, at most a year apart. One date alone covers the year after or before it.
+              </p>
+            </fieldset>
+          </FieldGrid>
+          <FormActions>
+            <Button type="submit" variant="secondary" size="control">
               Show
             </Button>
-            <Button asChild variant="ghost" size="lg" className="h-10 px-4">
+            <Button asChild variant="ghost" size="control">
               <Link href="/admin/audit">Clear</Link>
             </Button>
-          </div>
+          </FormActions>
         </form>
       </AdminCard>
-      <div role="alert" aria-live="assertive">
+      <div role="alert" aria-live="assertive" className="empty:-mt-5">
         {invalid || (outcome && "error" in outcome && outcome.error === "invalid_filter") ? (
           <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
             Check the filters: a kind, action and outcome from the lists, handles of 3 to 24 letters, numbers or underscores, and a range of at most a year.
@@ -178,14 +157,14 @@ async function AuditView({ searchParams }: { searchParams: PageProps<"/admin/aud
           {before || last ? (
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {before ? (
-                <Button asChild variant="ghost" size="lg">
+                <Button asChild variant="ghost" size="control">
                   <Link href={`/admin/audit${query.size ? `?${query}` : ""}`}>Newest</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {last ? (
-                <Button asChild variant="secondary" size="lg">
+                <Button asChild variant="secondary" size="control">
                   <Link href={`/admin/audit?${new URLSearchParams([...query, ["before", last]])}`}>Older</Link>
                 </Button>
               ) : null}

@@ -3,11 +3,10 @@
 import { CircleAlert } from "lucide-react";
 import { startTransition, useActionState } from "react";
 
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { decideSubmission, decideSubmissionFromForm, type ReviewState } from "@/features/review/actions";
-import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminTextarea } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: ReviewState, formData: FormData) => Promise<ReviewState>) {
   return async (state: ReviewState, formData: FormData): Promise<ReviewState> => {
@@ -81,18 +80,18 @@ export function DecisionForm({
             maxLength={2000}
             rows={3}
             aria-describedby={`${id}-note-hint`}
-            className={cn(selectClassName, "h-auto py-2")}
+            className={adminTextarea}
           />
         </Field>
       ) : null}
       <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
-        <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className="h-10" />
+        <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className={adminControl} />
       </Field>
       <div>
         <Button
           type="submit"
           variant={destructive ? "destructive" : "default"}
-          size="lg"
+          size="control"
           className="h-10 px-4"
           aria-describedby={`${id}-description`}
           aria-disabled={pending || undefined}

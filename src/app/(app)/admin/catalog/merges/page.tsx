@@ -65,14 +65,14 @@ async function MergesView({ searchParams }: { searchParams: PageProps<"/admin/ca
           {after || outcome.data.next_after ? (
             <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {after ? (
-                <Button asChild variant="ghost" size="lg">
+                <Button asChild variant="ghost" size="control">
                   <Link href="/admin/catalog/merges">First page</Link>
                 </Button>
               ) : (
                 <span />
               )}
               {outcome.data.next_after ? (
-                <Button asChild variant="secondary" size="lg">
+                <Button asChild variant="secondary" size="control">
                   <Link href={`/admin/catalog/merges?after=${outcome.data.next_after}`}>Next page</Link>
                 </Button>
               ) : null}

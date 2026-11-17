@@ -38,7 +38,7 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin
   // Catalog editors only (D8); staff signed in without their authenticator verify first.
   const { access } = await requireAdminSection(UUID.test(releaseId) ? `/admin/catalog/exclude/${releaseId}` : "/admin/catalog", "editor");
   const frame = (title: string, body: ReactNode, titleId?: string) => (
-    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+    <AdminFrame narrow access={access} current="catalog" title={title} titleId={titleId}>
       {body}
     </AdminFrame>
   );

@@ -82,7 +82,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
   const item = await getSubmissionReview(id);
   if (item === undefined) {
     return (
-      <AdminFrame access={access} current="catalog" title="Review a submission">
+      <AdminFrame narrow access={access} current="catalog" title="Review a submission">
         <EmptyState icon={PlugZap} title="This submission isn't available">
           It can&apos;t be loaded right now. Try again later.
         </EmptyState>
@@ -101,7 +101,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
     code === "unknown" ? (confirmed ? "Unknown, confirmed by an editor" : "Unknown, not confirmed") : (options?.regions.find((r) => r.code === code)?.label ?? code);
 
   return (
-    <AdminFrame access={access} current="catalog" title={game?.title ?? details.title} titleId="review-title">
+    <AdminFrame narrow access={access} current="catalog" title={game?.title ?? details.title} titleId="review-title">
       <article aria-labelledby="review-title" className="flex flex-col gap-4">
         <p>
           <Link href="/admin/catalog" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">

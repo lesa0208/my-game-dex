@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 async function NewGameView() {
   const { access } = await requireAdminSection("/admin/catalog/games/new", "editor");
   return (
-    <AdminFrame access={access} current="catalog" title="New game" titleId="new-game-heading">
+    <AdminFrame narrow access={access} current="catalog" title="New game" titleId="new-game-heading">
       <div className="flex flex-col gap-4">
         <p className="text-sm">
           <Link href="/admin/catalog/search" className={linkClass}>

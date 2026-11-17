@@ -8,7 +8,6 @@ import { PieceRows, ReleaseInputs, RequirementRows } from "@/components/admin/ed
 import { EditForm, ReasonField } from "@/components/admin/edit-form";
 import { RecordSection, StatusBadge } from "@/components/admin/records";
 import { editable, EditNotice, StepUpNotice } from "@/components/admin/review-panel";
-import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Input } from "@/components/ui/input";
 import { requireAdminSection } from "@/features/admin/queries";
@@ -30,6 +29,8 @@ import { getEditingOptions } from "@/features/editing/queries";
 import { recordFieldLabel } from "@/features/records/form";
 import { getReleaseRecord } from "@/features/records/queries";
 import { piecesEditable } from "@/features/review/form";
+import { cn } from "@/lib/utils";
+import { AdminField as Field, adminControl, adminSelect } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Edit release",
@@ -53,7 +54,7 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
   if (!outcome.ok || !options) {
     if (!outcome.ok && outcome.reason === "refused") notFound();
     return (
-      <AdminFrame access={access} current="catalog" title="Edit release">
+      <AdminFrame narrow access={access} current="catalog" title="Edit release">
         <EmptyState icon={PlugZap} title="This record isn't available">
           It can&apos;t be loaded right now. Try again later.
         </EmptyState>
@@ -70,7 +71,7 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
   const label = [r.game?.title, r.platform?.short_name, r.region?.code === "unknown" ? "Region unknown" : r.region?.label, r.edition?.name].filter(Boolean).join(" · ");
 
   return (
-    <AdminFrame access={access} current="catalog" title={`Edit ${label || "release"}`} titleId="edit-release-heading">
+    <AdminFrame narrow access={access} current="catalog" title={`Edit ${label || "release"}`} titleId="edit-release-heading">
       <div className="flex flex-col gap-4">
         <p className="text-sm">
           <Link href={record} className={linkClass}>
@@ -148,7 +149,7 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
                     autoComplete="off"
                     spellCheck={false}
                     aria-describedby="set-markets-codes-hint"
-                    className="h-10 font-mono"
+                    className={cn(adminControl, "font-mono")}
                   />
                 </Field>
                 <ReasonField id="set-markets" />
@@ -176,9 +177,9 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
               <EditForm id="set-release-lock" recordId={r.id} action={setLock} plain={setLockFromForm} submit="Save the lock" pending="Saving…">
                 <Hidden id={r.id} revision={r.revision} />
                 <input type="hidden" name="entity" value="release" />
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid items-start gap-4 sm:grid-cols-2">
                   <Field id="set-release-lock-field" label="Field">
-                    <select id="set-release-lock-field" name="field" className={selectClassName}>
+                    <select id="set-release-lock-field" name="field" className={adminSelect}>
                       {LOCKABLE_FIELDS.release.map((f) => (
                         <option key={f} value={f}>
                           {recordFieldLabel(f)}
@@ -188,7 +189,7 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
                     </select>
                   </Field>
                   <Field id="set-release-lock-locked" label="Lock">
-                    <select id="set-release-lock-locked" name="locked" defaultValue="yes" className={selectClassName}>
+                    <select id="set-release-lock-locked" name="locked" defaultValue="yes" className={adminSelect}>
                       <option value="yes">Lock it</option>
                       <option value="no">Unlock it</option>
                     </select>

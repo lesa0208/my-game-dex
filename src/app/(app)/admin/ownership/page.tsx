@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { acceptTransfer, cancelRecovery, cancelTransfer, registerDocument, setSuccessor, startTransfer } from "@/features/admin/actions";
 import { ownerAuthorityBlocked, pageError, pageNotice, refusalMessage } from "@/features/admin/form";
 import { getOwnershipStatus, requireAdminSection } from "@/features/admin/queries";
+import { cn } from "@/lib/utils";
+import { adminControl } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
   title: "Ownership",
@@ -21,7 +23,7 @@ function HandleInput({ id, required = true }: { id: string; required?: boolean }
       <label htmlFor={id} className="text-sm font-medium">
         Administrator&apos;s handle
       </label>
-      <Input id={id} name="handle" required={required} maxLength={25} autoComplete="off" spellCheck={false} className="h-10" />
+      <Input id={id} name="handle" required={required} maxLength={25} autoComplete="off" spellCheck={false} className={adminControl} />
     </div>
   );
 }
@@ -76,7 +78,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                   <p className="text-sm">If you didn&apos;t ask for this, cancel it. You need a fresh verification with your authenticator.</p>
                   <ReasonInput id="recovery-reason" />
                   <div>
-                    <Button type="submit" variant="destructive" size="lg" className="h-10 px-4">
+                    <Button type="submit" variant="destructive" size="control">
                       Cancel the recovery
                     </Button>
                   </div>
@@ -97,7 +99,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                     <input type="hidden" name="transfer_id" value={status.transfer.id} />
                     <p className="text-sm">Accepting makes you the Owner. The current Owner stays an administrator. You need two verified authenticator factors and a fresh verification.</p>
                     <div>
-                      <Button type="submit" size="lg" className="h-10 px-4">
+                      <Button type="submit" size="control">
                         Accept ownership
                       </Button>
                     </div>
@@ -107,7 +109,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                     <input type="hidden" name="as" value="target" />
                     <ReasonInput id="decline-reason" />
                     <div>
-                      <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                      <Button type="submit" variant="secondary" size="control">
                         Decline
                       </Button>
                     </div>
@@ -118,7 +120,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                   <input type="hidden" name="transfer_id" value={status.transfer.id} />
                   <ReasonInput id="cancel-transfer-reason" />
                   <div>
-                    <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                    <Button type="submit" variant="secondary" size="control">
                       Cancel the transfer
                     </Button>
                   </div>
@@ -141,7 +143,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                       <HandleInput id="transfer-handle" />
                       <ReasonInput id="transfer-reason" />
                       <div>
-                        <Button type="submit" size="lg" className="h-10 px-4">
+                        <Button type="submit" size="control">
                           Offer ownership
                         </Button>
                       </div>
@@ -153,7 +155,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                     <HandleInput id="successor-handle" />
                     <ReasonInput id="successor-reason" />
                     <div>
-                      <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                      <Button type="submit" variant="secondary" size="control">
                         Name successor
                       </Button>
                     </div>
@@ -163,7 +165,7 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                       <input type="hidden" name="clear" value="yes" />
                       <ReasonInput id="successor-clear-reason" />
                       <div>
-                        <Button type="submit" variant="ghost" size="lg" className="h-10 px-4">
+                        <Button type="submit" variant="ghost" size="control">
                           Remove successor
                         </Button>
                       </div>
@@ -176,14 +178,14 @@ async function OwnershipView({ searchParams }: { searchParams: PageProps<"/admin
                       <label htmlFor="document-fingerprint" className="text-sm font-medium">
                         SHA-256 fingerprint
                       </label>
-                      <Input id="document-fingerprint" name="fingerprint" required maxLength={80} autoComplete="off" spellCheck={false} aria-describedby="document-fingerprint-hint" className="h-10 font-mono" />
+                      <Input id="document-fingerprint" name="fingerprint" required maxLength={80} autoComplete="off" spellCheck={false} aria-describedby="document-fingerprint-hint" className={cn(adminControl, "font-mono")} />
                       <p id="document-fingerprint-hint" className="text-xs text-muted-foreground">
                         64 hexadecimal digits. The document itself stays with its custodians, never here.
                       </p>
                     </div>
                     <ReasonInput id="document-reason" />
                     <div>
-                      <Button type="submit" variant="secondary" size="lg" className="h-10 px-4">
+                      <Button type="submit" variant="secondary" size="control">
                         Register fingerprint
                       </Button>
                     </div>

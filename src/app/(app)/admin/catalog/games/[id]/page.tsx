@@ -238,14 +238,14 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
               {before || history.data.next_before ? (
                 <nav aria-label="History pages" className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   {before ? (
-                    <Button asChild variant="ghost" size="lg">
+                    <Button asChild variant="ghost" size="control">
                       <Link href={`/admin/catalog/games/${g.id}#history`}>Latest</Link>
                     </Button>
                   ) : (
                     <span />
                   )}
                   {history.data.next_before ? (
-                    <Button asChild variant="secondary" size="lg">
+                    <Button asChild variant="secondary" size="control">
                       <Link href={`/admin/catalog/games/${g.id}?before=${history.data.next_before}#history`}>Older</Link>
                     </Button>
                   ) : null}

@@ -85,56 +85,59 @@ async function OverviewView() {
           <p className="text-sm text-muted-foreground">The counts can&apos;t be loaded right now. Try again later.</p>
         </AdminCard>
       ) : null}
-      {catalog ? (
-        <AdminCard id="overview-catalog" title="Catalog">
-          <Counts
-            label="Review queue"
-            rows={[
-              // The same words as the queue's filters, which these link to.
-              { label: "Not started", value: count(catalog.submissions_open, cap), href: "/admin/catalog?status=open" },
-              { label: "In review", value: count(catalog.submissions_in_review, cap), href: "/admin/catalog?status=in_review" },
-              { label: "Changes requested", value: count(catalog.submissions_changes_requested, cap), href: "/admin/catalog?status=changes_requested" },
-            ]}
-          />
-          <Note>{catalog.oldest_waiting_at ? `The oldest submission waiting arrived on ${formatDay(catalog.oldest_waiting_at)}.` : "No submission is waiting."}</Note>
-          <div className="mt-4">
+      {/* The count cards side by side on a wide screen, so each number stays near its label. */}
+      <div className="grid items-start gap-5 lg:grid-cols-2">
+        {catalog ? (
+          <AdminCard id="overview-catalog" title="Catalog">
             <Counts
-              label="Catalog records"
+              label="Review queue"
               rows={[
-                { label: "Unpublished games", value: count(catalog.games_unpublished, cap) },
-                { label: "Unpublished releases", value: count(catalog.releases_unpublished, cap) },
-                { label: "Import items waiting for reclassification", value: count(catalog.reclassifications_open, cap), href: "/admin/catalog/reclassifications" },
-                { label: "Merges in the last 30 days", value: count(catalog.merges_30_days, cap), href: "/admin/catalog/merges" },
+                // The same words as the queue's filters, which these link to.
+                { label: "Not started", value: count(catalog.submissions_open, cap), href: "/admin/catalog?status=open" },
+                { label: "In review", value: count(catalog.submissions_in_review, cap), href: "/admin/catalog?status=in_review" },
+                { label: "Changes requested", value: count(catalog.submissions_changes_requested, cap), href: "/admin/catalog?status=changes_requested" },
               ]}
             />
-          </div>
-        </AdminCard>
-      ) : null}
-      {accounts ? (
-        <AdminCard id="overview-accounts" title="Accounts">
-          <Counts label="Accounts" rows={[{ label: "Suspended accounts", value: count(accounts.suspended, cap) }]} />
-          <Note>
-            <Link href="/admin/accounts" className={linkClass}>
-              Find an account by handle
-            </Link>{" "}
-            to suspend or reinstate it.
-          </Note>
-        </AdminCard>
-      ) : null}
-      {administration ? (
-        <AdminCard id="overview-administration" title="Administration">
-          <Counts
-            label="Administration"
-            rows={[
-              { label: "Active exclusions", value: count(administration.exclusions_active, cap), href: "/admin/catalog/exclusions" },
-              { label: "Administrators", value: count(administration.staff_admins, cap), href: "/admin/staff" },
-              { label: "Moderators", value: count(administration.staff_moderators, cap), href: "/admin/staff" },
-              { label: "Catalog editors", value: count(administration.staff_catalog_editors, cap), href: "/admin/staff" },
-              { label: "Refused staff actions in the last 7 days", value: count(administration.refusals_7_days, cap), href: "/admin/audit?outcome=refused" },
-            ]}
-          />
-        </AdminCard>
-      ) : null}
+            <Note>{catalog.oldest_waiting_at ? `The oldest submission waiting arrived on ${formatDay(catalog.oldest_waiting_at)}.` : "No submission is waiting."}</Note>
+            <div className="mt-4">
+              <Counts
+                label="Catalog records"
+                rows={[
+                  { label: "Unpublished games", value: count(catalog.games_unpublished, cap) },
+                  { label: "Unpublished releases", value: count(catalog.releases_unpublished, cap) },
+                  { label: "Import items waiting for reclassification", value: count(catalog.reclassifications_open, cap), href: "/admin/catalog/reclassifications" },
+                  { label: "Merges in the last 30 days", value: count(catalog.merges_30_days, cap), href: "/admin/catalog/merges" },
+                ]}
+              />
+            </div>
+          </AdminCard>
+        ) : null}
+        {accounts ? (
+          <AdminCard id="overview-accounts" title="Accounts">
+            <Counts label="Accounts" rows={[{ label: "Suspended accounts", value: count(accounts.suspended, cap) }]} />
+            <Note>
+              <Link href="/admin/accounts" className={linkClass}>
+                Find an account by handle
+              </Link>{" "}
+              to suspend or reinstate it.
+            </Note>
+          </AdminCard>
+        ) : null}
+        {administration ? (
+          <AdminCard id="overview-administration" title="Administration">
+            <Counts
+              label="Administration"
+              rows={[
+                { label: "Active exclusions", value: count(administration.exclusions_active, cap), href: "/admin/catalog/exclusions" },
+                { label: "Administrators", value: count(administration.staff_admins, cap), href: "/admin/staff" },
+                { label: "Moderators", value: count(administration.staff_moderators, cap), href: "/admin/staff" },
+                { label: "Catalog editors", value: count(administration.staff_catalog_editors, cap), href: "/admin/staff" },
+                { label: "Refused staff actions in the last 7 days", value: count(administration.refusals_7_days, cap), href: "/admin/audit?outcome=refused" },
+              ]}
+            />
+          </AdminCard>
+        ) : null}
+      </div>
     </AdminFrame>
   );
 }
