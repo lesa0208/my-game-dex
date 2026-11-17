@@ -66,25 +66,27 @@ export function StatusPill({ tone = "neutral", children }: { tone?: "good" | "wa
  */
 export function SubNav({ label, items, current }: { label: string; items: { href: string; label: string }[]; current: string }) {
   return (
-    <nav aria-label={label} className="relative -mx-4 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0">
-      <ul className="flex w-max gap-1 border-b sm:w-auto sm:flex-wrap">
-        {items.map((item) => (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              aria-current={item.href === current ? "page" : undefined}
-              className={cn(
-                "-mb-px inline-flex h-10 items-center border-b-2 px-3 text-sm whitespace-nowrap outline-none transition-colors focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/60",
-                item.href === current ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-              )}
-            >
-              {item.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
+    <div className="relative -mx-4 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0">
+      <nav aria-label={label}>
+        <ul className="flex w-max gap-1 border-b sm:w-auto sm:flex-wrap">
+          {items.map((item) => (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                aria-current={item.href === current ? "page" : undefined}
+                className={cn(
+                  "-mb-px inline-flex h-10 items-center border-b-2 px-3 text-sm whitespace-nowrap outline-none transition-colors focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/60",
+                  item.href === current ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
       <CurrentTabIntoView />
-    </nav>
+    </div>
   );
 }
 
