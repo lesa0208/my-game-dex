@@ -37,6 +37,28 @@ import {
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 
+/**
+ * Calls a Server Action the way the page's JavaScript does (the React action protocol),
+ * for a result only the enhanced form shows. The action is found by its export name in
+ * the build's manifest; its id is never typed here.
+ */
+async function callAction(browser, path, exportedName, state, fields) {
+  const manifest = JSON.parse(readFileSync(join(root, ".next/server/server-reference-manifest.json"), "utf8"));
+  const id = Object.entries(manifest.node).find(([, v]) => v.exportedName === exportedName && v.filename === "src/features/submissions/actions.ts")?.[0];
+  if (!id) throw new Error(`no action ${exportedName} in the build`);
+  const body = new FormData();
+  // The form data first, each entry named for the reference the root makes to it.
+  for (const [name, value] of Object.entries(fields)) body.append(`_1_${name}`, value);
+  body.append("0", JSON.stringify([state, "$K1"]));
+  const response = await fetch(`http://127.0.0.1:3290${path}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { cookie: browser.cookieHeader(), origin: "http://127.0.0.1:3290", "next-action": id, accept: "text/x-component" },
+    body,
+  });
+  return { response, text: await response.text() };
+}
+
 const plain = (html) => decode(html.replace(/<[^>]+>/g, ""));
 const users = [];
 const count = (sql) => Number(psql(sql));
@@ -148,6 +170,16 @@ async function missingRelease() {
   const edition = psql("select edition_name from public.releases where product_code = 'SNS-ZSFE-USA';");
   await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on" });
   check("a release that's already published isn't submitted again", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
+  // The enhanced form names the published release and links to it, through the
+  // release's pairing (a direct releases-to-games embed failed with PGRST200).
+  const published = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+  const duplicate = await callAction(owner.browser, "/submit?game=starfall-odyssey", "submitToCatalog", { status: "idle", message: null }, {
+    ...form.hidden, platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on",
+  });
+  check("the form links a duplicate to the published release on its game's page",
+    duplicate.response.status === 200 && duplicate.text.includes('"status":"duplicate"') && duplicate.text.includes(`"/games/starfall-odyssey?release=${published}"`),
+    `${duplicate.response.status} ${/"status":"(\w+)"/.exec(duplicate.text)?.[1] ?? "no state"}`);
+  check("and still submits nothing", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
   await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "pal" });
   check("without the physical confirmation, nothing is submitted", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
 
