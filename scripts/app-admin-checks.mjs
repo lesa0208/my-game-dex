@@ -21,6 +21,7 @@ import {
   createUser,
   decode,
   deleteUsers,
+  formById,
   formWith,
   forms,
   location,
@@ -47,6 +48,8 @@ const visible = (html) => plain(html.replace(/<script[\s\S]*?<\/script>/g, " "))
 const redirectsTo = (page) => location(page.response) || decode(/<meta[^>]+http-equiv="refresh"[^>]+content="\d+;\s*url=([^"]+)"/i.exec(page.html)?.[1] ?? "");
 const NOT_AVAILABLE = "This page isn't available";
 const UUIDS = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
+/** The product code of the release section 11 submits, to find and remove it. */
+const SUBMISSION_CODE = `QZA-${process.pid}`;
 function uuidv7(at = Date.now()) {
   const bytes = randomBytes(16);
   for (let i = 0; i < 6; i += 1) bytes[i] = Math.floor(at / 2 ** (8 * (5 - i))) % 256;
@@ -155,7 +158,8 @@ try {
       }
     }
     const nav = visible((await editor.browser.get("/admin")).html);
-    check("an editor's admin sections are Overview and Catalog only", nav.includes("Catalog") && !/\bStaff\b|Audit log|Ownership/.test(nav.replace(/Admin sections/g, "")));
+    check("an editor's admin sections are Overview, Catalog and Reference only",
+      nav.includes("Catalog") && nav.includes("Reference") && !/\bStaff\b|Audit log|Ownership|\bImports\b|\bSystem\b/.test(nav.replace(/Admin sections/g, "")));
     const unverified = new Browser();
     const page = await unverified.get("/sign-in?next=%2Fadmin");
     const signedIn = await unverified.submit("/sign-in", formWith(page.html, "password"), { email: admin.email, password: admin.password });
@@ -252,6 +256,86 @@ try {
     page = await admin.browser.get("/admin/audit?from=2020-01-01&to=2026-12-31");
     check("as is a range over a year", visible(page.html).includes("Check the filters"));
     check("and the log shows no email", !(await admin.browser.get("/admin/audit")).html.includes("@example.test"));
+  }
+
+  // -------------------------------------------------------------------------
+  section("6b. Accounts, audit and staff (M10e)");
+  {
+    const secrets = (html) => [collector, editor, moderator, admin, owner, heir].some((p) => html.includes(p.email) || html.includes(p.totpSecret ?? "\u0000") || html.includes(p.factorId ?? "\u0000"));
+    /** The audit events only, without the filter form's lists of labels. */
+    const eventsOf = (html) => visible(/<section aria-labelledby="audit-events"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "");
+    /** Forms that post (a Server Action), other than signing out: a GET filter isn't one. */
+    const writing = (html) =>
+      [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)].filter(([, a]) => (/method="post"/i.test(a) || /action="javascript:/.test(a)) && !a.includes('id="sign-out-form"')).map(([form]) => form);
+
+    // Accounts: search, summary and history, as a moderator and as an administrator.
+    let page = await moderator.browser.get("/admin/accounts?handle=ad_");
+    let text = visible(page.html);
+    check("a moderator searches by the start of a handle", text.includes("Handles that start with ad_") && text.includes(`@${collector.handle}`) && text.includes(`@${editor.handle}`));
+    check("each result opens the account", page.html.includes(`href="/admin/accounts?handle=${collector.handle}"`));
+    check("and nothing in the list can be changed", writing(page.html).length === 0);
+    page = await moderator.browser.get("/admin/accounts?handle=a");
+    check("one character is too short, and says so", visible(page.html).includes("Enter a handle: 2 to 24") && !visible(page.html).includes("Handles that start with"));
+    page = await moderator.browser.get(`/admin/accounts?handle=${collector.handle}`);
+    text = visible(page.html);
+    check("an account shows its moderation summary", text.includes("Moderation") && /Suspended Once/.test(text) && /Reinstated Once/.test(text));
+    check("and its last status change, and who made it", text.includes(`Reinstated by @${moderator.handle}`));
+    check("a moderator sees its status history, not its staff roles", text.includes("Account suspended") && text.includes("Account reinstated") && !text.includes("Role granted"));
+    // M10 integration review: moderators see what happened, never the reason staff wrote.
+    check("without the reasons staff wrote, anywhere in the page", !page.html.includes("Spam reports") && !page.html.includes("Appeal accepted"));
+    check("and is told reasons are for administrators", text.includes("The reasons staff wrote are shown to administrators only"));
+    check("and no link into the audit log, which is for administrators", !page.html.includes('href="/admin/audit?'));
+    check("the page explains who can do what", text.includes("Who can do what") && text.includes("suspend or reinstate collectors"));
+    // Section 5 made the collector a moderator: another moderator may not change them.
+    check("a moderator is offered no change for a staff member, and told why", writing(page.html).length === 0 && text.includes("Only an administrator can change the status of a staff member"));
+    check("no email address, factor or secret appears", !secrets(page.html) && !page.html.includes("@example.test"));
+    page = await admin.browser.get(`/admin/accounts?handle=${collector.handle}`);
+    text = visible(page.html);
+    check("an administrator also sees its staff roles", text.includes("Role granted") && text.includes("Role removed"));
+    check("and the staff's reasons, with no withheld notice", text.includes("Spam reports") && text.includes("Appeal accepted") && !text.includes("shown to administrators only"));
+    check("and is offered one writing form, the status change", writing(page.html).length === 1 && writing(page.html)[0].includes('name="reason"'), `${writing(page.html).length} forms`);
+    check("and links to every event about it", page.html.includes(`href="/admin/audit?target=${collector.handle}"`));
+    page = await moderator.browser.get(`/admin/accounts?handle=${owner.handle}`);
+    check("the Owner is marked protected, with nothing offered", visible(page.html).includes("The Owner's account is protected") && writing(page.html).length === 0);
+
+    // The audit log: kinds, outcomes and navigation.
+    page = await admin.browser.get("/admin/audit?kind=staff");
+    text = eventsOf(page.html);
+    check("the audit log filters by kind", text.includes("Role granted") && !text.includes("Account suspended") && !text.includes("Catalog record"));
+    page = await admin.browser.get("/admin/audit?outcome=refused");
+    text = eventsOf(page.html);
+    check("and by outcome", (text.includes("Staff change refused") || text.includes("Refused: Owner protected")) && !text.includes("Role granted") && !text.includes("Account reinstated"));
+    check("each handle links to the account and its events", page.html.includes(`href="/admin/accounts?handle=${admin.handle}"`) && page.html.includes(`href="/admin/audit?actor=${admin.handle}"`));
+    page = await admin.browser.get(`/admin/audit?target=${collector.handle}&kind=accounts`);
+    text = eventsOf(page.html);
+    check("about one account, by kind", text.includes("Account suspended") && text.includes("Account reinstated") && !text.includes("Role granted"));
+    page = await admin.browser.get("/admin/audit?kind=everything");
+    check("an unknown kind is refused, plainly", visible(page.html).includes("Check the filters"));
+    page = await admin.browser.get("/admin/audit?outcome=maybe");
+    check("so is an unknown outcome", visible(page.html).includes("Check the filters"));
+    page = await admin.browser.get("/admin/audit?from=2020-01-01");
+    check("one date alone covers the year after it", !visible(page.html).includes("Check the filters") && visible(page.html).includes("No events match."));
+    page = await admin.browser.get("/admin/audit");
+    check("the log shows no ids, emails, factors or secrets", !UUIDS.test(visible(page.html)) && !secrets(page.html) && !page.html.includes("@example.test"));
+    check("and nothing in it can be changed", writing(page.html).length === 0);
+
+    // Staff: standing and authenticator readiness, and why an action isn't offered.
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    page = await admin.browser.get("/admin/staff");
+    psql(`update public.profiles set account_status = 'active' where id = '${editor.id}';`);
+    text = visible(page.html);
+    check("the staff page counts each role", text.includes("Administrators") && text.includes("Moderators") && text.includes("Catalog editors"));
+    check("a suspended staff member's roles are marked unusable", text.includes("Suspended: their roles can't be used"));
+    check("the Owner is ready for Owner actions", text.includes("2 authenticators, ready for Owner actions"));
+    check("an administrator with one authenticator is told Owner actions need two", text.includes("1 authenticator; Owner actions need two set up 24 hours ago"));
+    check("a moderator's single authenticator is enough", text.includes("Authenticator set up"));
+    check("their own role says why it can't be removed", text.includes("You can't change your own roles"));
+    check("so do the Owner's", text.includes("The Owner's roles are protected"));
+    check("and another administrator's, to an administrator", text.includes("Only the Owner can remove an administrator."));
+    check("recent staff changes are listed", text.includes("Recent staff changes") && text.includes("Role granted") && page.html.includes('href="/admin/audit?kind=staff"'));
+    check("no factor name, id, secret or email appears", !secrets(page.html) && !page.html.includes("Backup key") && !page.html.includes("@example.test"));
+    page = await owner.browser.get("/admin/staff");
+    check("the Owner may remove another administrator", forms(page.html).some((f) => f.hidden.user_id === admin.id && f.hidden.role === "admin"));
   }
 
   // -------------------------------------------------------------------------
@@ -370,6 +454,154 @@ try {
     }
   }
 
+  // -------------------------------------------------------------------------
+  section("11. M10a: the catalog pages in the admin frame, with step-up, and the overview's counts");
+  {
+    // A submission of a fixture game's missing release, and a fixture release, to open the catalog pages with.
+    const page = await collector.browser.get("/submit?game=starfall-odyssey");
+    const posted = await collector.browser.submit("/submit?game=starfall-odyssey", formById(page.html, "new-submission"), {
+      platform: "snes", media_format: "rom-cartridge", region: "pal", product_code: SUBMISSION_CODE, physical: "on",
+    });
+    const submission = location(posted.response).split("/")[2]?.split("?")[0] ?? "";
+    check("setup: a collector submits a missing release", UUIDS.test(submission), location(posted.response));
+    const release = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+    const editorPages = ["/admin/catalog", `/admin/catalog/${submission}`, `/admin/catalog/merge/${release}`, `/admin/catalog/exclude/${release}`, "/admin/catalog/merges"];
+    const adminPages = ["/admin/catalog/exclusions"];
+    // Unknown ids: the access check comes first, so a missing record can't change who is turned away.
+    const unknown = [`/admin/catalog/merges/${uuidv7()}`, `/admin/catalog/exclusions/${uuidv7()}`];
+    const turnedAway = (html) => plain(html).includes(NOT_AVAILABLE) && !html.includes('aria-label="Admin sections"') && !html.includes(SUBMISSION_CODE) && !visible(html).includes("Starfall");
+    const framed = (html) => html.includes('aria-label="Admin sections"') && /aria-current="page"[^>]*>Catalog</.test(html) && oneHeading(html);
+    for (const path of editorPages) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets ${path.replace(UUIDS, ":id")} in the admin frame, with one heading`, framed(p.html),
+        `nav ${p.html.includes('aria-label="Admin sections"')}, current ${/aria-current="page"[^>]*>Catalog</.test(p.html)}, one h1 ${oneHeading(p.html)}, to ${redirectsTo(p) || "-"}`);
+    }
+    for (const path of [...adminPages, unknown[1]]) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets the unavailable page at ${path.replace(UUIDS, ":id")}`, turnedAway(p.html));
+    }
+    check("an administrator gets the exclusions in the admin frame", framed((await admin.browser.get("/admin/catalog/exclusions")).html));
+    for (const [name, who] of [["a collector", collector], ["a moderator", moderator]]) {
+      let refused = true;
+      for (const path of [...editorPages, ...adminPages, ...unknown]) {
+        const p = await who.browser.get(path);
+        refused &&= turnedAway(p.html);
+      }
+      check(`${name} gets the unavailable page on every catalog page`, refused);
+    }
+    // Staff signed in with a password only: the catalog pages ask for the authenticator first (D8).
+    const unverified = new Browser();
+    const signIn = await unverified.get("/sign-in");
+    await unverified.submit("/sign-in", formWith(signIn.html, "password"), { email: editor.email, password: editor.password });
+    let steps = true;
+    for (const path of [...editorPages, ...unknown]) {
+      const p = await unverified.get(path);
+      steps &&= redirectsTo(p) === `/settings/security/verify?next=${encodeURIComponent(path)}` && !p.html.includes('aria-label="Admin sections"') && !p.html.includes(SUBMISSION_CODE);
+    }
+    check("an editor at aal1 is sent to verify from every catalog page, and sees nothing first", steps);
+    const back = await verifyBrowser(unverified, editor, `/admin/catalog/${submission}`);
+    check("verifying returns them to the submission", location(back.response) === `/admin/catalog/${submission}`, location(back.response));
+    check("which then opens in the frame", framed((await unverified.get(`/admin/catalog/${submission}`)).html));
+
+    // The overview's counts: each role sees only its own sections, and the numbers are the database's.
+    const cards = async (who) => {
+      const html = (await who.browser.get("/admin")).html;
+      return ["overview-catalog", "overview-accounts", "overview-administration"].map((id) => (html.includes(`id="${id}"`) ? id.slice(9) : "-")).join("/");
+    };
+    check("the overview shows an editor the catalog counts only", (await cards(editor)) === "catalog/-/-", await cards(editor));
+    check("a moderator the account counts only", (await cards(moderator)) === "-/accounts/-", await cards(moderator));
+    check("an administrator every section", (await cards(admin)) === "catalog/accounts/administration", await cards(admin));
+    const collectorOverview = (await collector.browser.get("/admin")).html;
+    check("and a collector the unavailable page", turnedAway(collectorOverview) && !collectorOverview.includes('id="overview-catalog"'));
+    const open = psql("select count(*) from public.catalog_change_requests where status = 'open';");
+    const suspended = psql("select count(*) from public.profiles where account_status = 'suspended';");
+    const admins = psql("select count(*) from public.staff_roles where role = 'admin';");
+    const text = visible((await admin.browser.get("/admin")).html);
+    check("the counts shown are the database's", Number(open) >= 1 && text.includes(`Not started ${open}`) && text.includes(`Suspended accounts ${suspended}`) && text.includes(`Administrators ${admins}`),
+      `open ${open}, suspended ${suspended}, admins ${admins}`);
+    check("the refusals count opens the refused events (M10 integration review)", (await admin.browser.get("/admin")).html.includes('href="/admin/audit?outcome=refused"'));
+    check("and show no handle, email or title", !text.includes("@example.test") && !text.includes("Starfall") && !/@ad_[0-9a-f]/.test(text.replace(`@${admin.handle}`, "")));
+  }
+
+  section("12. M10b: catalog search, game and release records, and their history");
+  {
+    const game = psql("select id from public.games where slug = 'starfall-odyssey';");
+    const published = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+    const pending = psql(`select id from public.releases where product_code = '${SUBMISSION_CODE}';`);
+    const submission = psql(`select id from public.catalog_change_requests where release_id = '${pending}';`);
+    check("setup: section 11's submission is still pending", UUIDS.test(pending) && UUIDS.test(submission));
+    const pages = [
+      "/admin/catalog/search",
+      `/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`,
+      `/admin/catalog/games/${game}`,
+      `/admin/catalog/releases/${pending}`,
+      `/admin/catalog/releases/${published}`,
+    ];
+    const framed = (html) => html.includes('aria-label="Admin sections"') && /aria-current="page"[^>]*>Catalog</.test(html) && oneHeading(html);
+    // The search's own address holds the code, so it's looked for in what is shown; the record's id anywhere.
+    const turnedAway = (html, path) => plain(html).includes(NOT_AVAILABLE) && !html.includes('aria-label="Admin sections"') && (path.includes(pending) || !html.includes(pending))
+      && !visible(html).includes(SUBMISSION_CODE) && !visible(html).includes("Starfall");
+    for (const path of pages) {
+      const p = await editor.browser.get(path);
+      check(`an editor gets ${path.replace(UUIDS, ":id")} in the admin frame, with one heading and labelled fields`, p.response.status === 200 && framed(p.html) && labelled(p.html),
+        `${p.response.status}, framed ${framed(p.html)}, labelled ${labelled(p.html)}`);
+    }
+    for (const [name, who] of [["a collector", collector], ["a moderator", moderator]]) {
+      const shown = [];
+      for (const path of [...pages, `/admin/catalog/games/${uuidv7()}`]) if (!turnedAway((await who.browser.get(path)).html, path)) shown.push(path.replace(UUIDS, ":id"));
+      check(`${name} gets the unavailable page on every record page`, shown.length === 0, shown.join(" "));
+    }
+    const unverified = new Browser();
+    const signIn = await unverified.get("/sign-in");
+    await unverified.submit("/sign-in", formWith(signIn.html, "password"), { email: editor.email, password: editor.password });
+    const notSent = [];
+    for (const path of pages) {
+      const p = await unverified.get(path);
+      if (!(redirectsTo(p) === `/settings/security/verify?next=${encodeURIComponent(path)}` && !p.html.includes('aria-label="Admin sections"') && (path.includes(pending) || !p.html.includes(pending))
+        && !visible(p.html).includes(SUBMISSION_CODE)))
+        notSent.push(`${path.replace(UUIDS, ":id")} -> ${redirectsTo(p) || "-"}`);
+    }
+    check("an editor at aal1 is sent to verify from every record page, and sees nothing first", notSent.length === 0, notSent.join(" | "));
+    const searchPath = `/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`;
+    const back = await verifyBrowser(unverified, editor, searchPath);
+    check("verifying returns them to the same search", location(back.response) === searchPath, location(back.response));
+
+    // Search: the pending release is found by its code, links to its record, and says where it stands.
+    const found = (await editor.browser.get(`/admin/catalog/search?q=${SUBMISSION_CODE}&kind=releases`)).html;
+    check("search finds the collector's pending release by its product code", found.includes(`href="/admin/catalog/releases/${pending}"`) && /Pending|In review/.test(visible(found)));
+    const gamesFound = visible((await editor.browser.get("/admin/catalog/search?q=starfall")).html);
+    check("and the fixture game by a word of its title", gamesFound.includes("Starfall Odyssey"));
+    const odd = await editor.browser.get("/admin/catalog/search?kind=accounts&status=deleted&platform=SNES%3B&cursor=a%20b");
+    check("unknown search parameters are ignored, not an error", odd.response.status === 200 && framed(odd.html) && !visible(odd.html).includes("didn't work"));
+    const tooShort = visible((await editor.browser.get("/admin/catalog/search?q=a")).html);
+    check("a one-letter search asks for more", tooShort.includes("Type a little more"));
+
+    // Records: what they show, and what they never show.
+    const gamePage = visible((await editor.browser.get(`/admin/catalog/games/${game}`)).html);
+    check("the game record shows its title, releases, sources and history", gamePage.includes("Starfall Odyssey") && gamePage.includes("Releases (") && gamePage.includes("Sources and locks") && gamePage.includes("History"));
+    const gameHtml = (await editor.browser.get(`/admin/catalog/games/${game}`)).html;
+    check("and links to each of its releases", gameHtml.includes(`href="/admin/catalog/releases/${published}"`) && gameHtml.includes(`href="/admin/catalog/releases/${pending}"`));
+    const pendingHtml = (await editor.browser.get(`/admin/catalog/releases/${pending}`)).html;
+    const pendingPage = visible(pendingHtml);
+    check("the pending release's record shows it isn't verified, and its submission", pendingPage.includes("Not verified") && pendingHtml.includes(`href="/admin/catalog/${submission}"`) && pendingPage.includes(SUBMISSION_CODE));
+    check("its history shows the submission, by the submitter, never by name", pendingPage.includes("The submitter · Submitted it") && !pendingPage.includes(collector.handle) && !pendingPage.includes("@example.test"),
+      pendingPage.slice(pendingPage.indexOf("History"), pendingPage.indexOf("History") + 200));
+    const publishedPage = visible((await editor.browser.get(`/admin/catalog/releases/${published}`)).html);
+    check("a published release's record shows its physical details", publishedPage.includes("Physical release") && publishedPage.includes("SNS-ZSFE-USA") && publishedPage.includes("Verified"));
+    check("and no exclusions section for an editor", !publishedPage.includes("Exclusions"));
+    check("an unknown release is the unavailable page", plain((await editor.browser.get(`/admin/catalog/releases/${uuidv7()}`)).html).includes(NOT_AVAILABLE));
+    const badBefore = await editor.browser.get(`/admin/catalog/releases/${pending}?before=not-an-id`);
+    check("a bad history cursor is ignored", badBefore.response.status === 200 && visible(badBefore.html).includes("Submitted it"));
+
+    // Navigation: the review page links to the records and shows the release's history.
+    const review = (await editor.browser.get(`/admin/catalog/${submission}`)).html;
+    check("the review page links to the release and game records", review.includes(`href="/admin/catalog/releases/${pending}"`) && review.includes(`href="/admin/catalog/games/${game}"`));
+    check("and shows the release's latest history", visible(review).includes("Release history") && visible(review).includes("Submitted it"));
+    const mergePreview = visible((await editor.browser.get(`/admin/catalog/merge/${pending}?into=${published}`)).html);
+    check("the merge preview shows both releases' history", mergePreview.includes("History of the release to merge") && mergePreview.includes("History of the release to keep"));
+    check("the queue links to the records", (await editor.browser.get("/admin/catalog")).html.includes('href="/admin/catalog/search"'));
+  }
+
   const errors = appErrorLines();
   check("the app logged no errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
@@ -377,13 +609,21 @@ try {
 } finally {
   stopApp();
   removeTestOwner(psql);
+  // Section 11's submission and its release, before the accounts, while they still name their submitter.
+  const submitters = people.map((p) => `'${p.id}'`).join(",") || "null";
+  psql(`begin;
+create temp table m10a_requests on commit drop as select * from public.catalog_change_requests where submitted_by in (${submitters});
+delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
+delete from public.catalog_change_requests where id in (select id from m10a_requests);
+commit;`);
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
   psql("delete from private.handle_holds where kind = 'released' and handle like 'ad\\_%';");
   removeFixture();
-  check("no account, Owner record, transfer, recovery, registration or audit row is left behind",
+  check("no account, Owner record, transfer, recovery, registration, submission or audit row is left behind",
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
+      + (select count(*) from public.releases where product_code = '${SUBMISSION_CODE}') + (select count(*) from public.catalog_change_requests where submitted_by in (${list}))
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }

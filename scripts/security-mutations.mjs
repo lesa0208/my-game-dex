@@ -174,8 +174,10 @@ export const m3Mutations = [
 const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
 const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
 const STATUS = "public.set_account_status(uuid, public.account_status, text)";
-// M8d replaced it with the filtered version (A2); the m4 mutations apply to that one.
-const AUDIT_READ = "public.get_audit_events(integer, uuid, text, text, text, timestamptz, timestamptz)";
+// M8d replaced it with the filtered version (A2). The M10 integration review retired
+// get_audit_events; these historical mutations now target its replacement, get_audit_log.
+const AUDIT_READ = "public.get_audit_log(integer, uuid, text, text, text, text, text, timestamptz, timestamptz)";
+const AUDIT_VIEW = "private.audit_event_view(private.audit_events)";
 const ROLE_REFUSAL = "private.role_change_refusal(uuid, uuid, public.staff_role)";
 
 export const m4Mutations = [
@@ -672,7 +674,8 @@ const SUCCESSION_DOCUMENT = "public.register_succession_document(text, text)";
 const CONFIRM_RECOVERY = "public.confirm_owner_recovery(uuid)";
 const CANCEL_RECOVERY = "public.cancel_owner_recovery(uuid, text)";
 const ADMIN_ACCESS = "public.get_my_admin_access()";
-const STAFF_MEMBERS = "public.get_staff_members()";
+// get_staff_members was retired in the M10 integration review; its replacement is held to the same rules.
+const STAFF_MEMBERS = "public.get_staff_overview()";
 const FIND_ACCOUNT = "public.find_account_by_handle(text)";
 const OWNERSHIP_STATUS = "public.get_ownership_status()";
 const FACTOR_STATUS = "public.get_my_factor_status()";
@@ -741,7 +744,7 @@ export const m8Mutations = [
   sql("a refusal writes before refusing", "pgtap", rewrite(GRANT, "  if v_refusal is not null then\n", "  if v_refusal is not null then\n    insert into public.staff_roles (user_id, role, granted_by) values (p_user, 'moderator', v_me) on conflict do nothing;\n")),
   sql("refusals aren't audited", "both", rewrite(STAFF_REFUSAL, "v_audit := private.record_refusal(", "v_audit := null; perform pg_catalog.jsonb_build_array(")),
   sql("attempts on the Owner aren't told apart", "pgtap", rewrite(STAFF_REFUSAL, "case when p_code = 'owner_protected' then 'owner_protection_refused' else 'staff_change_refused' end", "'staff_change_refused'")),
-  sql("the audit log hides the outcome", "pgtap", rewrite(AUDIT_READ, "e.metadata, e.outcome", "e.metadata, 'succeeded'::text")),
+  sql("the audit log hides the outcome", "pgtap", rewrite(AUDIT_VIEW, "'outcome', p_event.outcome,", "'outcome', 'succeeded',")),
   // Ownership transfer (D5)
   sql("a transfer needs no Owner authority", "both", rewrite(START_TRANSFER, "  v_refusal := private.owner_authority_refusal();\n  if v_refusal is null and p_to = v_me then", "  v_refusal := null;\n  if v_refusal is null and p_to = v_me then")),
   sql("two transfers may be pending", "both", rewrite(START_TRANSFER, "and t.expires_at > pg_catalog.now()) then\n    v_refusal := 'transfer_pending';", "and false) then\n    v_refusal := 'transfer_pending';")),
@@ -783,9 +786,214 @@ export const m8Mutations = [
   sql("ownership status shows the document's fingerprint", "pgtap", rewrite(OWNERSHIP_STATUS, "'document_registered_at', o.succession_registered_at,", "'document_registered_at', o.succession_registered_at, 'fingerprint', o.succession_fingerprint,")),
   sql("factor status shows others' factors", "pgtap", rewrite(FACTOR_STATUS, "where f.user_id = v_me and f.factor_type = 'totp'", "where f.factor_type = 'totp'")),
   sql("factor status calls unregistered factors mature", "pgtap", rewrite(FACTOR_STATUS, "and r.registered_at <= pg_catalog.now() - interval '24 hours', false)", "and coalesce(r.registered_at, pg_catalog.now()) <= pg_catalog.now(), false)")),
-  sql("the audit log's range is unbounded", "pgtap", rewrite(AUDIT_READ, " or p_until - p_since > interval '366 days'", "")),
-  sql("the audit log takes any action name", "pgtap", rewrite(AUDIT_READ, "    if not (p_action = any (pg_catalog.enum_range(null::private.audit_action)::text[])) then\n      raise exception 'invalid filter' using errcode = '22023';\n    end if;\n", "")),
+  sql("the audit log's range is unbounded", "pgtap", rewrite(AUDIT_READ, " or v_until - v_since > interval '366 days'", "")),
+  sql("the audit log takes any action name", "pgtap", rewrite(AUDIT_READ, "(p_action is not null and not (p_action = any (pg_catalog.enum_range(null::private.audit_action)::text[])))", "false")),
   sql("the factor-status read is exposed to anon", "pgtap", `grant execute on function ${FACTOR_STATUS} to anon;`),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations };
+// M10a: the /admin overview's counts. Who may read them, which sections each role
+// gets, that they stay aggregate, and that each count counts what it says.
+const OVERVIEW = "public.get_admin_overview()";
+export const m10aMutations = [
+  // Who may read it
+  sql("the overview needs no staff role", "both", rewrite(OVERVIEW, "\n     or not exists (select 1 from public.staff_roles s where s.user_id = v_me) then", " then")),
+  sql("the overview needs no verified session", "both", rewrite(OVERVIEW, " or not private.mfa_session_ok()", "")),
+  sql("a suspended editor reads the overview", "both", rewrite(OVERVIEW, "if v_me is null or not private.is_active_user() or", "if v_me is null or")),
+  sql("the overview is granted to anon", "both", `grant execute on function ${OVERVIEW} to anon;`),
+  sql("the overview is granted to service_role", "pgtap", `grant execute on function ${OVERVIEW} to service_role;`),
+  // Each section for its roles only
+  sql("catalog counts for every staff member", "both", rewrite(OVERVIEW, "if private.has_staff_role('catalog_editor') then", "if true then")),
+  sql("account counts for every staff member", "both", rewrite(OVERVIEW, "if private.has_staff_role('moderator') then", "if true then")),
+  sql("administration counts for moderators", "both", rewrite(OVERVIEW, "if private.has_staff_role('admin') then", "if private.has_staff_role('moderator') then")),
+  // Aggregates only
+  sql("the overview names the oldest submitter", "pgtap", rewrite(OVERVIEW, "'reclassifications_open',", "'oldest_submitter', (select p.handle from public.catalog_change_requests r join public.profiles p on p.id = r.submitted_by order by r.created_at limit 1),\n      'reclassifications_open',")),
+  sql("the overview lists administrators' emails", "both", rewrite(OVERVIEW, "'exclusions_active',", "'admin_emails', (select pg_catalog.jsonb_agg(u.email) from public.staff_roles s join auth.users u on u.id = s.user_id where s.role = 'admin'),\n      'exclusions_active',")),
+  // Each count counts what it says
+  sql("open submissions count every status", "pgtap", rewrite(OVERVIEW, "where r.status = 'open' limit v_cap", "where true limit v_cap")),
+  sql("unpublished games include rejected ones", "pgtap", rewrite(OVERVIEW, "where g.status in ('unverified', 'under_review') limit v_cap", "where g.status <> 'published' limit v_cap")),
+  sql("suspended accounts count every account", "pgtap", rewrite(OVERVIEW, "where p.account_status = 'suspended' limit v_cap", "where true limit v_cap")),
+  sql("refusals count every event", "pgtap", rewrite(OVERVIEW, "where a.outcome = 'refused' and a.occurred_at", "where a.occurred_at")),
+  sql("refusals have no time window", "pgtap", rewrite(OVERVIEW, " and a.occurred_at > pg_catalog.now() - interval '7 days' limit v_cap", " limit v_cap")),
+];
+
+// M10b: catalog search, records and history (D4). Who may read them, that history is
+// only the record's allow-listed events and fields, that records leave out who did
+// what to whom, and that pages stay bounded.
+const RECORDS_SEARCH = "public.search_catalog_records(text, text, text, text, integer, text)";
+const RECORDS_GAME = "public.get_game_record(uuid)";
+const RECORDS_RELEASE = "public.get_release_record(uuid)";
+const RECORDS_HISTORY = "public.get_catalog_record_history(text, uuid, integer, uuid)";
+const RECORDS_EVENT = "private.history_event_json(private.audit_events)";
+const RECORDS_STAFF_CHECK = "perform private.require_active_staff('catalog_editor');";
+const RECORDS_LIMIT = "v_limit integer := least(greatest(coalesce(p_limit, 25), 1), 50);";
+export const m10bMutations = [
+  // Who may read them
+  sql("search needs no staff role", "both", rewrite(RECORDS_SEARCH, RECORDS_STAFF_CHECK, "")),
+  sql("a game record needs no staff role", "both", rewrite(RECORDS_GAME, RECORDS_STAFF_CHECK, "")),
+  sql("a release record needs no staff role", "both", rewrite(RECORDS_RELEASE, RECORDS_STAFF_CHECK, "")),
+  sql("history needs no staff role", "both", rewrite(RECORDS_HISTORY, RECORDS_STAFF_CHECK, "")),
+  sql("a suspended editor searches", "both", rewrite(RECORDS_SEARCH, RECORDS_STAFF_CHECK, "if not private.has_staff_role('catalog_editor') then raise exception 'not permitted' using errcode = '42501'; end if;")),
+  sql("search is granted to anon", "both", `grant execute on function ${RECORDS_SEARCH} to anon;`),
+  sql("history is granted to service_role", "pgtap", `grant execute on function ${RECORDS_HISTORY} to service_role;`),
+  // History: the record's allow-listed events only
+  sql("history shows any action", "pgtap", rewrite(RECORDS_HISTORY, "where x.action = any (v_actions)", "where true")),
+  sql("history ignores the record's kind", "pgtap", rewrite(RECORDS_HISTORY, "\n        and a.metadata ->> 'entity' = any (case when p_entity = 'game' then array['game', 'game_platform', 'game_relation'] else array['release'] end)", "")),
+  sql("history returns the raw metadata", "pgtap", rewrite(RECORDS_EVENT, "'details', pg_catalog.jsonb_strip_nulls(", "'details', p_event.metadata || pg_catalog.jsonb_strip_nulls(")),
+  sql("history names the submitter", "pgtap", rewrite(RECORDS_EVENT, "then pg_catalog.jsonb_build_object('kind', 'submitter')", "then pg_catalog.jsonb_build_object('kind', 'submitter', 'handle', (select p.handle from public.profiles p where p.id = p_event.actor_id))")),
+  sql("history shows an exclusion's staff reason", "pgtap", rewrite(RECORDS_EVENT, "'catalog_submission_resubmitted', 'catalog_release_excluded', 'catalog_exclusion_restored')", "'catalog_submission_resubmitted')")),
+  sql("history gives editors the exclusion id", "pgtap", rewrite(RECORDS_EVENT, "'exclusion_id', case when private.has_staff_role('admin') then m -> 'exclusion_id' end,", "'exclusion_id', m -> 'exclusion_id',")),
+  sql("history counts the copies", "pgtap", rewrite(RECORDS_EVENT, "'merge_id', m -> 'merge_id',", "'merge_id', m -> 'merge_id', 'copies', m -> 'copies',")),
+  // Records: nothing about who
+  sql("a game record names its submitter", "both", rewrite(RECORDS_GAME, "'status', g.status, 'verified_at', g.verified_at,", "'status', g.status, 'submitted_by', g.submitted_by, 'verified_at', g.verified_at,")),
+  sql("a release record names who locked a field", "pgtap", rewrite(RECORDS_RELEASE, "pg_catalog.jsonb_build_object('field', fl.field_name, 'locked_at', fl.locked_at)", "pg_catalog.jsonb_build_object('field', fl.field_name, 'locked_at', fl.locked_at, 'locked_by', fl.locked_by)")),
+  sql("editors get a release's exclusions", "pgtap", rewrite(RECORDS_RELEASE, "'exclusions', case when private.has_staff_role('admin') then", "'exclusions', case when true then")),
+  // Bounded, stable pages
+  sql("a search page has no upper bound", "pgtap", rewrite(RECORDS_SEARCH, RECORDS_LIMIT, "v_limit integer := greatest(coalesce(p_limit, 25), 1);")),
+  sql("a history page has no upper bound", "pgtap", rewrite(RECORDS_HISTORY, RECORDS_LIMIT, "v_limit integer := greatest(coalesce(p_limit, 25), 1);")),
+  sql("a cursor works with any search", "pgtap", rewrite(RECORDS_SEARCH, "if v_cursor ->> 0 is distinct from v_hash or c_sort is null", "if c_sort is null")),
+];
+
+// M10c: creator provenance and no self-review (D2, D-1 to D-4), recent MFA for
+// sensitive catalog work (D3, D-5, D-6, D-8) and revision-bound verification (D-7).
+const M10C_ORIGIN = "private.record_catalog_origin()";
+const M10C_ORIGIN_GUARD = "private.guard_catalog_record_origin()";
+const M10C_REVIEW_GUARD = "private.guard_submitted_record()";
+const M10C_REVISION = "private.bump_catalog_revision()";
+const M10C_EDIT_RELEASE = "public.update_release(uuid, jsonb, text)";
+const M10C_VERIFY_RELEASE = "public.verify_release(uuid, text, bigint)";
+const M10C_PUBLISH = "public.publish_release(uuid, text, bigint)";
+const M10C_APPROVE = "public.approve_submission(uuid, integer, bigint, bigint, text, text)";
+const M10C_EXCLUDE = "public.exclude_release(uuid, text, text, text, text, boolean, boolean)";
+const M10C_MERGE = "public.merge_release(uuid, uuid, text, text, text, text[], boolean)";
+const M10C_FIRST_FRESH = "  perform private.require_recent_mfa();\n  v_reason := private.require_reason(p_reason);";
+export const m10cMutations = [
+  // Provenance, recorded from trusted context and never changed
+  sql("a game's provenance isn't recorded", "both", "alter table public.games disable trigger record_catalog_origin;"),
+  sql("any signed-in client counts as staff", "pgtap", rewrite(M10C_ORIGIN, "elsif private.has_staff_role('catalog_editor') then", "elsif true then")),
+  sql("provenance can be rewritten", "pgtap", "drop trigger guard_catalog_record_origin on private.catalog_record_origins;"),
+  sql("clients can read provenance", "pgtap", "grant usage on schema private to authenticated; grant select on private.catalog_record_origins to authenticated;"),
+  sql("provenance blocks deleting the creator's account", "both", rewrite(M10C_ORIGIN_GUARD, "  if old.creator_id is not null and new.creator_id is null\n", "  if false and old.creator_id is not null and new.creator_id is null\n")),
+  // No self-review, with no administrator bypass
+  sql("the creator may verify and publish", "both", rewrite(M10C_REVIEW_GUARD, "if v_me is not null and v_origin.creator_id = v_me then", "if false then")),
+  sql("the creator rule covers releases only", "both", rewrite(M10C_REVIEW_GUARD, "if v_me is not null and v_origin.creator_id = v_me then", "if v_release and v_me is not null and v_origin.creator_id = v_me then")),
+  sql("the creator's own verification counts", "pgtap", rewrite(M10C_REVIEW_GUARD, "if old.verified_by is null or old.verified_by is not distinct from v_origin.creator_id then", "if old.verified_by is null then")),
+  sql("unknown provenance needs no administrator", "pgtap", rewrite(M10C_REVIEW_GUARD, "if v_unknown and not private.has_staff_role('admin') then", "if false then")),
+  sql("one administrator verifies and publishes unknown provenance", "pgtap", rewrite(M10C_REVIEW_GUARD, "if v_unknown and old.verified_by = v_me then", "if false then")),
+  sql("the creator merges their own release", "pgtap", rewrite(M10C_MERGE, "  if private.created_by(v_me, array[p_source, p_target],", "  if false and private.created_by(v_me, array[p_source, p_target],")),
+  sql("the creator excludes their own release", "pgtap", rewrite(M10C_EXCLUDE, "  if private.created_by(v_me, array[p_release], private.cascade_games(v_plan -> 'cascade')) then", "  if false then")),
+  // A TOTP verification in the last 10 minutes
+  sql("verifying a release asks for no recent verification first", "pgtap", rewrite(M10C_VERIFY_RELEASE, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("publishing asks for no recent verification first", "pgtap", rewrite(M10C_PUBLISH, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("approving asks for no recent verification first", "pgtap", rewrite(M10C_APPROVE, M10C_FIRST_FRESH, "  v_reason := private.require_reason(p_reason);")),
+  sql("editing a published release needs no recent verification", "pgtap", rewrite(M10C_EDIT_RELEASE, "  if v_status = 'published' then\n    perform private.require_recent_mfa();", "  if false then\n    perform private.require_recent_mfa();")),
+  sql("excluding a published release needs no recent verification", "pgtap", rewrite(M10C_EXCLUDE, "  if rel.status = 'published' then\n    perform private.require_recent_mfa();", "  if false then\n    perform private.require_recent_mfa();")),
+  sql("the guard's recent-verification backstop is gone", "pgtap", rewrite(M10C_REVIEW_GUARD, "      if not private.mfa_recent(interval '10 minutes') then", "      if false then")),
+  // A verification is bound to the revision it attested
+  sql("an edit keeps the verification", "both", rewrite(M10C_REVISION, "      new.verified_at := null;\n      new.verified_by := null;", "      null;")),
+  sql("publication ignores the verified revision", "pgtap", rewrite(M10C_REVIEW_GUARD, "        if not private.verification_current(v_kind, new.id, old.revision, old.verified_at) then", "        if false then")),
+];
+
+// M10c review fixes: relations, excluded records and pairings.
+const M10C_RELATION = "public.set_game_relation(uuid, uuid, public.game_relation_type, smallint, text, text)";
+const M10C_REMOVE_ALIAS = "public.remove_game_alias(uuid, text)";
+const M10C_PAIRING = "private.guard_pairing_publication()";
+export const m10cReviewMutations = [
+  sql("a relation needs a recent verification only between published games", "pgtap", rewrite(M10C_RELATION,
+    "  if exists (select 1 from public.games g where g.id in (p_source, p_target) and g.status = 'published') then",
+    "  if (select count(*) from public.games g where g.id in (p_source, p_target) and g.status = 'published') = 2 then")),
+  sql("an excluded game's alias can be removed", "pgtap", rewrite(M10C_REMOVE_ALIAS, "  if v_status in ('merged', 'excluded') then\n    raise exception 'record unavailable'", "  if false then\n    raise exception 'record unavailable'")),
+  sql("a pairing is published without a recent verification", "pgtap", rewrite(M10C_PAIRING, "     and not private.mfa_recent(interval '10 minutes') then", "     and false then")),
+];
+
+// M10d: import monitoring and the system view, administrators only (D7, D8), and the
+// reclassification resolution the queue page now uses (M5b).
+const M10D_PROVIDERS = "public.get_import_providers()";
+const M10D_RUNS = "public.get_import_runs(integer, uuid, text, text)";
+const M10D_RUN = "public.get_import_run(uuid)";
+const M10D_RECORDS = "public.get_import_run_records(uuid, text, integer, integer)";
+const M10D_SYSTEM = "public.get_system_status()";
+const M10D_SUMMARY = "private.import_run_summary(private.import_runs)";
+const M10D_RESOLVE = "public.resolve_catalog_review(uuid, text)";
+const M10D_ADMIN = "perform private.require_active_staff('admin');";
+export const m10dMutations = [
+  // Who may read
+  sql("catalog editors read the import sources", "pgtap", rewrite(M10D_PROVIDERS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read the import runs", "pgtap", rewrite(M10D_RUNS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read a run's report", "pgtap", rewrite(M10D_RUN, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read a run's staged entries", "pgtap", rewrite(M10D_RECORDS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("moderators read the system view", "pgtap", rewrite(M10D_SYSTEM, M10D_ADMIN, "perform private.require_active_staff('moderator');")),
+  sql("anon may call the system view", "pgtap", "grant execute on function public.get_system_status() to anon;"),
+  // What they return
+  sql("a run shows its lease id", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'lease_id', p_run.lease_id,\n    'lease_live', p_run.status = 'running'")),
+  sql("a run shows its checkpoint", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'checkpoint', p_run.checkpoint,\n    'lease_live', p_run.status = 'running'")),
+  sql("a run's stats keep anything", "pgtap", rewrite(M10D_SUMMARY, "              where s.key in ('staged_new', 'staged_unchanged', 'staged_changed', 'staged_ignored', 'staged_repeated')\n                and pg_catalog.jsonb_typeof(s.value) = 'number')", "              where true)")),
+  sql("a staged entry shows its raw payload", "pgtap", rewrite(M10D_RECORDS, "      'title', pg_catalog.left(pr.payload ->> 'title', 200),", "      'title', pr.payload::text,")),
+  sql("the system view names the importer's connection limit", "pgtap", rewrite(M10D_SYSTEM, "      'login_enabled', coalesce(", "      'connection_limit', (select r.rolconnlimit from pg_catalog.pg_roles r where r.rolname = 'catalog_importer'),\n      'login_enabled', coalesce(")),
+  // Bounds and filters
+  sql("a page of runs has no upper bound", "pgtap", rewrite(M10D_RUNS, "limit least(greatest(coalesce(p_limit, 25), 1), 100)", "limit greatest(coalesce(p_limit, 25), 1)")),
+  sql("a page of entries has no upper bound", "pgtap", rewrite(M10D_RECORDS, "limit least(greatest(coalesce(p_limit, 50), 1), 100)", "limit greatest(coalesce(p_limit, 50), 1)")),
+  sql("an unknown run status is accepted", "pgtap", rewrite(M10D_RUNS, "if (p_status is not null and p_status not in ('running', 'completed', 'failed', 'abandoned'))", "if false")),
+  // The one write: resolving a reclassification item
+  sql("a resolution needs no reason", "pgtap", rewrite(M10D_RESOLVE, "v_resolution := private.require_reason(p_resolution);", "v_resolution := coalesce(nullif(pg_catalog.btrim(p_resolution), ''), 'none');")),
+  sql("an item can be resolved twice", "pgtap", rewrite(M10D_RESOLVE, "where c.id = p_id and c.action = 'queued' and c.resolved_at is null", "where c.id = p_id and c.action = 'queued'")),
+  sql("a resolution isn't audited", "pgtap", rewrite(M10D_RESOLVE, "  perform private.record_catalog_audit(v_me, 'catalog_review_resolved'", "  perform 1 where false and private.record_catalog_audit(v_me, 'catalog_review_resolved'")),
+  sql("anyone signed in may resolve items", "pgtap", rewrite(M10D_RESOLVE, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
+];
+
+// M10e: the import report's allow-list, and the Accounts, Audit and Staff reads.
+const M10E_COUNTS = "private.import_report_counts(jsonb, text, integer, integer)";
+const M10E_SEARCH = "public.search_accounts(text, integer)";
+const M10E_SUMMARY = "public.get_account_summary(text)";
+const M10E_AUDIT = "public.get_audit_log(integer, uuid, text, text, text, text, text, timestamptz, timestamptz)";
+const M10E_EVENT = "private.audit_event_view(private.audit_events)";
+const M10E_DETAILS = "private.audit_details(jsonb)";
+const M10E_STAFF = "public.get_staff_overview()";
+const M10E_STATS_KEYS = "where s.key in ('staged_new', 'staged_unchanged', 'staged_changed', 'staged_ignored', 'staged_repeated')\n                and pg_catalog";
+
+export const m10eMutations = [
+  // The import report's allow-list (privacy review)
+  sql("a run's report is the raw pilot report", "pgtap", rewrite(M10D_RUN, "v_report := private.import_report_safe(catalog_import.run_report(p_run));", "v_report := catalog_import.run_report(p_run) - 'run';")),
+  sql("a failed entry shows the importer's error", "pgtap", rewrite(M10D_RECORDS, "      'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),", "      'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),\n      'error', pr.match_notes ->> 'error',")),
+  sql("an ignore reason has no length bound", "pgtap", rewrite(M10D_RECORDS, "'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),", "'ignored', pr.match_notes ->> 'ignored',")),
+  sql("a report keeps any number of reasons", "pgtap", rewrite(M10E_COUNTS, "    limit p_max", "    limit 1000")),
+  sql("a run's stats keep any numeric key", "pgtap", rewrite(M10D_SUMMARY, M10E_STATS_KEYS, "where pg_catalog")),
+  // Account search
+  sql("anyone signed in may search accounts", "pgtap", rewrite(M10E_SEARCH, "perform private.require_active_staff('moderator');", "perform private.require_active_user();")),
+  sql("the search query is a LIKE pattern", "pgtap", rewrite(M10E_SEARCH, "pg_catalog.starts_with(p.handle, v_query)", "p.handle like v_query || '%'")),
+  sql("a search has no upper bound", "pgtap", rewrite(M10E_SEARCH, "limit least(greatest(coalesce(p_limit, 20), 1), 25)", "limit greatest(coalesce(p_limit, 20), 1)")),
+  sql("a search returns email addresses", "pgtap", rewrite(M10E_SEARCH, "      'owner', private.is_designated_owner(p.id)", "      'email', (select u.email from auth.users u where u.id = p.id),\n      'owner', private.is_designated_owner(p.id)")),
+  // Account summary
+  sql("anyone signed in may read an account's summary", "pgtap", rewrite(M10E_SUMMARY, "perform private.require_active_staff('moderator');", "perform private.require_active_user();")),
+  sql("moderators see staff-role history", "pgtap", rewrite(M10E_SUMMARY, "v_admin := private.has_staff_role('admin');", "v_admin := true;")),
+  sql("a summary returns the account's bio", "pgtap", rewrite(M10E_SUMMARY, "'account_status', v_profile.account_status, 'member_since'", "'account_status', v_profile.account_status, 'bio', v_profile.bio, 'member_since'")),
+  // The audit log
+  sql("moderators read the audit log", "pgtap", rewrite(M10E_AUDIT, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("an audit event returns its raw metadata", "pgtap", rewrite(M10E_EVENT, "'details', private.audit_details(p_event.metadata)", "'details', p_event.metadata")),
+  sql("an audit detail isn't cut to 80 characters", "pgtap", rewrite(M10E_DETAILS, "pg_catalog.to_jsonb(pg_catalog.left(e.value #>> '{}', 80))", "e.value")),
+  sql("an audit event names the actor's account id", "pgtap", rewrite(M10E_EVENT, "    'by_account', p_event.actor_id is not null,", "    'actor_id', p_event.actor_id,\n    'by_account', p_event.actor_id is not null,")),
+  sql("an audit range has no length bound", "pgtap", rewrite(M10E_AUDIT, " or v_until - v_since > interval '366 days'", "")),
+  sql("a page of the audit log has no upper bound", "pgtap", rewrite(M10E_AUDIT, "limit least(greatest(coalesce(p_limit, 50), 1), 100)", "limit greatest(coalesce(p_limit, 50), 1)")),
+  // The staff overview
+  sql("moderators read the staff overview", "pgtap", rewrite(M10E_STAFF, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("the staff overview names each authenticator", "pgtap", rewrite(M10E_STAFF, "'factors', private.totp_factor_count(p.id),",
+    "'factors', private.totp_factor_count(p.id), 'factor_names', (select pg_catalog.jsonb_agg(f.friendly_name) from auth.mfa_factors f where f.user_id = p.id),")),
+];
+
+// M10 integration review: the retired M8d reads stay retired, and moderators' account
+// history keeps what happened but never the reason staff wrote.
+const M10I_SUMMARY = "public.get_account_summary(text)";
+const M10I_RAW_AUDIT = `create function public.get_audit_events() returns setof private.audit_events language sql stable security definer set search_path = '' as $f$ select * from private.audit_events order by id desc limit 100 $f$;
+grant execute on function public.get_audit_events() to authenticated;`;
+const M10I_RAW_STAFF = `create function public.get_staff_members() returns jsonb language sql stable security definer set search_path = '' as $f$ select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(p)) from public.profiles p where exists (select 1 from public.staff_roles s where s.user_id = p.id) $f$;
+grant execute on function public.get_staff_members() to authenticated;`;
+
+export const m10iMutations = [
+  sql("the raw audit read is back", "both", M10I_RAW_AUDIT),
+  sql("the old staff list is back", "pgtap", M10I_RAW_STAFF),
+  sql("moderators see the reasons staff wrote", "pgtap", rewrite(M10I_SUMMARY, "case when v_admin then private.audit_event_view(e)", "case when true then private.audit_event_view(e)")),
+  sql("a summary claims reasons are shown", "pgtap", rewrite(M10I_SUMMARY, "'reasons_shown', v_admin,", "'reasons_shown', true,")),
+  sql("moderators lose a refusal's code and status change", "pgtap", rewrite(M10I_SUMMARY, "(private.audit_event_view(e) - 'reason')", "(private.audit_event_view(e) - 'reason' - 'details')")),
+  sql("administrators lose the reasons too", "pgtap", rewrite(M10I_SUMMARY, "case when v_admin then private.audit_event_view(e)", "case when false then private.audit_event_view(e)")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations };

@@ -3,17 +3,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Suspense } from "react";
 
+import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
 import { ExcludeForm } from "@/components/exclusion/exclude-form";
-import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { UUID } from "@/features/collection/uuid";
 import { catalogStatusLabel, releaseLabelLine } from "@/features/exclusion/form";
 import { type CascadeEntry, getExclusionPreview } from "@/features/exclusion/queries";
-import { canReview } from "@/features/review/queries";
 
 export const metadata: Metadata = {
   title: "Exclude a release",
@@ -38,13 +35,18 @@ function cascadeText(entry: CascadeEntry) {
 async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin/catalog/exclude/[releaseId]">["params"]; searchParams: PageProps<"/admin/catalog/exclude/[releaseId]">["searchParams"] }) {
   const { releaseId } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(releaseId) ? `/admin/catalog/exclude/${releaseId}` : "/admin/catalog");
-  // Anyone who can't review gets the same page as for an address that doesn't exist.
-  if (!(await canReview())) notFound();
+  // Catalog editors only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection(UUID.test(releaseId) ? `/admin/catalog/exclude/${releaseId}` : "/admin/catalog", "editor");
+  const frame = (title: string, body: ReactNode, titleId?: string) => (
+    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+      {body}
+    </AdminFrame>
+  );
 
   if (search.notice === "excluded") {
     const copies = typeof search.copies === "string" && /^\d{1,7}$/.test(search.copies) ? Number(search.copies) : null;
-    return (
+    return frame(
+      "Release excluded",
       <div className="flex flex-col gap-4">
         <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
           <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
@@ -55,24 +57,26 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin
             Back to the review queue
           </Link>
         </p>
-      </div>
+      </div>,
     );
   }
 
   const outcome = await getExclusionPreview(releaseId);
   if (!outcome.ok) {
     if (outcome.reason === "refused" && outcome.message === "release unavailable") notFound();
-    return (
+    return frame(
+      "Exclude a release",
       <EmptyState icon={PlugZap} title="This release isn't available">
         It can&apos;t be loaded right now. Try again later.
-      </EmptyState>
+      </EmptyState>,
     );
   }
   const preview = outcome.data;
   const { release } = preview;
   const blocked = preview.blocking.length > 0;
 
-  return (
+  return frame(
+    `Exclude ${release.game.title} from the catalog`,
     <article aria-labelledby="exclude-title" className="flex flex-col gap-4">
       <p>
         <Link
@@ -84,9 +88,6 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin
         </Link>
       </p>
       <header>
-        <h1 id="exclude-title" className="text-xl font-semibold tracking-tight text-pretty">
-          Exclude {release.game.title} from the catalog
-        </h1>
         <p className="text-sm text-muted-foreground">{releaseLabelLine(release)}</p>
         <p className="mt-2 text-sm">
           <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{catalogStatusLabel(release.status)}</span>
@@ -149,26 +150,15 @@ async function ExcludeView({ params, searchParams }: { params: PageProps<"/admin
           <ExcludeForm releaseId={release.id} token={preview.token} copies={preview.copies} owners={preview.owners} cascade={preview.cascade.map(cascadeText)} />
         </Section>
       )}
-    </article>
+    </article>,
+    "exclude-title",
   );
 }
 
 export default function ExcludePage({ params, searchParams }: PageProps<"/admin/catalog/exclude/[releaseId]">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-4">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          }
-        >
-          <ExcludeView params={params} searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <ExcludeView params={params} searchParams={searchParams} />
+    </AdminShell>
   );
 }

@@ -1,6 +1,6 @@
 # Relationships
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented locally.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented. Genres, franchises and catalog images are designed but not built ([database schema](database-schema.md)).
 
 This document shows how the tables connect and what happens when data is deleted. All of it is proposed to be hosted in Central EU (Frankfurt), AWS `eu-central-1` (D13), with [legal review outstanding](security-rls.md#data-region-and-legal-review). Column details are in [database-schema.md](database-schema.md). To keep the diagrams readable, each shows only the columns that matter for its relationships.
 
@@ -799,6 +799,7 @@ Deleting the `auth.users` row cascades through `profiles`. Behavior for each typ
 | Reports filed about others | Kept, reporter set to null | Moderation record |
 | Reports about the user | Kept, target set to null, snapshot retained | Moderation evidence |
 | Catalog submissions | Kept, submitter set to null | Shared data |
+| Who created a catalog record (M10c) | Kept, creator set to null and marked removed | The record still says a person created it; nothing else about them is kept |
 
 The treatment of comments, messages and report snapshots needs legal review. This is [D10](architecture-decisions.md#decisions-requiring-product-owner-approval).
 

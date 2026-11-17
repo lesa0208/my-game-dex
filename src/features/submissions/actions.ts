@@ -62,8 +62,10 @@ export async function submitToCatalog(_state: SubmissionState, formData: FormDat
 
   const outcome = data as { outcome?: string; submission_id?: string; release_id?: string };
   if (outcome.outcome === "published_duplicate" && outcome.release_id) {
-    const { data: release } = await supabase.from("releases").select("id, game:games(slug)").eq("id", outcome.release_id).maybeSingle();
-    const slug = (release?.game as { slug?: string } | null)?.slug;
+    // A release names its game through its platform pairing (M5): releases have no
+    // foreign key to games of their own, so embedding games directly fails (PGRST200).
+    const { data: release } = await supabase.from("releases").select("id, pairing:game_platforms(game:games(slug))").eq("id", outcome.release_id).maybeSingle();
+    const slug = (release?.pairing as { game?: { slug?: string } | null } | null)?.game?.slug;
     return {
       status: "duplicate",
       message: "This release is already in the catalog, so there's nothing to submit. You can add your copy from its page.",

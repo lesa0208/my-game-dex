@@ -3,13 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Suspense } from "react";
 
+import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-frame";
 import { RestoreForm } from "@/components/exclusion/restore-form";
-import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { catalogStatusLabel, exclusionErrorMessage, exclusionReasonLabel, releaseLabelLine } from "@/features/exclusion/form";
@@ -50,14 +48,21 @@ const cascadeText = (entry: CascadeEntry) =>
 async function ExclusionView({ params, searchParams }: { params: PageProps<"/admin/catalog/exclusions/[id]">["params"]; searchParams: PageProps<"/admin/catalog/exclusions/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(id) ? `/admin/catalog/exclusions/${id}` : "/admin/catalog/exclusions");
+  // Administrators only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/exclusions/${id}` : "/admin/catalog/exclusions", "admin");
+  const frame = (title: string, body: ReactNode, titleId?: string) => (
+    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+      {body}
+    </AdminFrame>
+  );
   const outcome = await getExclusion(id);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
-    return (
+    return frame(
+      "Exclusion",
       <EmptyState icon={PlugZap} title="This exclusion isn't available">
         It can&apos;t be loaded right now. Try again later.
-      </EmptyState>
+      </EmptyState>,
     );
   }
   const ex = outcome.data;
@@ -65,7 +70,8 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
   const restored = ex.restored_at !== null;
   const cannot = ex.own_exclusion ? "You excluded this, so another administrator has to restore it." : ex.own_submission ? "You submitted this, so another administrator has to restore it." : ex.blocker ? exclusionErrorMessage(ex.blocker) : null;
 
-  return (
+  return frame(
+    ex.release.game.title,
     <article aria-labelledby="exclusion-title" className="flex flex-col gap-4">
       <p>
         <Link href="/admin/catalog/exclusions" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg text-sm text-primary-text underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">
@@ -80,12 +86,12 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
         </p>
       ) : null}
       <header>
-        <h1 id="exclusion-title" className="text-xl font-semibold tracking-tight text-pretty">
-          {ex.release.game.title}
-        </h1>
         <p className="text-sm text-muted-foreground">{releaseLabelLine(ex.release)}</p>
         <p className="mt-2 text-sm">
-          <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{restored ? "Restored" : "Excluded"}</span>
+          <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{restored ? "Restored" : "Excluded"}</span>{" "}
+          <Link href={`/admin/catalog/releases/${ex.release.id}`} className={linkClass}>
+            Release record
+          </Link>
         </p>
       </header>
 
@@ -130,25 +136,15 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
           )}
         </Section>
       )}
-    </article>
+    </article>,
+    "exclusion-title",
   );
 }
 
 export default function ExclusionPage({ params, searchParams }: PageProps<"/admin/catalog/exclusions/[id]">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-4">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          }
-        >
-          <ExclusionView params={params} searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <ExclusionView params={params} searchParams={searchParams} />
+    </AdminShell>
   );
 }

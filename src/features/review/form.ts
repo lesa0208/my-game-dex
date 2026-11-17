@@ -71,7 +71,7 @@ const oneOf = (list: readonly string[], value: string) => list.includes(value);
 /** The editor's reason, which the audit log keeps: required, up to 500 characters. */
 export function readReason(read: Read): Result<string> {
   const reason = read("reason").replace(/\s+/g, " ").trim();
-  if (!reason) return { error: "Give a reason for the record. Only editors see it." };
+  if (!reason) return { error: "Give a reason for the record. Other catalog staff can see it." };
   if (reason.length > 500) return { error: "The reason can be up to 500 characters." };
   return { value: reason };
 }

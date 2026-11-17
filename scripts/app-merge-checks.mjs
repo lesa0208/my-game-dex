@@ -93,10 +93,12 @@ try {
   const admin = await person("admin");
   const owner = await person();
   const someone = await person();
-  // A published duplicate of us, made by the editor.
+  // A published duplicate of us, made by the editor and, as nobody reviews their own
+  // record (M10c), verified and published by the administrator.
   const dup = psql(`begin; select set_config('request.jwt.claims', '${claimsFor(editor.id)}', true); set local role authenticated;
     select public.create_release('${game}', (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
       '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "MGA-DUP"}', 'Merge checks');
+    select set_config('request.jwt.claims', '${claimsFor(admin.id)}', true);
     select public.verify_release(r.id, 'Merge checks', r.revision) from public.releases r where r.product_code = 'MGA-DUP';
     select public.publish_release(r.id, 'Merge checks', r.revision) from public.releases r where r.product_code = 'MGA-DUP';
     reset role; select id from public.releases where product_code = 'MGA-DUP'; commit;`).split("\n").filter((l) => /^[0-9a-f-]{36}$/.test(l)).at(-1);

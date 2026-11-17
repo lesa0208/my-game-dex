@@ -56,15 +56,27 @@ insert into approved_function_grants values
   ('grant_staff_role(uuid,staff_role,text)', 'authenticated'),
   ('revoke_staff_role(uuid,staff_role,text)', 'authenticated'),
   ('set_account_status(uuid,account_status,text)', 'authenticated'),
-  ('get_audit_events(integer,uuid,text,text,text,timestamp with time zone,timestamp with time zone)', 'authenticated'),
+  -- get_audit_events (M8d) was retired in the M10 integration review; get_audit_log (M10e) replaces it.
   -- M8c: ownership transfer, succession and the app side of recovery. Each checks the caller itself.
   ('start_ownership_transfer(uuid,text)', 'authenticated'), ('accept_ownership_transfer(uuid)', 'authenticated'),
   ('cancel_ownership_transfer(uuid,text)', 'authenticated'), ('set_owner_successor(uuid,text)', 'authenticated'),
   ('register_succession_document(text,text)', 'authenticated'), ('confirm_owner_recovery(uuid)', 'authenticated'),
   ('cancel_owner_recovery(uuid,text)', 'authenticated'),
   -- M8d: reads for /admin and Settings → Security. Each checks the caller itself.
-  ('get_my_admin_access()', 'authenticated'), ('get_staff_members()', 'authenticated'), ('find_account_by_handle(text)', 'authenticated'),
+  ('get_my_admin_access()', 'authenticated'), ('find_account_by_handle(text)', 'authenticated'),
   ('get_ownership_status()', 'authenticated'), ('get_my_factor_status()', 'authenticated'),
+  -- M10a: the /admin overview's counts, scoped by role. It checks the caller itself.
+  ('get_admin_overview()', 'authenticated'),
+  -- M10d: import monitoring and the system view, for administrators. Each checks the caller itself.
+  ('get_import_providers()', 'authenticated'), ('get_import_runs(integer,uuid,text,text)', 'authenticated'), ('get_import_run(uuid)', 'authenticated'),
+  ('get_import_run_records(uuid,text,integer,integer)', 'authenticated'), ('get_system_status()', 'authenticated'),
+  -- M10e: account search and summary for moderators, the audit log and staff overview for
+  -- administrators. Each checks the caller itself.
+  ('search_accounts(text,integer)', 'authenticated'), ('get_account_summary(text)', 'authenticated'),
+  ('get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)', 'authenticated'), ('get_staff_overview()', 'authenticated'),
+  -- M10b: catalog search, records and history for editors. Each checks the caller itself.
+  ('search_catalog_records(text,text,text,text,integer,text)', 'authenticated'), ('get_game_record(uuid)', 'authenticated'),
+  ('get_release_record(uuid)', 'authenticated'), ('get_catalog_record_history(text,uuid,integer,uuid)', 'authenticated'),
   -- M4b: notifications have no client grants; clients use only these.
   ('get_my_notifications(integer,uuid)', 'authenticated'),
   ('get_unread_notification_count()', 'authenticated'),

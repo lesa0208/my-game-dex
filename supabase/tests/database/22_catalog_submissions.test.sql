@@ -84,13 +84,13 @@ create function pg_temp.game(p_name text, p_title text, p_publish_on text defaul
 declare v uuid; r uuid;
 begin
   v := public.create_game(p_title, 'game', null, null, null, 'unknown', 'Submission tests');
-  perform public.verify_game(v, 'Submission tests', (select revision from public.games where id = v));
+  perform pg_temp.rv_on(); perform public.verify_game(v, 'Submission tests', (select revision from public.games where id = v)); perform pg_temp.rv_off();
   insert into ids values (p_name, v);
   if p_publish_on is not null then
     r := public.create_release(v, (select id from public.platforms where slug = p_publish_on), 'rom-cartridge', 'ntsc-uc',
       '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "QZS-001"}', 'Submission tests');
-    perform public.verify_release(r, 'Submission tests', (select revision from public.releases where id = r));
-    perform public.publish_release(r, 'Submission tests', (select revision from public.releases where id = r));
+    perform pg_temp.rv_on(); perform public.verify_release(r, 'Submission tests', (select revision from public.releases where id = r)); perform pg_temp.rv_off();
+    perform pg_temp.rv_on(); perform public.publish_release(r, 'Submission tests', (select revision from public.releases where id = r)); perform pg_temp.rv_off();
     insert into ids values (p_name || '-pub', r);
   end if;
   return v;
@@ -106,6 +106,24 @@ update public.profiles set handle = 'sub_' || right(id::text, 2), handle_changed
 where id in (select pg_temp.u(s) from unnest(array['a1', 'b2', 'c3', 'e5', 'f6']) as s);
 update public.profiles set account_status = 'suspended' where id = pg_temp.u('c3');
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e5'), 'catalog_editor');
+
+-- M10c (D2): nobody verifies or publishes a record they created, so the fixtures'
+-- records are verified and published by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'sub_rv', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as reviewer_ready;
+create function pg_temp.rv_on() returns void language plpgsql as $rv$
+begin
+  perform set_config('test.claims_before_review', coalesce(current_setting('request.jwt.claims', true), ''), true),
+         set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $rv$;
+create function pg_temp.rv_off() returns void language plpgsql as $rv$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_review', true), true);
+end $rv$;
+grant execute on function pg_temp.rv_on(), pg_temp.rv_off() to authenticated, anon;
 
 select set_config('request.jwt.claims', pg_temp.claims(pg_temp.u('e5'))::text, true);
 select set_config('role', 'authenticated', true);

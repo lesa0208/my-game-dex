@@ -29,8 +29,9 @@ import { createRequire } from "node:module";
 
 import { chromium } from "playwright-core";
 
-import { api, appErrorLines, Browser, check, createUser, deleteUsers, formWith, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
-import { addFactor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
+import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { addFactor, claimsFor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
 import { matureFactors, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
 
 requireNoOwner(psql, api);
@@ -47,6 +48,8 @@ const lightFindings = [];
 let lightStates = 0;
 const NOT_AVAILABLE = "This page isn't available";
 const PREFIX = "a11y";
+/** The product code of the release a collector submits (M10a), to find and remove it. */
+const SUBMISSION_CODE = `QZB-${process.pid}`;
 
 // ---------------------------------------------------------------------------
 // Redaction: secrets seen during the run, and anything shaped like one
@@ -92,10 +95,33 @@ async function applyScheme(page, scheme) {
   await page.evaluate((dark) => document.documentElement.classList.toggle("dark", dark), scheme === "dark");
 }
 
-/** axe-core and the sideways-scroll check on the page as it is, in both schemes. */
+/**
+ * Expands every collapsed section (<details>) for the checks, so what's inside them is
+ * checked too, and returns a function that collapses them again. Collapsed content
+ * keeps a layout box but no rendered text, so it would otherwise look like an unnamed
+ * control, and axe would skip it.
+ */
+async function expandDetails(page) {
+  await page.evaluate(() => {
+    for (const d of document.querySelectorAll("details:not([open])")) {
+      d.dataset.a11yClosed = "true";
+      d.open = true;
+    }
+  });
+  return () =>
+    page.evaluate(() => {
+      for (const d of document.querySelectorAll("details[data-a11y-closed]")) {
+        d.open = false;
+        delete d.dataset.a11yClosed;
+      }
+    });
+}
+
+/** axe-core and the sideways-scroll check on the page, with its sections expanded, in both schemes. */
 async function audit(page, name, tag) {
   await page.waitForLoadState("networkidle");
   if (!(await page.evaluate(() => Boolean(window.axe)))) await page.addScriptTag({ content: axeSource });
+  const collapse = await expandDetails(page);
   for (const scheme of SCHEMES) {
     await applyScheme(page, scheme);
     const found = await page.evaluate(async () => {
@@ -119,10 +145,12 @@ async function audit(page, name, tag) {
     ok(`${tag} ${mode} ${name}: no sideways scrolling`, overflow.scroll <= overflow.view, `${overflow.scroll} > ${overflow.view}`);
   }
   await applyScheme(page, "dark");
+  await collapse();
 }
 
-/** One h1, and every visible field has an accessible name. */
+/** One h1, and every visible field has an accessible name, with the page's sections expanded. */
 async function structure(page, name, tag) {
+  const collapse = await expandDetails(page);
   const facts = await page.evaluate(() => {
     const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
     const fields = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(visible);
@@ -130,6 +158,7 @@ async function structure(page, name, tag) {
     const buttons = [...document.querySelectorAll("button, a[href]")].filter(visible).filter((el) => !(el.innerText.trim() || el.getAttribute("aria-label") || el.getAttribute("title"))).map((el) => el.outerHTML.slice(0, 80));
     return { h1: document.querySelectorAll("h1").length, unnamed, buttons };
   });
+  await collapse();
   ok(`${tag} ${name}: one main heading`, facts.h1 === 1, `${facts.h1} h1`);
   ok(`${tag} ${name}: every field and control has an accessible name`, facts.unnamed.length === 0 && facts.buttons.length === 0, [...facts.unnamed, ...facts.buttons].join(", "));
 }
@@ -260,7 +289,7 @@ async function person(role = null, { mfa = Boolean(role) } = {}) {
   if (psql(`select handle from public.profiles where id = '${user.id}';`) !== handle) throw new Error("setup: the handle wasn't saved");
   if (role) psql(`insert into public.staff_roles (user_id, role) values ('${user.id}', '${role}');`);
   handles.set(user.id, handle);
-  return { ...user, handle };
+  return { ...user, handle, http };
 }
 async function secondFactor(user) {
   const response = await fetch(`${api}/auth/v1/token?grant_type=password`, {
@@ -287,6 +316,7 @@ try {
 }
 
 try {
+  installFixture();
   const collector = await person();
   const editor = await person("catalog_editor");
   const moderator = await person("moderator");
@@ -295,9 +325,85 @@ try {
   await secondFactor(owner);
   psql(`select private.assign_initial_owner('${owner.handle}', 'Browser checks: test owner');`);
   matureFactors(psql, owner.id);
+  // A moderation history for the collector, as the M8 functions record it (M10e pages).
+  psql(`insert into private.audit_events (occurred_at, actor_id, action, target_profile_id, reason, metadata) values
+    (now() - interval '3 days', '${moderator.id}', 'account_suspended', '${collector.id}', 'Browser checks: spam', '{"from": "active", "to": "suspended"}'),
+    (now() - interval '2 days', '${admin.id}', 'account_reinstated', '${collector.id}', 'Browser checks: appeal', '{"from": "suspended", "to": "active"}'),
+    (now() - interval '1 day', '${moderator.id}', 'staff_change_refused', '${admin.id}', 'Refused: admin_required', '{"code": "admin_required", "operation": "set_account_status", "status": "suspended"}');`);
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
-  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership"];
+  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
+
+  // M10a: a collector's submission and the fixture's releases, for the catalog pages.
+  const form = await collector.http.get("/submit?game=starfall-odyssey");
+  const posted = await collector.http.submit("/submit?game=starfall-odyssey", formById(form.html, "new-submission"), {
+    platform: "snes", media_format: "rom-cartridge", region: "pal", product_code: SUBMISSION_CODE, physical: "on",
+  });
+  const submission = location(posted.response).split("/")[2]?.split("?")[0] ?? "";
+  const releaseUs = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
+  const releaseEu = psql("select id from public.releases where product_code = 'SNSP-ZSFP-EUR';");
+  ok("setup: a submission and two fixture releases", [submission, releaseUs, releaseEu].every((id) => /^[0-9a-f-]{36}$/.test(id)));
+  const CATALOG_PAGES = [
+    ["submission review", `/admin/catalog/${submission}`],
+    ["merge candidates", `/admin/catalog/merge/${releaseUs}`],
+    ["merge preview", `/admin/catalog/merge/${releaseEu}?into=${releaseUs}`],
+    ["exclusion preview", `/admin/catalog/exclude/${releaseUs}`],
+    ["merge history", "/admin/catalog/merges"],
+  ];
+
+  // M10b: a real merge and a real exclusion, made through the database functions as an
+  // administrator and an editor would, so their detail pages are opened with data.
+  // Nobody reviews, merges or excludes a record they created (M10c): the editor creates
+  // the duplicate and the administrator publishes and merges it; the administrator
+  // creates the download code and the editor excludes it.
+  const as = (user, sql) => psql(`begin; select set_config('request.jwt.claims', '${claimsFor(user.id)}', true); set local role authenticated; ${sql}; commit;`)
+    .split("\n").filter((l) => l && l !== "BEGIN" && l !== "COMMIT").at(-1);
+  const gameId = psql("select game_id from public.releases where product_code = 'SNS-ZSFE-USA';");
+  const snes = psql("select id from public.platforms where slug = 'snes';");
+  const dup = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'ntsc-uc', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "AYB-DUP"}', 'Browser checks: a duplicate')`);
+  as(admin, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  as(admin, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  const merged = as(admin, `select public.merge_release('${dup}', '${releaseUs}', p ->> 'token', 'Browser checks: the same release', null,
+    array(select d ->> 'field' from jsonb_array_elements(p -> 'differences') d), true)::text from (select public.get_merge_preview('${dup}', '${releaseUs}') as p) x`);
+  const mergeId = psql(`select id from private.catalog_merges where source_release_id = '${dup}';`);
+  const excluded = as(admin, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'pal', '{"product_code": "AYB-EXC"}', 'Browser checks: a download code')`);
+  as(editor, `select public.exclude_release('${excluded}', p ->> 'token', 'download_code', 'Browser checks: not a physical release')::text from (select public.get_exclusion_preview('${excluded}') as p) x`);
+  const exclusionId = psql(`select id from private.catalog_exclusions where release_id = '${excluded}';`);
+  ok("setup: a real merge and a real exclusion", /^[0-9a-f-]{36}$/.test(mergeId) && /^[0-9a-f-]{36}$/.test(exclusionId)
+    && psql(`select status from public.releases where id = '${dup}';`) === "merged" && psql(`select status from public.releases where id = '${excluded}';`) === "excluded", merged ?? "");
+  CATALOG_PAGES.push(
+    ["merge detail", `/admin/catalog/merges/${mergeId}`],
+    ["catalog search", "/admin/catalog/search?q=starfall"],
+    ["release search", "/admin/catalog/search?q=starfall&kind=releases"],
+    ["game record", `/admin/catalog/games/${gameId}`],
+    ["release record", `/admin/catalog/releases/${releaseUs}`],
+    ["merged release record", `/admin/catalog/releases/${dup}`],
+    // M10c: the editing pages, on a published game and release (forms behind a recent verification).
+    ["new game", "/admin/catalog/games/new"],
+    ["game editing", `/admin/catalog/games/${gameId}/edit`],
+    ["new release", `/admin/catalog/releases/new?game=${gameId}`],
+    ["release editing", `/admin/catalog/releases/${releaseUs}/edit`],
+  );
+
+  // M10d: an import run as the importer leaves it, with a staged entry and an item in the
+  // reclassification queue, so the import and queue pages are opened with data.
+  const importRun = psql(`insert into private.import_runs (provider_code, platform_id, source_name, source_sha256, source_fetched_at, status, stats, started_at, finished_at, reason)
+    values ('no-intro', '${snes}', 'AYB snapshot.dat', repeat('a', 64), now(), 'completed', '{"staged_new": 1}', now(), now(), 'Browser checks') returning id;`);
+  const importRecord = psql(`insert into private.provider_records (provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, match_tier, matched_release_id)
+    values ('no-intro', 'release', 'ayb-1', '{"title": "Starfall Odyssey"}', repeat('1', 64), '${importRun}', 'promoted', 'A', '${releaseUs}') returning id;`);
+  psql(`insert into private.import_run_records (import_run_id, provider_record_id, position) values ('${importRun}', '${importRecord}', 0);
+    insert into private.catalog_reclassifications (release_id, provider_record_id, import_run_id, action, reason) values ('${releaseUs}', '${importRecord}', '${importRun}', 'queued', 'Browser checks: the source now tags it a prototype');`);
+  ok("setup: an import run with a queued reclassification", /^[0-9a-f-]{36}$/.test(importRun) && /^[0-9a-f-]{36}$/.test(importRecord));
+  CATALOG_PAGES.push(["reclassification queue", "/admin/catalog/reclassifications"]);
+  const REFERENCE_PAGES = [
+    ["reference summary", "/admin/reference"],
+    ["platforms", "/admin/reference/platforms"],
+    ["filtered platforms", "/admin/reference/platforms?kind=handheld"],
+    ["platform", "/admin/reference/platforms/snes"],
+    ["media formats", "/admin/reference/formats"],
+    ["regions and markets", "/admin/reference/regions?q=united"],
+    ["hardware requirements", "/admin/reference/requirements"],
+  ];
 
   for (const viewport of WIDTHS) {
     const tag = viewport.tag;
@@ -320,15 +426,18 @@ try {
     section(`${tag}: 2. Each role sees its own sections`);
     {
       const expected = {
-        editor: { who: editor, sections: ["Overview", "Catalog"], pages: ["/admin", "/admin/catalog"] },
+        editor: { who: editor, sections: ["Overview", "Catalog", "Reference"], pages: ["/admin", "/admin/catalog", "/admin/reference"] },
         moderator: { who: moderator, sections: ["Overview", "Accounts"], pages: ["/admin", "/admin/accounts"] },
-        admin: { who: admin, sections: ["Overview", "Catalog", "Accounts", "Staff", "Audit log", "Ownership"], pages: ADMIN_PAGES },
+        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
       };
       for (const [name, { who, sections, pages }] of Object.entries(expected)) {
         const s = await signIn(browser, viewport, who);
         await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
         const shown = await sectionsShown(s.page);
         ok(`${tag} ${name}: the admin sections are ${sections.join(", ")}`, JSON.stringify(shown) === JSON.stringify(sections), shown.join(", "));
+        const counts = await s.page.evaluate(() => ["overview-catalog", "overview-accounts", "overview-administration"].filter((id) => document.getElementById(id)).map((id) => id.slice(9)).join(","));
+        const expectedCounts = { editor: "catalog", moderator: "accounts", admin: "catalog,accounts,administration" }[name];
+        ok(`${tag} ${name}: the overview shows the ${expectedCounts} counts only`, counts === expectedCounts, counts);
         for (const path of ADMIN_PAGES) {
           await s.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
           const open = pages.includes(path);
@@ -338,17 +447,72 @@ try {
         if (name === "editor") {
           await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
           await audit(s.page, "editor overview", tag);
+          await structure(s.page, "editor overview", tag);
         }
         if (name === "moderator") {
+          await s.page.goto(`${origin}/admin`, { waitUntil: "networkidle" });
+          await audit(s.page, "moderator overview", tag);
+          await structure(s.page, "moderator overview", tag);
           await s.page.goto(`${origin}/admin/accounts?handle=${collector.handle}`, { waitUntil: "networkidle" });
           await audit(s.page, "moderator account lookup", tag);
           await structure(s.page, "moderator account lookup", tag);
+          // M10 integration review: the history without the reasons staff wrote, and saying so.
+          const history = await visibleText(s.page);
+          ok(`${tag} moderator: the account history withholds staff reasons and says so`, !history.includes("Browser checks:") && history.includes("shown to administrators only")
+            && /Account suspended/.test(history));
         }
         await s.context.close();
       }
     }
 
     // -----------------------------------------------------------------------
+    section(`${tag}: 2b. The catalog pages, in the admin frame (M10a)`);
+    {
+      const e = await signIn(browser, viewport, editor);
+      for (const [name, path] of CATALOG_PAGES) {
+        await e.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        const current = await e.page.evaluate(() => document.querySelector('nav[aria-label="Admin sections"] a[aria-current="page"]')?.textContent?.trim() ?? "");
+        ok(`${tag} editor ${name}: in the admin frame, with Catalog as the current section`, current === "Catalog", current);
+        await audit(e.page, `editor ${name}`, tag);
+        await structure(e.page, `editor ${name}`, tag);
+      }
+      await e.page.goto(`${origin}/admin/catalog/${submission}`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "submission review page", tag);
+      await e.page.goto(`${origin}/admin/catalog/exclusions`, { waitUntil: "networkidle" });
+      ok(`${tag} an editor gets the unavailable page for exclusions`, (await visibleText(e.page)).includes(NOT_AVAILABLE) && (await sectionsShown(e.page)).length === 0);
+      // M10b: the records with real data, and the history's links between them.
+      await e.page.goto(`${origin}/admin/catalog/merges/${mergeId}`, { waitUntil: "networkidle" });
+      const mergeText = await visibleText(e.page);
+      ok(`${tag} the merge detail shows the real merge and the merged release's history`,
+        mergeText.includes("Starfall Odyssey merged") && mergeText.includes("History of the merged release") && mergeText.includes("Merged this release into another"));
+      await e.page.goto(`${origin}/admin/catalog/releases/${releaseUs}`, { waitUntil: "networkidle" });
+      ok(`${tag} the kept release's history shows the merge, linked`, (await visibleText(e.page)).includes("Merged another release into this one")
+        && (await e.page.locator(`#history a[href="/admin/catalog/merges/${mergeId}"]`).count()) > 0);
+      await keyboard(e.page, "release record page", tag);
+      await e.page.goto(`${origin}/admin/catalog/search?q=starfall&kind=releases`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "catalog search page", tag);
+      await e.page.goto(`${origin}/admin/catalog/releases/${excluded}`, { waitUntil: "networkidle" });
+      const excludedText = await visibleText(e.page);
+      ok(`${tag} an editor sees the excluded release and its exclusion, but no exclusion record or staff reason`,
+        excludedText.includes("Excluded the release") && !excludedText.includes("not a physical release") && (await e.page.locator('a[href^="/admin/catalog/exclusions/"]').count()) === 0);
+      await e.context.close();
+    }
+
+    section(`${tag}: 2c. The reference pages (M10d)`);
+    {
+      const e = await signIn(browser, viewport, editor);
+      for (const [name, path] of REFERENCE_PAGES) {
+        await e.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        const current = await e.page.evaluate(() => document.querySelector('nav[aria-label="Admin sections"] a[aria-current="page"]')?.textContent?.trim() ?? "");
+        ok(`${tag} editor ${name}: in the admin frame, with Reference as the current section`, current === "Reference", current);
+        await audit(e.page, `editor ${name}`, tag);
+        await structure(e.page, `editor ${name}`, tag);
+      }
+      await e.page.goto(`${origin}/admin/reference/platforms`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "platforms page", tag);
+      await e.context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -357,9 +521,20 @@ try {
         ["staff", "/admin/staff"],
         ["staff with a refusal", "/admin/staff?error=owner_only"],
         ["account lookup", `/admin/accounts?handle=${owner.handle}`],
+        ["account search", "/admin/accounts?handle=ay_"],
+        ["account with history", `/admin/accounts?handle=${collector.handle}`],
+        ["account search refused", "/admin/accounts?handle=x"],
         ["audit log", "/admin/audit"],
+        ["audit log by kind and outcome", "/admin/audit?kind=accounts&outcome=succeeded"],
+        ["audit log with a refused filter", "/admin/audit?kind=everything"],
         ["ownership", "/admin/ownership"],
+        ["imports", "/admin/imports"],
+        ["import run", `/admin/imports/runs/${importRun}`],
+        ["system", "/admin/system"],
         ["catalog review", "/admin/catalog"],
+        ["exclusions", "/admin/catalog/exclusions"],
+        ["exclusion detail", `/admin/catalog/exclusions/${exclusionId}`],
+        ["excluded release record", `/admin/catalog/releases/${excluded}`],
         ["verification", "/settings/security/verify?next=%2Fadmin"],
         ["security settings", "/settings/security"],
       ]) {
@@ -367,8 +542,19 @@ try {
         await audit(a.page, `admin ${name}`, tag);
         await structure(a.page, `admin ${name}`, tag);
       }
+      await a.page.goto(`${origin}/admin/catalog/exclusions/${exclusionId}`, { waitUntil: "networkidle" });
+      ok(`${tag} the exclusion detail shows the real exclusion, linked to its release record`, (await visibleText(a.page)).includes("Browser checks: not a physical release")
+        && (await a.page.locator(`a[href="/admin/catalog/releases/${excluded}"]`).count()) > 0);
+      await a.page.goto(`${origin}/admin/catalog/releases/${excluded}`, { waitUntil: "networkidle" });
+      ok(`${tag} an administrator's release record lists the exclusion, linked`, (await a.page.locator(`#release-exclusions a[href="/admin/catalog/exclusions/${exclusionId}"]`).count()) > 0
+        && (await a.page.locator(`#history a[href="/admin/catalog/exclusions/${exclusionId}"]`).count()) > 0);
       await a.page.goto(`${origin}/admin/staff`, { waitUntil: "networkidle" });
       await keyboard(a.page, "admin staff page", tag);
+      await a.page.goto(`${origin}/admin/accounts?handle=${collector.handle}`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "account with history", tag);
+      ok(`${tag} the account shows its moderation summary and history`, (await visibleText(a.page)).includes("Browser checks: appeal") && /Reinstated\s+Once/.test(await visibleText(a.page)));
+      await a.page.goto(`${origin}/admin/audit?kind=accounts`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "filtered audit log", tag);
       await a.page.goto(`${origin}/settings/security/verify?next=%2Fadmin`, { waitUntil: "networkidle" });
       await keyboard(a.page, "verification page", tag);
       await a.context.close();
@@ -463,6 +649,31 @@ try {
     await a.context.close();
   }
 
+  // -------------------------------------------------------------------------
+  section("6. Step-up from a catalog page, with JavaScript (M10a)");
+  {
+    const context = await browser.newContext({ viewport: { width: WIDTHS[1].width, height: WIDTHS[1].height } });
+    const page = await context.newPage();
+    await page.goto(`${origin}/sign-in`, { waitUntil: "networkidle" });
+    await page.fill("#email", editor.email);
+    await page.fill("#password", editor.password);
+    await page.click('main button[type="submit"]');
+    await page.waitForURL((u) => u.pathname === "/settings/security/verify");
+    // Signed in with a password only, the editor opens a submission directly.
+    await page.goto(`${origin}/admin/catalog/${submission}`);
+    await page.waitForURL((u) => u.pathname === "/settings/security/verify" && u.searchParams.get("next") !== "/home");
+    ok("an editor at aal1 opening a submission is sent to verify, and back to it afterwards", new URL(page.url()).searchParams.get("next") === `/admin/catalog/${submission}`, page.url());
+    ok("and the submission isn't on the page meanwhile", !(await page.content()).includes(SUBMISSION_CODE));
+    await page.fill("#verify-code", totp(editor.totpSecret));
+    await page.click('main button[type="submit"]');
+    await page.waitForURL((u) => u.pathname === `/admin/catalog/${submission}`);
+    // The page streams in after the client-side navigation; wait for the frame itself.
+    await page.waitForSelector('nav[aria-label="Admin sections"]', { timeout: 15000 }).catch(() => {});
+    const opened = { sections: (await sectionsShown(page)).join(","), code: (await page.content()).includes(SUBMISSION_CODE) };
+    ok("after verifying, the submission opens in the admin frame", opened.sections.includes("Catalog") && opened.code, JSON.stringify(opened));
+    await context.close();
+  }
+
   const errors = appErrorLines();
   ok("the app logged no errors", errors.length === 0, errors.join(" | "));
 } catch (error) {
@@ -471,14 +682,42 @@ try {
   await browser.close();
   stopApp();
   removeTestOwner(psql);
+  // M10b's merge and exclusion are permanent by design; this test data goes with the triggers off.
+  psql(`begin; set local session_replication_role = replica;
+delete from private.catalog_merge_references where merge_id in (select m.id from private.catalog_merges m join public.releases r on r.id = m.source_release_id where r.product_code = 'AYB-DUP');
+delete from private.catalog_merge_copies where merge_id in (select m.id from private.catalog_merges m join public.releases r on r.id = m.source_release_id where r.product_code = 'AYB-DUP');
+delete from private.catalog_merges where source_release_id in (select id from public.releases where product_code = 'AYB-DUP');
+delete from private.catalog_exclusion_copies where exclusion_id in (select e.id from private.catalog_exclusions e join public.releases r on r.id = e.release_id where r.product_code = 'AYB-EXC');
+delete from private.catalog_exclusions where release_id in (select id from public.releases where product_code = 'AYB-EXC');
+delete from private.catalog_verifications where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
+delete from private.catalog_record_origins where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
+delete from public.releases where product_code in ('AYB-DUP', 'AYB-EXC');
+commit;`);
+  psql(`begin;
+delete from private.catalog_reclassifications where reason like 'Browser checks%';
+delete from private.import_run_records where import_run_id in (select id from private.import_runs where source_name = 'AYB snapshot.dat');
+delete from private.provider_records where import_run_id in (select id from private.import_runs where source_name = 'AYB snapshot.dat');
+delete from private.import_runs where source_name = 'AYB snapshot.dat';
+commit;`);
+  // The submission and its release, before the accounts, while they still name their submitter.
+  const submitters = [...handles.keys()].map((id) => `'${id}'`).join(",") || "null";
+  psql(`begin;
+create temp table m10a_requests on commit drop as select * from public.catalog_change_requests where submitted_by in (${submitters});
+delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
+delete from public.catalog_change_requests where id in (select id from m10a_requests);
+commit;`);
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
   psql("delete from private.handle_holds where kind = 'released' and handle like 'ay\\_%';");
-  ok("no account, Owner record, registration, hold or audit row is left behind",
+  removeFixture();
+  ok("no account, Owner record, registration, hold, submission or audit row is left behind",
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
-      + (select count(*) from private.handle_holds where handle like 'ay\\_%')
+      + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
+      + (select count(*) from private.catalog_merges) + (select count(*) from private.catalog_exclusions)
+      + (select count(*) from private.catalog_record_origins) + (select count(*) from private.catalog_verifications)
+      + (select count(*) from private.import_runs) + (select count(*) from private.provider_records) + (select count(*) from private.catalog_reclassifications)
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 

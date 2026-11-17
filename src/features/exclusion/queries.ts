@@ -147,9 +147,3 @@ export async function getMyPreservedTitles(itemIds: string[]): Promise<Map<strin
   if (error || typeof data !== "object" || data === null) return new Map();
   return new Map(Object.entries(data as Record<string, PreservedTitle>));
 }
-
-/** Whether the signed-in user is an active administrator, who may see and restore exclusions. */
-export async function isAdministrator(): Promise<boolean> {
-  const outcome = await getExclusions("active", null);
-  return outcome.ok;
-}

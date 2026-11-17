@@ -15,7 +15,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { decodeClaims, elevate, totp } from "./lib/mfa-session.mjs";
+import { decodeClaims, elevate, reverify, totp } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
@@ -141,23 +141,23 @@ try {
   {
     const aal1 = await signIn(admin);
     check("an admin's password-only session is aal1", decodeClaims(aal1.access_token).aal === "aal1");
-    check("at aal1, a staff function is refused with the generic message", refused(await rpc(aal1.access_token, "get_audit_events")));
+    check("at aal1, a staff function is refused with the generic message", refused(await rpc(aal1.access_token, "get_audit_log")));
     const elevated = await elevate(api, anonKey, aal1);
     Object.assign(admin, { factorId: elevated.factorId, secret: elevated.totpSecret });
     check("after a TOTP verification, the session is aal2", decodeClaims(elevated.access_token).aal === "aal2");
-    check("and the same function works", (await rpc(elevated.access_token, "get_audit_events")).status === 200);
-    check("the earlier aal1 token still can't use it", refused(await rpc(aal1.access_token, "get_audit_events")));
+    check("and the same function works", (await rpc(elevated.access_token, "get_audit_log")).status === 200);
+    check("the earlier aal1 token still can't use it", refused(await rpc(aal1.access_token, "get_audit_log")));
 
     const out = await auth("/logout?scope=local", elevated.access_token, {});
     check("after signing out", out.status === 204, `status ${out.status}`);
-    check("the aal2 token, unexpired, is refused", refused(await rpc(elevated.access_token, "get_audit_events")));
+    check("the aal2 token, unexpired, is refused", refused(await rpc(elevated.access_token, "get_audit_log")));
   }
 
   // -------------------------------------------------------------------------
   section("2. Factor removal");
   {
     const s1 = await signInAal2(admin);
-    check("a new aal2 session works", (await rpc(s1.access_token, "get_audit_events")).status === 200);
+    check("a new aal2 session works", (await rpc(s1.access_token, "get_audit_log")).status === 200);
     // Session A ends verified with a spare factor; session B, a separate sign-in, with the first.
     const extra = await auth("/factors", s1.access_token, { factor_type: "totp", friendly_name: "spare" });
     const ch = await auth(`/factors/${extra.body.id}/challenge`, s1.access_token, {});
@@ -168,14 +168,14 @@ try {
       && psql(`select count(distinct factor_id) from auth.sessions where id in ('${decodeClaims(sessionA.access_token).session_id}', '${decodeClaims(sessionB.access_token).session_id}');`) === "2");
     const removed = await auth(`/factors/${admin.factorId}`, sessionA.access_token, null, "DELETE");
     check("the admin removes their first factor", removed.status === 200, `status ${removed.status}`);
-    check("a token from the session verified with it, still claiming aal2, is refused", refused(await rpc(sessionB.access_token, "get_audit_events")));
-    check("the session verified with the remaining factor keeps working", (await rpc(sessionA.access_token, "get_audit_events")).status === 200);
+    check("a token from the session verified with it, still claiming aal2, is refused", refused(await rpc(sessionB.access_token, "get_audit_log")));
+    check("the session verified with the remaining factor keeps working", (await rpc(sessionA.access_token, "get_audit_log")).status === 200);
     Object.assign(admin, { factorId: extra.body.id, secret: extra.body.totp.secret });
     const s3 = await signInAal2(admin);
-    check("a new session with the remaining factor works", (await rpc(s3.access_token, "get_audit_events")).status === 200);
+    check("a new session with the remaining factor works", (await rpc(s3.access_token, "get_audit_log")).status === 200);
     const adminRemoval = await fetch(`${api}/auth/v1/admin/users/${admin.id}/factors/${admin.factorId}`, { method: "DELETE", headers: service });
     check("when the Admin API removes the last factor", adminRemoval.ok, `status ${adminRemoval.status}`);
-    check("that session is refused too", refused(await rpc(s3.access_token, "get_audit_events")));
+    check("that session is refused too", refused(await rpc(s3.access_token, "get_audit_log")));
   }
 
   // -------------------------------------------------------------------------
@@ -255,6 +255,244 @@ try {
     const inserts = migrations.flatMap((name) => readFileSync(join(root, "supabase", "migrations", name), "utf8").match(/insert\s+into\s+private\.mfa_factor_registrations[^;]*;/gi) ?? []);
     check("and it records the server's now(), never an earlier time", inserts.length === 1 && /pg_catalog\.now\(\)/.test(inserts[0]) && !/interval/.test(inserts[0]), inserts.join(" | "));
     check("no migration updates or deletes registrations", migrations.every((name) => !/(update|delete\s+from)\s+private\.mfa_factor_registrations/i.test(readFileSync(join(root, "supabase", "migrations", name), "utf8"))));
+  }
+
+  // -------------------------------------------------------------------------
+  section("6. The admin overview over the API, scoped by role (M10a)");
+  {
+    const sections = (r) => ["catalog", "accounts", "administration"].map((k) => (r.body?.[k] && typeof r.body[k] === "object" ? k : "-")).join("/");
+    const anon = await fetch(`${api}/rest/v1/rpc/get_admin_overview`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: "{}" });
+    const anonBody = await anon.json().catch(() => ({}));
+    check("anon is refused by PostgreSQL itself", anon.status === 401 && anonBody.code === "42501" && anonBody.message === "permission denied for function get_admin_overview",
+      `${anon.status} ${anonBody.code} ${anonBody.message}`);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    check("a collector, even at aal2, is refused with the generic message", refused(await rpc(collectorAal2.access_token, "get_admin_overview")));
+    const editor = await createUser("catalog_editor");
+    const editorAal1 = await signIn(editor);
+    check("a catalog editor at aal1 is refused", refused(await rpc(editorAal1.access_token, "get_admin_overview")));
+    const editorAal2 = await elevate(api, anonKey, editorAal1);
+    const editorRead = await rpc(editorAal2.access_token, "get_admin_overview");
+    check("at aal2, a catalog editor gets the catalog counts only", editorRead.status === 200 && sections(editorRead) === "catalog/-/-", sections(editorRead));
+    const moderator = await createUser("moderator");
+    const moderatorRead = await rpc((await elevate(api, anonKey, await signIn(moderator))).access_token, "get_admin_overview");
+    check("a moderator gets the account counts only", moderatorRead.status === 200 && sections(moderatorRead) === "-/accounts/-", sections(moderatorRead));
+    const administrator = await createUser("admin");
+    const adminRead = await rpc((await elevate(api, anonKey, await signIn(administrator))).access_token, "get_admin_overview");
+    check("an administrator gets every section", adminRead.status === 200 && sections(adminRead) === "catalog/accounts/administration", sections(adminRead));
+    const text = JSON.stringify(adminRead.body);
+    check("and only numbers: no id, handle or email", !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(text) && !text.includes("@") && !/mf_[0-9a-f]/.test(text));
+    // Account status is read live, so the same aal2 token stops working at once.
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "get_admin_overview")));
+  }
+
+  section("7. Catalog search, records and history over the API (M10b)");
+  {
+    const title = `${PREFIX} Unpublished Record`;
+    const editor = await createUser("catalog_editor");
+    const editorAal1 = await signIn(editor);
+    const editorAal2 = await elevate(api, anonKey, editorAal1);
+    const created = await rpc(editorAal2.access_token, "create_game", { p_title: title, p_kind: "game", p_reason: "Adding a record to search for" });
+    const game = created.body;
+    check("setup: an editor adds an unpublished game", created.status === 200 && typeof game === "string", `${created.status}`);
+    const calls = [
+      ["search_catalog_records", { p_kind: "games", p_query: title }],
+      ["get_game_record", { p_game: game }],
+      ["get_release_record", { p_release: game }],
+      ["get_catalog_record_history", { p_entity: "game", p_id: game }],
+    ];
+    let anonRefused = true;
+    for (const [fn, args] of calls) {
+      const r = await fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+      const body = await r.json().catch(() => ({}));
+      anonRefused &&= r.status === 401 && body.code === "42501" && body.message === `permission denied for function ${fn}`;
+    }
+    check("anon is refused by PostgreSQL itself, for all four", anonRefused);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    const moderator = await createUser("moderator");
+    const moderatorAal2 = await elevate(api, anonKey, await signIn(moderator));
+    for (const [name, token] of [["a collector at aal2", collectorAal2.access_token], ["a moderator at aal2", moderatorAal2.access_token], ["a catalog editor at aal1", editorAal1.access_token]]) {
+      let all = true;
+      for (const [fn, args] of calls) all &&= refused(await rpc(token, fn, args));
+      check(`${name} is refused by all four, with the generic message`, all);
+    }
+    const search = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title });
+    check("an editor's search finds the unpublished game", search.status === 200 && search.body.items?.length === 1 && search.body.items[0].id === game && search.body.items[0].status === "under_review",
+      JSON.stringify(search.body?.items?.map((i) => i.status)));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    check("so does an administrator's", (await rpc(adminAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })).body?.items?.length === 1);
+    const record = await rpc(editorAal2.access_token, "get_game_record", { p_game: game });
+    check("the game's record opens for the editor", record.status === 200 && record.body?.title === title && record.body?.status === "under_review");
+    const history = await rpc(editorAal2.access_token, "get_catalog_record_history", { p_entity: "game", p_id: game });
+    const created1 = history.body?.items?.find((e) => e.action === "catalog_record_created");
+    check("its history names the editor by handle, with their reason", created1?.actor?.kind === "staff" && /^mf_/.test(created1.actor.handle ?? "") && created1.reason === "Adding a record to search for",
+      JSON.stringify(created1?.actor));
+    const text = JSON.stringify([search.body, record.body, history.body]);
+    check("nothing in them holds an email or an account id", !text.includes("@") && !text.includes(editor.id) && !text.includes("submitted_by") && !text.includes("verified_by"));
+    const bounded = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "releases", p_limit: 1000 });
+    check("a page holds at most 50 results, however many are asked for", bounded.status === 200 && bounded.body.items.length <= 50, `${bounded.body?.items?.length}`);
+    const historyBounded = await rpc(editorAal2.access_token, "get_catalog_record_history", { p_entity: "game", p_id: game, p_limit: 1000 });
+    check("and a history page at most 50 events", historyBounded.status === 200 && historyBounded.body.items.length <= 50);
+    const badCursor = await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_cursor: "bm90LWEtY3Vyc29y" });
+    check("a made-up cursor is refused", badCursor.status === 400 && badCursor.body?.message === "invalid cursor", `${badCursor.status} ${badCursor.body?.message}`);
+    // The public reads are unchanged: the unpublished game stays out of them.
+    const collectorRead = await fetch(`${api}/rest/v1/games?select=id&id=eq.${game}`, { headers: asUser(collectorAal2.access_token) });
+    check("a collector still can't read the unpublished game directly", (await collectorRead.json()).length === 0);
+    const publicSearch = await fetch(`${api}/rest/v1/rpc/search_catalog`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_query: title }) });
+    check("and the public search doesn't find it", (await publicSearch.json()).items?.length === 0);
+    check("the full audit log is still administrators' only", refused(await rpc(editorAal2.access_token, "get_audit_log", { p_limit: 5 })));
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })));
+  }
+
+  section("8. Catalog editing over the API: the creator and a recent verification (M10c)");
+  {
+    const failedWith = (r, message) => r.status >= 400 && r.body?.message === message;
+    const revision = (table, id) => Number(psql(`select revision from public.${table} where id = '${id}';`));
+    /** Makes a session's TOTP verification 11 minutes old. Only postgres can age the claim like this. */
+    const age = (session) => psql(`update auth.mfa_amr_claims set updated_at = now() - interval '11 minutes' where session_id = '${decodeClaims(session.access_token).session_id}';`);
+    const creator = await createUser("catalog_editor");
+    const creatorAal2 = await elevate(api, anonKey, await signIn(creator));
+    const other = await createUser("catalog_editor");
+    const otherAal2 = await elevate(api, anonKey, await signIn(other));
+    const title = `${PREFIX} edited ${randomBytes(3).toString("hex")}`;
+    const game = (await rpc(creatorAal2.access_token, "create_game", { p_title: title, p_kind: "game", p_reason: "Editing checks" })).body;
+    const snes = psql("select id from public.platforms where slug = 'snes';");
+    const release = (await rpc(creatorAal2.access_token, "create_release", {
+      p_game: game, p_platform: snes, p_media_format_code: "rom-cartridge", p_region_code: "ntsc-uc",
+      p_details: { edition_name: "Standard", edition_kind: "standard", media_count: 1, product_code: `MF-${randomBytes(3).toString("hex")}` }, p_reason: "Editing checks",
+    })).body;
+    check("an editor creates a game and a release over the API", /^[0-9a-f-]{36}$/.test(game ?? "") && /^[0-9a-f-]{36}$/.test(release ?? ""));
+    const anonCreate = await fetch(`${api}/rest/v1/rpc/create_game`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_title: "x", p_kind: "game", p_reason: "x" }) });
+    check("anon is refused by PostgreSQL itself", anonCreate.status === 401);
+    const collector = await createUser();
+    const collectorAal2 = await elevate(api, anonKey, await signIn(collector));
+    check("a collector at aal2 can't verify", refused(await rpc(collectorAal2.access_token, "verify_game", { p_game: game, p_reason: "x", p_expected_revision: revision("games", game) })));
+    check("the creator can't verify their game", failedWith(await rpc(creatorAal2.access_token, "verify_game", { p_game: game, p_reason: "Mine", p_expected_revision: revision("games", game) }), "own record"));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    const adminGame = (await rpc(adminAal2.access_token, "create_game", { p_title: `${PREFIX} admin ${randomBytes(3).toString("hex")}`, p_kind: "game", p_reason: "Editing checks" })).body;
+    check("nor can an administrator verify their own", failedWith(await rpc(adminAal2.access_token, "verify_game", { p_game: adminGame, p_reason: "Mine", p_expected_revision: revision("games", adminGame) }), "own record"));
+    age(otherAal2);
+    check("another editor with a verification 11 minutes old is asked to verify again",
+      failedWith(await rpc(otherAal2.access_token, "verify_game", { p_game: game, p_reason: "Checked", p_expected_revision: revision("games", game) }), "reauthentication required")
+      && psql(`select verified_at is null from public.games where id = '${game}';`) === "t");
+    check("while editing an unpublished game needs only the live session",
+      (await rpc(otherAal2.access_token, "update_game", { p_game: game, p_changes: { summary: "Described." }, p_reason: "Editing checks" })).body === true);
+    const fresh = await reverify(api, anonKey, otherAal2);
+    check("with a recent verification, the other editor verifies the game and the release",
+      (await rpc(fresh.access_token, "verify_game", { p_game: game, p_reason: "Checked", p_expected_revision: revision("games", game) })).body === true
+      && (await rpc(fresh.access_token, "verify_release", { p_release: release, p_reason: "Checked", p_expected_revision: revision("releases", release) })).body === true);
+    check("the creator can't publish it", failedWith(await rpc(creatorAal2.access_token, "publish_release", { p_release: release, p_reason: "Mine", p_expected_revision: revision("releases", release) }), "own record"));
+    check("the other editor publishes it, with its game",
+      (await rpc(fresh.access_token, "publish_release", { p_release: release, p_reason: "Ready", p_expected_revision: revision("releases", release) })).body === true
+      && psql(`select status from public.games where id = '${game}';`) === "published");
+    age(fresh);
+    check("editing the published release then needs a recent verification again",
+      failedWith(await rpc(fresh.access_token, "update_release", { p_release: release, p_changes: { packaging: "Box" }, p_reason: "Editing checks" }), "reauthentication required")
+      && psql(`select packaging is null from public.releases where id = '${release}';`) === "t");
+    const relations = () => psql(`select count(*) from public.game_relations where '${game}' in (source_game_id, target_game_id);`);
+    check("so does relating the published game to an unpublished one, in either direction",
+      failedWith(await rpc(fresh.access_token, "set_game_relation", { p_source: game, p_target: adminGame, p_relation: "remake_of", p_reason: "Editing checks" }), "reauthentication required")
+      && failedWith(await rpc(fresh.access_token, "set_game_relation", { p_source: adminGame, p_target: game, p_relation: "remaster_of", p_reason: "Editing checks" }), "reauthentication required")
+      && relations() === "0");
+    const freshAgain = await reverify(api, anonKey, fresh);
+    check("which a recent verification allows",
+      (await rpc(freshAgain.access_token, "set_game_relation", { p_source: adminGame, p_target: game, p_relation: "remaster_of", p_reason: "Editing checks" })).body === true && relations() === "1");
+    const asCreator = (await rpc(creatorAal2.access_token, "get_release_record", { p_release: release })).body?.review;
+    const asOther = (await rpc(fresh.access_token, "get_release_record", { p_release: release })).body?.review;
+    check("the record tells each only what they did themselves", asCreator?.you_created === true && asCreator?.you_verified === false && asOther?.you_created === false && asOther?.you_verified === true);
+    const reviewText = JSON.stringify([asCreator, asOther]);
+    check("and names nobody", ![creator.id, other.id, creator.email, other.email].some((x) => reviewText.includes(x)));
+    check("no client can reach provenance", !(await fetch(`${api}/rest/v1/catalog_record_origins?select=id`, { headers: { ...asUser(creatorAal2.access_token), "Accept-Profile": "private" } })).ok);
+    psql(`delete from public.releases where game_id in ('${game}', '${adminGame}');`);
+  }
+
+  section("9. Import monitoring and the system view over the API, administrators only (M10d)");
+  {
+    const reads = [
+      ["get_import_providers", {}],
+      ["get_import_runs", { p_limit: 5 }],
+      ["get_import_run", { p_run: randomUUID() }],
+      ["get_import_run_records", { p_run: randomUUID() }],
+      ["get_system_status", {}],
+    ];
+    const every = async (token, test) => (await Promise.all(reads.map(([fn, args]) => rpc(token, fn, args)))).every(test);
+    const anonAll = await Promise.all(reads.map(([fn, args]) =>
+      fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) })));
+    check("anon is refused by PostgreSQL itself, for each read", anonAll.every((r) => r.status === 401));
+    const serviceAll = await Promise.all(reads.map(([fn, args]) => fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: service, body: JSON.stringify(args) })));
+    check("so is service_role, which has no grant", serviceAll.every((r) => r.status === 401 || r.status === 403));
+    const collector = await createUser();
+    check("a collector at aal2 is refused", await every((await elevate(api, anonKey, await signIn(collector))).access_token, refused));
+    const editor = await createUser("catalog_editor");
+    check("so is a catalog editor at aal2 (D8)", await every((await elevate(api, anonKey, await signIn(editor))).access_token, refused));
+    const moderator = await createUser("moderator");
+    check("and a moderator", await every((await elevate(api, anonKey, await signIn(moderator))).access_token, refused));
+    const administrator = await createUser("admin");
+    const adminAal1 = await signIn(administrator);
+    check("an administrator at aal1 is refused", await every(adminAal1.access_token, refused));
+    const adminAal2 = await elevate(api, anonKey, adminAal1);
+    const results = await Promise.all(reads.map(([fn, args]) => rpc(adminAal2.access_token, fn, args)));
+    check("at aal2, an administrator reads each", results.every((r) => r.status === 200), results.map((r) => r.status).join(","));
+    check("an unknown run is null, and has no entries", results[2].body === null && Array.isArray(results[3].body) && results[3].body.length === 0);
+    const system = results[4].body;
+    check("the system view says whether the importer can log in, and nothing about how",
+      typeof system?.importer?.login_enabled === "boolean" && Object.keys(system.importer).sort().join(",") === "last_run_at,leases_expired,login_enabled,runs_running");
+    const text = JSON.stringify(results.map((r) => r.body));
+    check("no key, address, lease, checkpoint or payload is returned",
+      ![serviceKey, anonKey, "postgres://", "postgresql://", "lease_id", "checkpoint", "payload", "match_notes", api].some((x) => text.includes(x)));
+    check("an invalid filter gets a plain message", (await rpc(adminAal2.access_token, "get_import_runs", { p_status: "deleted" })).body?.message === "invalid filter");
+    psql(`update public.profiles set account_status = 'suspended' where id = '${administrator.id}';`);
+    check("once suspended, the same administrator's aal2 token is refused", await every(adminAal2.access_token, refused));
+  }
+
+  section("10. Accounts, audit and staff reads over the API (M10e)");
+  {
+    const moderatorReads = [
+      ["search_accounts", { p_query: "mf_" }],
+      ["get_account_summary", { p_handle: "mf_nobody" }],
+    ];
+    const adminReads = [
+      ["get_audit_log", { p_limit: 5 }],
+      ["get_staff_overview", {}],
+    ];
+    const reads = [...moderatorReads, ...adminReads];
+    const all = async (token, list, test) => (await Promise.all(list.map(([fn, args]) => rpc(token, fn, args)))).every(test);
+    const anonAll = await Promise.all(reads.map(([fn, args]) =>
+      fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) })));
+    check("anon is refused by PostgreSQL itself, for each read", anonAll.every((r) => r.status === 401));
+    const serviceAll = await Promise.all(reads.map(([fn, args]) => fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: service, body: JSON.stringify(args) })));
+    check("so is service_role, which has no grant", serviceAll.every((r) => r.status === 401 || r.status === 403));
+    const collector = await createUser();
+    check("a collector at aal2 is refused every read", await all((await elevate(api, anonKey, await signIn(collector))).access_token, reads, refused));
+    const editor = await createUser("catalog_editor");
+    check("so is a catalog editor", await all((await elevate(api, anonKey, await signIn(editor))).access_token, reads, refused));
+    const moderator = await createUser("moderator");
+    const modAal1 = await signIn(moderator);
+    check("a moderator at aal1 is refused", await all(modAal1.access_token, moderatorReads, refused));
+    const modAal2 = await elevate(api, anonKey, modAal1);
+    const modResults = await Promise.all(moderatorReads.map(([fn, args]) => rpc(modAal2.access_token, fn, args)));
+    check("at aal2, a moderator searches accounts and reads one", modResults.every((r) => r.status === 200) && Array.isArray(modResults[0].body) && modResults[1].body === null,
+      modResults.map((r) => r.status).join(","));
+    check("but not the audit log or the staff overview", await all(modAal2.access_token, adminReads, refused));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    const results = await Promise.all(reads.map(([fn, args]) => rpc(adminAal2.access_token, fn, args)));
+    check("an administrator at aal2 reads each", results.every((r) => r.status === 200), results.map((r) => r.status).join(","));
+    const text = JSON.stringify(results.map((r) => r.body));
+    check("no email, factor id, secret, key or raw metadata is returned",
+      ![serviceKey, anonKey, "@example", "metadata", "factor_id", "friendly_name", "totp", "secret", "actor_id", "target_profile_id"].some((x) => text.includes(x))
+        && ![moderator, administrator, collector, editor].some((u) => text.includes(u.email)));
+    check("staff members show readiness as counts", results[3].body?.members?.every?.((m) => typeof m.factors === "number" && typeof m.mature_factors === "number"));
+    check("an email address isn't a search", (await rpc(adminAal2.access_token, "search_accounts", { p_query: moderator.email })).body?.message === "invalid handle");
+    check("a range over a year is refused", (await rpc(adminAal2.access_token, "get_audit_log", { p_since: "2020-01-01T00:00:00Z", p_until: "2026-01-01T00:00:00Z" })).body?.message === "invalid filter");
+    check("nothing is written by a read", psql(`select count(*) from private.audit_events where actor_id in ('${moderator.id}', '${administrator.id}');`) === "0");
+    psql(`update public.profiles set account_status = 'suspended' where id = '${moderator.id}';`);
+    check("once suspended, the moderator's aal2 token is refused", await all(modAal2.access_token, moderatorReads, refused));
   }
 } catch (error) {
   check("the checks ran to the end", false, error.message);

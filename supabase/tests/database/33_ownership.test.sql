@@ -317,11 +317,12 @@ select is((select count(*)::int from pg_policies where coalesce(qual, '') || coa
 select is((select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private') and p.prosrc ~ 'is_designated_owner|platform_owner|owner_authority|can_exercise_owner|owner_candidate|role_change_refusal'),
   array['accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'cancel_owner_recovery(uuid,text)', 'confirm_owner_recovery(uuid)', 'find_account_by_handle(text)',
-    'get_my_admin_access()', 'get_ownership_status()', 'get_staff_members()', 'grant_staff_role(uuid,staff_role,text)',
+    -- M10e: the account and staff reads say whether an account is the Owner's, as find_account_by_handle does.
+    'get_account_summary(text)', 'get_my_admin_access()', 'get_ownership_status()', 'get_staff_overview()', 'grant_staff_role(uuid,staff_role,text)',
     'private.assign_initial_owner(text,text)', 'private.begin_owner_recovery(text,text,text,text,boolean)', 'private.can_exercise_owner_authority()', 'private.close_owner_designations(uuid,uuid,text,text)',
     'private.complete_owner_recovery(uuid,text)', 'private.is_designated_owner(uuid)', 'private.operator_set_owner_status(account_status,text)', 'private.owner_authority_refusal()', 'private.owner_integrity()',
     'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.role_change_refusal(uuid,uuid,staff_role)',
-    'register_succession_document(text,text)', 'revoke_staff_role(uuid,staff_role,text)', 'set_account_status(uuid,account_status,text)', 'set_owner_successor(uuid,text)', 'start_ownership_transfer(uuid,text)'],
+    'register_succession_document(text,text)', 'revoke_staff_role(uuid,staff_role,text)', 'search_accounts(text,integer)', 'set_account_status(uuid,account_status,text)', 'set_owner_successor(uuid,text)', 'start_ownership_transfer(uuid,text)'],
   'only the staff, protection and operator functions mention the Owner');
 select is((select count(*)::int from pg_proc p where p.prosrc ~ 'is_designated_owner|owner_authority' and (p.prosrc ~ '(public|private)\.(collection|catalog|game|release|import|provider)')),
   0, 'none of them touches a collection, catalog, release or submission');

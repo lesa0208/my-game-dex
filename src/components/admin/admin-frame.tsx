@@ -9,27 +9,45 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { AdminAccess } from "@/features/admin/queries";
 import { cn } from "@/lib/utils";
 
-export type AdminSection = "overview" | "catalog" | "accounts" | "staff" | "audit" | "ownership";
+export type AdminSection = "overview" | "catalog" | "reference" | "imports" | "accounts" | "staff" | "audit" | "ownership" | "system";
 
 const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: AdminAccess) => boolean }[] = [
   { id: "overview", label: "Overview", href: "/admin", allowed: (a) => a.staff },
   { id: "catalog", label: "Catalog", href: "/admin/catalog", allowed: (a) => a.editor },
+  { id: "reference", label: "Reference", href: "/admin/reference", allowed: (a) => a.editor },
+  { id: "imports", label: "Imports", href: "/admin/imports", allowed: (a) => a.admin },
   { id: "accounts", label: "Accounts", href: "/admin/accounts", allowed: (a) => a.moderator },
   { id: "staff", label: "Staff", href: "/admin/staff", allowed: (a) => a.admin },
   { id: "audit", label: "Audit log", href: "/admin/audit", allowed: (a) => a.admin },
   { id: "ownership", label: "Ownership", href: "/admin/ownership", allowed: (a) => a.admin },
+  { id: "system", label: "System", href: "/admin/system", allowed: (a) => a.admin },
 ];
 
 /**
  * The /admin heading and its sections, only those the viewer's live roles allow. It's
  * rendered after the access check, so nobody else ever sees what /admin contains.
  */
-export function AdminFrame({ access, current, title, children }: { access: AdminAccess; current: AdminSection; title: string; children: ReactNode }) {
+export function AdminFrame({
+  access,
+  current,
+  title,
+  titleId,
+  children,
+}: {
+  access: AdminAccess;
+  current: AdminSection;
+  title: string;
+  /** An id for the heading, for a page whose sections are labelled by it. */
+  titleId?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-3">
         <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Admin</p>
-        <h1 className="text-xl font-semibold tracking-tight text-pretty">{title}</h1>
+        <h1 id={titleId} className="text-xl font-semibold tracking-tight text-pretty">
+          {title}
+        </h1>
         <nav aria-label="Admin sections">
           <ul className="flex flex-wrap gap-2">
             {SECTIONS.filter((s) => s.allowed(access)).map((s) => (

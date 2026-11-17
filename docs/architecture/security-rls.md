@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 and M1 are implemented locally, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, with the M10 integration review's corrections, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -582,7 +582,7 @@ with check (
 | Table | `anon` | `authenticated` |
 | --- | --- | --- |
 | `reports` | **No grant** | Moderators: R. Everyone else has no read policy. Filed and updated through functions |
-| `private.audit_events` (M4, replaces the planned `moderation_actions`) | **No grant** | **No grant.** Admins read through `get_audit_events()`. Rows are added only by staff functions. See [Audit log](#audit-log) |
+| `private.audit_events` (M4, replaces the planned `moderation_actions`) | **No grant** | **No grant.** Admins read through `get_audit_log()` (M10e; `get_audit_events()` was [retired in the M10 integration review](#m10-integration-review)). Rows are added only by staff functions. See [Audit log](#audit-log) |
 
 **Reporters don't read `reports` directly.** A read policy on their own rows would also expose the snapshot and the assigned moderator, because RLS can't limit columns. A `my_reports()` function returns only the target and status.
 
@@ -814,7 +814,7 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 | `grant_staff_role(user, role, reason)` | Admin | The target must be active, verified and have a handle. Admins may grant `admin` (M4-D12) |
 | `revoke_staff_role(user, role, reason)` | Admin | At least one other active admin must remain, so the last admin can't step down |
 | `set_account_status(user, status, reason)` | Moderator for accounts without a staff role. Admin for staff accounts | Only `active` and `suspended`. Never your own account. `deactivated` accounts are refused |
-| `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page |
+| `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page. Replaced in M8d, then [retired in the M10 integration review](#m10-integration-review) in favour of `get_audit_log` |
 
 **The caller must be active staff.** `private.require_active_staff(role)` requires the role and an active, verified account with a handle. `private.has_staff_role()` alone doesn't check the account, so no function uses it on its own. A suspended admin can't act.
 
@@ -868,7 +868,7 @@ So the log is append-only for application and API roles, not immutable.
 
 **Neither timestamps nor ids guarantee commit order.** This matters most when transactions run concurrently. `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written. For staff functions that happens under the staff lock, so the id usually follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. A row the owner writes directly, without the lock, has no ordering guarantee at all. In the stress tests, id order always matched commit order, but that's an observation, not a guarantee. Don't treat either column as commit order. A strict order would need a sequence column, which can be added if audits ever need one.
 
-**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names. Since M8d, `get_audit_events` looks up the current handles of actor and target when read, so a deleted account shows none.
+**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names. Since M8d, the audit read looks up the current handles of actor and target when read, so a deleted account shows none; since M10e, `get_audit_log` returns handles only, never the ids.
 
 **Retention is undecided (M4-D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
 
@@ -944,9 +944,11 @@ The catalog is written only by catalog editors and administrators, through audit
 | `publish_release` | Needs a verified release, at the revision the editor reviewed (M5b), and a verified game. Publishes the game and its platform pairing in the same transaction, if they aren't yet |
 | `set_catalog_field_lock` | Locks or unlocks a field against imports |
 
-**Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited.
+**Who.** An active catalog editor or administrator: verified email, handle, `active` status. One editor may both verify and publish (M5 decision 3), and both actions are audited. Since M10c, never a record they created ([D2](#no-self-review-d2)), and verifying and publishing need a recent TOTP verification ([D3](#recent-mfa-for-catalog-work-d3)).
 
 **Verification isn't publication.** Verifying records that an editor has checked a record's identity. Publishing makes it public, and requires that verification. Editing an identity field of an unpublished record clears its verification, because what was checked has changed. For a game that's the title, kind and first release date. For a release it's the region and its confirmation, edition name and kind, variant, packaging, product code, barcode, format, medium count and components. Descriptive fields, such as the summary, publisher, release date, languages, ratings, markets and hardware requirements, keep the verification. Editing a published record keeps it published and verified. There's no unpublishing in M5: a trigger refuses it even for the owner. Merging and exclusion come in M7.
+
+**Since M10c (D-7),** any change to an unpublished, verified record ends its verification, descriptive fields and aliases and relations too, and publication needs a verification of the record as it is ([details](#a-verification-is-bound-to-its-revision-d-7)).
 
 **Reviewed revisions (M5b).** Every content change to a game or release, including an import filling an empty field and any change to a release's markets, components or hardware requirements, raises its `revision`. `verify_game`, `verify_release` and `publish_release` take the revision the editor reviewed, and refuse with `record changed` if it moved on. The check is made after the row is locked, so a change committed while the call waited is seen. Verifying doesn't change the revision. Clients can read `revision` but never write it, and a direct write can only raise it by one.
 
@@ -1003,7 +1005,7 @@ Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restr
 
 **Matching.** Titles compare after normalizing case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article. Roman numerals II to IX and "Part N" become numbers; I, V and X don't, because they are often letters. A game's own title and every title its source lists, including romanizations, are indexed in `private.game_title_keys`. An entry matching no game exactly, but exactly one game on the run's platform ignoring word breaks ("ClayFighter", "Clay Fighter"), is matched and says so; several such games mean review, and titles under six characters never match this way. An entry whose main title before a subtitle matches a game is suggested for review, never matched. Several matches always wait for an editor: nothing is merged.
 
-**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. Rejecting or merging a queued candidate is an editor action that comes with M7.
+**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. The queue's page is `/admin/catalog/reclassifications` (M10d), using both unchanged; resolving stays an audited write ([M10d](#reference-data-imports-and-system-m10d)).
 
 | Race, tested with a transaction held open | Result |
 | --- | --- |
@@ -1038,7 +1040,7 @@ Tested by `24_import_submission_privacy.test.sql` (title, word-break, main-title
 
 ## Catalog search
 
-Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included: editor search comes with M7.
+Design for M5c. Anyone, signed in or not, can search the published catalog and choose a physical release. Search never shows anything else, to anyone, editors included. Staff search unpublished records with a separate function, [`search_catalog_records`](#catalog-records-and-history-m10b) (M10b).
 
 **Three functions, read-only.** `search_catalog(query, platforms, limit, cursor)`, `get_release_picker(game, platform, region, release)` and `list_catalog_platforms()` are granted to `anon` and `authenticated` only. Each is `STABLE`, so it can't write, and `SECURITY DEFINER` with an empty `search_path`, so it can read the stored search keys, which clients can't. The app calls them on the server, as anon, so no session is sent and results can be cached.
 
@@ -1438,16 +1440,20 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 
 | Section | Path | Who |
 | --- | --- | --- |
-| Overview | `/admin` | Any staff |
-| Catalog: review, exclusion and merge | `/admin/catalog/*` | Catalog editors and administrators |
-| Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
-| Staff | `/admin/staff` | Administrators |
-| Audit log | `/admin/audit` | Administrators |
+| Overview, with counts for each role ([M10a](#the-admin-overview-m10a)) | `/admin` | Any staff |
+| Catalog: review, exclusion and merge, search, records and history ([M10b](#catalog-records-and-history-m10b)), and editing ([M10c](#catalog-editing-provenance-and-no-self-review-m10c)) | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
+| Accounts: search by handle, summary and history, suspend and reinstate (M10e) | `/admin/accounts` | Moderators and administrators |
+| Staff: roles, standing and authenticator readiness (M10e) | `/admin/staff` | Administrators |
+| Audit log, by kind, outcome, handle and date (M10e) | `/admin/audit` | Administrators |
 | Ownership | `/admin/ownership` | Administrators. Owner actions show only for the Owner |
+| Reference data ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/reference/*` | Catalog editors and administrators |
+| Imports ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/imports/*` | Administrators. The reclassification queue (`/admin/catalog/reclassifications`) is for catalog editors and administrators |
+| System ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/system` | Administrators |
 
 - **Anyone without the section's role gets the page that doesn't exist (D8).** Staff signed in without verifying their authenticator are sent to verify first.
 - The navigation lists only the sections the viewer's roles allow. The pages offer only what the matrix allows, and the database checks every action again.
 - **`/review` and `/review/*` redirect permanently (308) to `/admin/catalog`**, keeping the query (D10). The review, exclusion and merge pages behave as before.
+- **Every catalog page uses the same access check as the rest of `/admin` (M10a).** Before, three of them showed staff without a verified session the page that doesn't exist, and four relied only on the database refusing the read. Now staff signed in without their authenticator are sent to verify and come back to the page, and the page renders in the admin frame. Who may open each page didn't change: the database's own checks (`can_review_submissions`, and `require_active_staff` in each read) match the page's.
 - Every form works without JavaScript, and each action redirects back with a fixed notice or error code.
 
 **Reads for the pages,** each checking its caller and returning no email, TOTP secret, purchase detail or collection:
@@ -1455,19 +1461,153 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | Function | Caller | Returns |
 | --- | --- | --- |
 | `get_my_admin_access()` | Anyone signed in | The caller's own roles and live state: whether verified recently, the Owner's authority, a pending recovery, a transfer offered to them, a recovery to confirm |
-| `get_staff_members()` | Administrators | Handle, display name, status and roles of everyone with a role, and who is Owner and successor |
+| `get_staff_members()` | Administrators | Handle, display name, status and roles of everyone with a role, and who is Owner and successor. **[Retired in the M10 integration review](#m10-integration-review)**; `get_staff_overview` (M10e) replaces it |
 | `find_account_by_handle(handle)` | Moderators and administrators | One account by its **exact** handle (D11): handle, display name, status, roles, whether it's the Owner. Anything that isn't a valid handle, an email included, is refused |
 | `get_ownership_status()` | Administrators | The Owner, the successor, whether a succession document is registered (never its fingerprint), a pending transfer or recovery, and whether the Owner's factors changed in the last 24 hours |
 | `get_my_factor_status()` | Anyone signed in | The caller's own factors and their maturity |
-| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
+| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | **[Retired in the M10 integration review](#m10-integration-review)**: it returned each row's raw metadata and account ids; `get_audit_log` (M10e) replaces it. Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
 
 The audit page shows 50 rows a page, and only an allow-list of plain metadata fields.
 
+## The admin overview (M10a)
+
+`/admin` shows operational counts from one read, `public.get_admin_overview()` (migration `20261119100000`, [ADR-057](architecture-decisions.md#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). The database decides what each caller gets. The page only displays it.
+
+| Section | Who gets it | Counts |
+| --- | --- | --- |
+| `catalog` | Catalog editors and administrators | Submissions by status (open, in review, changes requested), when the oldest open or in-review submission arrived, open import reclassifications, unpublished (unverified or under review) games and releases, merges in the last 30 days |
+| `accounts` | Moderators and administrators | Suspended accounts |
+| `administration` | Administrators | Active exclusions, staff by role, refused staff actions in the last 7 days |
+
+- **Staff only.** The caller needs an active account, a live verified session (M8b) and a staff role, as `get_my_admin_access` counts staff. Anyone else, at aal1, suspended or without a role, gets the generic `not permitted`. Anon has no `EXECUTE`, so PostgreSQL refuses it before the function runs.
+- **A section the caller may not read is null,** never empty or zero, so a page can't show it by mistake. Each section's role check is the one for reading the records behind it.
+- **Aggregates only.** The result has fixed keys holding numbers, plus the one timestamp. There's no handle, email, title, reason, record id or collection data.
+- **Bounded.** Each count stops at 10,000 (`cap` in the result), and the page shows "10,000 or more".
+- **Not audited.** It writes nothing, like the other staff reads.
+- **Tests.** `35_admin_overview` covers the grants, every refusal, the section each role gets, the fixed keys and each count's filter. `db-mfa-checks` section 6 does the same over the API with real sessions, `app:admin-checks` section 11 and `app:a11y-checks` cover the page, and the 15 `m10a` mutations prove the tests catch each weakening.
+
 **Tested by** `33_ownership.test.sql`, `34_admin.test.sql`, `scripts/db-ownership-checks.mjs`, `npm run admin:test` and `npm run app:admin-checks`, which drives the built app over HTTP as each role: access and navigation, the matrix through the pages and through crafted forms, step-up without replay, real TOTP enrollment and removal, the audit filters, transfer and recovery, and privacy scans of every admin and security page.
+
+## Catalog records and history (M10b)
+
+Catalog editors and administrators can search every game and release, open a read-only record of each, and read that record's history (decision D4). Four reads in migration `20261120100000` ([ADR-058](architecture-decisions.md#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). Nothing here writes: the pages link to the existing review, merge and exclusion actions, which keep their own checks.
+
+| Function | Returns |
+| --- | --- |
+| `search_catalog_records(kind, query, platform, status, limit, cursor)` | Games or releases of any status, merged, excluded and rejected ones included. Matched by the normalized title, an alias or a release's local title anywhere in the title, an exact id, or for releases an exact product code or barcode. A release search for a game's id lists that game's releases. Filtered by one platform and one status |
+| `get_game_record(game)` | The game's catalog fields and revision, other titles, platform pairings with their status, related games in both directions, its release count and first 100 releases, its external references and field locks, and its 20 latest submissions |
+| `get_release_record(release)` | The release's fields as the public release view lists them, plus status, verification time, revision, pairing status and where it was merged; its external references, which provider supports which field (counts only), field locks, the merges it took part in, its 20 latest submissions, and for administrators its exclusions |
+| `get_catalog_record_history(entity, id, limit, before)` | One game's or release's events from the audit log, newest first |
+
+- **Who.** Each function starts with `require_active_staff('catalog_editor')`: an active account, the role (administrators have every role) and a session verified with the authenticator (M8b). Collectors, moderators, aal1 sessions and suspended staff get the generic `not permitted`. Only `authenticated` has `EXECUTE`, so PostgreSQL refuses anon before the function runs. Editors could already read every game and release through the RLS policies; these add search over unpublished records, the private provenance and the history.
+- **The pages.** `/admin/catalog/search`, `/admin/catalog/games/:id` and `/admin/catalog/releases/:id` use the same access check as every catalog page: anyone else gets the page that doesn't exist, and staff without a verified session are sent to verify and come back, to the same search too. The review page links to both records and shows the release's latest history; the merge preview shows both releases' history, and the merge detail the merged release's. The exclusion detail links to the release record.
+- **No people.** No record or result names who submitted, verified, locked or merged anything: `submitted_by`, `verified_by`, `locked_by` and `merged_by` are never read into a response. Submissions are listed by id, kind, status and date; the submission's own page says who sent it, as before. No collection data of any kind, no copy or owner counts, no purchase data, notes or emails.
+- **No raw provenance.** External references give the provider's name and its id for the record. Evidence gives the field, the provider and how many entries support it, never a provider entry, its payload or an import run.
+- **Exclusions stay administrators'.** Only administrators get a release's exclusions, and in history only they get the exclusion's id to open it. History shows an exclusion's reason code, never the staff reason, the cascade or the copies.
+- **Bounded and stable.** Pages hold at most 50 results or events, however many are asked for. Search is ordered by sort title, then id, and history by event id, newest first; both page by keyset. A search cursor is opaque and tied to the query and filters it came from, and anything else is `invalid cursor`. Queries have at most 100 characters and need two letters or digits. Records list at most 100 releases, 20 submissions and 20 merges.
+- **Public reads are unchanged.** `search_catalog` and the picker still return published records only, and the read policies are as they were.
+
+### What history shows (D4)
+
+History is a view of `private.audit_events` built from two allow-lists, so a new kind of event or a new metadata key never appears until it is added on purpose.
+
+- **Only the record's events.** A game's history is the events recorded on the game, its platform pairings and its relations (either side), and submissions naming it. A release's is the events recorded on it, merges into it and its submissions. An event is matched by the record's id in a named field and by the kind of record, so an event on a release can't appear in a game's history because the ids match. The record must exist: an id that is no record is `record unavailable`, even when events name it.
+- **Only catalog actions.** `history_actions()` lists the 22 catalog actions history may show: record changes, verification, publication, field locks, aliases, reclassification, the submission lifecycle, exclusion, restoration and merging. Staff role, account, Owner, import-run and provider events never appear, even when their metadata names the record.
+- **Only allow-listed details.** `history_event_json()` copies a fixed list of metadata keys, each a plain value or a list of them: which fields changed, the revision, the related records' ids, the alias, reason and status codes. Import runs, provider entries, copy, owner and reference counts, and anything else in the stored metadata are left out. The stored metadata is never returned.
+- **Who acted, as a kind.** An import; the submitter, never by name; or a staff member by handle, as the review page already shows reviewers. An event whose actor's account is gone shows a former staff member.
+- **Reasons.** A staff member's reason is shown, as it is in the review history. Imports' run notes, submitters' fixed texts and exclusion reasons are not.
+- **The full audit log stays administrators' only** (`get_audit_log` since the M10 integration review), unchanged.
+
+**Tests.** `36_catalog_records` covers the grants, every refusal, search (unpublished records, filters, bounds, cursors), the fields of each record and what they leave out, and history: unrelated actions, other records and another record kind sharing an id, the allowed details, actors, reasons and paging, including more than a page of games and events. `db-mfa-checks` section 7 checks the same over the API with real sessions, and that the public reads are unchanged. `app:admin-checks` section 12 and `app:a11y-checks` cover the pages, the latter with a real merge and a real exclusion opened in a browser. The 20 `m10b` mutations prove the tests catch each weakening.
+
+## Catalog editing, provenance and no self-review (M10c)
+
+Catalog editors create, edit, verify and publish games and physical releases in `/admin`, with the M5 editing functions, and nobody verifies or publishes a record they created (decision D2). Verifying, publishing and changing published content need a recent TOTP verification (D3), and a verification counts only for the revision it attested (D-7). Migrations `20261121100000` and `20261121100100`, the review fixes ([ADR-059](architecture-decisions.md#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)).
+
+### Who created a record
+
+Every game and release has one row in `private.catalog_record_origins`, written by an `AFTER INSERT` trigger in the same transaction as the record, from what the database itself knows about the session:
+
+| Origin | When | Creator |
+| --- | --- | --- |
+| `staff` | A signed-in staff member with the catalog role, through any function | Their account |
+| `submission` | A signed-in member's own submission: the row's `submitted_by` is the caller | Their account |
+| `import` | The importer's own login role, with no signed-in user | None |
+| `system` | Any other session: migrations, operators, tests | None |
+| `unknown` | Written only by the M10c backfill, for a record with no evidence | None |
+
+- **No client can pass as the importer or the system.** A client session (`authenticated`, `anon`, `service_role`) is the signed-in caller, and must be the staff member or the submitter; anything else is refused with `not permitted`, whatever function inserted the row. `authenticator`, `anon`, `authenticated` and `service_role` aren't members of `catalog_importer`.
+- **Nothing can change it.** The table has no grants to any client role or to the importer, and is in the private schema. A trigger refuses every update and delete, the table owner's included, except the two below.
+- **A deleted creator.** Deleting the account clears `creator_id` through its foreign key and marks `creator_removed`, so the row still says a person created it. Only that change is allowed, and only once their profile is gone. No copy of their id or anything else about them is kept here; the audit log keeps its plain ids, as for every account, under the same undecided retention (M4-D10). A new account is never recognized as the same person. Account deletion keeps working: the trigger is `SECURITY DEFINER`, as Auth deletes accounts as its own role.
+- **A deleted record** takes its row with it (maintenance only; catalog records aren't deleted).
+- **Legacy records.** The backfill classifies each record from the evidence, in this order: the review request that created it (a submission), then the audit row of its creation (a staff member, or the importer with its run), else `unknown`. A creator whose profile is gone is recorded as removed. Unknown is never guessed to be an import or the system. `private.legacy_catalog_origin()` does the classifying, and `37_catalog_provenance` tests it on crafted records.
+
+### No self-review (D2)
+
+The M7b-1 guard on `games` and `releases`, `private.guard_submitted_record()`, runs on every update. When a signed-in caller verifies a record, or makes it published:
+
+- **Never its creator,** whatever their role: an administrator or the Owner too. `own record`. This covers a game published with one of its releases: someone else's release can't be published by the game's creator.
+- **Unknown or missing provenance fails closed:** only an administrator may verify or publish the record (`provenance unknown`), and not the same administrator who verified it (`independent review required`). Their verification and publication are audited with `provenance: unknown`.
+- **A first publication** (from unverified or in review) needs a verifier who's known and isn't the creator (`verification required`), so a record its creator verified before M10c is verified again by someone else. A restoration from an exclusion isn't a first publication; `restore_exclusion` checks its own rules, and brings the records back as they were excluded (see D-7 below).
+- **Submissions keep their rules** (`own submission`, `review required`).
+- **Merging and excluding** (D-4): `merge_release` refuses either release, or either release's game, created by the caller; `exclude_release` and `restore_exclusion` refuse the release, or a game it takes with it or brings back. `own record`.
+
+### Recent MFA for catalog work (D3)
+
+Each function asks first, before its own checks, with `private.require_recent_mfa()`: a live aal2 session (M8b) and a TOTP verification in the last 10 minutes, or `reauthentication required`.
+
+| Operation | Recent TOTP verification |
+| --- | --- |
+| `verify_game`, `verify_release`, `publish_release` (and the game and pairing it publishes), `approve_submission` | Always |
+| `update_game`, `update_release`, `set_release_markets`, `set_release_components`, `set_release_requirements` | When the record is published |
+| `add_game_alias`, `remove_game_alias` | When the game is published |
+| `set_game_relation` | When either game is published: a relation raises both games' revisions, so it changes a published game's record even while it isn't public (review fix) |
+| `exclude_release` (D-5) | When the release is published |
+| `restore_exclusion` (D-5) | When it brings anything back as published |
+| `merge_release` | A published merge (M8d) |
+| `create_game`, `create_release`, `set_game_platform`, field locks, starting a review, asking for changes, rejecting, `resolve_catalog_review`, and the edits above on unpublished records | A live session only |
+
+**Behind the functions (D-8).** The guard refuses any client verification or publication of a game or release without a recent TOTP verification, and a trigger on `game_platforms` refuses a client publication of a pairing. So a function that forgets the check, or calls another, can't verify or publish anything.
+
+**In the app.** A form that needs a recent verification is shown only after one; otherwise the page links to the verification page, which comes back to it. If the verification expires while a form is open, the action changes nothing and the editor is sent to verify; the typed reason is kept in that browser tab only (`sessionStorage`) and put back in the form. Nothing is submitted for them: they check the record, whose revision the page reads again, and submit. Without JavaScript the form goes straight to verification.
+
+### A verification is bound to its revision (D-7)
+
+- **Kept with its revision.** `private.catalog_verifications` keeps each record's verification with the revision it attested, written by a trigger from the record row itself, under its row lock. No client role can read or write it.
+- **A change ends it.** Any change to an unpublished, verified record ends its verification, through the M5b revision trigger: its fields, and its markets, pieces, hardware (M5b), aliases and relations (M10c). Edits report `verification_cleared` in their audit row. The descriptive fields that used to keep a verification no longer do.
+- **Publication checks it.** A release, and a game published with it, must have a verification of the revision it has, or `verification stale`. A status change (a review, an exclusion) raises the revision without ending the verification, so the record is verified again before it's published. A stale verification is replaced by verifying again; a current one returns false.
+- **Distinct verifications.** Each is timed with the statement's own clock, so two in one transaction are distinct.
+- **A restoration isn't verified again, so excluded records stay as they were.** Every editor function refuses an excluded or merged game or release, its aliases, relations, platforms, markets, pieces and requirements (`record unavailable`); the review fix added the last missing one, removing an alias. A restored record is therefore the content its earlier, independent publication attested. Restoring needs an administrator who isn't the excluder or the creator, with a recent TOTP verification when anything comes back published.
+- **No indirect publication.** Only `publish_release` (also through `approve_submission`) and `restore_exclusion` make a game, release or pairing published, and each does it by updating the row, so the guard's creator, provenance, MFA and, for a first publication, revision checks apply to the release and to the game published with it. A merge never publishes. A pairing has no content of its own beyond its game and platform: the commit-time check (M5, M7b-2b) refuses a published pairing without its published game and release, and its own trigger refuses a stale client publication, so a pairing is never a route to publishing anything.
+
+### What editors see
+
+The game and release records (M10b) add `review`: how the record came to exist (`staff`, `submission`, `import`, `system` or `unknown`), whether the caller created it or verified it, and whether its verification is current. They name nobody. Reason fields everywhere history shows their reasons say "Visible to other catalog staff." The exclusion and restoration reasons, which history never shows, keep "Only staff see it."
+
+**Tests.** `37_catalog_provenance` covers provenance from each origin and from the definer path, its immutability and the account-deletion case, every self-review refusal with no administrator bypass, indirect publication, legacy and unknown provenance and the backfill's classification, merges and exclusions, the stale-MFA matrix with each function asking first, the trigger backstops, and revision binding. `db-mfa-checks` section 8 checks the creator rule, the recent verification and the review flags over the API with real sessions, and `db-catalog-checks` adds a creator and a verifier deleted through Auth, and a publication racing the creator's uncommitted edit. `app:editing-checks` drives the editing pages, including step-up without replay, and `app:a11y-checks` opens them in a browser. The 20 `m10c` mutations prove the tests catch each weakening.
+
+## M10 integration review
+
+The review of M10a to M10e together (migration `20261124100000`) found no new grant, policy or RLS change outside the documented functions, no edited earlier migration, and the M8 guarantees intact (the guard tests `03`, `10`, `14`, `32`, `33` and `34` assert them). It made three corrections.
+
+**Two reads retired.** Each drop is guarded like A2: the exact signature, result, `SECURITY DEFINER`, `search_path`, owner and privileges must be what M8d created, with no overload, no dependent object and no function body that names it, or the migration stops and changes nothing. `drop function` names the exact signature with `RESTRICT`; nothing uses `CASCADE`, and no audit row is changed or deleted.
+
+| Retired | Why | Replacement |
+| --- | --- | --- |
+| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` (M8d) | Unused by the app since M10e, yet returned each row's raw metadata (for example a succession document's fingerprint, plan tokens), the actor's and target's account ids and the reason to any administrator calling the API directly | `get_audit_log` (M10e): allow-listed, bounded details and handles only |
+| `get_staff_members()` (M8d) | Unused by the app since M10e; a subset of the overview without standing or readiness | `get_staff_overview` (M10e) |
+
+**Moderators don't see the reasons staff wrote.** A reason for a status change is free text written by an administrator or moderator, and may hold internal notes. `get_account_summary` now returns each event in a moderator's history with its action, outcome, time, the handles involved and its allow-listed details (the status changed from and to, a refusal's code and operation), and `reason` null; `reasons_shown` is false, and the page says reasons are shown to administrators only. Administrators keep every reason, in the account history and in `get_audit_log`. Only the projection changed; the counts, the last change and the signature stay.
+
+**The overview's refusal count opens the refused events** (`/admin/audit?outcome=refused`), not the whole log.
+
+**Kept on purpose.** `find_account_by_handle` (M8d) is still the account lookup behind the status and role forms, by exact handle, with the same fields as the search; it isn't a second read of anything the pages show.
+
+**Tests.** The retired functions are asserted absent under every schema (`14_audit`, `34_admin`) and uncallable over the API (`db-audit-checks`); every assertion that used them now uses the replacement (`14`, `32`, `34`, `36`, `db-mfa-checks`); `39_accounts_audit_staff` (85) covers the moderator projection and that administrators keep reasons; `app:admin-checks` checks both views of the page. Six `m10i` mutations bring back each retired read, show moderators the reasons, claim reasons are shown, strip moderators' details, and hide administrators' reasons. The historical `m4` and `m8` mutations that targeted the retired functions now target their replacements and are still detected.
 
 ## Production launch prerequisites (M8)
 
-**None of M8 has run on a hosted project.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
+**None of M8 or M10 has run on a hosted project, and none of these is resolved.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
 
 | Prerequisite | Why |
 | --- | --- |
@@ -1486,6 +1626,56 @@ The audit page shows 50 rows a page, and only an allow-list of plain metadata fi
 - **Staff can remove their last factor through Auth directly,** bypassing the app's guard. The result is no staff access.
 - **The procedural controls:** that the operator isn't the beneficiary, that approvers are independent, and identity checks, are recorded in case files outside the database.
 - **Enrolling an authenticator needs JavaScript** to show the QR code and setup key.
+
+## Reference data, imports and system (M10d)
+
+Read-only views of what already exists (decisions D5, D7 and D8), in migration `20261122100000` ([ADR-060](architecture-decisions.md#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). Nothing here starts, changes or stops an import, edits reference data, or changes a setting; there are no feature flags. The one write is resolving a reclassification item, through the existing `resolve_catalog_review`.
+
+**Reference data (D5).** Platforms and their families and regional names, media formats and their platform pairings, region codes, markets and hardware requirements are public tables, managed by migrations. The pages read them as anon, cached for hours, after the viewer's staff access is checked; no function was added. Catalog editors and administrators open them.
+
+**The reads (D7, D8).** Each is `SECURITY DEFINER` with an empty `search_path`, executable by `authenticated` only (not anon, `service_role` or the importer), and calls `require_active_staff('admin')` first: an active account, a live verified session (M8b) and the administrator role, or the generic `not permitted`. They write nothing, so nothing is audited, like the other staff reads.
+
+| Function | Returns |
+| --- | --- |
+| `get_import_providers()` | Each source: code, name, terms URL, the reviewed copy's hash and review time, clearance and its note, its runs, those running, its last run, and its source entries (counts stop at 10,000) |
+| `get_import_runs(limit, before, provider, status)` | Runs, newest first, 1 to 100 a page, paged by id, optionally by source and status (`invalid filter` otherwise): source, platform, snapshot name, hash and fetch time, cited terms hash, status, the operator's reason, start and finish, whether a running run's lease is live and until when, and its five staging counts (M10e: no other key) |
+| `get_import_run(run)` | One run as above, the operator's pilot report (`catalog_import.run_report`, reused through the allow-list `private.import_report_safe`, M10e: ten counts, the status and tier maps with keys of the known form, at most 20 ignored and 20 held reasons of at most 200 characters, and eight missing-detail counts), its failed and held entries, and the candidates it reconsidered (up to 100, with their outcome and resolution, naming nobody); null for an unknown run |
+| `get_import_run_records(run, status, limit, after)` | A run's staged entries in source order, 1 to 100 a page, optionally by status: type, source id, title (at most 200 characters), status, match tier, the held or ignored reason (at most 200 characters; a failure shows only its status, M10e), whether it's a possible duplicate or a shared serial, and the record it matched or created |
+| `get_system_status()` | The applied migrations and the latest, whether the importer role can log in, runs in progress and those stopped with an expired lease, the last run, sources and how many are cleared, reference counts, and published games and releases (stopping at 10,000) |
+
+- **Never returned:** a run's lease id or checkpoint, a source entry's raw payload (including the payload values `run_report` counts by: release types and flags) or match notes, the importer's database error message for a failed entry (an internal diagnostic: the operator's log has it), a credential, connection string, address, setting, environment value, version string, or any detail of the importer role beyond whether it can log in.
+- **Catalog editors don't read import runs or sources (D8).** Their reclassification queue names each release and the reason, and links to the release's record.
+
+**The reclassification queue.** `/admin/catalog/reclassifications` lists open items, oldest first, through `get_catalog_review_queue`, with each release as the editor may read it. Resolving an item calls `resolve_catalog_review` (M5b, unchanged), which:
+- needs an active catalog editor or administrator with a verified session (`begin_catalog_edit`), and a reason of 1 to 500 characters;
+- closes only an open, queued item: a withdrawn or resolved one is `record unavailable`;
+- records who resolved it, when and how, and audits it (`catalog_review_resolved`, with the reason and the item), so the release's history shows it;
+- changes no catalog record, so it needs no recent verification (the D3 matrix lists it with the other writes that need only a live session).
+
+The page labels it as the one write here, beside a reason field that says "Visible to other catalog staff." It works without JavaScript and redirects back with a fixed notice or error.
+
+**Tests.** `38_imports_system` covers the grants and definitions, every refusal (anon, a collector, an editor, a moderator, a suspended administrator, an administrator at aal1), the fixed keys, the bounds and filters, that no lease, checkpoint or payload appears, the system view, and the resolution's rules, audit and its leaving the release unchanged. `db-mfa-checks` section 9 does the same over the API with real sessions. `app:reference-checks` drives the pages as each role, including a forged resolution, that every reference, import and system page has no writing form, and that none shows a key or address; `app:a11y-checks` audits each page at every width. The 18 `m10d` mutations prove the tests catch each weakening.
+
+## Accounts, audit and staff (M10e)
+
+M10e makes the existing M8 pages more useful without changing who may do what. Four new reads (migration `20261123100100`), each SECURITY DEFINER with an empty `search_path`, executable by `authenticated` only, checking the caller with `require_active_staff` (active account, confirmed email, handle, a live session verified with a TOTP factor) before anything else. None of them writes, so none is audited, like every staff read. Every change still goes through the audited M8 functions (`set_account_status`, `grant_staff_role`, `revoke_staff_role` and the Owner functions), which decide every rule again, including recent MFA and no automatic replay after a step-up.
+
+| Function | Who | Returns |
+| --- | --- | --- |
+| `search_accounts(query, limit)` | Moderators and up | Accounts whose handle starts with the query (2 to 24 letters, numbers or underscores, compared as text, so `_` isn't a wildcard), 1 to 25: id, handle, name, status, roles and whether it's the Owner's. Never by email or name |
+| `get_account_summary(handle)` | Moderators and up | One account: the fields above and when it joined; how often it was suspended and reinstated, refused status changes, and the last status change and who made it; and its last 20 events. Moderators see status changes and refused status changes, without the reasons staff wrote (since the [M10 integration review](#m10-integration-review)); administrators also staff-role changes and every refusal about it, with reasons. Null for an unknown handle |
+| `get_audit_log(limit, before, action, kind, outcome, actor, target, since, until)` | Administrators | The audit log, 1 to 100 a page, newest first, by action, kind (account status, staff, ownership, catalog, operator), outcome (done, refused, operator), the handle that acted or was acted on, and a range of at most 366 days (one end alone covers 366 days from it). An unknown filter is `invalid filter` |
+| `get_staff_overview()` | Administrators | The number of each role; each staff member (at most 500) with their roles, whether they're the Owner or successor, their standing as a fixed word (active, suspended, deactivated, unverified, no handle, closed, or unavailable), their verified and mature authenticator counts, and when they last acted; and the last 20 staff changes |
+
+**Every event goes through one allow-list** (`private.audit_event_view` and `private.audit_details`): its id, time, action, outcome, reason, the handles that acted and were acted on (and whether an account was involved at all), and details under known keys only (refusal code, attempted operation, role, from, to, status, kind, by, cause, reason code, previous status, copies, entity), plain values, strings cut to 80 characters. A catalog event names its game or release, by id, only so the page can link to the record. Account ids, fingerprints, tokens and any other metadata never leave the database through these reads.
+
+**Never returned:** an email address, private profile field (bio, settings), collection, copy, purchase or price, private note, authenticator secret, name or id, recovery material, session or token.
+
+**Unchanged.** Catalog editors keep the bounded record history of M10b (ADR-058) and see no account or staff events. Audit retention is unchanged and remains a launch decision: nothing deletes audit rows.
+
+**The pages.** `/admin/accounts` searches by the start of a handle and opens an account with its moderation summary, history and the one action the viewer may take, or why there is none; it explains who can do what. `/admin/audit` adds the kind and outcome filters, outcome markers, and links from each handle to the account and its events and from a catalog event to its record. `/admin/staff` adds the role counts, each member's standing and authenticator readiness (one verified factor to use `/admin`; two registered 24 hours ago for Owner actions), why a role can't be removed, and recent staff changes.
+
+**Tests.** `39_accounts_audit_staff` (76) covers the grants and definitions, every refusal, the fixed keys, the allow-list, the bounds and filters, that no email, factor name or id, or raw metadata appears, and that nothing is written; `db-mfa-checks` section 10 calls each read over the API as anon, service_role, a collector, an editor, a moderator at aal1 and aal2, and an administrator; `app:admin-checks` section 6b and `app:a11y-checks` drive the pages; 20 `m10e` mutations (with the import allow-list's).
 
 ## Assigning the first administrator
 

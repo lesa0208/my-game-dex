@@ -1,37 +1,59 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
-import { AdminCard, AdminFrame, AdminShell, PageMessage, param, ReasonInput } from "@/components/admin/admin-frame";
+import { AdminCard, AdminFrame, AdminShell, linkClass, PageMessage, param, ReasonInput } from "@/components/admin/admin-frame";
+import { AuditEntryItem } from "@/components/admin/audit-entry";
+import { selectClass, StatusPill, when } from "@/components/admin/data-table";
+import { Facts } from "@/components/admin/records";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { grantRole, revokeRole } from "@/features/admin/actions";
-import { ownerAuthorityBlocked, pageError, pageNotice, ROLES, roleLabel, statusLabel } from "@/features/admin/form";
-import { getStaffMembers, requireAdminSection } from "@/features/admin/queries";
+import { mfaReadiness, ownerAuthorityBlocked, pageError, pageNotice, ROLES, roleChangeBlocked, roleLabel, standingLabel } from "@/features/admin/form";
+import { getStaffOverview, requireAdminSection } from "@/features/admin/queries";
 
 export const metadata: Metadata = {
   title: "Staff",
 };
 
-const selectClass =
-  "h-10 w-full rounded-lg border border-input bg-transparent px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring md:text-sm dark:bg-input/30";
-
 async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/staff">["searchParams"] }) {
   const search = await searchParams;
   const { viewer, access } = await requireAdminSection("/admin/staff", "admin");
-  const members = await getStaffMembers();
+  const overview = await getStaffOverview();
   // The page mirrors the matrix (M8c); the database decides. Admin roles are the
   // Owner's to give, with Owner authority, and nobody changes their own or the Owner's.
-  const grantable = ROLES.filter((r) => r !== "admin" || (access.owner && !ownerAuthorityBlocked(access.ownerAuthority)));
+  const authorityBlocked = ownerAuthorityBlocked(access.ownerAuthority);
+  const grantable = ROLES.filter((r) => r !== "admin" || (access.owner && !authorityBlocked));
 
   return (
     <AdminFrame access={access} current="staff" title="Staff">
       <PageMessage notice={pageNotice(param(search.notice))} error={pageError(param(search.error))} />
+      {overview ? (
+        <AdminCard id="staff-roles" title="Roles">
+          <Facts
+            label="Roles"
+            rows={[
+              { label: "Administrators", value: overview.roles.admin },
+              { label: "Moderators", value: overview.roles.moderator },
+              { label: "Catalog editors", value: overview.roles.catalog_editor },
+            ]}
+          />
+          <p className="mt-3 text-xs text-muted-foreground">
+            A role works only for an active account with a confirmed email address, signed in with a verified authenticator. Sensitive changes ask for a verification from the
+            last 10 minutes.
+          </p>
+        </AdminCard>
+      ) : null}
       <AdminCard id="staff-list" title="Staff members">
-        {!members ? (
+        {!overview ? (
           <p className="text-sm text-muted-foreground">The staff list isn&apos;t available right now. Try again later.</p>
+        ) : overview.members.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nobody holds a staff role.</p>
         ) : (
           <ul className="flex flex-col divide-y">
-            {members.map((m) => {
+            {overview.members.map((m) => {
               const own = m.id === viewer.id;
+              const standing = standingLabel(m.standing);
+              const mfa = mfaReadiness(m);
               return (
                 <li key={m.id} className="flex flex-col gap-2 py-3">
                   <p className="text-sm">
@@ -40,15 +62,35 @@ async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/sta
                     {m.owner ? <span className="ml-2 rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">Owner</span> : null}
                     {m.successor ? <span className="ml-2 rounded-md border px-2 py-0.5 text-xs">Successor</span> : null}
                     {own ? <span className="ml-2 rounded-md border px-2 py-0.5 text-xs">You</span> : null}
-                    {m.account_status !== "active" ? <span className="ml-2 text-xs text-destructive">{statusLabel(m.account_status)}</span> : null}
+                  </p>
+                  <p className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={standing.tone}>{standing.label}</StatusPill>
+                    <StatusPill tone={mfa.tone}>{mfa.label}</StatusPill>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {m.last_staff_action_at ? `Last recorded action ${when(m.last_staff_action_at)}.` : "No recorded actions."}
+                    {m.handle ? (
+                      <>
+                        {" "}
+                        <Link href={`/admin/accounts?handle=${m.handle}`} className="underline underline-offset-4">
+                          Account
+                        </Link>
+                        {" · "}
+                        <Link href={`/admin/audit?actor=${m.handle}`} className="underline underline-offset-4">
+                          Their actions
+                        </Link>
+                      </>
+                    ) : null}
                   </p>
                   <ul className="flex flex-col gap-2">
                     {m.roles.map((role) => {
-                      const removable = !own && !m.owner && (role !== "admin" || (access.owner && !ownerAuthorityBlocked(access.ownerAuthority)));
+                      const blocked = roleChangeBlocked({ own, owner: m.owner, role, viewerOwner: access.owner, ownerAuthorityBlocked: authorityBlocked });
                       return (
                         <li key={role} className="flex flex-col gap-2 rounded-lg border p-2.5">
                           <span className="text-sm">{roleLabel(role)}</span>
-                          {removable ? (
+                          {blocked ? (
+                            <p className="text-xs text-muted-foreground">{blocked}</p>
+                          ) : (
                             <form action={revokeRole} className="flex flex-col gap-2 sm:flex-row sm:items-end">
                               <input type="hidden" name="user_id" value={m.id} />
                               <input type="hidden" name="role" value={role} />
@@ -60,7 +102,7 @@ async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/sta
                                 Remove {roleLabel(role).toLowerCase()}
                               </Button>
                             </form>
-                          ) : null}
+                          )}
                         </li>
                       );
                     })}
@@ -103,8 +145,31 @@ async function StaffView({ searchParams }: { searchParams: PageProps<"/admin/sta
           </div>
         </form>
         {access.owner ? null : <p className="mt-3 text-sm text-muted-foreground">Only the Owner can make someone an administrator.</p>}
-        {access.owner && ownerAuthorityBlocked(access.ownerAuthority) ? <p className="mt-3 text-sm text-muted-foreground">Administrator changes wait until Owner authority returns.</p> : null}
+        {access.owner && authorityBlocked ? <p className="mt-3 text-sm text-muted-foreground">Administrator changes wait until Owner authority returns.</p> : null}
       </AdminCard>
+      {overview ? (
+        <section aria-labelledby="staff-recent-title" className="flex flex-col gap-2">
+          <h2 id="staff-recent-title" className="text-sm font-semibold">
+            Recent staff changes
+          </h2>
+          {overview.recent.length ? (
+            <>
+              <ol className="flex flex-col gap-2">
+                {overview.recent.map((e) => (
+                  <AuditEntryItem key={e.id} entry={e} auditLinks />
+                ))}
+              </ol>
+              <p className="text-sm">
+                <Link href="/admin/audit?kind=staff" className={linkClass}>
+                  Every staff change
+                </Link>
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">No staff changes have been recorded.</p>
+          )}
+        </section>
+      ) : null}
     </AdminFrame>
   );
 }

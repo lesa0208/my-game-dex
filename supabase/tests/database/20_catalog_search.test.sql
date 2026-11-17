@@ -3,7 +3,7 @@
 -- with "Qzv", so results don't depend on other data, such as the dev fixture.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(129);
+select plan(130);
 
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
@@ -92,7 +92,7 @@ returns uuid language plpgsql as $$
 declare v uuid;
 begin
   v := public.create_game(p_title, 'game', null, null, p_date, p_precision, 'Search tests');
-  perform public.verify_game(v, 'Search tests', (select revision from public.games where id = v));
+  perform pg_temp.rv_on(); perform public.verify_game(v, 'Search tests', (select revision from public.games where id = v)); perform pg_temp.rv_off();
   insert into ids values (p_name, v);
   return v;
 end $$;
@@ -102,9 +102,9 @@ declare v uuid;
 begin
   v := public.create_release(pg_temp.id(p_game), (select id from public.platforms where slug = p_platform), p_format, p_region,
     '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}'::jsonb || p_details, 'Search tests');
-  perform public.verify_release(v, 'Search tests', (select revision from public.releases where id = v));
+  perform pg_temp.rv_on(); perform public.verify_release(v, 'Search tests', (select revision from public.releases where id = v)); perform pg_temp.rv_off();
   if p_publish then
-    perform public.publish_release(v, 'Search tests', (select revision from public.releases where id = v));
+    perform pg_temp.rv_on(); perform public.publish_release(v, 'Search tests', (select revision from public.releases where id = v)); perform pg_temp.rv_off();
   end if;
   insert into ids values (p_name, v);
   return v;
@@ -118,6 +118,24 @@ from unnest(array['e1', 'c2', 'b3']) as s;
 update public.profiles set handle = 'srch_' || right(id::text, 2), handle_changed_at = now()
 where id in (select pg_temp.u(s) from unnest(array['e1', 'c2', 'b3']) as s);
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e1'), 'catalog_editor');
+
+-- M10c (D2): nobody verifies or publishes a record they created, so the fixtures'
+-- records are verified and published by a second catalog editor, fe.
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
+values (pg_temp.u('fe'), 'authenticated', 'authenticated', 'fe@example.test', now(), '00000000-0000-0000-0000-000000000000');
+update public.profiles set handle = 'srch_rv', handle_changed_at = now() where id = pg_temp.u('fe');
+insert into public.staff_roles (user_id, role) values (pg_temp.u('fe'), 'catalog_editor');
+select pg_temp.claims(pg_temp.u('fe')) is not null as reviewer_ready;
+create function pg_temp.rv_on() returns void language plpgsql as $rv$
+begin
+  perform set_config('test.claims_before_review', coalesce(current_setting('request.jwt.claims', true), ''), true),
+         set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u('fe'), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u('fe'))::text, true);
+end $rv$;
+create function pg_temp.rv_off() returns void language plpgsql as $rv$
+begin
+  perform set_config('request.jwt.claims', current_setting('test.claims_before_review', true), true);
+end $rv$;
+grant execute on function pg_temp.rv_on(), pg_temp.rv_off() to authenticated, anon;
 
 -- ---------------------------------------------------------------------------
 -- The test catalog, made by the editor
@@ -191,8 +209,12 @@ select is((select count(*)::int from pg_proc p where p.proname like 'catalog\_%'
 select is((select string_agg(p.proname || ':' || p.provolatile::text || ':' || p.prosecdef::text, ',' order by p.proname) from pg_proc p
   where p.oid in ('public.search_catalog(text, text[], integer, text)'::regprocedure, 'public.get_release_picker(text, text, text, uuid)'::regprocedure, 'public.list_catalog_platforms()'::regprocedure)),
   'get_release_picker:s:true,list_catalog_platforms:s:true,search_catalog:s:true', 'the search functions are STABLE, so they can''t write');
-select is((select count(*)::int from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%search%' and indexdef not like '%status = ''published''%'), 0,
-  'every game and release search index is partial on published');
+select is((select count(*)::int from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%search%' and indexname not like '%\_staff\_%' and indexdef not like '%status = ''published''%'), 0,
+  'every game and release search index for the public search is partial on published');
+-- M10b: the staff search (search_catalog_records) reaches every status, with its own
+-- indexes, named _staff_. These three are the only ones, and the public search never needs them.
+select is((select string_agg(indexname, ',' order by indexname) from pg_indexes where schemaname = 'public' and tablename in ('games', 'releases') and indexname like '%\_staff\_%'),
+  'games_staff_search_trgm_idx,releases_staff_local_title_trgm_idx,releases_staff_product_code_idx', 'the staff search has exactly its three indexes over every status');
 select is((select string_agg(column_name, ',' order by column_name) from information_schema.column_privileges where table_schema = 'public' and table_name = 'game_aliases' and grantee = 'anon' and privilege_type = 'SELECT'),
   'created_at,game_id,id,kind,language_code,region_code,title,updated_at', 'anon reads only the alias fields');
 

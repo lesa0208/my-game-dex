@@ -278,3 +278,95 @@ export function readDay(value: string): Date | null {
 export function ownerAuthorityBlocked(refusal: string | null): boolean {
   return refusal !== null && refusal !== "reauthentication_required";
 }
+
+/** The kinds of action the audit log can be filtered by (M10e); the database holds the same lists. */
+export const AUDIT_CATEGORIES: readonly { value: string; label: string }[] = [
+  { value: "accounts", label: "Account status" },
+  { value: "staff", label: "Staff roles and refusals" },
+  { value: "ownership", label: "Ownership" },
+  { value: "catalog", label: "Catalog" },
+  { value: "operator", label: "Operator" },
+];
+export const AUDIT_OUTCOMES: readonly { value: string; label: string }[] = [
+  { value: "succeeded", label: "Done" },
+  { value: "refused", label: "Refused" },
+  { value: "operator", label: "Operator" },
+];
+
+export function isAuditCategory(value: string): boolean {
+  return AUDIT_CATEGORIES.some((c) => c.value === value);
+}
+
+export function isAuditOutcome(value: string): boolean {
+  return AUDIT_OUTCOMES.some((o) => o.value === value);
+}
+
+export function auditOutcomeLabel(outcome: string): string {
+  return AUDIT_OUTCOMES.find((o) => o.value === outcome)?.label ?? outcome;
+}
+
+/** The start of a handle, for the account search (M10e): 2 to 24 letters, numbers or underscores. */
+export function readHandleQuery(value: string): string | null {
+  const query = value.trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{2,24}$/.test(query) ? query.toLowerCase() : null;
+}
+
+/** Why a staff member's role can or can't be used, in words (M10e). */
+export function standingLabel(standing: string): { label: string; tone: "good" | "warning" | "problem" } {
+  switch (standing) {
+    case "active":
+      return { label: "Active", tone: "good" };
+    case "suspended":
+      return { label: "Suspended: their roles can't be used", tone: "problem" };
+    case "deactivated":
+      return { label: "Deactivated: their roles can't be used", tone: "problem" };
+    case "unverified":
+      return { label: "Ineligible: email address not confirmed", tone: "warning" };
+    case "no_handle":
+      return { label: "Ineligible: no handle", tone: "warning" };
+    case "banned":
+    case "deleted":
+      return { label: "Ineligible: the sign-in account is closed", tone: "problem" };
+    default:
+      return { label: "Ineligible: the account can't be checked", tone: "warning" };
+  }
+}
+
+/**
+ * Authenticator readiness from counts only (M10e): staff need one verified factor to
+ * use /admin (M8b), and the Owner, or an administrator taking ownership, needs two
+ * registered at least 24 hours ago (D13). Nothing about a factor itself is shown.
+ */
+export function mfaReadiness(member: { factors: number | null; mature_factors: number | null; roles: string[]; owner: boolean }): {
+  label: string;
+  tone: "good" | "warning" | "problem";
+} {
+  if (member.factors === null || member.mature_factors === null) return { label: "Authenticator status unavailable", tone: "warning" };
+  if (member.factors === 0) return { label: "No authenticator: can't use /admin", tone: "problem" };
+  const needsTwo = member.owner || member.roles.includes("admin");
+  if (!needsTwo) return { label: member.factors === 1 ? "Authenticator set up" : `${member.factors} authenticators set up`, tone: "good" };
+  if (member.mature_factors >= 2) return { label: `${member.factors} authenticators, ready for Owner actions`, tone: "good" };
+  return {
+    label: `${member.factors} authenticator${member.factors === 1 ? "" : "s"}; Owner actions need two set up 24 hours ago`,
+    tone: member.owner ? "problem" : "warning",
+  };
+}
+
+/**
+ * Why a role has no removal form (M10e), mirroring the matrix (M8c). The database
+ * decides; this only explains what the page doesn't offer.
+ */
+export function roleChangeBlocked(input: { own: boolean; owner: boolean; role: string; viewerOwner: boolean; ownerAuthorityBlocked: boolean }): string | null {
+  if (input.own) return "You can't change your own roles. Ask another administrator.";
+  if (input.owner) return "The Owner's roles are protected. Ownership changes go through Ownership.";
+  if (input.role === "admin" && !input.viewerOwner) return "Only the Owner can remove an administrator.";
+  if (input.role === "admin" && input.ownerAuthorityBlocked) return "Administrator changes wait until Owner authority returns.";
+  return null;
+}
+
+/** What each staff role may do with accounts and roles (M8c), as the pages explain it. */
+export const AUTHORITY: readonly { role: string; can: string }[] = [
+  { role: "Moderator", can: "Find accounts by handle, and suspend or reinstate collectors." },
+  { role: "Administrator", can: "Everything a moderator can, and suspend or reinstate moderators and catalog editors; give and remove those roles; read the audit log." },
+  { role: "Owner", can: "Everything an administrator can, and suspend, reinstate, appoint or remove administrators. Nobody can change their own account or roles, or the Owner's." },
+];

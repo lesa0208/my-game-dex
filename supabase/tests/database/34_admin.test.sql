@@ -95,8 +95,10 @@ select pg_temp.mature('f1');
 -- 1. What the caller may see in /admin (get_my_admin_access)
 -- ---------------------------------------------------------------------------
 create temporary table m8d_functions (fn text);
-insert into m8d_functions values ('public.get_my_admin_access()'), ('public.get_staff_members()'), ('public.find_account_by_handle(text)'),
-  ('public.get_ownership_status()'), ('public.get_my_factor_status()'), ('public.get_audit_events(integer,uuid,text,text,text,timestamptz,timestamptz)');
+-- get_staff_members and get_audit_events were retired in the M10 integration review;
+-- their replacements (M10e) are held to the same rule here.
+insert into m8d_functions values ('public.get_my_admin_access()'), ('public.get_staff_overview()'), ('public.find_account_by_handle(text)'),
+  ('public.get_ownership_status()'), ('public.get_my_factor_status()'), ('public.get_audit_log(integer,uuid,text,text,text,text,text,timestamptz,timestamptz)');
 select is((select count(*)::int from m8d_functions f join pg_proc p on p.oid = f.fn::regprocedure
   where p.prosecdef and p.proconfig = array['search_path=""'] and p.proacl::text = '{postgres=X/postgres,authenticated=X/postgres}'),
   6, 'each M8d read is SECURITY DEFINER with an empty search_path, and only authenticated may execute it');
@@ -112,19 +114,19 @@ select is(pg_temp.as_user('a2', $$select (public.get_my_admin_access() ->> 'admi
 select is(pg_temp.as_user('f1', $$select (public.get_my_admin_access() ->> 'owner') || '/' || coalesce(public.get_my_admin_access() ->> 'owner_authority', 'none')$$), 'true/none', 'the Owner sees they hold Owner authority');
 select is(pg_temp.as_aal1('a6', $$select (public.get_my_admin_access() ->> 'roles') || '/' || (public.get_my_admin_access() ->> 'staff') || '/' || (public.get_my_admin_access() ->> 'mfa')$$),
   '["admin"]/false/false', 'an admin at aal1 sees their own role, but isn''t staff until they verify');
-select is(pg_temp.as_aal1('c5', $$select public.get_staff_members()::text$$), 'error: not permitted', 'and the staff reads refuse an aal1 session');
+select is(pg_temp.as_aal1('c5', $$select public.get_staff_overview()::text$$), 'error: not permitted', 'and the staff reads refuse an aal1 session');
 select set_config('request.jwt.claims', '', true);
 select is(pg_temp.try($$select public.get_my_admin_access()$$), 'error: not permitted', 'nobody signed in, no answer');
 
 -- ---------------------------------------------------------------------------
--- 2. Staff and accounts (get_staff_members, find_account_by_handle)
+-- 2. Staff and accounts (get_staff_overview, which replaced get_staff_members, and find_account_by_handle)
 -- ---------------------------------------------------------------------------
-select is(pg_temp.as_user('d3', $$select public.get_staff_members()::text$$), 'error: not permitted', 'a moderator can''t list the staff');
-select is(pg_temp.as_user('e4', $$select public.get_staff_members()::text$$), 'error: not permitted', 'nor an editor');
-select is(pg_temp.as_user('a2', $$select string_agg(x ->> 'handle' || ':' || (x -> 'roles')::text || ':' || (x ->> 'owner'), ', ' order by x ->> 'handle') from jsonb_array_elements(public.get_staff_members()) x$$),
+select is(pg_temp.as_user('d3', $$select public.get_staff_overview()::text$$), 'error: not permitted', 'a moderator can''t list the staff');
+select is(pg_temp.as_user('e4', $$select public.get_staff_overview()::text$$), 'error: not permitted', 'nor an editor');
+select is(pg_temp.as_user('a2', $$select string_agg(x ->> 'handle' || ':' || (x -> 'roles')::text || ':' || (x ->> 'owner'), ', ' order by x ->> 'handle') from jsonb_array_elements(public.get_staff_overview() -> 'members') x$$),
   'adm4_a2:["admin"]:false, adm4_a6:["admin"]:false, adm4_d3:["moderator"]:false, adm4_e4:["catalog_editor"]:false, adm4_f1:["admin"]:true', 'an admin lists every staff member with their roles, the Owner marked');
-select is(pg_temp.as_user('a2', $$select string_agg(distinct k, ',' order by k) from jsonb_array_elements(public.get_staff_members()) x, jsonb_object_keys(x) k$$),
-  'account_status,display_name,handle,id,owner,roles,successor', 'and nothing else: no email');
+select is(pg_temp.as_user('a2', $$select string_agg(distinct k, ',' order by k) from jsonb_array_elements(public.get_staff_overview() -> 'members') x, jsonb_object_keys(x) k$$),
+  'account_status,display_name,factors,handle,id,last_staff_action_at,mature_factors,owner,roles,standing,successor', 'and nothing else: no email, no factor names');
 select is(pg_temp.as_user('c5', $$select public.find_account_by_handle('adm4_e4')::text$$), 'error: not permitted', 'a collector can''t look anyone up');
 select is(pg_temp.as_user('e4', $$select public.find_account_by_handle('adm4_c5')::text$$), 'error: not permitted', 'nor an editor');
 select is(pg_temp.as_user('d3', $$select (public.find_account_by_handle('  ADM4_C5 ') - 'id')::text$$),
@@ -154,24 +156,24 @@ select is(pg_temp.as_user('a2', $$select string_agg((x ->> 'status') || ':' || (
 select is(pg_temp.as_user('c5', $$select string_agg(x ->> 'friendly_name', ',') from jsonb_array_elements(public.get_my_factor_status()) x$$), 'test session factor', 'each caller sees only their own factors');
 
 -- ---------------------------------------------------------------------------
--- 4. The audit log's filters (get_audit_events, replaced per A2)
+-- 4. The audit log's filters (get_audit_log, which replaced get_audit_events in the M10 integration review)
 -- ---------------------------------------------------------------------------
 select is(pg_temp.as_user('a2', $$select pg_temp.res(public.grant_staff_role(pg_temp.u('c5'), 'moderator', 'Filter test'))$$), 'changed', 'setup: an audited grant');
 select is(pg_temp.as_user('a2', $$select pg_temp.res(public.grant_staff_role(pg_temp.u('c5'), 'admin', 'Filter test'))$$), 'refused: owner_only', 'setup: and an audited refusal');
-select is(pg_temp.as_user('a2', $$select string_agg(action || '/' || outcome || '/' || actor_handle || '/' || target_handle, ', ' order by action) from public.get_audit_events(100, null, null, 'adm4_a2')$$),
+select is(pg_temp.as_user('a2', $$select string_agg((x ->> 'action') || '/' || (x ->> 'outcome') || '/' || (x ->> 'actor_handle') || '/' || (x ->> 'target_handle'), ', ' order by x ->> 'action') from jsonb_array_elements(public.get_audit_log(100, null, null, null, null, 'adm4_a2')) x$$),
   'staff_change_refused/refused/adm4_a2/adm4_c5, staff_role_granted/succeeded/adm4_a2/adm4_c5', 'filtered by actor, with handles instead of ids');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, 'staff_role_granted', null, 'adm4_c5')$$), '1', 'by action and target');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, 'nobody_here')$$), '0', 'an unknown handle matches nothing');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, null, null, now() + interval '1 second')$$), '0', 'and a range in the future nothing');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, 'adm4_a2', null, now() - interval '1 minute', now() + interval '1 minute')$$),
+select is(pg_temp.as_user('a2', $$select count(*)::text from jsonb_array_elements(public.get_audit_log(100, null, 'staff_role_granted', null, null, null, 'adm4_c5')) x$$), '1', 'by action and target');
+select is(pg_temp.as_user('a2', $$select count(*)::text from jsonb_array_elements(public.get_audit_log(100, null, null, null, null, 'nobody_here')) x$$), '0', 'an unknown handle matches nothing');
+select is(pg_temp.as_user('a2', $$select count(*)::text from jsonb_array_elements(public.get_audit_log(100, null, null, null, null, null, null, now() + interval '1 second')) x$$), '0', 'and a range in the future nothing');
+select is(pg_temp.as_user('a2', $$select count(*)::text from jsonb_array_elements(public.get_audit_log(100, null, null, null, null, 'adm4_a2', null, now() - interval '1 minute', now() + interval '1 minute')) x$$),
   (select count(*)::text from private.audit_events where actor_id = pg_temp.u('a2')), 'a range around now finds what happened now');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, 'not_an_action')$$), 'error: invalid filter', 'an unknown action is refused');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, null, null, now(), now() - interval '1 day')$$), 'error: invalid filter', 'as is a range that ends before it starts');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, null, null, now() - interval '400 days', now())$$), 'error: invalid filter', 'or spans more than a year');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(100, null, null, repeat('x', 25))$$), 'error: invalid filter', 'or names a handle longer than any');
-select is(pg_temp.as_user('a2', $$select count(*)::text from public.get_audit_events(101)$$), 'error: invalid page request', 'pages stay at 100 rows at most');
-select is(pg_temp.as_user('d3', $$select count(*)::text from public.get_audit_events()$$), 'error: not permitted', 'a moderator still can''t read the log');
-select is((select count(*)::int from pg_proc p where p.proname = 'get_audit_events'), 1, 'only the new get_audit_events exists');
+select is(pg_temp.as_user('a2', $$select public.get_audit_log(100, null, 'not_an_action')::text$$), 'error: invalid filter', 'an unknown action is refused');
+select is(pg_temp.as_user('a2', $$select public.get_audit_log(100, null, null, null, null, null, null, now(), now() - interval '1 day')::text$$), 'error: invalid filter', 'as is a range that ends before it starts');
+select is(pg_temp.as_user('a2', $$select public.get_audit_log(100, null, null, null, null, null, null, now() - interval '400 days', now())::text$$), 'error: invalid filter', 'or spans more than a year');
+select is(pg_temp.as_user('a2', $$select public.get_audit_log(100, null, null, null, null, repeat('x', 25))::text$$), 'error: invalid filter', 'or names a handle longer than any');
+select is(pg_temp.as_user('a2', $$select (jsonb_array_length(public.get_audit_log(101)) <= 100)::text$$), 'true', 'pages stay at 100 rows at most');
+select is(pg_temp.as_user('d3', $$select public.get_audit_log()::text$$), 'error: not permitted', 'a moderator still can''t read the log');
+select is((select count(*)::int from pg_proc p where p.proname in ('get_audit_events', 'get_staff_members')), 0, 'the M8d audit and staff reads are retired');
 
 -- ---------------------------------------------------------------------------
 -- 5. The recovery guard on accepting a transfer (M8c risk, PO requirement 2).

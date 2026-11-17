@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { FIXTURE_EDITOR, installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { FIXTURE_EDITOR, FIXTURE_REVIEWER, installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { elevate } from "./lib/mfa-session.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -155,7 +155,7 @@ try {
   check("every platform is listed", platforms.body.length === Number(psql("select count(*) from public.platforms;")));
   const bodies = [asAnon.text, code.text, picker.text, platforms.text, (await rpc(user.headers, "get_release_picker", { p_game: "starfall-odyssey" })).text];
   check("no response names an editor, a verification, a revision, provenance or a review status",
-    bodies.every((text) => !FORBIDDEN.test(text) && !text.includes(FIXTURE_EDITOR) && !text.includes(editor.id)));
+    bodies.every((text) => !FORBIDDEN.test(text) && !text.includes(FIXTURE_EDITOR) && !text.includes(FIXTURE_REVIEWER) && !text.includes(editor.id)));
 
   section("Not found is the same for every case");
   const ids = Object.fromEntries(psql("select title, id from public.games where title in ('Hidden Prototype Quest', 'Rejected Racer', 'Orphan Saga');").split("\n").map((line) => line.split("|")));

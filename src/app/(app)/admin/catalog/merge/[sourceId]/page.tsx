@@ -3,19 +3,17 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Suspense } from "react";
 
-import { PageLayout } from "@/components/layout/page-layout";
+import { AdminFrame, AdminShell } from "@/components/admin/admin-frame";
+import { HistoryPanel } from "@/components/admin/records";
 import { MergeForm } from "@/components/merge/merge-form";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { UUID } from "@/features/collection/uuid";
 import { catalogStatusLabel, releaseLabelLine } from "@/features/exclusion/form";
-import { isAdministrator, type ReleaseLabel } from "@/features/exclusion/queries";
+import type { ReleaseLabel } from "@/features/exclusion/queries";
 import { blockerText, fieldLabel, fieldValue } from "@/features/merge/form";
 import { getMergeCandidates, getMergePreview } from "@/features/merge/queries";
-import { canReview } from "@/features/review/queries";
 
 export const metadata: Metadata = {
   title: "Merge a release",
@@ -94,13 +92,19 @@ async function Candidates({ sourceId }: { sourceId: string }) {
 async function MergeView({ params, searchParams }: { params: PageProps<"/admin/catalog/merge/[sourceId]">["params"]; searchParams: PageProps<"/admin/catalog/merge/[sourceId]">["searchParams"] }) {
   const { sourceId } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(sourceId) ? `/admin/catalog/merge/${sourceId}` : "/admin/catalog");
-  // Anyone who can't review gets the same page as for an address that doesn't exist.
-  if (!(await canReview()) || !UUID.test(sourceId)) notFound();
+  // Catalog editors only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection(UUID.test(sourceId) ? `/admin/catalog/merge/${sourceId}` : "/admin/catalog", "editor");
+  if (!UUID.test(sourceId)) notFound();
+  const frame = (title: string, body: ReactNode, titleId?: string) => (
+    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+      {body}
+    </AdminFrame>
+  );
 
   const into = typeof search.into === "string" && UUID.test(search.into) ? search.into : null;
   if (!into) {
-    return (
+    return frame(
+      "Merge a duplicate release",
       <div className="flex flex-col gap-4">
         <p>
           <Link href="/admin/catalog" className={backLink}>
@@ -108,13 +112,12 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
             Review queue
           </Link>
         </p>
-        <h1 className="text-xl font-semibold tracking-tight text-pretty">Merge a duplicate release</h1>
         <p className="text-sm">
           Merging keeps one record for the same physical product. This release&apos;s copies move to the one you keep, with everything their owners recorded. Nothing is deleted,
           and this record stays as history.
         </p>
         <Candidates sourceId={sourceId} />
-      </div>
+      </div>,
     );
   }
 
@@ -122,26 +125,29 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
   if (!outcome.ok) {
     if (outcome.reason === "refused" && outcome.message === "release unavailable") notFound();
     if (outcome.reason === "refused" && outcome.message === "target unavailable") {
-      return (
+      return frame(
+        "Merge a duplicate release",
         <EmptyState icon={PlugZap} title="That release can't take a merge">
           It isn&apos;t published, or it&apos;s this release.{" "}
           <Link href={`/admin/catalog/merge/${sourceId}`} className="text-primary-text underline underline-offset-4">
             Choose another
           </Link>
-        </EmptyState>
+        </EmptyState>,
       );
     }
-    return (
+    return frame(
+      "Merge a duplicate release",
       <EmptyState icon={PlugZap} title="This merge isn't available">
         It can&apos;t be loaded right now. Try again later.
-      </EmptyState>
+      </EmptyState>,
     );
   }
   const p = outcome.data;
   const blocked = p.blocking.length > 0;
-  const needsAdmin = p.requires_admin && !(await isAdministrator());
+  const needsAdmin = p.requires_admin && !access.admin;
 
-  return (
+  return frame(
+    `Merge ${p.source.game.title} into another release`,
     <article aria-labelledby="merge-title" className="flex flex-col gap-4">
       <p>
         <Link href={`/admin/catalog/merge/${sourceId}`} className={backLink}>
@@ -149,9 +155,6 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
           Choose another release
         </Link>
       </p>
-      <h1 id="merge-title" className="text-xl font-semibold tracking-tight text-pretty">
-        Merge {p.source.game.title} into another release
-      </h1>
 
       <Section id="merge-pair" title="The releases">
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
@@ -169,6 +172,9 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
           </div>
         </dl>
       </Section>
+
+      <HistoryPanel id="merge-source-history" entity="release" recordId={p.source_id} title="History of the release to merge" admin={access.admin} />
+      <HistoryPanel id="merge-target-history" entity="release" recordId={p.target_id} title="History of the release to keep" admin={access.admin} />
 
       <Section id="merge-differences" title={p.differences.length ? `What differs (${p.differences.length})` : "What differs"}>
         {p.differences.length ? (
@@ -247,26 +253,15 @@ async function MergeView({ params, searchParams }: { params: PageProps<"/admin/c
           <MergeForm sourceId={p.source_id} targetId={p.target_id} token={p.token} fields={p.differences.map((d) => ({ field: d.field, critical: d.critical }))} copies={p.copies} owners={p.owners} />
         </Section>
       )}
-    </article>
+    </article>,
+    "merge-title",
   );
 }
 
 export default function MergePage({ params, searchParams }: PageProps<"/admin/catalog/merge/[sourceId]">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-4">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          }
-        >
-          <MergeView params={params} searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <MergeView params={params} searchParams={searchParams} />
+    </AdminShell>
   );
 }

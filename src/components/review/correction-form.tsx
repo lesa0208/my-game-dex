@@ -37,7 +37,7 @@ function Errors({ state }: { state: ReviewState }) {
 
 function Reason({ id }: { id: string }) {
   return (
-    <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Only editors see it.">
+    <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
       <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className="h-10" />
     </Field>
   );

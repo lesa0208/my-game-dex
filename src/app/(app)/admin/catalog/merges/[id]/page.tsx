@@ -3,12 +3,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Suspense } from "react";
 
-import { PageLayout } from "@/components/layout/page-layout";
+import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-frame";
+import { HistoryPanel } from "@/components/admin/records";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
-import { requireViewerWithHandle } from "@/features/account/queries";
+import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { catalogStatusLabel, releaseLabelLine } from "@/features/exclusion/form";
@@ -39,20 +38,28 @@ const KIND: Record<string, string> = {
 async function MergeDetailView({ params, searchParams }: { params: PageProps<"/admin/catalog/merges/[id]">["params"]; searchParams: PageProps<"/admin/catalog/merges/[id]">["searchParams"] }) {
   const { id } = await params;
   const search = await searchParams;
-  await requireViewerWithHandle(UUID.test(id) ? `/admin/catalog/merges/${id}` : "/admin/catalog/merges");
+  // Catalog editors only (D8); staff signed in without their authenticator verify first.
+  const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/merges/${id}` : "/admin/catalog/merges", "editor");
+  const frame = (title: string, body: ReactNode, titleId?: string) => (
+    <AdminFrame access={access} current="catalog" title={title} titleId={titleId}>
+      {body}
+    </AdminFrame>
+  );
   const outcome = await getMerge(id);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
-    return (
+    return frame(
+      "Merge",
       <EmptyState icon={PlugZap} title="This merge isn't available">
         It can&apos;t be loaded right now. Try again later.
-      </EmptyState>
+      </EmptyState>,
     );
   }
   const m = outcome.data;
   if (!m) notFound();
 
-  return (
+  return frame(
+    `${m.source.game.title} merged`,
     <article aria-labelledby="merge-detail-title" className="flex flex-col gap-4">
       <p>
         <Link
@@ -71,9 +78,6 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
         </p>
       ) : null}
       <header>
-        <h1 id="merge-detail-title" className="text-xl font-semibold tracking-tight text-pretty">
-          {m.source.game.title} merged
-        </h1>
         <p className="text-sm text-muted-foreground">
           {KIND[m.kind] ?? m.kind} · {formatDay(m.merged_at)}
           {m.merged_by ? ` · by @${m.merged_by}` : ""}
@@ -88,6 +92,9 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
               <span className="font-medium">{m.source.game.title}</span>
               <span className="block text-muted-foreground">{releaseLabelLine(m.source)}</span>
               <span className="mt-1 block text-xs text-muted-foreground">Was {catalogStatusLabel(m.previous_status).toLowerCase()}</span>
+              <Link href={`/admin/catalog/releases/${m.source.id}`} className={`mt-1 inline-block ${linkClass}`}>
+                Release record
+              </Link>
             </dd>
           </div>
           <div>
@@ -101,6 +108,9 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
                 <span className="font-medium">{m.target.game.title}</span>
               )}
               <span className="block text-muted-foreground">{releaseLabelLine(m.target)}</span>
+              <Link href={`/admin/catalog/releases/${m.target.id}`} className={`mt-1 inline-block ${linkClass}`}>
+                Release record
+              </Link>
             </dd>
           </div>
         </dl>
@@ -171,25 +181,17 @@ async function MergeDetailView({ params, searchParams }: { params: PageProps<"/a
           </ul>
         </Section>
       ) : null}
-    </article>
+
+      <HistoryPanel id="merge-detail-history" entity="release" recordId={m.source.id} title="History of the merged release" admin={access.admin} />
+    </article>,
+    "merge-detail-title",
   );
 }
 
 export default function MergeDetailPage({ params, searchParams }: PageProps<"/admin/catalog/merges/[id]">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense
-          fallback={
-            <div aria-hidden="true" className="flex flex-col gap-4">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-32 w-full" />
-            </div>
-          }
-        >
-          <MergeDetailView params={params} searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <AdminShell>
+      <MergeDetailView params={params} searchParams={searchParams} />
+    </AdminShell>
   );
 }
