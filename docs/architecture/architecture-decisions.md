@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e; all five are built, and wait for the final M10 integration review. Each step needs the product owner's authorization.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is built in five steps, M10a to M10e, with the M10 integration review's corrections ([ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators)); it waits for the product owner's approval of the pull request. Each step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -69,6 +69,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it) | A record's creator is kept privately, and never reviews it |
 | [060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables) | Imports and the system are read-only views for administrators, and reference data is the public tables |
 | [061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions) | Accounts, audit and staff are allow-listed reads over the M8 functions |
+| [062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators) | The M10 integration review retires the raw admin reads and withholds staff reasons from moderators |
 
 ## Decisions requiring product-owner approval
 
@@ -151,7 +152,7 @@ These are separate from D1 to D22 above. M4 documents cite them as M4-D1 to M4-D
 | # | Decision | Outcome |
 | --- | --- | --- |
 | **M4-D1** | Audit log | **Approved.** `private.audit_events`, append-only for application and API roles. Replaces the planned `moderation_actions`. See [ADR-043](#adr-043-the-audit-log-is-private-and-append-only-for-application-roles) |
-| **M4-D2** | Who reads the audit log | **Approved.** Admins only, through `get_audit_events()` |
+| **M4-D2** | Who reads the audit log | **Approved.** Admins only, through `get_audit_events()`; since the M10 integration review, through `get_audit_log()` ([ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators)) |
 | **M4-D3** | Duplicate notifications | **Approved.** One notice per event, and repeated follows of one account notify once per 24 hours |
 | **M4-D4** | Deleted accounts in notifications | **Approved.** Deleting the recipient or the actor deletes the notice |
 | **M4-D5** | Who suspends | **Approved.** Moderators suspend and reinstate accounts without a staff role. Admins handle staff accounts. Nobody suspends themselves |
@@ -774,7 +775,7 @@ Most general game databases focus on games rather than physical releases. Expect
 
 ### ADR-043: The audit log is private, and append-only for application roles
 
-**Decision.** Approved by the product owner as M4-D1, M4-D2, M4-D5, M4-D7, M4-D10 and M4-D12. Staff and operator actions are recorded in `private.audit_events`, which replaces the planned `public.moderation_actions`. No API role has any privilege on it. Rows are added only through `private.record_audit()`, in the same transaction as the action, and triggers refuse updates, deletes and truncation. Admins read it through `get_audit_events()`. Staff functions require active staff, take one lock for all staff changes, and record a required reason. Moderators suspend and reinstate accounts without a staff role, admins handle staff accounts, and nobody acts on themselves. One active admin may grant `admin`, and the last active admin can't be removed.
+**Decision.** Approved by the product owner as M4-D1, M4-D2, M4-D5, M4-D7, M4-D10 and M4-D12. Staff and operator actions are recorded in `private.audit_events`, which replaces the planned `public.moderation_actions`. No API role has any privilege on it. Rows are added only through `private.record_audit()`, in the same transaction as the action, and triggers refuse updates, deletes and truncation. Admins read it through `get_audit_events()`, since the M10 integration review through `get_audit_log()` ([ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators)). Staff functions require active staff, take one lock for all staff changes, and record a required reason. Moderators suspend and reinstate accounts without a staff role, admins handle staff accounts, and nobody acts on themselves. One active admin may grant `admin`, and the last active admin can't be removed.
 
 **Why.** An audit trail is only useful if clients can't read, forge or erase it, and if no staff change can happen without a row. Keeping it out of `public` removes a whole class of policy mistakes. Plain IDs without foreign keys mean account deletion never rewrites history.
 
@@ -1027,7 +1028,7 @@ Also in M10a, every catalog page (review, merge, exclusion and their histories) 
 - **Exclusions stay administrators'.** History shows an exclusion's reason code to editors, never the staff reason, the copies or the exclusion's id.
 - **Bounded:** pages of at most 50, by keyset on the event id.
 
-The full audit log (`get_audit_events`) stays administrators' only.
+The full audit log (`get_audit_events`, now `get_audit_log`) stays administrators' only.
 
 **Why.** Editors reviewing or merging a record need to see what was done to it, and why, without the full audit log, which also holds account, staff and Owner events. Reading the existing log keeps one source of truth; the allow-lists keep its private parts out by construction rather than by filtering what's known to be sensitive.
 
@@ -1092,9 +1093,23 @@ The full audit log (`get_audit_events`) stays administrators' only.
 
 **Trade-offs.**
 - **Readiness is counts only.** An administrator sees that a colleague has one authenticator, never which one or when it was used.
-- **Moderators see the reasons other staff gave** for an account's status changes, which they need to judge it; they don't see staff-role history or the audit log.
-- **`get_audit_events` (M8d) stays,** returning raw metadata to administrators over the API, for compatibility with its tests; the page uses the allow-listed read. Retiring it is a small follow-up for the integration review.
+- **Moderators saw the reasons other staff gave** for an account's status changes; they don't see staff-role history or the audit log. Superseded by [ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators): moderators now see what happened and why it was refused, not the free-text reason.
+- **`get_audit_events` (M8d) stayed,** returning raw metadata to administrators over the API, for compatibility with its tests. Retired in [ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators), with `get_staff_members`.
 - **Covered by** `39_accounts_audit_staff`, `db-mfa-checks` section 10, `app:admin-checks` section 6b, `app:a11y-checks` and the 20 `m10e` mutations.
+
+### ADR-062: The M10 integration review retires the raw admin reads and withholds staff reasons from moderators
+
+**Decision.** The product owner's M10 integration review (migration `20261124100000`; [security-rls.md](security-rls.md#m10-integration-review)):
+- **`get_audit_events` and `get_staff_members` (M8d) are dropped,** each by exact signature, guarded, with `RESTRICT`. `get_audit_log` and `get_staff_overview` (M10e) replace them. No audit row is changed or deleted, and retention is unchanged.
+- **Moderators' account history withholds the reason** staff wrote, keeping the action, outcome, time, handles and allow-listed details, including a refusal's code. Administrators keep every reason.
+- **The overview's refusal count** links to the refused events.
+
+**Why.** The app stopped using both reads in M10e, but `get_audit_events` still handed any administrator calling the API the raw metadata the page's allow-list hides: account ids, a succession document's fingerprint, plan tokens. An unused path that bypasses an allow-list is a liability, not compatibility. A status reason is free text that may carry internal notes; a moderator judging an account needs what happened and when, not another staff member's words.
+
+**Trade-offs.**
+- **A script that called the retired reads breaks,** by design. None exists in the repository; operators read `private.audit_events` with SQL, as before.
+- **A moderator can't read a colleague's reasoning** for a suspension; they ask an administrator, who sees it in the account and the audit log.
+- **Covered by** `14_audit`, `34_admin`, `39_accounts_audit_staff` (85), `db-audit-checks`, `db-mfa-checks`, `app:admin-checks`, and six `m10i` mutations; the historical mutations on the retired reads now target the replacements.
 
 ## Risks to watch
 
@@ -1207,7 +1222,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M7 Catalog workflow** (done: M7a to M7b-2c) | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
 | **M8 Superadmin Foundation** (done) | The Owner record and its protections, live MFA for staff and factor maturity, the staff authority matrix, ownership transfer and recovery, the unified `/admin` and Settings → Security. See [ADR-055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | Staff work needs a protected Owner and verified staff first |
 | **M9 Internationalization** (cancelled) | Not built. The application is English-only ([M10 decision D1](#m10-decisions-the-admin-panel-expansion)) | |
-| **M10 Admin panel expansion** (built: M10a to M10e, before the integration review) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). M10d read-only reference data, import monitoring and the system view ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). M10e account search and summaries, the allow-listed audit log and the staff overview ([ADR-061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions)) | Staff tools before the collector-facing milestones |
+| **M10 Admin panel expansion** (built: M10a to M10e and the integration review, before the pull request) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). M10d read-only reference data, import monitoring and the system view ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). M10e account search and summaries, the allow-listed audit log and the staff overview ([ADR-061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions)) | Staff tools before the collector-facing milestones |
 
 Later groups, in order:
 
@@ -1233,7 +1248,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | Every migration, M0 to M10e, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
+| Migration dependencies | Every migration, M0 to M10e and the M10 integration review, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
 | Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`; the database, HTTP and browser suites run locally |
 | Reproducible workflow | `npm run db:verify` |
 
@@ -1269,7 +1284,7 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. The final integration review of M10a to M10e, then the M10 pull request and merge, each approved separately.
+1. The M10 pull request and merge, each approved separately, after the integration review ([ADR-062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators)).
 2. After M10, the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery.
 3. Create the Supabase project in Frankfurt when authorized, check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project), and meet the [production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.

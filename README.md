@@ -4,7 +4,7 @@ _Your collection. Your gaming identity._
 
 My Game Dex is a social network and collection manager for physical video game collectors. It combines a community feed, a game catalog and virtual shelves, so that a collection becomes part of a collector's identity online.
 
-**Status:** Phase 1 (frontend foundation) is complete. The Supabase backend is built on the local stack through M8, the Superadmin Foundation, and M10, the admin panel expansion, is built (M10a to M10e) and waits for its integration review. No hosted project exists. The application is English-only.
+**Status:** Phase 1 (frontend foundation) is complete. The Supabase backend is built on the local stack through M8, the Superadmin Foundation, and M10, the admin panel expansion, is built (M10a to M10e) with its integration review's corrections, and waits for approval of its pull request. No hosted project exists. The application is English-only.
 
 ## Requirements
 
@@ -247,7 +247,7 @@ Phase 2 replaces the seed viewer with real accounts:
 4. **Account UI:** the account menu and `getCurrentViewer()` use the real session (M6a). Profile editing and the remaining settings are still to do
 5. **Light mode:** deferred, not planned for the initial release (ADR-056)
 
-Current plan: M10, the admin panel expansion, built in five steps and now in its integration review, then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
+Current plan: M10, the admin panel expansion, built in five steps and reviewed together, then its pull request, then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
 
 Later phases:
 

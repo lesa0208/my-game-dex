@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, with the M10 integration review's corrections, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -582,7 +582,7 @@ with check (
 | Table | `anon` | `authenticated` |
 | --- | --- | --- |
 | `reports` | **No grant** | Moderators: R. Everyone else has no read policy. Filed and updated through functions |
-| `private.audit_events` (M4, replaces the planned `moderation_actions`) | **No grant** | **No grant.** Admins read through `get_audit_events()`. Rows are added only by staff functions. See [Audit log](#audit-log) |
+| `private.audit_events` (M4, replaces the planned `moderation_actions`) | **No grant** | **No grant.** Admins read through `get_audit_log()` (M10e; `get_audit_events()` was [retired in the M10 integration review](#m10-integration-review)). Rows are added only by staff functions. See [Audit log](#audit-log) |
 
 **Reporters don't read `reports` directly.** A read policy on their own rows would also expose the snapshot and the assigned moderator, because RLS can't limit columns. A `my_reports()` function returns only the target and status.
 
@@ -814,7 +814,7 @@ Staff are ordinary `authenticated` users. Every staff change goes through one of
 | `grant_staff_role(user, role, reason)` | Admin | The target must be active, verified and have a handle. Admins may grant `admin` (M4-D12) |
 | `revoke_staff_role(user, role, reason)` | Admin | At least one other active admin must remain, so the last admin can't step down |
 | `set_account_status(user, status, reason)` | Moderator for accounts without a staff role. Admin for staff accounts | Only `active` and `suspended`. Never your own account. `deactivated` accounts are refused |
-| `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page |
+| `get_audit_events(limit, before)` | Admin | Newest first, 1 to 100 rows per page. Replaced in M8d, then [retired in the M10 integration review](#m10-integration-review) in favour of `get_audit_log` |
 
 **The caller must be active staff.** `private.require_active_staff(role)` requires the role and an active, verified account with a handle. `private.has_staff_role()` alone doesn't check the account, so no function uses it on its own. A suspended admin can't act.
 
@@ -868,7 +868,7 @@ So the log is append-only for application and API roles, not immutable.
 
 **Neither timestamps nor ids guarantee commit order.** This matters most when transactions run concurrently. `occurred_at` is the transaction's start time, which is before it waited for the staff lock. So two changes can carry times in the opposite order to the one they took effect in. The id comes from the clock when the row is written. For staff functions that happens under the staff lock, so the id usually follows the real order, but only to the millisecond: two changes within one millisecond can sort either way. A row the owner writes directly, without the lock, has no ordering guarantee at all. In the stress tests, id order always matched commit order, but that's an observation, not a guarantee. Don't treat either column as commit order. A strict order would need a sequence column, which can be added if audits ever need one.
 
-**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names. Since M8d, `get_audit_events` looks up the current handles of actor and target when read, so a deleted account shows none.
+**Identifiers, not copies.** IDs are plain values with no foreign keys, so deleting an account doesn't change the log. Rows hold no handles or names. Since M8d, the audit read looks up the current handles of actor and target when read, so a deleted account shows none; since M10e, `get_audit_log` returns handles only, never the ids.
 
 **Retention is undecided (M4-D10).** Nothing removes rows. That is an interim state pending legal review, not a commitment to keep them indefinitely. A purge and a procedure for erasure requests need a separate, approved change.
 
@@ -1461,11 +1461,11 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | Function | Caller | Returns |
 | --- | --- | --- |
 | `get_my_admin_access()` | Anyone signed in | The caller's own roles and live state: whether verified recently, the Owner's authority, a pending recovery, a transfer offered to them, a recovery to confirm |
-| `get_staff_members()` | Administrators | Handle, display name, status and roles of everyone with a role, and who is Owner and successor |
+| `get_staff_members()` | Administrators | Handle, display name, status and roles of everyone with a role, and who is Owner and successor. **[Retired in the M10 integration review](#m10-integration-review)**; `get_staff_overview` (M10e) replaces it |
 | `find_account_by_handle(handle)` | Moderators and administrators | One account by its **exact** handle (D11): handle, display name, status, roles, whether it's the Owner. Anything that isn't a valid handle, an email included, is refused |
 | `get_ownership_status()` | Administrators | The Owner, the successor, whether a succession document is registered (never its fingerprint), a pending transfer or recovery, and whether the Owner's factors changed in the last 24 hours |
 | `get_my_factor_status()` | Anyone signed in | The caller's own factors and their maturity |
-| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
+| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` | Administrators | **[Retired in the M10 integration review](#m10-integration-review)**: it returned each row's raw metadata and account ids; `get_audit_log` (M10e) replaces it. Newest first, 1 to 100 rows, paged by id, with each row's outcome and the actor's and target's handles. Optional filters: an action from the list, exact handles, and a range of at most 366 days. An unknown handle matches nothing |
 
 The audit page shows 50 rows a page, and only an allow-list of plain metadata fields.
 
@@ -1516,7 +1516,7 @@ History is a view of `private.audit_events` built from two allow-lists, so a new
 - **Only allow-listed details.** `history_event_json()` copies a fixed list of metadata keys, each a plain value or a list of them: which fields changed, the revision, the related records' ids, the alias, reason and status codes. Import runs, provider entries, copy, owner and reference counts, and anything else in the stored metadata are left out. The stored metadata is never returned.
 - **Who acted, as a kind.** An import; the submitter, never by name; or a staff member by handle, as the review page already shows reviewers. An event whose actor's account is gone shows a former staff member.
 - **Reasons.** A staff member's reason is shown, as it is in the review history. Imports' run notes, submitters' fixed texts and exclusion reasons are not.
-- **The full audit log stays administrators' only** (`get_audit_events`), unchanged.
+- **The full audit log stays administrators' only** (`get_audit_log` since the M10 integration review), unchanged.
 
 **Tests.** `36_catalog_records` covers the grants, every refusal, search (unpublished records, filters, bounds, cursors), the fields of each record and what they leave out, and history: unrelated actions, other records and another record kind sharing an id, the allowed details, actors, reasons and paging, including more than a page of games and events. `db-mfa-checks` section 7 checks the same over the API with real sessions, and that the public reads are unchanged. `app:admin-checks` section 12 and `app:a11y-checks` cover the pages, the latter with a real merge and a real exclusion opened in a browser. The 20 `m10b` mutations prove the tests catch each weakening.
 
@@ -1586,9 +1586,28 @@ The game and release records (M10b) add `review`: how the record came to exist (
 
 **Tests.** `37_catalog_provenance` covers provenance from each origin and from the definer path, its immutability and the account-deletion case, every self-review refusal with no administrator bypass, indirect publication, legacy and unknown provenance and the backfill's classification, merges and exclusions, the stale-MFA matrix with each function asking first, the trigger backstops, and revision binding. `db-mfa-checks` section 8 checks the creator rule, the recent verification and the review flags over the API with real sessions, and `db-catalog-checks` adds a creator and a verifier deleted through Auth, and a publication racing the creator's uncommitted edit. `app:editing-checks` drives the editing pages, including step-up without replay, and `app:a11y-checks` opens them in a browser. The 20 `m10c` mutations prove the tests catch each weakening.
 
+## M10 integration review
+
+The review of M10a to M10e together (migration `20261124100000`) found no new grant, policy or RLS change outside the documented functions, no edited earlier migration, and the M8 guarantees intact (the guard tests `03`, `10`, `14`, `32`, `33` and `34` assert them). It made three corrections.
+
+**Two reads retired.** Each drop is guarded like A2: the exact signature, result, `SECURITY DEFINER`, `search_path`, owner and privileges must be what M8d created, with no overload, no dependent object and no function body that names it, or the migration stops and changes nothing. `drop function` names the exact signature with `RESTRICT`; nothing uses `CASCADE`, and no audit row is changed or deleted.
+
+| Retired | Why | Replacement |
+| --- | --- | --- |
+| `get_audit_events(limit, before, action, actor_handle, target_handle, since, until)` (M8d) | Unused by the app since M10e, yet returned each row's raw metadata (for example a succession document's fingerprint, plan tokens), the actor's and target's account ids and the reason to any administrator calling the API directly | `get_audit_log` (M10e): allow-listed, bounded details and handles only |
+| `get_staff_members()` (M8d) | Unused by the app since M10e; a subset of the overview without standing or readiness | `get_staff_overview` (M10e) |
+
+**Moderators don't see the reasons staff wrote.** A reason for a status change is free text written by an administrator or moderator, and may hold internal notes. `get_account_summary` now returns each event in a moderator's history with its action, outcome, time, the handles involved and its allow-listed details (the status changed from and to, a refusal's code and operation), and `reason` null; `reasons_shown` is false, and the page says reasons are shown to administrators only. Administrators keep every reason, in the account history and in `get_audit_log`. Only the projection changed; the counts, the last change and the signature stay.
+
+**The overview's refusal count opens the refused events** (`/admin/audit?outcome=refused`), not the whole log.
+
+**Kept on purpose.** `find_account_by_handle` (M8d) is still the account lookup behind the status and role forms, by exact handle, with the same fields as the search; it isn't a second read of anything the pages show.
+
+**Tests.** The retired functions are asserted absent under every schema (`14_audit`, `34_admin`) and uncallable over the API (`db-audit-checks`); every assertion that used them now uses the replacement (`14`, `32`, `34`, `36`, `db-mfa-checks`); `39_accounts_audit_staff` (85) covers the moderator projection and that administrators keep reasons; `app:admin-checks` checks both views of the page. Six `m10i` mutations bring back each retired read, show moderators the reasons, claim reasons are shown, strip moderators' details, and hide administrators' reasons. The historical `m4` and `m8` mutations that targeted the retired functions now target their replacements and are still detected.
+
 ## Production launch prerequisites (M8)
 
-**None of M8 has run on a hosted project.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
+**None of M8 or M10 has run on a hosted project, and none of these is resolved.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
 
 | Prerequisite | Why |
 | --- | --- |
@@ -1644,7 +1663,7 @@ M10e makes the existing M8 pages more useful without changing who may do what. F
 | Function | Who | Returns |
 | --- | --- | --- |
 | `search_accounts(query, limit)` | Moderators and up | Accounts whose handle starts with the query (2 to 24 letters, numbers or underscores, compared as text, so `_` isn't a wildcard), 1 to 25: id, handle, name, status, roles and whether it's the Owner's. Never by email or name |
-| `get_account_summary(handle)` | Moderators and up | One account: the fields above and when it joined; how often it was suspended and reinstated, refused status changes, and the last status change and who made it; and its last 20 events. Moderators see status changes and refused status changes; administrators also staff-role changes and every refusal about it. Null for an unknown handle |
+| `get_account_summary(handle)` | Moderators and up | One account: the fields above and when it joined; how often it was suspended and reinstated, refused status changes, and the last status change and who made it; and its last 20 events. Moderators see status changes and refused status changes, without the reasons staff wrote (since the [M10 integration review](#m10-integration-review)); administrators also staff-role changes and every refusal about it, with reasons. Null for an unknown handle |
 | `get_audit_log(limit, before, action, kind, outcome, actor, target, since, until)` | Administrators | The audit log, 1 to 100 a page, newest first, by action, kind (account status, staff, ownership, catalog, operator), outcome (done, refused, operator), the handle that acted or was acted on, and a range of at most 366 days (one end alone covers 366 days from it). An unknown filter is `invalid filter` |
 | `get_staff_overview()` | Administrators | The number of each role; each staff member (at most 500) with their roles, whether they're the Owner or successor, their standing as a fixed word (active, suspended, deactivated, unverified, no handle, closed, or unavailable), their verified and mature authenticator counts, and when they last acted; and the last 20 staff changes |
 
@@ -1652,7 +1671,7 @@ M10e makes the existing M8 pages more useful without changing who may do what. F
 
 **Never returned:** an email address, private profile field (bio, settings), collection, copy, purchase or price, private note, authenticator secret, name or id, recovery material, session or token.
 
-**Unchanged.** `get_audit_events` (M8d) still returns raw metadata to administrators over the API; the page no longer uses it. Catalog editors keep the bounded record history of M10b (ADR-058) and see no account or staff events. Audit retention is unchanged and remains a launch decision: nothing deletes audit rows.
+**Unchanged.** Catalog editors keep the bounded record history of M10b (ADR-058) and see no account or staff events. Audit retention is unchanged and remains a launch decision: nothing deletes audit rows.
 
 **The pages.** `/admin/accounts` searches by the start of a handle and opens an account with its moderation summary, history and the one action the viewer may take, or why there is none; it explains who can do what. `/admin/audit` adds the kind and outcome filters, outcome markers, and links from each handle to the account and its events and from a catalog event to its record. `/admin/staff` adds the role counts, each member's standing and authenticator readiness (one verified factor to use `/admin`; two registered 24 hours ago for Owner actions), why a role can't be removed, and recent staff changes.
 

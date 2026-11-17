@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, with the M10 integration review, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 
@@ -1372,6 +1372,7 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 - **Indexes:** `(target_profile_id, id DESC)` and `(actor_id, id DESC)`, each where not null; `(actor_id, action, occurred_at DESC)` for the two refusal actions, for the rate limit (M8); `metadata ->> 'id'` where present (M5b); and `(metadata ->> 'id', id DESC)`, `(metadata ->> 'release_id', id DESC)`, `(metadata ->> 'game_id', id DESC)` and `(metadata ->> 'target_id', id DESC)`, each where the key is present, for a catalog record's history (M10b)
 - **Timestamps:** `occurred_at`. Rows are never updated
 - **Retention:** undecided (M4-D10). Nothing removes rows, which is an interim state, not a commitment
+- **Read through:** `get_audit_log` (administrators), `get_account_summary` (moderators, without reasons) and `get_staff_overview` (M10e), each through one allow-list; catalog editors through the record history (M10b). The raw `get_audit_events` was retired in the M10 integration review
 
 ### Owner and MFA tables (M8)
 
