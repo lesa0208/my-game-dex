@@ -37,6 +37,9 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
         </Link>{" "}
         <Link href="/admin/catalog/merges" className="text-primary-text underline underline-offset-4">
           Merges
+        </Link>{" "}
+        <Link href="/admin/catalog/reclassifications" className="text-primary-text underline underline-offset-4">
+          Reclassification queue
         </Link>
         {admin ? (
           <>

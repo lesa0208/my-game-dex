@@ -902,4 +902,39 @@ export const m10cReviewMutations = [
   sql("a pairing is published without a recent verification", "pgtap", rewrite(M10C_PAIRING, "     and not private.mfa_recent(interval '10 minutes') then", "     and false then")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations };
+// M10d: import monitoring and the system view, administrators only (D7, D8), and the
+// reclassification resolution the queue page now uses (M5b).
+const M10D_PROVIDERS = "public.get_import_providers()";
+const M10D_RUNS = "public.get_import_runs(integer, uuid, text, text)";
+const M10D_RUN = "public.get_import_run(uuid)";
+const M10D_RECORDS = "public.get_import_run_records(uuid, text, integer, integer)";
+const M10D_SYSTEM = "public.get_system_status()";
+const M10D_SUMMARY = "private.import_run_summary(private.import_runs)";
+const M10D_RESOLVE = "public.resolve_catalog_review(uuid, text)";
+const M10D_ADMIN = "perform private.require_active_staff('admin');";
+export const m10dMutations = [
+  // Who may read
+  sql("catalog editors read the import sources", "pgtap", rewrite(M10D_PROVIDERS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read the import runs", "pgtap", rewrite(M10D_RUNS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read a run's report", "pgtap", rewrite(M10D_RUN, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("catalog editors read a run's staged entries", "pgtap", rewrite(M10D_RECORDS, M10D_ADMIN, "perform private.require_active_staff('catalog_editor');")),
+  sql("moderators read the system view", "pgtap", rewrite(M10D_SYSTEM, M10D_ADMIN, "perform private.require_active_staff('moderator');")),
+  sql("anon may call the system view", "pgtap", "grant execute on function public.get_system_status() to anon;"),
+  // What they return
+  sql("a run shows its lease id", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'lease_id', p_run.lease_id,\n    'lease_live', p_run.status = 'running'")),
+  sql("a run shows its checkpoint", "pgtap", rewrite(M10D_SUMMARY, "    'lease_live', p_run.status = 'running'", "    'checkpoint', p_run.checkpoint,\n    'lease_live', p_run.status = 'running'")),
+  sql("a run's stats keep anything", "pgtap", rewrite(M10D_SUMMARY, "              where pg_catalog.jsonb_typeof(s.value) = 'number')", "              where true)")),
+  sql("a staged entry shows its raw payload", "pgtap", rewrite(M10D_RECORDS, "      'title', pg_catalog.left(pr.payload ->> 'title', 200),", "      'title', pr.payload::text,")),
+  sql("the system view names the importer's connection limit", "pgtap", rewrite(M10D_SYSTEM, "      'login_enabled', coalesce(", "      'connection_limit', (select r.rolconnlimit from pg_catalog.pg_roles r where r.rolname = 'catalog_importer'),\n      'login_enabled', coalesce(")),
+  // Bounds and filters
+  sql("a page of runs has no upper bound", "pgtap", rewrite(M10D_RUNS, "limit least(greatest(coalesce(p_limit, 25), 1), 100)", "limit greatest(coalesce(p_limit, 25), 1)")),
+  sql("a page of entries has no upper bound", "pgtap", rewrite(M10D_RECORDS, "limit least(greatest(coalesce(p_limit, 50), 1), 100)", "limit greatest(coalesce(p_limit, 50), 1)")),
+  sql("an unknown run status is accepted", "pgtap", rewrite(M10D_RUNS, "if (p_status is not null and p_status not in ('running', 'completed', 'failed', 'abandoned'))", "if false")),
+  // The one write: resolving a reclassification item
+  sql("a resolution needs no reason", "pgtap", rewrite(M10D_RESOLVE, "v_resolution := private.require_reason(p_resolution);", "v_resolution := coalesce(nullif(pg_catalog.btrim(p_resolution), ''), 'none');")),
+  sql("an item can be resolved twice", "pgtap", rewrite(M10D_RESOLVE, "where c.id = p_id and c.action = 'queued' and c.resolved_at is null", "where c.id = p_id and c.action = 'queued'")),
+  sql("a resolution isn't audited", "pgtap", rewrite(M10D_RESOLVE, "  perform private.record_catalog_audit(v_me, 'catalog_review_resolved'", "  perform 1 where false and private.record_catalog_audit(v_me, 'catalog_review_resolved'")),
+  sql("anyone signed in may resolve items", "pgtap", rewrite(M10D_RESOLVE, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations };

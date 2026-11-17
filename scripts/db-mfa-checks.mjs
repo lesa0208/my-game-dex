@@ -410,6 +410,45 @@ try {
     check("no client can reach provenance", !(await fetch(`${api}/rest/v1/catalog_record_origins?select=id`, { headers: { ...asUser(creatorAal2.access_token), "Accept-Profile": "private" } })).ok);
     psql(`delete from public.releases where game_id in ('${game}', '${adminGame}');`);
   }
+
+  section("9. Import monitoring and the system view over the API, administrators only (M10d)");
+  {
+    const reads = [
+      ["get_import_providers", {}],
+      ["get_import_runs", { p_limit: 5 }],
+      ["get_import_run", { p_run: randomUUID() }],
+      ["get_import_run_records", { p_run: randomUUID() }],
+      ["get_system_status", {}],
+    ];
+    const every = async (token, test) => (await Promise.all(reads.map(([fn, args]) => rpc(token, fn, args)))).every(test);
+    const anonAll = await Promise.all(reads.map(([fn, args]) =>
+      fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) })));
+    check("anon is refused by PostgreSQL itself, for each read", anonAll.every((r) => r.status === 401));
+    const serviceAll = await Promise.all(reads.map(([fn, args]) => fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: service, body: JSON.stringify(args) })));
+    check("so is service_role, which has no grant", serviceAll.every((r) => r.status === 401 || r.status === 403));
+    const collector = await createUser();
+    check("a collector at aal2 is refused", await every((await elevate(api, anonKey, await signIn(collector))).access_token, refused));
+    const editor = await createUser("catalog_editor");
+    check("so is a catalog editor at aal2 (D8)", await every((await elevate(api, anonKey, await signIn(editor))).access_token, refused));
+    const moderator = await createUser("moderator");
+    check("and a moderator", await every((await elevate(api, anonKey, await signIn(moderator))).access_token, refused));
+    const administrator = await createUser("admin");
+    const adminAal1 = await signIn(administrator);
+    check("an administrator at aal1 is refused", await every(adminAal1.access_token, refused));
+    const adminAal2 = await elevate(api, anonKey, adminAal1);
+    const results = await Promise.all(reads.map(([fn, args]) => rpc(adminAal2.access_token, fn, args)));
+    check("at aal2, an administrator reads each", results.every((r) => r.status === 200), results.map((r) => r.status).join(","));
+    check("an unknown run is null, and has no entries", results[2].body === null && Array.isArray(results[3].body) && results[3].body.length === 0);
+    const system = results[4].body;
+    check("the system view says whether the importer can log in, and nothing about how",
+      typeof system?.importer?.login_enabled === "boolean" && Object.keys(system.importer).sort().join(",") === "last_run_at,leases_expired,login_enabled,runs_running");
+    const text = JSON.stringify(results.map((r) => r.body));
+    check("no key, address, lease, checkpoint or payload is returned",
+      ![serviceKey, anonKey, "postgres://", "postgresql://", "lease_id", "checkpoint", "payload", "match_notes", api].some((x) => text.includes(x)));
+    check("an invalid filter gets a plain message", (await rpc(adminAal2.access_token, "get_import_runs", { p_status: "deleted" })).body?.message === "invalid filter");
+    psql(`update public.profiles set account_status = 'suspended' where id = '${administrator.id}';`);
+    check("once suspended, the same administrator's aal2 token is refused", await every(adminAal2.access_token, refused));
+  }
 } catch (error) {
   check("the checks ran to the end", false, error.message);
 } finally {

@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10c are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10d are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -1005,7 +1005,7 @@ Built in M5b ([ADR-046](architecture-decisions.md#adr-046-imports-run-as-a-restr
 
 **Matching.** Titles compare after normalizing case, accents, apostrophes, "&", punctuation, separators and a leading or trailing article. Roman numerals II to IX and "Part N" become numbers; I, V and X don't, because they are often letters. A game's own title and every title its source lists, including romanizations, are indexed in `private.game_title_keys`. An entry matching no game exactly, but exactly one game on the run's platform ignoring word breaks ("ClayFighter", "Clay Fighter"), is matched and says so; several such games mean review, and titles under six characters never match this way. An entry whose main title before a subtitle matches a game is suggested for review, never matched. Several matches always wait for an editor: nothing is merged.
 
-**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. There's no app page for the queue yet. M10d adds one, using the existing `resolve_catalog_review`, which stays an audited write.
+**Reclassification.** When a later snapshot ignores or holds an entry whose source id already has a candidate, the import reconsiders that candidate once. It withdraws it, by setting it `rejected`, only when the source now rejects it with explicit evidence (a digital service, another platform, a prototype, a pirate copy, a hack, not a game, a bad dump) and the candidate is unpublished, unverified, without field locks, created by an import, never changed by an editor according to the audit log, and supported by no other source entry. Otherwise it puts the candidate in the editor review queue, `private.catalog_reclassifications`, with the reason and what blocked withdrawal; a held entry is never enough to withdraw. Nothing is deleted, an import never restores a withdrawn candidate, and each withdrawal, queue item and resolution is audited (`catalog_record_withdrawn`, `catalog_review_queued`, `catalog_review_resolved`). Editors read the queue with `get_catalog_review_queue` and close items with `resolve_catalog_review`, which needs a reason. The queue's page is `/admin/catalog/reclassifications` (M10d), using both unchanged; resolving stays an audited write ([M10d](#reference-data-imports-and-system-m10d)).
 
 | Race, tested with a transaction held open | Result |
 | --- | --- |
@@ -1446,6 +1446,9 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | Staff | `/admin/staff` | Administrators |
 | Audit log | `/admin/audit` | Administrators |
 | Ownership | `/admin/ownership` | Administrators. Owner actions show only for the Owner |
+| Reference data ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/reference/*` | Catalog editors and administrators |
+| Imports ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/imports/*` | Administrators. The reclassification queue (`/admin/catalog/reclassifications`) is for catalog editors and administrators |
+| System ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/system` | Administrators |
 
 - **Anyone without the section's role gets the page that doesn't exist (D8).** Staff signed in without verifying their authenticator are sent to verify first.
 - The navigation lists only the sections the viewer's roles allow. The pages offer only what the matrix allows, and the database checks every action again.
@@ -1604,6 +1607,35 @@ The game and release records (M10b) add `review`: how the record came to exist (
 - **Staff can remove their last factor through Auth directly,** bypassing the app's guard. The result is no staff access.
 - **The procedural controls:** that the operator isn't the beneficiary, that approvers are independent, and identity checks, are recorded in case files outside the database.
 - **Enrolling an authenticator needs JavaScript** to show the QR code and setup key.
+
+## Reference data, imports and system (M10d)
+
+Read-only views of what already exists (decisions D5, D7 and D8), in migration `20261122100000` ([ADR-060](architecture-decisions.md#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). Nothing here starts, changes or stops an import, edits reference data, or changes a setting; there are no feature flags. The one write is resolving a reclassification item, through the existing `resolve_catalog_review`.
+
+**Reference data (D5).** Platforms and their families and regional names, media formats and their platform pairings, region codes, markets and hardware requirements are public tables, managed by migrations. The pages read them as anon, cached for hours, after the viewer's staff access is checked; no function was added. Catalog editors and administrators open them.
+
+**The reads (D7, D8).** Each is `SECURITY DEFINER` with an empty `search_path`, executable by `authenticated` only (not anon, `service_role` or the importer), and calls `require_active_staff('admin')` first: an active account, a live verified session (M8b) and the administrator role, or the generic `not permitted`. They write nothing, so nothing is audited, like the other staff reads.
+
+| Function | Returns |
+| --- | --- |
+| `get_import_providers()` | Each source: code, name, terms URL, the reviewed copy's hash and review time, clearance and its note, its runs, those running, its last run, and its source entries (counts stop at 10,000) |
+| `get_import_runs(limit, before, provider, status)` | Runs, newest first, 1 to 100 a page, paged by id, optionally by source and status (`invalid filter` otherwise): source, platform, snapshot name, hash and fetch time, cited terms hash, status, the operator's reason, start and finish, whether a running run's lease is live and until when, and the numbers in its stats |
+| `get_import_run(run)` | One run as above, the operator's pilot report (`catalog_import.run_report`, reused), its failed and held entries, and the candidates it reconsidered (up to 100, with their outcome and resolution, naming nobody); null for an unknown run |
+| `get_import_run_records(run, status, limit, after)` | A run's staged entries in source order, 1 to 100 a page, optionally by status: type, source id, title (at most 200 characters), status, match tier, the held, ignored or error reason, whether it's a possible duplicate or a shared serial, and the record it matched or created |
+| `get_system_status()` | The applied migrations and the latest, whether the importer role can log in, runs in progress and those stopped with an expired lease, the last run, sources and how many are cleared, reference counts, and published games and releases (stopping at 10,000) |
+
+- **Never returned:** a run's lease id or checkpoint, a source entry's raw payload or match notes, a credential, connection string, address, setting, environment value, version string, or any detail of the importer role beyond whether it can log in.
+- **Catalog editors don't read import runs or sources (D8).** Their reclassification queue names each release and the reason, and links to the release's record.
+
+**The reclassification queue.** `/admin/catalog/reclassifications` lists open items, oldest first, through `get_catalog_review_queue`, with each release as the editor may read it. Resolving an item calls `resolve_catalog_review` (M5b, unchanged), which:
+- needs an active catalog editor or administrator with a verified session (`begin_catalog_edit`), and a reason of 1 to 500 characters;
+- closes only an open, queued item: a withdrawn or resolved one is `record unavailable`;
+- records who resolved it, when and how, and audits it (`catalog_review_resolved`, with the reason and the item), so the release's history shows it;
+- changes no catalog record, so it needs no recent verification (the D3 matrix lists it with the other writes that need only a live session).
+
+The page labels it as the one write here, beside a reason field that says "Visible to other catalog staff." It works without JavaScript and redirects back with a fixed notice or error.
+
+**Tests.** `38_imports_system` covers the grants and definitions, every refusal (anon, a collector, an editor, a moderator, a suspended administrator, an administrator at aal1), the fixed keys, the bounds and filters, that no lease, checkpoint or payload appears, the system view, and the resolution's rules, audit and its leaving the release unchanged. `db-mfa-checks` section 9 does the same over the API with real sessions. `app:reference-checks` drives the pages as each role, including a forged resolution, that every reference, import and system page has no writing form, and that none shows a key or address; `app:a11y-checks` audits each page at every width. The 18 `m10d` mutations prove the tests catch each weakening.
 
 ## Assigning the first administrator
 

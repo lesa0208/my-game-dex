@@ -1,6 +1,6 @@
 # Database schema
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10c are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10d are implemented, in `supabase/migrations/`, and this document describes those tables. A few tables are designed but not built; each is marked **Planned, not built**, with the milestone it waits for. The SQL here illustrates the design and isn't a migration.
 
 This is the table-by-table reference for My Game Dex on Supabase and PostgreSQL.
 

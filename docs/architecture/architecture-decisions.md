@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e; M10a, M10b and M10c are built. Each step needs the product owner's authorization.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e; M10a to M10d are built. Each step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -67,6 +67,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database) | The admin overview shows role-scoped, bounded counts, decided in the database |
 | [058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log) | Catalog history is an allow-listed view of the audit log |
 | [059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it) | A record's creator is kept privately, and never reviews it |
+| [060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables) | Imports and the system are read-only views for administrators, and reference data is the public tables |
 
 ## Decisions requiring product-owner approval
 
@@ -220,10 +221,10 @@ Approved by the product owner on 2026-11-16, with the M10 plan. M10 is built in 
 | **D2** | Staff-created records | **Approved.** A staff member must not verify or publish a game or release they created, so direct creation keeps the same no-self-review rule as member submissions. Before `submitted_by` changes, M10c reviews its whole lifecycle (publication, audit provenance, merges, tests) and proposes how the creator stays recorded until an independent review. **Done in M10c** with a private provenance record, leaving `submitted_by` as it was ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). |
 | **D3** | Fresh MFA for sensitive catalog work | **Approved.** Verifying, publishing and protected edits to published records need a TOTP verification in the last 10 minutes, checked in the database, so direct API calls are held to it too (M10c). **Done in M10c,** with excluding and restoring published releases too ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). |
 | **D4** | Catalog history for editors | **Approved.** Catalog editors may read a sanitized, bounded history of the catalog records they may work on. It shows no staff-account events, private account information, emails, purchase data or unrelated audit rows (M10b). **Done in M10b** ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). |
-| **D5** | Reference data | **Approved.** Platforms, markets, regions and formats stay managed by migrations, and read-only in M10. |
+| **D5** | Reference data | **Approved.** Platforms, markets, regions and formats stay managed by migrations, and read-only in M10. **Done in M10d:** read-only pages for catalog editors, from the public tables ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). |
 | **D6** | Genres and franchises | **Approved.** Deferred to the Game Details milestone. The schema document marks them, and every other designed-but-unbuilt table, as planned. **Done in M10a.** |
-| **D7** | System settings | **Approved.** A read-only view of the operational configuration. No editable settings or feature flags in M10 (M10d). |
-| **D8** | Imports | **Approved.** Import runs and provider information are for administrators only. Scraping, provider integration and automated importing aren't authorized in M10. Monitoring imports is read-only; resolving a reclassification item is an audited write, through the existing `resolve_catalog_review`, and is described as one (M10d). |
+| **D7** | System settings | **Approved.** A read-only view of the operational configuration. No editable settings or feature flags in M10 (M10d). **Done in M10d** ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). |
+| **D8** | Imports | **Approved.** Import runs and provider information are for administrators only. Scraping, provider integration and automated importing aren't authorized in M10. Monitoring imports is read-only; resolving a reclassification item is an audited write, through the existing `resolve_catalog_review`, and is described as one (M10d). **Done in M10d** ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). |
 
 ### Needed before launch, may need legal advice
 
@@ -1053,6 +1054,29 @@ The full audit log (`get_audit_events`) stays administrators' only.
 - **Unknown records need two administrators** to verify and publish.
 - **Covered by** `37_catalog_provenance`, `db-catalog-checks`, `app:editing-checks` and the 20 `m10c` mutations.
 
+**Accepted with M10c** (the product owner's review of commit `c4e2b6b`):
+- `set_game_relation` needs a recent verification whenever either game is published.
+- `remove_game_alias` refuses excluded and merged games.
+- A restoration brings back previously reviewed content, because every editor function refuses an excluded record.
+- Indirect publication and pairings were examined, and no bypass was found.
+
+**Deferred hardening (M10c review).** A database trigger that refuses changes to an excluded record, whichever function makes them, so that keeping excluded records unchanged doesn't rest on each editor function. It needs its own compatibility analysis first: account deletion (which clears `submitted_by` and `verified_by` on those rows), foreign keys and their cascades, restoration, and legitimate maintenance. Not in M10d, unless a new material vulnerability is found, which would be reported before the scope grows.
+
+### ADR-060: Imports and the system are read-only views for administrators, and reference data is the public tables
+
+**Decision.** M10d, for decisions D5, D7 and D8 (migration `20261122100000`; [security-rls.md](security-rls.md#reference-data-imports-and-system-m10d)).
+- **Reference data (D5)** is read from the public, migration-managed tables, as anon and cached, like the editing forms' choices. No function, form or endpoint changes it. The pages are for catalog editors and administrators, who use the lists.
+- **Imports (D8)** are five new reads, for administrators only, each `SECURITY DEFINER` with an empty `search_path`, `require_active_staff('admin')` first and bounded results: `get_import_providers`, `get_import_runs` (1 to 100 a page, by source and status), `get_import_run` (the operator's existing pilot report, `catalog_import.run_report`, reused), `get_import_run_records` (1 to 100 entries a page, by status) and `get_system_status`. They return fixed keys: never a lease id, checkpoint, raw payload or match notes, and only the numbers in a run's stats.
+- **The reclassification queue** is a catalog page for editors, using the existing `get_catalog_review_queue` and `resolve_catalog_review` (M5b), unchanged. Resolving is the only write in M10d: it needs an active editor with a verified session and a reason, closes only the queue item, changes no catalog record, and is audited (`catalog_review_resolved`), so the record's history shows it. It needs no recent verification, as in the D3 matrix, because nothing public changes.
+- **The system view (D7)** shows the applied migrations, whether the importer role can log in, runs in progress and stopped ones, sources and their clearance, counts, and the fixed policies. Not the Owner record, which the ownership page shows. No setting, environment value, address, key, version string or role detail beyond the importer's login.
+
+**Why.** Everything shown already exists and was already authorized; the reads only make it visible, in the database's own words, to the role D8 names. Reusing the pilot report keeps one definition of a run's results. Keeping the queue on the existing functions means no new privileged write.
+
+**Trade-offs.**
+- **Editors don't see import runs.** An item in their queue links to its release, not its run; administrators see both.
+- **Reference data is cached for hours,** which is right while only a migration changes it.
+- **Covered by** `38_imports_system`, `db-mfa-checks` section 9, `app:reference-checks`, `app:a11y-checks` and the 18 `m10d` mutations.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -1164,7 +1188,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M7 Catalog workflow** (done: M7a to M7b-2c) | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
 | **M8 Superadmin Foundation** (done) | The Owner record and its protections, live MFA for staff and factor maturity, the staff authority matrix, ownership transfer and recovery, the unified `/admin` and Settings → Security. See [ADR-055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | Staff work needs a protected Owner and verified staff first |
 | **M9 Internationalization** (cancelled) | Not built. The application is English-only ([M10 decision D1](#m10-decisions-the-admin-panel-expansion)) | |
-| **M10 Admin panel expansion** (in progress: M10a to M10c done) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). Then M10d reference data, imports and system, and M10e accounts, audit and staff, each authorized separately ([M10 decisions](#m10-decisions-the-admin-panel-expansion)) | Staff tools before the collector-facing milestones |
+| **M10 Admin panel expansion** (in progress: M10a to M10d done) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). M10d read-only reference data, import monitoring and the system view ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). Then M10e accounts, audit and staff, authorized separately ([M10 decisions](#m10-decisions-the-admin-panel-expansion)) | Staff tools before the collector-facing milestones |
 
 Later groups, in order:
 
@@ -1190,7 +1214,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | Every migration, M0 to M10c, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
+| Migration dependencies | Every migration, M0 to M10d, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
 | Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`; the database, HTTP and browser suites run locally |
 | Reproducible workflow | `npm run db:verify` |
 
@@ -1226,7 +1250,7 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. Continue M10 one authorized step at a time: M10d and M10e, each reviewed before the next.
+1. Continue M10 with M10e, accounts, audit and staff, when authorized.
 2. After M10, the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery.
 3. Create the Supabase project in Frankfurt when authorized, check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project), and meet the [production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.

@@ -67,6 +67,9 @@ insert into approved_function_grants values
   ('get_ownership_status()', 'authenticated'), ('get_my_factor_status()', 'authenticated'),
   -- M10a: the /admin overview's counts, scoped by role. It checks the caller itself.
   ('get_admin_overview()', 'authenticated'),
+  -- M10d: import monitoring and the system view, for administrators. Each checks the caller itself.
+  ('get_import_providers()', 'authenticated'), ('get_import_runs(integer,uuid,text,text)', 'authenticated'), ('get_import_run(uuid)', 'authenticated'),
+  ('get_import_run_records(uuid,text,integer,integer)', 'authenticated'), ('get_system_status()', 'authenticated'),
   -- M10b: catalog search, records and history for editors. Each checks the caller itself.
   ('search_catalog_records(text,text,text,text,integer,text)', 'authenticated'), ('get_game_record(uuid)', 'authenticated'),
   ('get_release_record(uuid)', 'authenticated'), ('get_catalog_record_history(text,uuid,integer,uuid)', 'authenticated'),

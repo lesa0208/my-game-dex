@@ -103,7 +103,7 @@ async function OverviewView() {
               rows={[
                 { label: "Unpublished games", value: count(catalog.games_unpublished, cap) },
                 { label: "Unpublished releases", value: count(catalog.releases_unpublished, cap) },
-                { label: "Import items waiting for reclassification", value: count(catalog.reclassifications_open, cap) },
+                { label: "Import items waiting for reclassification", value: count(catalog.reclassifications_open, cap), href: "/admin/catalog/reclassifications" },
                 { label: "Merges in the last 30 days", value: count(catalog.merges_30_days, cap), href: "/admin/catalog/merges" },
               ]}
             />

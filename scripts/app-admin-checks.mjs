@@ -158,7 +158,8 @@ try {
       }
     }
     const nav = visible((await editor.browser.get("/admin")).html);
-    check("an editor's admin sections are Overview and Catalog only", nav.includes("Catalog") && !/\bStaff\b|Audit log|Ownership/.test(nav.replace(/Admin sections/g, "")));
+    check("an editor's admin sections are Overview, Catalog and Reference only",
+      nav.includes("Catalog") && nav.includes("Reference") && !/\bStaff\b|Audit log|Ownership|\bImports\b|\bSystem\b/.test(nav.replace(/Admin sections/g, "")));
     const unverified = new Browser();
     const page = await unverified.get("/sign-in?next=%2Fadmin");
     const signedIn = await unverified.submit("/sign-in", formWith(page.html, "password"), { email: admin.email, password: admin.password });

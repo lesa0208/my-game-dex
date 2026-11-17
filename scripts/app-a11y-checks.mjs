@@ -327,7 +327,7 @@ try {
   matureFactors(psql, owner.id);
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
-  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership"];
+  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
 
   // M10a: a collector's submission and the fixture's releases, for the catalog pages.
   const form = await collector.http.get("/submit?game=starfall-odyssey");
@@ -380,6 +380,26 @@ try {
     ["release editing", `/admin/catalog/releases/${releaseUs}/edit`],
   );
 
+  // M10d: an import run as the importer leaves it, with a staged entry and an item in the
+  // reclassification queue, so the import and queue pages are opened with data.
+  const importRun = psql(`insert into private.import_runs (provider_code, platform_id, source_name, source_sha256, source_fetched_at, status, stats, started_at, finished_at, reason)
+    values ('no-intro', '${snes}', 'AYB snapshot.dat', repeat('a', 64), now(), 'completed', '{"staged_new": 1}', now(), now(), 'Browser checks') returning id;`);
+  const importRecord = psql(`insert into private.provider_records (provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, match_tier, matched_release_id)
+    values ('no-intro', 'release', 'ayb-1', '{"title": "Starfall Odyssey"}', repeat('1', 64), '${importRun}', 'promoted', 'A', '${releaseUs}') returning id;`);
+  psql(`insert into private.import_run_records (import_run_id, provider_record_id, position) values ('${importRun}', '${importRecord}', 0);
+    insert into private.catalog_reclassifications (release_id, provider_record_id, import_run_id, action, reason) values ('${releaseUs}', '${importRecord}', '${importRun}', 'queued', 'Browser checks: the source now tags it a prototype');`);
+  ok("setup: an import run with a queued reclassification", /^[0-9a-f-]{36}$/.test(importRun) && /^[0-9a-f-]{36}$/.test(importRecord));
+  CATALOG_PAGES.push(["reclassification queue", "/admin/catalog/reclassifications"]);
+  const REFERENCE_PAGES = [
+    ["reference summary", "/admin/reference"],
+    ["platforms", "/admin/reference/platforms"],
+    ["filtered platforms", "/admin/reference/platforms?kind=handheld"],
+    ["platform", "/admin/reference/platforms/snes"],
+    ["media formats", "/admin/reference/formats"],
+    ["regions and markets", "/admin/reference/regions?q=united"],
+    ["hardware requirements", "/admin/reference/requirements"],
+  ];
+
   for (const viewport of WIDTHS) {
     const tag = viewport.tag;
 
@@ -401,9 +421,9 @@ try {
     section(`${tag}: 2. Each role sees its own sections`);
     {
       const expected = {
-        editor: { who: editor, sections: ["Overview", "Catalog"], pages: ["/admin", "/admin/catalog"] },
+        editor: { who: editor, sections: ["Overview", "Catalog", "Reference"], pages: ["/admin", "/admin/catalog", "/admin/reference"] },
         moderator: { who: moderator, sections: ["Overview", "Accounts"], pages: ["/admin", "/admin/accounts"] },
-        admin: { who: admin, sections: ["Overview", "Catalog", "Accounts", "Staff", "Audit log", "Ownership"], pages: ADMIN_PAGES },
+        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
       };
       for (const [name, { who, sections, pages }] of Object.entries(expected)) {
         const s = await signIn(browser, viewport, who);
@@ -469,6 +489,21 @@ try {
       await e.context.close();
     }
 
+    section(`${tag}: 2c. The reference pages (M10d)`);
+    {
+      const e = await signIn(browser, viewport, editor);
+      for (const [name, path] of REFERENCE_PAGES) {
+        await e.page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        const current = await e.page.evaluate(() => document.querySelector('nav[aria-label="Admin sections"] a[aria-current="page"]')?.textContent?.trim() ?? "");
+        ok(`${tag} editor ${name}: in the admin frame, with Reference as the current section`, current === "Reference", current);
+        await audit(e.page, `editor ${name}`, tag);
+        await structure(e.page, `editor ${name}`, tag);
+      }
+      await e.page.goto(`${origin}/admin/reference/platforms`, { waitUntil: "networkidle" });
+      await keyboard(e.page, "platforms page", tag);
+      await e.context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -479,6 +514,9 @@ try {
         ["account lookup", `/admin/accounts?handle=${owner.handle}`],
         ["audit log", "/admin/audit"],
         ["ownership", "/admin/ownership"],
+        ["imports", "/admin/imports"],
+        ["import run", `/admin/imports/runs/${importRun}`],
+        ["system", "/admin/system"],
         ["catalog review", "/admin/catalog"],
         ["exclusions", "/admin/catalog/exclusions"],
         ["exclusion detail", `/admin/catalog/exclusions/${exclusionId}`],
@@ -636,6 +674,12 @@ delete from private.catalog_verifications where release_id in (select id from pu
 delete from private.catalog_record_origins where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
 delete from public.releases where product_code in ('AYB-DUP', 'AYB-EXC');
 commit;`);
+  psql(`begin;
+delete from private.catalog_reclassifications where reason like 'Browser checks%';
+delete from private.import_run_records where import_run_id in (select id from private.import_runs where source_name = 'AYB snapshot.dat');
+delete from private.provider_records where import_run_id in (select id from private.import_runs where source_name = 'AYB snapshot.dat');
+delete from private.import_runs where source_name = 'AYB snapshot.dat';
+commit;`);
   // The submission and its release, before the accounts, while they still name their submitter.
   const submitters = [...handles.keys()].map((id) => `'${id}'`).join(",") || "null";
   psql(`begin;
@@ -654,6 +698,7 @@ commit;`);
       + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
       + (select count(*) from private.catalog_merges) + (select count(*) from private.catalog_exclusions)
       + (select count(*) from private.catalog_record_origins) + (select count(*) from private.catalog_verifications)
+      + (select count(*) from private.import_runs) + (select count(*) from private.provider_records) + (select count(*) from private.catalog_reclassifications)
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 
