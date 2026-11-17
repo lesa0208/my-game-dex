@@ -456,6 +456,10 @@ try {
           await s.page.goto(`${origin}/admin/accounts?handle=${collector.handle}`, { waitUntil: "networkidle" });
           await audit(s.page, "moderator account lookup", tag);
           await structure(s.page, "moderator account lookup", tag);
+          // M10 integration review: the history without the reasons staff wrote, and saying so.
+          const history = await visibleText(s.page);
+          ok(`${tag} moderator: the account history withholds staff reasons and says so`, !history.includes("Browser checks:") && history.includes("shown to administrators only")
+            && /Account suspended/.test(history));
         }
         await s.context.close();
       }

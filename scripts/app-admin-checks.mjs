@@ -281,7 +281,9 @@ try {
     check("an account shows its moderation summary", text.includes("Moderation") && /Suspended Once/.test(text) && /Reinstated Once/.test(text));
     check("and its last status change, and who made it", text.includes(`Reinstated by @${moderator.handle}`));
     check("a moderator sees its status history, not its staff roles", text.includes("Account suspended") && text.includes("Account reinstated") && !text.includes("Role granted"));
-    check("with the staff's reasons", text.includes("Spam reports") && text.includes("Appeal accepted"));
+    // M10 integration review: moderators see what happened, never the reason staff wrote.
+    check("without the reasons staff wrote, anywhere in the page", !page.html.includes("Spam reports") && !page.html.includes("Appeal accepted"));
+    check("and is told reasons are for administrators", text.includes("The reasons staff wrote are shown to administrators only"));
     check("and no link into the audit log, which is for administrators", !page.html.includes('href="/admin/audit?'));
     check("the page explains who can do what", text.includes("Who can do what") && text.includes("suspend or reinstate collectors"));
     // Section 5 made the collector a moderator: another moderator may not change them.
@@ -290,6 +292,7 @@ try {
     page = await admin.browser.get(`/admin/accounts?handle=${collector.handle}`);
     text = visible(page.html);
     check("an administrator also sees its staff roles", text.includes("Role granted") && text.includes("Role removed"));
+    check("and the staff's reasons, with no withheld notice", text.includes("Spam reports") && text.includes("Appeal accepted") && !text.includes("shown to administrators only"));
     check("and is offered one writing form, the status change", writing(page.html).length === 1 && writing(page.html)[0].includes('name="reason"'), `${writing(page.html).length} forms`);
     check("and links to every event about it", page.html.includes(`href="/admin/audit?target=${collector.handle}"`));
     page = await moderator.browser.get(`/admin/accounts?handle=${owner.handle}`);

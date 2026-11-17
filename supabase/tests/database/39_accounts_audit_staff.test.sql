@@ -4,7 +4,7 @@
 -- transaction that rolls back, on the local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(76);
+select plan(85);
 
 create function pg_temp.session(p_user uuid, p_verified timestamptz) returns jsonb language plpgsql as $mfa$
 begin
@@ -158,7 +158,7 @@ select is(pg_temp.search('acc')::text ~ 'example\.test', false, 'no email addres
 create function pg_temp.summary(who text, h text) returns jsonb language sql as $$ select pg_temp.as_user(who, format('select public.get_account_summary(%L)::text', h))::jsonb $$;
 select is(pg_temp.as_user('b1', 'select coalesce(public.get_account_summary(''acc_zz'')::text, ''none'')'), 'none', 'an unknown handle is null');
 select is(pg_temp.as_user('b1', 'select public.get_account_summary(''a b'')::text'), 'error: invalid handle', 'a malformed handle is refused');
-select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.summary('b1', 'acc_c1')) k), 'account,cap,history,moderation', 'fixed keys');
+select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.summary('b1', 'acc_c1')) k), 'account,cap,history,moderation,reasons_shown', 'fixed keys');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.summary('b1', 'acc_c1') -> 'account') k),
   'account_status,display_name,handle,id,member_since,owner,roles', 'the account: no email, collection or private setting');
 select is(pg_temp.summary('b1', 'acc_c1')::text ~ 'example\.test|collection_visibility|"bio"', false, 'and none of them appears');
@@ -174,7 +174,22 @@ select is((select string_agg(h ->> 'action', ',') from jsonb_array_elements(pg_t
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.summary('a1', 'acc_c1') -> 'history' -> 0) k),
   'about_account,action,actor_handle,by_account,details,id,occurred_at,outcome,reason,target_handle', 'each event with fixed keys: no account ids');
 select is(pg_temp.summary('a1', 'acc_c1')::text ~ 'never shown|"token"|abc"', false, 'and only allow-listed details');
-select is(pg_temp.summary('b1', 'acc_c2') -> 'history' -> 0 ->> 'reason', 'Old case', 'history isn''t limited to a recent window');
+select is(pg_temp.summary('a1', 'acc_c2') -> 'history' -> 0 ->> 'reason', 'Old case', 'history isn''t limited to a recent window');
+
+-- M10 integration review: moderators see what happened, never the reason staff wrote.
+select is(pg_temp.summary('b1', 'acc_c1') ->> 'reasons_shown', 'false', 'a moderator is told reasons are withheld');
+select is(pg_temp.summary('a1', 'acc_c1') ->> 'reasons_shown', 'true', 'an administrator is not');
+select is((select count(*)::int from jsonb_array_elements(pg_temp.summary('b1', 'acc_c1') -> 'history') h where h ->> 'reason' is not null), 0, 'a moderator''s history has no reasons');
+select is(pg_temp.summary('b1', 'acc_c1')::text ~ 'Spam in bio|Appeal accepted|Refused:', false, 'and no reason text appears anywhere');
+select is((select string_agg(h ->> 'action' || '/' || (h ->> 'outcome') || '/' || (h ->> 'actor_handle') || '/' || (h -> 'details')::text, ' | ')
+    from jsonb_array_elements(pg_temp.summary('b1', 'acc_c1') -> 'history') h),
+  'staff_change_refused/refused/acc_b1/{"code": "admin_required", "status": "suspended", "operation": "set_account_status"} | account_reinstated/succeeded/acc_a1/{"to": "active", "from": "suspended"} | account_suspended/succeeded/acc_b1/{"to": "suspended", "from": "active"}',
+  'but keeps each action, outcome, actor, status change and refusal code');
+select is((select count(*)::int from jsonb_array_elements(pg_temp.summary('b1', 'acc_c1') -> 'history') h where h ->> 'occurred_at' is null), 0, 'and when it happened');
+select is((select string_agg(h ->> 'reason', ' | ') from jsonb_array_elements(pg_temp.summary('a1', 'acc_c1') -> 'history') h where h ->> 'action' like 'account_%'),
+  'Appeal accepted | Spam in bio', 'an administrator keeps the full reasons');
+select is(pg_temp.as_user('a1', $$select public.get_audit_log(100, null, 'account_suspended', null, null, null, 'acc_c1') -> 0 ->> 'reason'$$), 'Spam in bio', 'as does the audit log');
+select is(pg_temp.as_user('a1', 'select public.get_audit_events()::text') ~ '^error: function public.get_audit_events\(\) does not exist', true, 'the retired raw audit read can''t be called');
 
 -- ---------------------------------------------------------------------------
 -- 5. The audit log: allow-listed details, filters and bounds

@@ -153,7 +153,8 @@ export type AuditEntry = {
   occurred_at: string;
   action: string;
   outcome: string;
-  reason: string;
+  /** Null in a moderator's account history: the reason staff wrote is for administrators. */
+  reason: string | null;
   by_account: boolean;
   actor_handle: string | null;
   about_account: boolean;
@@ -202,6 +203,8 @@ export async function searchAccounts(query: string): Promise<Account[] | "error"
 
 export type AccountSummary = {
   cap: number;
+  /** False for moderators: their history carries no reasons (M10 integration review). */
+  reasons_shown: boolean;
   account: Account & { member_since: string };
   moderation: {
     suspensions: number;

@@ -170,7 +170,7 @@ select is((select count(*)::int from fns f where pg_temp.as_aal1('a6', f.call) =
 select is((select count(*)::int from fns f where pg_temp.as_user('e7', f.call) = 'error: not permitted'), 4, 'a suspended catalog editor is refused, even at aal2');
 select is((select count(*)::int from fns f where pg_temp.as_user('e4', f.call) not like 'error:%'), 4, 'a catalog editor may call all four');
 select is((select count(*)::int from fns f where pg_temp.as_user('a2', f.call) not like 'error:%'), 4, 'and so may an administrator');
-select is(pg_temp.as_user('e4', 'select count(*)::text from public.get_audit_events(5)'), 'error: not permitted', 'the full audit log stays administrators'' only');
+select is(pg_temp.as_user('e4', 'select public.get_audit_log(5)::text'), 'error: not permitted', 'the full audit log stays administrators'' only');
 
 -- ---------------------------------------------------------------------------
 -- 2. Search

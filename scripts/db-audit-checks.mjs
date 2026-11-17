@@ -131,7 +131,7 @@ const functions = [
   ["grant_staff_role", { p_user: randomUUID(), p_role: "moderator", p_reason: "x" }],
   ["revoke_staff_role", { p_user: randomUUID(), p_role: "moderator", p_reason: "x" }],
   ["set_account_status", { p_user: randomUUID(), p_status: "suspended", p_reason: "x" }],
-  ["get_audit_events", {}],
+  ["get_audit_log", {}],
 ];
 
 async function permissions() {
@@ -172,11 +172,17 @@ async function flow() {
   check("can still unblock (D6)", (await call(member, "unblock_user", { p_target: other.id })).ok);
 
   section("Audit log access");
-  result = await call(admin, "get_audit_events", { p_limit: 100 });
-  const mine = Array.isArray(result.body) ? result.body.filter((row) => [admin.id, moderator.id, member.id].includes(row.target_profile_id)) : [];
+  // get_audit_log (M10e) replaced get_audit_events in the M10 integration review.
+  const mine = [];
+  for (const user of [admin, moderator, member]) {
+    result = await call(admin, "get_audit_log", { p_limit: 100, p_target_handle: user.handle });
+    if (Array.isArray(result.body)) mine.push(...result.body);
+  }
   check("an admin reads the log", result.ok && mine.length === 3, result.message);
-  check("rows carry the action and reason", mine.some((row) => row.action === "account_suspended" && row.reason === "Spam" && row.actor_id === moderator.id));
-  check("a moderator can't read the log", refusedWith(await call(moderator, "get_audit_events", {}), "not permitted"));
+  check("rows carry the action and reason, by handle", mine.some((row) => row.action === "account_suspended" && row.reason === "Spam" && row.actor_handle === moderator.handle));
+  check("and no account id or raw metadata", mine.every((row) => !("actor_id" in row) && !("target_profile_id" in row) && !("metadata" in row)));
+  check("the retired raw read can't be called", (await call(admin, "get_audit_events", {})).status === 404);
+  check("a moderator can't read the log", refusedWith(await call(moderator, "get_audit_log", {}), "not permitted"));
   result = await setStatus(moderator, member, "active", "Appeal");
   check("the moderator reinstates the account", result.ok && accountStatus(member) === "active", result.message);
 }

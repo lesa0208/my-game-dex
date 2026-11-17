@@ -31,7 +31,7 @@ export function AuditEntryItem({ entry, auditLinks }: { entry: AuditEntry; audit
           </>
         ) : null}
       </p>
-      <p className="mt-1 wrap-break-word">{entry.reason}</p>
+      {entry.reason !== null ? <p className="mt-1 wrap-break-word">{entry.reason}</p> : null}
       {details.length || record ? (
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {details.map((d) => (

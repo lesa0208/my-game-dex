@@ -318,7 +318,7 @@ select is((select array_agg(p.oid::regprocedure::text collate "C" order by p.oid
   where n.nspname in ('public', 'private') and p.prosrc ~ 'is_designated_owner|platform_owner|owner_authority|can_exercise_owner|owner_candidate|role_change_refusal'),
   array['accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'cancel_owner_recovery(uuid,text)', 'confirm_owner_recovery(uuid)', 'find_account_by_handle(text)',
     -- M10e: the account and staff reads say whether an account is the Owner's, as find_account_by_handle does.
-    'get_account_summary(text)', 'get_my_admin_access()', 'get_ownership_status()', 'get_staff_members()', 'get_staff_overview()', 'grant_staff_role(uuid,staff_role,text)',
+    'get_account_summary(text)', 'get_my_admin_access()', 'get_ownership_status()', 'get_staff_overview()', 'grant_staff_role(uuid,staff_role,text)',
     'private.assign_initial_owner(text,text)', 'private.begin_owner_recovery(text,text,text,text,boolean)', 'private.can_exercise_owner_authority()', 'private.close_owner_designations(uuid,uuid,text,text)',
     'private.complete_owner_recovery(uuid,text)', 'private.is_designated_owner(uuid)', 'private.operator_set_owner_status(account_status,text)', 'private.owner_authority_refusal()', 'private.owner_integrity()',
     'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.role_change_refusal(uuid,uuid,staff_role)',

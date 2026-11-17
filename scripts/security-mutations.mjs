@@ -174,8 +174,10 @@ export const m3Mutations = [
 const GRANT = "public.grant_staff_role(uuid, public.staff_role, text)";
 const REVOKE = "public.revoke_staff_role(uuid, public.staff_role, text)";
 const STATUS = "public.set_account_status(uuid, public.account_status, text)";
-// M8d replaced it with the filtered version (A2); the m4 mutations apply to that one.
-const AUDIT_READ = "public.get_audit_events(integer, uuid, text, text, text, timestamptz, timestamptz)";
+// M8d replaced it with the filtered version (A2). The M10 integration review retired
+// get_audit_events; these historical mutations now target its replacement, get_audit_log.
+const AUDIT_READ = "public.get_audit_log(integer, uuid, text, text, text, text, text, timestamptz, timestamptz)";
+const AUDIT_VIEW = "private.audit_event_view(private.audit_events)";
 const ROLE_REFUSAL = "private.role_change_refusal(uuid, uuid, public.staff_role)";
 
 export const m4Mutations = [
@@ -672,7 +674,8 @@ const SUCCESSION_DOCUMENT = "public.register_succession_document(text, text)";
 const CONFIRM_RECOVERY = "public.confirm_owner_recovery(uuid)";
 const CANCEL_RECOVERY = "public.cancel_owner_recovery(uuid, text)";
 const ADMIN_ACCESS = "public.get_my_admin_access()";
-const STAFF_MEMBERS = "public.get_staff_members()";
+// get_staff_members was retired in the M10 integration review; its replacement is held to the same rules.
+const STAFF_MEMBERS = "public.get_staff_overview()";
 const FIND_ACCOUNT = "public.find_account_by_handle(text)";
 const OWNERSHIP_STATUS = "public.get_ownership_status()";
 const FACTOR_STATUS = "public.get_my_factor_status()";
@@ -741,7 +744,7 @@ export const m8Mutations = [
   sql("a refusal writes before refusing", "pgtap", rewrite(GRANT, "  if v_refusal is not null then\n", "  if v_refusal is not null then\n    insert into public.staff_roles (user_id, role, granted_by) values (p_user, 'moderator', v_me) on conflict do nothing;\n")),
   sql("refusals aren't audited", "both", rewrite(STAFF_REFUSAL, "v_audit := private.record_refusal(", "v_audit := null; perform pg_catalog.jsonb_build_array(")),
   sql("attempts on the Owner aren't told apart", "pgtap", rewrite(STAFF_REFUSAL, "case when p_code = 'owner_protected' then 'owner_protection_refused' else 'staff_change_refused' end", "'staff_change_refused'")),
-  sql("the audit log hides the outcome", "pgtap", rewrite(AUDIT_READ, "e.metadata, e.outcome", "e.metadata, 'succeeded'::text")),
+  sql("the audit log hides the outcome", "pgtap", rewrite(AUDIT_VIEW, "'outcome', p_event.outcome,", "'outcome', 'succeeded',")),
   // Ownership transfer (D5)
   sql("a transfer needs no Owner authority", "both", rewrite(START_TRANSFER, "  v_refusal := private.owner_authority_refusal();\n  if v_refusal is null and p_to = v_me then", "  v_refusal := null;\n  if v_refusal is null and p_to = v_me then")),
   sql("two transfers may be pending", "both", rewrite(START_TRANSFER, "and t.expires_at > pg_catalog.now()) then\n    v_refusal := 'transfer_pending';", "and false) then\n    v_refusal := 'transfer_pending';")),
@@ -783,8 +786,8 @@ export const m8Mutations = [
   sql("ownership status shows the document's fingerprint", "pgtap", rewrite(OWNERSHIP_STATUS, "'document_registered_at', o.succession_registered_at,", "'document_registered_at', o.succession_registered_at, 'fingerprint', o.succession_fingerprint,")),
   sql("factor status shows others' factors", "pgtap", rewrite(FACTOR_STATUS, "where f.user_id = v_me and f.factor_type = 'totp'", "where f.factor_type = 'totp'")),
   sql("factor status calls unregistered factors mature", "pgtap", rewrite(FACTOR_STATUS, "and r.registered_at <= pg_catalog.now() - interval '24 hours', false)", "and coalesce(r.registered_at, pg_catalog.now()) <= pg_catalog.now(), false)")),
-  sql("the audit log's range is unbounded", "pgtap", rewrite(AUDIT_READ, " or p_until - p_since > interval '366 days'", "")),
-  sql("the audit log takes any action name", "pgtap", rewrite(AUDIT_READ, "    if not (p_action = any (pg_catalog.enum_range(null::private.audit_action)::text[])) then\n      raise exception 'invalid filter' using errcode = '22023';\n    end if;\n", "")),
+  sql("the audit log's range is unbounded", "pgtap", rewrite(AUDIT_READ, " or v_until - v_since > interval '366 days'", "")),
+  sql("the audit log takes any action name", "pgtap", rewrite(AUDIT_READ, "(p_action is not null and not (p_action = any (pg_catalog.enum_range(null::private.audit_action)::text[])))", "false")),
   sql("the factor-status read is exposed to anon", "pgtap", `grant execute on function ${FACTOR_STATUS} to anon;`),
 ];
 
@@ -976,4 +979,21 @@ export const m10eMutations = [
     "'factors', private.totp_factor_count(p.id), 'factor_names', (select pg_catalog.jsonb_agg(f.friendly_name) from auth.mfa_factors f where f.user_id = p.id),")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations };
+// M10 integration review: the retired M8d reads stay retired, and moderators' account
+// history keeps what happened but never the reason staff wrote.
+const M10I_SUMMARY = "public.get_account_summary(text)";
+const M10I_RAW_AUDIT = `create function public.get_audit_events() returns setof private.audit_events language sql stable security definer set search_path = '' as $f$ select * from private.audit_events order by id desc limit 100 $f$;
+grant execute on function public.get_audit_events() to authenticated;`;
+const M10I_RAW_STAFF = `create function public.get_staff_members() returns jsonb language sql stable security definer set search_path = '' as $f$ select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(p)) from public.profiles p where exists (select 1 from public.staff_roles s where s.user_id = p.id) $f$;
+grant execute on function public.get_staff_members() to authenticated;`;
+
+export const m10iMutations = [
+  sql("the raw audit read is back", "both", M10I_RAW_AUDIT),
+  sql("the old staff list is back", "pgtap", M10I_RAW_STAFF),
+  sql("moderators see the reasons staff wrote", "pgtap", rewrite(M10I_SUMMARY, "case when v_admin then private.audit_event_view(e)", "case when true then private.audit_event_view(e)")),
+  sql("a summary claims reasons are shown", "pgtap", rewrite(M10I_SUMMARY, "'reasons_shown', v_admin,", "'reasons_shown', true,")),
+  sql("moderators lose a refusal's code and status change", "pgtap", rewrite(M10I_SUMMARY, "(private.audit_event_view(e) - 'reason')", "(private.audit_event_view(e) - 'reason' - 'details')")),
+  sql("administrators lose the reasons too", "pgtap", rewrite(M10I_SUMMARY, "case when v_admin then private.audit_event_view(e)", "case when false then private.audit_event_view(e)")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations };

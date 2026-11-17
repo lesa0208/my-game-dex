@@ -170,6 +170,7 @@ async function AccountsView({ searchParams }: { searchParams: PageProps<"/admin/
             </h2>
             <p className="text-xs text-muted-foreground">
               {access.admin ? "Status changes, staff roles and refused changes, newest first: the last 20." : "Status changes and refused status changes, newest first: the last 20."}
+              {summary.reasons_shown ? null : " The reasons staff wrote are shown to administrators only."}
             </p>
             {summary.history.length ? (
               <ol className="flex flex-col gap-2">

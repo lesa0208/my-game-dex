@@ -141,23 +141,23 @@ try {
   {
     const aal1 = await signIn(admin);
     check("an admin's password-only session is aal1", decodeClaims(aal1.access_token).aal === "aal1");
-    check("at aal1, a staff function is refused with the generic message", refused(await rpc(aal1.access_token, "get_audit_events")));
+    check("at aal1, a staff function is refused with the generic message", refused(await rpc(aal1.access_token, "get_audit_log")));
     const elevated = await elevate(api, anonKey, aal1);
     Object.assign(admin, { factorId: elevated.factorId, secret: elevated.totpSecret });
     check("after a TOTP verification, the session is aal2", decodeClaims(elevated.access_token).aal === "aal2");
-    check("and the same function works", (await rpc(elevated.access_token, "get_audit_events")).status === 200);
-    check("the earlier aal1 token still can't use it", refused(await rpc(aal1.access_token, "get_audit_events")));
+    check("and the same function works", (await rpc(elevated.access_token, "get_audit_log")).status === 200);
+    check("the earlier aal1 token still can't use it", refused(await rpc(aal1.access_token, "get_audit_log")));
 
     const out = await auth("/logout?scope=local", elevated.access_token, {});
     check("after signing out", out.status === 204, `status ${out.status}`);
-    check("the aal2 token, unexpired, is refused", refused(await rpc(elevated.access_token, "get_audit_events")));
+    check("the aal2 token, unexpired, is refused", refused(await rpc(elevated.access_token, "get_audit_log")));
   }
 
   // -------------------------------------------------------------------------
   section("2. Factor removal");
   {
     const s1 = await signInAal2(admin);
-    check("a new aal2 session works", (await rpc(s1.access_token, "get_audit_events")).status === 200);
+    check("a new aal2 session works", (await rpc(s1.access_token, "get_audit_log")).status === 200);
     // Session A ends verified with a spare factor; session B, a separate sign-in, with the first.
     const extra = await auth("/factors", s1.access_token, { factor_type: "totp", friendly_name: "spare" });
     const ch = await auth(`/factors/${extra.body.id}/challenge`, s1.access_token, {});
@@ -168,14 +168,14 @@ try {
       && psql(`select count(distinct factor_id) from auth.sessions where id in ('${decodeClaims(sessionA.access_token).session_id}', '${decodeClaims(sessionB.access_token).session_id}');`) === "2");
     const removed = await auth(`/factors/${admin.factorId}`, sessionA.access_token, null, "DELETE");
     check("the admin removes their first factor", removed.status === 200, `status ${removed.status}`);
-    check("a token from the session verified with it, still claiming aal2, is refused", refused(await rpc(sessionB.access_token, "get_audit_events")));
-    check("the session verified with the remaining factor keeps working", (await rpc(sessionA.access_token, "get_audit_events")).status === 200);
+    check("a token from the session verified with it, still claiming aal2, is refused", refused(await rpc(sessionB.access_token, "get_audit_log")));
+    check("the session verified with the remaining factor keeps working", (await rpc(sessionA.access_token, "get_audit_log")).status === 200);
     Object.assign(admin, { factorId: extra.body.id, secret: extra.body.totp.secret });
     const s3 = await signInAal2(admin);
-    check("a new session with the remaining factor works", (await rpc(s3.access_token, "get_audit_events")).status === 200);
+    check("a new session with the remaining factor works", (await rpc(s3.access_token, "get_audit_log")).status === 200);
     const adminRemoval = await fetch(`${api}/auth/v1/admin/users/${admin.id}/factors/${admin.factorId}`, { method: "DELETE", headers: service });
     check("when the Admin API removes the last factor", adminRemoval.ok, `status ${adminRemoval.status}`);
-    check("that session is refused too", refused(await rpc(s3.access_token, "get_audit_events")));
+    check("that session is refused too", refused(await rpc(s3.access_token, "get_audit_log")));
   }
 
   // -------------------------------------------------------------------------
@@ -343,7 +343,7 @@ try {
     check("a collector still can't read the unpublished game directly", (await collectorRead.json()).length === 0);
     const publicSearch = await fetch(`${api}/rest/v1/rpc/search_catalog`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_query: title }) });
     check("and the public search doesn't find it", (await publicSearch.json()).items?.length === 0);
-    check("the full audit log is still administrators' only", refused(await rpc(editorAal2.access_token, "get_audit_events", { p_limit: 5 })));
+    check("the full audit log is still administrators' only", refused(await rpc(editorAal2.access_token, "get_audit_log", { p_limit: 5 })));
     psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
     check("once suspended, the same editor's aal2 token is refused", refused(await rpc(editorAal2.access_token, "search_catalog_records", { p_kind: "games", p_query: title })));
   }

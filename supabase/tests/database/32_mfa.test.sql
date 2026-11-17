@@ -111,8 +111,8 @@ select is(pg_temp.as_pg('a1', '01', 'aal2', $$select private.mfa_recent('20 minu
 select is(pg_temp.as_pg('a1', '01', 'aal2', $$select private.require_recent_mfa()::text$$), pg_temp.u('a1')::text, 'a recent verification passes');
 
 -- 3. Staff privileges need MFA, on every path
-select is(pg_temp.as_client('a1', '02', 'aal1', 'select count(*)::text from public.get_audit_events()'), 'error: not permitted', 'an admin at aal1 can''t use a staff function');
-select is(pg_temp.as_client('a1', '01', 'aal2', 'select (count(*) >= 0)::text from public.get_audit_events()'), 'true', 'at aal2 they can');
+select is(pg_temp.as_client('a1', '02', 'aal1', 'select public.get_audit_log()::text'), 'error: not permitted', 'an admin at aal1 can''t use a staff function');
+select is(pg_temp.as_client('a1', '01', 'aal2', $$select jsonb_typeof(public.get_audit_log())$$), 'array', 'at aal2 they can');
 select is(pg_temp.as_pg('a1', '02', 'aal1', $$select private.has_staff_role('admin')::text$$), 'false', 'has_staff_role is false at aal1');
 select is(pg_temp.as_pg('e2', '03', 'aal1', $$select private.is_catalog_editor()::text$$), 'false', 'so is is_catalog_editor, which the catalog read policies use');
 select is(pg_temp.as_pg('e2', '03', 'aal2', $$select private.is_catalog_editor()::text$$), 'true', 'and true at aal2');
@@ -175,7 +175,7 @@ select pg_temp.verified_at('23', interval '1 minute');
 select is(pg_temp.as_pg('f4', '23', 'aal2', 'select private.owner_authority_refusal()'), 'owner_ineligible', 'with one mature factor left, the Owner has no Owner authority');
 select ok(private.is_designated_owner(pg_temp.u('f4')), 'but is still the designated Owner');
 select is(pg_temp.as_pg(null, null, null, $$delete from public.profiles where id = '$$ || pg_temp.u('f4') || $$' returning 'deleted'$$), 'error: account protected', 'and still protected');
-select is(pg_temp.as_client('f4', '23', 'aal2', 'select (count(*) >= 0)::text from public.get_audit_events()'), 'true', 'and keeps ordinary admin access with the remaining factor');
+select is(pg_temp.as_client('f4', '23', 'aal2', $$select jsonb_typeof(public.get_audit_log())$$), 'array', 'and keeps ordinary admin access with the remaining factor');
 -- A replacement, enrolled with the remaining factor and registered now, waits 24 hours.
 select pg_temp.factor('f4', '14');
 select is(pg_temp.as_client('f4', '23', 'aal2', 'select public.register_my_verified_factors()::text'), '1', 'the replacement is registered');

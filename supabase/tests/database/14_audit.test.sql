@@ -92,11 +92,11 @@ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'serv
   where has_function_privilege(r, f, 'execute')), 0, 'no API role can execute an audit or authority helper');
 select is((select count(*)::int from unnest(array['anon', 'service_role']) r, unnest(array[
     'public.grant_staff_role(uuid,public.staff_role,text)', 'public.revoke_staff_role(uuid,public.staff_role,text)',
-    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid,text,text,text,timestamptz,timestamptz)']) f
+    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_log(integer,uuid,text,text,text,text,text,timestamptz,timestamptz)']) f
   where has_function_privilege(r, f, 'execute')), 0, 'anon and service_role can execute no staff function');
 select is((select count(*)::int from unnest(array[
     'public.grant_staff_role(uuid,public.staff_role,text)', 'public.revoke_staff_role(uuid,public.staff_role,text)',
-    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_events(integer,uuid,text,text,text,timestamptz,timestamptz)']) f
+    'public.set_account_status(uuid,public.account_status,text)', 'public.get_audit_log(integer,uuid,text,text,text,text,text,timestamptz,timestamptz)']) f
   where has_function_privilege('authenticated', f, 'execute')), 4, 'signed-in users can call the staff functions, which check the role');
 select is(pg_temp.as_user('c4', 'select count(*)::text from private.audit_events'), 'error: permission denied for schema private', 'a signed-in user can''t reach the table');
 set local role service_role;
@@ -107,9 +107,9 @@ reset role;
 -- safety and privileges, and no boolean version remains under any schema.
 select is((select string_agg(p.proname || ':' || pg_get_function_result(p.oid), ',' order by p.proname) from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status')),
   'grant_staff_role:jsonb,revoke_staff_role:jsonb,set_account_status:jsonb', 'each staff function exists once, returning jsonb');
-select is((select pg_get_function_result(p.oid) from pg_proc p where p.proname = 'get_audit_events'),
-  'TABLE(id uuid, occurred_at timestamp with time zone, actor_id uuid, action text, target_profile_id uuid, reason text, metadata jsonb, outcome text, actor_handle text, target_handle text)', 'get_audit_events exists once, with outcome and handles (M8d)');
-select is((select count(*)::int from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status', 'get_audit_events')
+select is((select count(*)::int from pg_proc p where p.proname in ('get_audit_events', 'get_staff_members')), 0,
+  'get_audit_events and get_staff_members (M8d) are retired under every schema (M10 integration review)');
+select is((select count(*)::int from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status', 'get_audit_log')
   and p.prosecdef and p.proconfig = array['search_path=""'] and p.proacl::text = '{postgres=X/postgres,authenticated=X/postgres}' and pg_get_userbyid(p.proowner) = 'postgres'),
   4, 'all four are SECURITY DEFINER with an empty search_path, owned by postgres, executable by authenticated only');
 select is((select count(*)::int from pg_proc p where p.proname in ('grant_staff_role', 'revoke_staff_role', 'set_account_status') and pg_get_function_result(p.oid) = 'boolean'),
@@ -266,17 +266,17 @@ select is(pg_temp.as_user('d3', $$select pg_temp.res(public.set_account_status(p
 select is(pg_temp.status('a9'), 'active', 'and changes nothing');
 drop trigger fail_audit on private.audit_events;
 
--- Reading the log
-select is(pg_temp.as_user('a1', 'select count(*)::text from public.get_audit_events(100)'), (select count(*)::text from private.audit_events), 'an admin reads every row');
-select is(pg_temp.as_user('a1', 'select id::text from public.get_audit_events(1)'), (select id::text from private.audit_events order by id desc limit 1), 'newest first');
-select is(pg_temp.as_user('a1', format('select string_agg(id::text, '','') from public.get_audit_events(3, %L)', (select id from (select id from private.audit_events order by id desc limit 3) t order by id limit 1))),
+-- Reading the log (get_audit_log, which replaced get_audit_events in the M10 integration review)
+select is(pg_temp.as_user('a1', 'select jsonb_array_length(public.get_audit_log(100))::text'), (select least(count(*), 100)::text from private.audit_events), 'an admin reads every row, a page at a time');
+select is(pg_temp.as_user('a1', $$select public.get_audit_log(1) -> 0 ->> 'id'$$), (select id::text from private.audit_events order by id desc limit 1), 'newest first');
+select is(pg_temp.as_user('a1', format($$select string_agg(x ->> 'id', ',' order by x ->> 'id' desc) from jsonb_array_elements(public.get_audit_log(3, %L)) x$$, (select id from (select id from private.audit_events order by id desc limit 3) t order by id limit 1))),
   (select string_agg(id::text, ',' order by id desc) from (select id from private.audit_events order by id desc offset 3 limit 3) t), 'the next page continues without overlap');
-select is(pg_temp.as_user('a1', $$select string_agg(distinct outcome, ',' order by outcome) from public.get_audit_events(100)$$), 'operator,refused,succeeded', 'rows carry their outcome (D9)');
+select is(pg_temp.as_user('a1', $$select string_agg(distinct x ->> 'outcome', ',' order by x ->> 'outcome') from jsonb_array_elements(public.get_audit_log(100)) x$$), 'operator,refused,succeeded', 'rows carry their outcome (D9)');
 select is((select count(*)::int from private.audit_events where outcome = 'refused' and action not in ('owner_protection_refused', 'staff_change_refused')), 0, 'only refusal actions have the refused outcome');
-select is(pg_temp.as_user('a1', 'select count(*)::text from public.get_audit_events(0)'), 'error: invalid page request', 'a page needs at least one row');
-select is(pg_temp.as_user('a1', 'select count(*)::text from public.get_audit_events(101)'), 'error: invalid page request', 'and at most 100');
-select is(pg_temp.as_user('d3', 'select count(*)::text from public.get_audit_events()'), 'error: not permitted', 'a moderator can''t read the log (D2)');
-select is(pg_temp.as_user('c4', 'select count(*)::text from public.get_audit_events()'), 'error: not permitted', 'an ordinary user can''t read the log');
+select is(pg_temp.as_user('a1', 'select jsonb_array_length(public.get_audit_log(0))::text'), '1', 'a page holds at least one row');
+select is(pg_temp.as_user('a1', 'select (jsonb_array_length(public.get_audit_log(101)) <= 100)::text'), 'true', 'and at most 100');
+select is(pg_temp.as_user('d3', 'select public.get_audit_log()::text'), 'error: not permitted', 'a moderator can''t read the log (D2)');
+select is(pg_temp.as_user('c4', 'select public.get_audit_log()::text'), 'error: not permitted', 'an ordinary user can''t read the log');
 
 select * from finish();
 rollback;
