@@ -302,8 +302,13 @@ try {
 } finally {
   // Throwaway accounts and their invitations only (example.test, this run's tag).
   psql(`delete from private.account_invitations where email like 'inv-${tag}-%';`);
-  const ids = psql(`select string_agg(id::text, ',') from auth.users where email like 'inv-${tag}-%';`).split(",").filter(Boolean);
+  const ids = psql(`select coalesce(string_agg(id::text, ','), '') from auth.users where email like 'inv-${tag}-%';`).split(",").filter(Boolean);
   for (const id of ids) await adminAuth.deleteUser(id);
+  // The audit rows these accounts made or were about (the log is append-only, so with
+  // triggers off, as the other checks do), and the holds their released handles left.
+  const list = ids.map((id) => `'${id}'`).join(",") || "null";
+  psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
+  psql(`delete from private.handle_holds where kind = 'released' and handle like 'iv${tag}%';`);
   const left = psql(`select count(*) from auth.users where email like 'inv-${tag}-%';`);
   console.log(`\nCleanup: ${ids.length} throwaway accounts deleted, ${left} left.`);
 }
