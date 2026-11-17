@@ -16,9 +16,10 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { scramVerifier } from "./catalog-import-role.mjs";
 import { parseWikidata } from "./catalog-import-sources.mjs";
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const config = readFileSync(join(root, "supabase", "config.toml"), "utf8");
+const config = readFileSync(stackConfigPath, "utf8");
 const projectId = /project_id\s*=\s*"([^"]+)"/.exec(config)[1];
 const dbPort = /\[db\][\s\S]*?\nport\s*=\s*(\d+)/.exec(config)[1];
 const psqlArgs = ["exec", "-i", `supabase_db_${projectId}`, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At"];
@@ -259,7 +260,7 @@ async function concurrency({ termsHash }) {
 
 async function api() {
   section("No API path");
-  const status = JSON.parse(execFileSync(process.execPath, [join(root, "node_modules", "supabase", "dist", "supabase.js"), "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+  const status = stackStatus();
   const key = status.SERVICE_ROLE_KEY ?? status.SECRET_KEY;
   for (const [label, headers] of [["service_role", { apikey: key, Authorization: `Bearer ${key}` }], ["anon", { apikey: status.ANON_KEY ?? status.PUBLISHABLE_KEY }]]) {
     const response = await fetch(`${status.API_URL}/rest/v1/rpc/start_run`, { method: "POST", headers: { ...headers, "Content-Type": "application/json", "Content-Profile": "catalog_import" }, body: "{}" });

@@ -8,14 +8,11 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { claimsFor, elevate } from "./lib/mfa-session.mjs";
 import { makeTestOwner, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 const psqlArgs = ["exec", "-i", `supabase_db_${projectId}`, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At"];
 
 let passed = 0;
@@ -62,7 +59,7 @@ async function whileHeld(setupSql, during) {
 }
 const asUserSql = (user) => `select set_config('request.jwt.claims', '${claimsFor(user.id)}', true);\nset local role authenticated;`;
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 const api = status.API_URL;
 const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;
 const serviceKey = status.SERVICE_ROLE_KEY ?? status.SECRET_KEY;

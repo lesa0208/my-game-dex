@@ -12,10 +12,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { elevate, totp } from "./lib/mfa-session.mjs";
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 
 // ---------------------------------------------------------------------------
 // Results
@@ -41,7 +41,7 @@ export function psql(sql) {
 // The local stack
 // ---------------------------------------------------------------------------
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 export const api = status.API_URL;
 export const publishableKey = status.PUBLISHABLE_KEY ?? status.ANON_KEY;
 const serviceKey = status.SECRET_KEY ?? status.SERVICE_ROLE_KEY;

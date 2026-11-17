@@ -13,8 +13,9 @@
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { dbContainer } from "./lib/stack.mjs";
 
-const CONTAINER = "supabase_db_my-game-dex";
+const CONTAINER = dbContainer;
 
 /** A SCRAM-SHA-256 verifier, in the form PostgreSQL stores. */
 export function scramVerifier(password, salt = randomBytes(16), iterations = 4096) {

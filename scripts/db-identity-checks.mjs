@@ -1,3 +1,4 @@
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 /**
  * M2 Identity checks against the running local stack, through the real Auth, REST
  * and Storage APIs and real email delivery to Mailpit. Runs the actual avatar
@@ -8,8 +9,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import {
   AvatarError,
@@ -19,9 +18,7 @@ import {
   replaceAvatar,
 } from "../src/features/avatars/avatar-workflow.ts";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 
 let passed = 0;
 let failed = 0;
@@ -52,7 +49,7 @@ function psqlSession(sql) {
 }
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 const api = status.API_URL;
 const mailpit = status.MAILPIT_URL;
 const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;

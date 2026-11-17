@@ -13,15 +13,12 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { elevate } from "./lib/mfa-session.mjs";
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 const psqlArgs = ["exec", "-i", `supabase_db_${projectId}`, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At"];
 const psql = (sql) => execFileSync("docker", psqlArgs, { input: sql, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 
@@ -34,7 +31,7 @@ function check(name, ok, detail = "") {
 }
 const section = (title) => console.log(`\n${title}`);
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 const api = status.API_URL;
 const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;
 const serviceKey = status.SERVICE_ROLE_KEY ?? status.SECRET_KEY;

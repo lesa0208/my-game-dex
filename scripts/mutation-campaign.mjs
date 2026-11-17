@@ -25,6 +25,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { suites } from "./security-mutations.mjs";
+import { stackStatus } from "./lib/stack.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_STEPS = ["m7b2b", "m7b2a", "m6", "m7b1", "m5a:game published without a physical release"];
@@ -74,7 +75,7 @@ function preflight() {
     problems.push("Docker isn't running. Start Docker Desktop, then npm run db:start.");
   }
   try {
-    const status = JSON.parse(execFileSync(process.execPath, [join(root, "node_modules", "supabase", "dist", "supabase.js"), "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const status = stackStatus();
     if (!/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(status.API_URL ?? "")) problems.push("The Supabase stack isn't the local one.");
   } catch {
     problems.push("The local Supabase stack isn't running. Run npm run db:start.");
