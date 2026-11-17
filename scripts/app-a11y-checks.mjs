@@ -325,6 +325,11 @@ try {
   await secondFactor(owner);
   psql(`select private.assign_initial_owner('${owner.handle}', 'Browser checks: test owner');`);
   matureFactors(psql, owner.id);
+  // A moderation history for the collector, as the M8 functions record it (M10e pages).
+  psql(`insert into private.audit_events (occurred_at, actor_id, action, target_profile_id, reason, metadata) values
+    (now() - interval '3 days', '${moderator.id}', 'account_suspended', '${collector.id}', 'Browser checks: spam', '{"from": "active", "to": "suspended"}'),
+    (now() - interval '2 days', '${admin.id}', 'account_reinstated', '${collector.id}', 'Browser checks: appeal', '{"from": "suspended", "to": "active"}'),
+    (now() - interval '1 day', '${moderator.id}', 'staff_change_refused', '${admin.id}', 'Refused: admin_required', '{"code": "admin_required", "operation": "set_account_status", "status": "suspended"}');`);
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
   const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
@@ -512,7 +517,12 @@ try {
         ["staff", "/admin/staff"],
         ["staff with a refusal", "/admin/staff?error=owner_only"],
         ["account lookup", `/admin/accounts?handle=${owner.handle}`],
+        ["account search", "/admin/accounts?handle=ay_"],
+        ["account with history", `/admin/accounts?handle=${collector.handle}`],
+        ["account search refused", "/admin/accounts?handle=x"],
         ["audit log", "/admin/audit"],
+        ["audit log by kind and outcome", "/admin/audit?kind=accounts&outcome=succeeded"],
+        ["audit log with a refused filter", "/admin/audit?kind=everything"],
         ["ownership", "/admin/ownership"],
         ["imports", "/admin/imports"],
         ["import run", `/admin/imports/runs/${importRun}`],
@@ -536,6 +546,11 @@ try {
         && (await a.page.locator(`#history a[href="/admin/catalog/exclusions/${exclusionId}"]`).count()) > 0);
       await a.page.goto(`${origin}/admin/staff`, { waitUntil: "networkidle" });
       await keyboard(a.page, "admin staff page", tag);
+      await a.page.goto(`${origin}/admin/accounts?handle=${collector.handle}`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "account with history", tag);
+      ok(`${tag} the account shows its moderation summary and history`, (await visibleText(a.page)).includes("Browser checks: appeal") && /Reinstated\s+Once/.test(await visibleText(a.page)));
+      await a.page.goto(`${origin}/admin/audit?kind=accounts`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "filtered audit log", tag);
       await a.page.goto(`${origin}/settings/security/verify?next=%2Fadmin`, { waitUntil: "networkidle" });
       await keyboard(a.page, "verification page", tag);
       await a.context.close();

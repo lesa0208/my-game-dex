@@ -1,6 +1,6 @@
 # Architecture decisions
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e; M10a to M10d are built. Each step needs the product owner's authorization.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 are implemented and merged; none has run on a hosted project yet. M9, internationalization, is cancelled: the application is English-only ([M10 decisions](#m10-decisions-the-admin-panel-expansion), D1). M10, the admin panel expansion, is in progress in five steps, M10a to M10e; all five are built, and wait for the final M10 integration review. Each step needs the product owner's authorization.
 
 This records why the database is designed as it is, what each choice costs, and what still needs a product decision. [Product-owner decisions](#decisions-requiring-product-owner-approval) are listed first because some still block implementation.
 
@@ -68,6 +68,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log) | Catalog history is an allow-listed view of the audit log |
 | [059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it) | A record's creator is kept privately, and never reviews it |
 | [060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables) | Imports and the system are read-only views for administrators, and reference data is the public tables |
+| [061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions) | Accounts, audit and staff are allow-listed reads over the M8 functions |
 
 ## Decisions requiring product-owner approval
 
@@ -1079,6 +1080,22 @@ The full audit log (`get_audit_events`) stays administrators' only.
 
 **M10e privacy review** (migration `20261123100000`). Reusing the pilot report whole also passed on what it counts by: values copied from the raw source payload (release types and flags), and an unbounded number of reasons. And a failed entry showed the importer's database error message, an internal diagnostic. Nothing secret was reachable, and only administrators could read it, but the reads no longer rely on that. The report is now rebuilt from an explicit allow-list (`private.import_report_safe`). A failed entry shows only its status, an ignore reason is cut to 200 characters, and a run's stats keep only the five staging counts.
 
+### ADR-061: Accounts, audit and staff are allow-listed reads over the M8 functions
+
+**Decision.** M10e (migration `20261123100100`; [security-rls.md](security-rls.md#accounts-audit-and-staff-m10e)). Four reads, and no new write:
+- **Accounts** (moderators and up): `search_accounts` finds handles by their start, never by email or name, 1 to 25 at a time; `get_account_summary` adds how often an account was suspended and reinstated, refused status changes, the last change and its last 20 events. Moderators see status history; administrators also staff-role history.
+- **Audit** (administrators): `get_audit_log` adds filters by kind and outcome, keeps the handle filters, bounds every range to 366 days, and returns each event through one allow-list of details, with a link target for a game or release. Catalog editors keep the narrower record history (ADR-058).
+- **Staff** (administrators): `get_staff_overview` adds role counts, each member's standing as a fixed word, their verified and mature authenticator counts, when they last acted, and recent staff changes.
+- **Writes stay the M8 functions,** unchanged: the pages only explain what they don't offer (your own roles, the Owner's, administrators for anyone but the Owner, paused Owner authority), and the database decides.
+
+**Why.** Staff need context to act fairly: an account's history before suspending it, which staff can actually use their roles, and the log narrowed to what matters. Each of those is a read of data the database already holds. Reusing the M8 writes keeps one place that decides the authority matrix, the step-up and the audit row.
+
+**Trade-offs.**
+- **Readiness is counts only.** An administrator sees that a colleague has one authenticator, never which one or when it was used.
+- **Moderators see the reasons other staff gave** for an account's status changes, which they need to judge it; they don't see staff-role history or the audit log.
+- **`get_audit_events` (M8d) stays,** returning raw metadata to administrators over the API, for compatibility with its tests; the page uses the allow-listed read. Retiring it is a small follow-up for the integration review.
+- **Covered by** `39_accounts_audit_staff`, `db-mfa-checks` section 10, `app:admin-checks` section 6b, `app:a11y-checks` and the 20 `m10e` mutations.
+
 ## Risks to watch
 
 | Risk | Mitigation |
@@ -1190,7 +1207,7 @@ Each step ships its grants, RLS policies, constraints and tests together, so no 
 | **M7 Catalog workflow** (done: M7a to M7b-2c) | M7a: user submissions of missing games and releases (`catalog_change_requests`, `submit_game`, `submit_release`, `my_catalog_submissions`), usable at once by the submitter. M7b: editor review, request changes, reject, merge, exclude, reverse and publish, and an owner's relink of a copy | Exclusion and merge change collection items, so they follow M6. Submitting what the catalog lacks is a permanent product requirement (D5) |
 | **M8 Superadmin Foundation** (done) | The Owner record and its protections, live MFA for staff and factor maturity, the staff authority matrix, ownership transfer and recovery, the unified `/admin` and Settings → Security. See [ADR-055](#adr-055-the-owner-is-a-protected-record-its-authority-needs-mature-mfa-and-recovery-is-an-audited-operator-procedure) | Staff work needs a protected Owner and verified staff first |
 | **M9 Internationalization** (cancelled) | Not built. The application is English-only ([M10 decision D1](#m10-decisions-the-admin-panel-expansion)) | |
-| **M10 Admin panel expansion** (in progress: M10a to M10d done) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). M10d read-only reference data, import monitoring and the system view ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). Then M10e accounts, audit and staff, authorized separately ([M10 decisions](#m10-decisions-the-admin-panel-expansion)) | Staff tools before the collector-facing milestones |
+| **M10 Admin panel expansion** (built: M10a to M10e, before the integration review) | M10a foundations and the overview's counts ([ADR-057](#adr-057-the-admin-overview-shows-role-scoped-bounded-counts-decided-in-the-database)). M10b catalog search, record pages and history ([ADR-058](#adr-058-catalog-history-is-an-allow-listed-view-of-the-audit-log)). M10c catalog editing, creator provenance and no self-review ([ADR-059](#adr-059-a-records-creator-is-kept-privately-and-never-reviews-it)). M10d read-only reference data, import monitoring and the system view ([ADR-060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables)). M10e account search and summaries, the allow-listed audit log and the staff overview ([ADR-061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions)) | Staff tools before the collector-facing milestones |
 
 Later groups, in order:
 
@@ -1216,7 +1233,7 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | Every migration, M0 to M10d, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
+| Migration dependencies | Every migration, M0 to M10e, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
 | Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`; the database, HTTP and browser suites run locally |
 | Reproducible workflow | `npm run db:verify` |
 
@@ -1252,7 +1269,7 @@ M0 creates no application tables and changes no application code. It stops there
 
 ## Suggested next steps
 
-1. Continue M10 with M10e, accounts, audit and staff, when authorized.
+1. The final integration review of M10a to M10e, then the M10 pull request and merge, each approved separately.
 2. After M10, the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery.
 3. Create the Supabase project in Frankfurt when authorized, check the items in [security-rls.md](security-rls.md#to-verify-when-creating-the-project), and meet the [production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.

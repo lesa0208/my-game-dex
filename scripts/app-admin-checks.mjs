@@ -259,6 +259,83 @@ try {
   }
 
   // -------------------------------------------------------------------------
+  section("6b. Accounts, audit and staff (M10e)");
+  {
+    const secrets = (html) => [collector, editor, moderator, admin, owner, heir].some((p) => html.includes(p.email) || html.includes(p.totpSecret ?? "\u0000") || html.includes(p.factorId ?? "\u0000"));
+    /** The audit events only, without the filter form's lists of labels. */
+    const eventsOf = (html) => visible(/<section aria-labelledby="audit-events"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "");
+    /** Forms that post (a Server Action), other than signing out: a GET filter isn't one. */
+    const writing = (html) =>
+      [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)].filter(([, a]) => (/method="post"/i.test(a) || /action="javascript:/.test(a)) && !a.includes('id="sign-out-form"')).map(([form]) => form);
+
+    // Accounts: search, summary and history, as a moderator and as an administrator.
+    let page = await moderator.browser.get("/admin/accounts?handle=ad_");
+    let text = visible(page.html);
+    check("a moderator searches by the start of a handle", text.includes("Handles that start with ad_") && text.includes(`@${collector.handle}`) && text.includes(`@${editor.handle}`));
+    check("each result opens the account", page.html.includes(`href="/admin/accounts?handle=${collector.handle}"`));
+    check("and nothing in the list can be changed", writing(page.html).length === 0);
+    page = await moderator.browser.get("/admin/accounts?handle=a");
+    check("one character is too short, and says so", visible(page.html).includes("Enter a handle: 2 to 24") && !visible(page.html).includes("Handles that start with"));
+    page = await moderator.browser.get(`/admin/accounts?handle=${collector.handle}`);
+    text = visible(page.html);
+    check("an account shows its moderation summary", text.includes("Moderation") && /Suspended Once/.test(text) && /Reinstated Once/.test(text));
+    check("and its last status change, and who made it", text.includes(`Reinstated by @${moderator.handle}`));
+    check("a moderator sees its status history, not its staff roles", text.includes("Account suspended") && text.includes("Account reinstated") && !text.includes("Role granted"));
+    check("with the staff's reasons", text.includes("Spam reports") && text.includes("Appeal accepted"));
+    check("and no link into the audit log, which is for administrators", !page.html.includes('href="/admin/audit?'));
+    check("the page explains who can do what", text.includes("Who can do what") && text.includes("suspend or reinstate collectors"));
+    // Section 5 made the collector a moderator: another moderator may not change them.
+    check("a moderator is offered no change for a staff member, and told why", writing(page.html).length === 0 && text.includes("Only an administrator can change the status of a staff member"));
+    check("no email address, factor or secret appears", !secrets(page.html) && !page.html.includes("@example.test"));
+    page = await admin.browser.get(`/admin/accounts?handle=${collector.handle}`);
+    text = visible(page.html);
+    check("an administrator also sees its staff roles", text.includes("Role granted") && text.includes("Role removed"));
+    check("and is offered one writing form, the status change", writing(page.html).length === 1 && writing(page.html)[0].includes('name="reason"'), `${writing(page.html).length} forms`);
+    check("and links to every event about it", page.html.includes(`href="/admin/audit?target=${collector.handle}"`));
+    page = await moderator.browser.get(`/admin/accounts?handle=${owner.handle}`);
+    check("the Owner is marked protected, with nothing offered", visible(page.html).includes("The Owner's account is protected") && writing(page.html).length === 0);
+
+    // The audit log: kinds, outcomes and navigation.
+    page = await admin.browser.get("/admin/audit?kind=staff");
+    text = eventsOf(page.html);
+    check("the audit log filters by kind", text.includes("Role granted") && !text.includes("Account suspended") && !text.includes("Catalog record"));
+    page = await admin.browser.get("/admin/audit?outcome=refused");
+    text = eventsOf(page.html);
+    check("and by outcome", (text.includes("Staff change refused") || text.includes("Refused: Owner protected")) && !text.includes("Role granted") && !text.includes("Account reinstated"));
+    check("each handle links to the account and its events", page.html.includes(`href="/admin/accounts?handle=${admin.handle}"`) && page.html.includes(`href="/admin/audit?actor=${admin.handle}"`));
+    page = await admin.browser.get(`/admin/audit?target=${collector.handle}&kind=accounts`);
+    text = eventsOf(page.html);
+    check("about one account, by kind", text.includes("Account suspended") && text.includes("Account reinstated") && !text.includes("Role granted"));
+    page = await admin.browser.get("/admin/audit?kind=everything");
+    check("an unknown kind is refused, plainly", visible(page.html).includes("Check the filters"));
+    page = await admin.browser.get("/admin/audit?outcome=maybe");
+    check("so is an unknown outcome", visible(page.html).includes("Check the filters"));
+    page = await admin.browser.get("/admin/audit?from=2020-01-01");
+    check("one date alone covers the year after it", !visible(page.html).includes("Check the filters") && visible(page.html).includes("No events match."));
+    page = await admin.browser.get("/admin/audit");
+    check("the log shows no ids, emails, factors or secrets", !UUIDS.test(visible(page.html)) && !secrets(page.html) && !page.html.includes("@example.test"));
+    check("and nothing in it can be changed", writing(page.html).length === 0);
+
+    // Staff: standing and authenticator readiness, and why an action isn't offered.
+    psql(`update public.profiles set account_status = 'suspended' where id = '${editor.id}';`);
+    page = await admin.browser.get("/admin/staff");
+    psql(`update public.profiles set account_status = 'active' where id = '${editor.id}';`);
+    text = visible(page.html);
+    check("the staff page counts each role", text.includes("Administrators") && text.includes("Moderators") && text.includes("Catalog editors"));
+    check("a suspended staff member's roles are marked unusable", text.includes("Suspended: their roles can't be used"));
+    check("the Owner is ready for Owner actions", text.includes("2 authenticators, ready for Owner actions"));
+    check("an administrator with one authenticator is told Owner actions need two", text.includes("1 authenticator; Owner actions need two set up 24 hours ago"));
+    check("a moderator's single authenticator is enough", text.includes("Authenticator set up"));
+    check("their own role says why it can't be removed", text.includes("You can't change your own roles"));
+    check("so do the Owner's", text.includes("The Owner's roles are protected"));
+    check("and another administrator's, to an administrator", text.includes("Only the Owner can remove an administrator."));
+    check("recent staff changes are listed", text.includes("Recent staff changes") && text.includes("Role granted") && page.html.includes('href="/admin/audit?kind=staff"'));
+    check("no factor name, id, secret or email appears", !secrets(page.html) && !page.html.includes("Backup key") && !page.html.includes("@example.test"));
+    page = await owner.browser.get("/admin/staff");
+    check("the Owner may remove another administrator", forms(page.html).some((f) => f.hidden.user_id === admin.id && f.hidden.role === "admin"));
+  }
+
+  // -------------------------------------------------------------------------
   section("7. Ownership: succession, transfer and stale authority");
   {
     let page = await owner.browser.get("/admin/ownership");

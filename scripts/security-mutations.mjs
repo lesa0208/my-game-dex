@@ -937,4 +937,43 @@ export const m10dMutations = [
   sql("anyone signed in may resolve items", "pgtap", rewrite(M10D_RESOLVE, "v_me := private.begin_catalog_edit();", "v_me := (select auth.uid());")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations };
+// M10e: the import report's allow-list, and the Accounts, Audit and Staff reads.
+const M10E_COUNTS = "private.import_report_counts(jsonb, text, integer, integer)";
+const M10E_SEARCH = "public.search_accounts(text, integer)";
+const M10E_SUMMARY = "public.get_account_summary(text)";
+const M10E_AUDIT = "public.get_audit_log(integer, uuid, text, text, text, text, text, timestamptz, timestamptz)";
+const M10E_EVENT = "private.audit_event_view(private.audit_events)";
+const M10E_DETAILS = "private.audit_details(jsonb)";
+const M10E_STAFF = "public.get_staff_overview()";
+const M10E_STATS_KEYS = "where s.key in ('staged_new', 'staged_unchanged', 'staged_changed', 'staged_ignored', 'staged_repeated')\n                and pg_catalog";
+
+export const m10eMutations = [
+  // The import report's allow-list (privacy review)
+  sql("a run's report is the raw pilot report", "pgtap", rewrite(M10D_RUN, "v_report := private.import_report_safe(catalog_import.run_report(p_run));", "v_report := catalog_import.run_report(p_run) - 'run';")),
+  sql("a failed entry shows the importer's error", "pgtap", rewrite(M10D_RECORDS, "      'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),", "      'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),\n      'error', pr.match_notes ->> 'error',")),
+  sql("an ignore reason has no length bound", "pgtap", rewrite(M10D_RECORDS, "'ignored', pg_catalog.left(pr.match_notes ->> 'ignored', 200),", "'ignored', pr.match_notes ->> 'ignored',")),
+  sql("a report keeps any number of reasons", "pgtap", rewrite(M10E_COUNTS, "    limit p_max", "    limit 1000")),
+  sql("a run's stats keep any numeric key", "pgtap", rewrite(M10D_SUMMARY, M10E_STATS_KEYS, "where pg_catalog")),
+  // Account search
+  sql("anyone signed in may search accounts", "pgtap", rewrite(M10E_SEARCH, "perform private.require_active_staff('moderator');", "perform private.require_active_user();")),
+  sql("the search query is a LIKE pattern", "pgtap", rewrite(M10E_SEARCH, "pg_catalog.starts_with(p.handle, v_query)", "p.handle like v_query || '%'")),
+  sql("a search has no upper bound", "pgtap", rewrite(M10E_SEARCH, "limit least(greatest(coalesce(p_limit, 20), 1), 25)", "limit greatest(coalesce(p_limit, 20), 1)")),
+  sql("a search returns email addresses", "pgtap", rewrite(M10E_SEARCH, "      'owner', private.is_designated_owner(p.id)", "      'email', (select u.email from auth.users u where u.id = p.id),\n      'owner', private.is_designated_owner(p.id)")),
+  // Account summary
+  sql("anyone signed in may read an account's summary", "pgtap", rewrite(M10E_SUMMARY, "perform private.require_active_staff('moderator');", "perform private.require_active_user();")),
+  sql("moderators see staff-role history", "pgtap", rewrite(M10E_SUMMARY, "v_admin := private.has_staff_role('admin');", "v_admin := true;")),
+  sql("a summary returns the account's bio", "pgtap", rewrite(M10E_SUMMARY, "'account_status', v_profile.account_status, 'member_since'", "'account_status', v_profile.account_status, 'bio', v_profile.bio, 'member_since'")),
+  // The audit log
+  sql("moderators read the audit log", "pgtap", rewrite(M10E_AUDIT, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("an audit event returns its raw metadata", "pgtap", rewrite(M10E_EVENT, "'details', private.audit_details(p_event.metadata)", "'details', p_event.metadata")),
+  sql("an audit detail isn't cut to 80 characters", "pgtap", rewrite(M10E_DETAILS, "pg_catalog.to_jsonb(pg_catalog.left(e.value #>> '{}', 80))", "e.value")),
+  sql("an audit event names the actor's account id", "pgtap", rewrite(M10E_EVENT, "    'by_account', p_event.actor_id is not null,", "    'actor_id', p_event.actor_id,\n    'by_account', p_event.actor_id is not null,")),
+  sql("an audit range has no length bound", "pgtap", rewrite(M10E_AUDIT, " or v_until - v_since > interval '366 days'", "")),
+  sql("a page of the audit log has no upper bound", "pgtap", rewrite(M10E_AUDIT, "limit least(greatest(coalesce(p_limit, 50), 1), 100)", "limit greatest(coalesce(p_limit, 50), 1)")),
+  // The staff overview
+  sql("moderators read the staff overview", "pgtap", rewrite(M10E_STAFF, "perform private.require_active_staff('admin');", "perform private.require_active_staff('moderator');")),
+  sql("the staff overview names each authenticator", "pgtap", rewrite(M10E_STAFF, "'factors', private.totp_factor_count(p.id),",
+    "'factors', private.totp_factor_count(p.id), 'factor_names', (select pg_catalog.jsonb_agg(f.friendly_name) from auth.mfa_factors f where f.user_id = p.id),")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations };

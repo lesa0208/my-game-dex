@@ -20,6 +20,15 @@ import {
   stepUpHref,
   withParam,
 } from "./form.ts";
+import {
+  auditOutcomeLabel,
+  isAuditCategory,
+  isAuditOutcome,
+  mfaReadiness,
+  readHandleQuery,
+  roleChangeBlocked,
+  standingLabel,
+} from "./form.ts";
 import { authErrorCode, maturityText, readCode, readFactorName, securityError } from "../security/form.ts";
 
 test("return paths stay under /admin or /settings on this site", () => {
@@ -112,4 +121,52 @@ test("maturity is described from the database's answer", () => {
   assert.equal(maturityText({ status: "verified", registered_at: null, matures_at: null, mature: false }, now), "Verified, not yet registered for Owner authority");
   assert.equal(maturityText({ status: "verified", registered_at: "2026-11-14T00:00:00Z", matures_at: "2026-11-15T00:00:00Z", mature: true }, now), "Verified and registered more than 24 hours ago");
   assert.equal(maturityText({ status: "verified", registered_at: "2026-11-15T10:30:00Z", matures_at: "2026-11-16T10:30:00Z", mature: false }, now), "Verified; counts for Owner authority in about 23 hours");
+});
+
+test("M10e: the account search takes the start of a handle, never an email or a pattern", () => {
+  assert.equal(readHandleQuery(" @Ad_ "), "ad_");
+  assert.equal(readHandleQuery("ab"), "ab");
+  assert.equal(readHandleQuery("a"), null);
+  assert.equal(readHandleQuery("someone@example.test"), null);
+  assert.equal(readHandleQuery("ad%"), null);
+  assert.equal(readHandleQuery("x".repeat(25)), null);
+});
+
+test("M10e: audit kinds and outcomes are fixed lists", () => {
+  assert.ok(isAuditCategory("staff") && isAuditCategory("catalog"));
+  assert.equal(isAuditCategory("everything"), false);
+  assert.ok(isAuditOutcome("refused"));
+  assert.equal(isAuditOutcome("maybe"), false);
+  assert.equal(auditOutcomeLabel("succeeded"), "Done");
+});
+
+test("M10e: staff standing is a fixed word, and an unknown one is never shown as given", () => {
+  assert.equal(standingLabel("active").tone, "good");
+  assert.match(standingLabel("suspended").label, /can't be used/);
+  assert.match(standingLabel("unverified").label, /email address not confirmed/);
+  assert.equal(standingLabel("auth_contract_broken").label, "Ineligible: the account can't be checked");
+});
+
+test("M10e: authenticator readiness from counts only", () => {
+  assert.equal(mfaReadiness({ factors: 0, mature_factors: 0, roles: ["moderator"], owner: false }).tone, "problem");
+  assert.equal(mfaReadiness({ factors: 1, mature_factors: 0, roles: ["moderator"], owner: false }).label, "Authenticator set up");
+  assert.equal(mfaReadiness({ factors: 2, mature_factors: 2, roles: ["admin"], owner: true }).label, "2 authenticators, ready for Owner actions");
+  assert.equal(mfaReadiness({ factors: 1, mature_factors: 0, roles: ["admin"], owner: false }).tone, "warning");
+  assert.equal(mfaReadiness({ factors: 1, mature_factors: 1, roles: ["admin"], owner: true }).tone, "problem");
+  assert.equal(mfaReadiness({ factors: null, mature_factors: null, roles: [], owner: false }).label, "Authenticator status unavailable");
+});
+
+test("M10e: why a role can't be removed mirrors the matrix", () => {
+  const base = { own: false, owner: false, role: "moderator", viewerOwner: false, ownerAuthorityBlocked: false };
+  assert.equal(roleChangeBlocked(base), null);
+  assert.match(roleChangeBlocked({ ...base, own: true }), /your own roles/);
+  assert.match(roleChangeBlocked({ ...base, owner: true }), /Owner's roles are protected/);
+  assert.match(roleChangeBlocked({ ...base, role: "admin" }), /Only the Owner/);
+  assert.match(roleChangeBlocked({ ...base, role: "admin", viewerOwner: true, ownerAuthorityBlocked: true }), /wait until Owner authority/);
+  assert.equal(roleChangeBlocked({ ...base, role: "admin", viewerOwner: true }), null);
+});
+
+test("M10e: audit details stay an allow-list, and a record link isn't a detail", () => {
+  const details = auditDetails({ from: "active", to: "suspended", record: { entity: "release", id: "x" }, secret: "no" });
+  assert.deepEqual(details.map((d) => d.label), ["From", "To"]);
 });

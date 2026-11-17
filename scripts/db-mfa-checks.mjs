@@ -449,6 +449,51 @@ try {
     psql(`update public.profiles set account_status = 'suspended' where id = '${administrator.id}';`);
     check("once suspended, the same administrator's aal2 token is refused", await every(adminAal2.access_token, refused));
   }
+
+  section("10. Accounts, audit and staff reads over the API (M10e)");
+  {
+    const moderatorReads = [
+      ["search_accounts", { p_query: "mf_" }],
+      ["get_account_summary", { p_handle: "mf_nobody" }],
+    ];
+    const adminReads = [
+      ["get_audit_log", { p_limit: 5 }],
+      ["get_staff_overview", {}],
+    ];
+    const reads = [...moderatorReads, ...adminReads];
+    const all = async (token, list, test) => (await Promise.all(list.map(([fn, args]) => rpc(token, fn, args)))).every(test);
+    const anonAll = await Promise.all(reads.map(([fn, args]) =>
+      fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify(args) })));
+    check("anon is refused by PostgreSQL itself, for each read", anonAll.every((r) => r.status === 401));
+    const serviceAll = await Promise.all(reads.map(([fn, args]) => fetch(`${api}/rest/v1/rpc/${fn}`, { method: "POST", headers: service, body: JSON.stringify(args) })));
+    check("so is service_role, which has no grant", serviceAll.every((r) => r.status === 401 || r.status === 403));
+    const collector = await createUser();
+    check("a collector at aal2 is refused every read", await all((await elevate(api, anonKey, await signIn(collector))).access_token, reads, refused));
+    const editor = await createUser("catalog_editor");
+    check("so is a catalog editor", await all((await elevate(api, anonKey, await signIn(editor))).access_token, reads, refused));
+    const moderator = await createUser("moderator");
+    const modAal1 = await signIn(moderator);
+    check("a moderator at aal1 is refused", await all(modAal1.access_token, moderatorReads, refused));
+    const modAal2 = await elevate(api, anonKey, modAal1);
+    const modResults = await Promise.all(moderatorReads.map(([fn, args]) => rpc(modAal2.access_token, fn, args)));
+    check("at aal2, a moderator searches accounts and reads one", modResults.every((r) => r.status === 200) && Array.isArray(modResults[0].body) && modResults[1].body === null,
+      modResults.map((r) => r.status).join(","));
+    check("but not the audit log or the staff overview", await all(modAal2.access_token, adminReads, refused));
+    const administrator = await createUser("admin");
+    const adminAal2 = await elevate(api, anonKey, await signIn(administrator));
+    const results = await Promise.all(reads.map(([fn, args]) => rpc(adminAal2.access_token, fn, args)));
+    check("an administrator at aal2 reads each", results.every((r) => r.status === 200), results.map((r) => r.status).join(","));
+    const text = JSON.stringify(results.map((r) => r.body));
+    check("no email, factor id, secret, key or raw metadata is returned",
+      ![serviceKey, anonKey, "@example", "metadata", "factor_id", "friendly_name", "totp", "secret", "actor_id", "target_profile_id"].some((x) => text.includes(x))
+        && ![moderator, administrator, collector, editor].some((u) => text.includes(u.email)));
+    check("staff members show readiness as counts", results[3].body?.members?.every?.((m) => typeof m.factors === "number" && typeof m.mature_factors === "number"));
+    check("an email address isn't a search", (await rpc(adminAal2.access_token, "search_accounts", { p_query: moderator.email })).body?.message === "invalid handle");
+    check("a range over a year is refused", (await rpc(adminAal2.access_token, "get_audit_log", { p_since: "2020-01-01T00:00:00Z", p_until: "2026-01-01T00:00:00Z" })).body?.message === "invalid filter");
+    check("nothing is written by a read", psql(`select count(*) from private.audit_events where actor_id in ('${moderator.id}', '${administrator.id}');`) === "0");
+    psql(`update public.profiles set account_status = 'suspended' where id = '${moderator.id}';`);
+    check("once suspended, the moderator's aal2 token is refused", await all(modAal2.access_token, moderatorReads, refused));
+  }
 } catch (error) {
   check("the checks ran to the end", false, error.message);
 } finally {

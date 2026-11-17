@@ -1,6 +1,6 @@
 # Security and Row Level Security
 
-**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10d are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
+**Status:** Approved design, including the decisions on D1 to D9, Q1 to Q12, A1 to A3, P1 to P10, R1 to R8 and D13, and the strict physical-only scope. M0 to M8 and M10a to M10e are implemented, and their rules are enforced by tests. Other SQL here illustrates the policies, and isn't a migration.
 
 ## The security model
 
@@ -1442,9 +1442,9 @@ Codes: `owner_protected`, `owner_only`, `owner_ineligible`, `mfa_required`, `rec
 | --- | --- | --- |
 | Overview, with counts for each role ([M10a](#the-admin-overview-m10a)) | `/admin` | Any staff |
 | Catalog: review, exclusion and merge, search, records and history ([M10b](#catalog-records-and-history-m10b)), and editing ([M10c](#catalog-editing-provenance-and-no-self-review-m10c)) | `/admin/catalog/*` | Catalog editors and administrators. The exclusion history and restoring (`/admin/catalog/exclusions/*`) are for administrators only |
-| Accounts: lookup by handle, suspend and reinstate | `/admin/accounts` | Moderators and administrators |
-| Staff | `/admin/staff` | Administrators |
-| Audit log | `/admin/audit` | Administrators |
+| Accounts: search by handle, summary and history, suspend and reinstate (M10e) | `/admin/accounts` | Moderators and administrators |
+| Staff: roles, standing and authenticator readiness (M10e) | `/admin/staff` | Administrators |
+| Audit log, by kind, outcome, handle and date (M10e) | `/admin/audit` | Administrators |
 | Ownership | `/admin/ownership` | Administrators. Owner actions show only for the Owner |
 | Reference data ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/reference/*` | Catalog editors and administrators |
 | Imports ([M10d](#reference-data-imports-and-system-m10d)) | `/admin/imports/*` | Administrators. The reclassification queue (`/admin/catalog/reclassifications`) is for catalog editors and administrators |
@@ -1636,6 +1636,27 @@ Read-only views of what already exists (decisions D5, D7 and D8), in migration `
 The page labels it as the one write here, beside a reason field that says "Visible to other catalog staff." It works without JavaScript and redirects back with a fixed notice or error.
 
 **Tests.** `38_imports_system` covers the grants and definitions, every refusal (anon, a collector, an editor, a moderator, a suspended administrator, an administrator at aal1), the fixed keys, the bounds and filters, that no lease, checkpoint or payload appears, the system view, and the resolution's rules, audit and its leaving the release unchanged. `db-mfa-checks` section 9 does the same over the API with real sessions. `app:reference-checks` drives the pages as each role, including a forged resolution, that every reference, import and system page has no writing form, and that none shows a key or address; `app:a11y-checks` audits each page at every width. The 18 `m10d` mutations prove the tests catch each weakening.
+
+## Accounts, audit and staff (M10e)
+
+M10e makes the existing M8 pages more useful without changing who may do what. Four new reads (migration `20261123100100`), each SECURITY DEFINER with an empty `search_path`, executable by `authenticated` only, checking the caller with `require_active_staff` (active account, confirmed email, handle, a live session verified with a TOTP factor) before anything else. None of them writes, so none is audited, like every staff read. Every change still goes through the audited M8 functions (`set_account_status`, `grant_staff_role`, `revoke_staff_role` and the Owner functions), which decide every rule again, including recent MFA and no automatic replay after a step-up.
+
+| Function | Who | Returns |
+| --- | --- | --- |
+| `search_accounts(query, limit)` | Moderators and up | Accounts whose handle starts with the query (2 to 24 letters, numbers or underscores, compared as text, so `_` isn't a wildcard), 1 to 25: id, handle, name, status, roles and whether it's the Owner's. Never by email or name |
+| `get_account_summary(handle)` | Moderators and up | One account: the fields above and when it joined; how often it was suspended and reinstated, refused status changes, and the last status change and who made it; and its last 20 events. Moderators see status changes and refused status changes; administrators also staff-role changes and every refusal about it. Null for an unknown handle |
+| `get_audit_log(limit, before, action, kind, outcome, actor, target, since, until)` | Administrators | The audit log, 1 to 100 a page, newest first, by action, kind (account status, staff, ownership, catalog, operator), outcome (done, refused, operator), the handle that acted or was acted on, and a range of at most 366 days (one end alone covers 366 days from it). An unknown filter is `invalid filter` |
+| `get_staff_overview()` | Administrators | The number of each role; each staff member (at most 500) with their roles, whether they're the Owner or successor, their standing as a fixed word (active, suspended, deactivated, unverified, no handle, closed, or unavailable), their verified and mature authenticator counts, and when they last acted; and the last 20 staff changes |
+
+**Every event goes through one allow-list** (`private.audit_event_view` and `private.audit_details`): its id, time, action, outcome, reason, the handles that acted and were acted on (and whether an account was involved at all), and details under known keys only (refusal code, attempted operation, role, from, to, status, kind, by, cause, reason code, previous status, copies, entity), plain values, strings cut to 80 characters. A catalog event names its game or release, by id, only so the page can link to the record. Account ids, fingerprints, tokens and any other metadata never leave the database through these reads.
+
+**Never returned:** an email address, private profile field (bio, settings), collection, copy, purchase or price, private note, authenticator secret, name or id, recovery material, session or token.
+
+**Unchanged.** `get_audit_events` (M8d) still returns raw metadata to administrators over the API; the page no longer uses it. Catalog editors keep the bounded record history of M10b (ADR-058) and see no account or staff events. Audit retention is unchanged and remains a launch decision: nothing deletes audit rows.
+
+**The pages.** `/admin/accounts` searches by the start of a handle and opens an account with its moderation summary, history and the one action the viewer may take, or why there is none; it explains who can do what. `/admin/audit` adds the kind and outcome filters, outcome markers, and links from each handle to the account and its events and from a catalog event to its record. `/admin/staff` adds the role counts, each member's standing and authenticator readiness (one verified factor to use `/admin`; two registered 24 hours ago for Owner actions), why a role can't be removed, and recent staff changes.
+
+**Tests.** `39_accounts_audit_staff` (76) covers the grants and definitions, every refusal, the fixed keys, the allow-list, the bounds and filters, that no email, factor name or id, or raw metadata appears, and that nothing is written; `db-mfa-checks` section 10 calls each read over the API as anon, service_role, a collector, an editor, a moderator at aal1 and aal2, and an administrator; `app:admin-checks` section 6b and `app:a11y-checks` drive the pages; 20 `m10e` mutations (with the import allow-list's).
 
 ## Assigning the first administrator
 

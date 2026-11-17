@@ -70,6 +70,10 @@ insert into approved_function_grants values
   -- M10d: import monitoring and the system view, for administrators. Each checks the caller itself.
   ('get_import_providers()', 'authenticated'), ('get_import_runs(integer,uuid,text,text)', 'authenticated'), ('get_import_run(uuid)', 'authenticated'),
   ('get_import_run_records(uuid,text,integer,integer)', 'authenticated'), ('get_system_status()', 'authenticated'),
+  -- M10e: account search and summary for moderators, the audit log and staff overview for
+  -- administrators. Each checks the caller itself.
+  ('search_accounts(text,integer)', 'authenticated'), ('get_account_summary(text)', 'authenticated'),
+  ('get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)', 'authenticated'), ('get_staff_overview()', 'authenticated'),
   -- M10b: catalog search, records and history for editors. Each checks the caller itself.
   ('search_catalog_records(text,text,text,text,integer,text)', 'authenticated'), ('get_game_record(uuid)', 'authenticated'),
   ('get_release_record(uuid)', 'authenticated'), ('get_catalog_record_history(text,uuid,integer,uuid)', 'authenticated'),
