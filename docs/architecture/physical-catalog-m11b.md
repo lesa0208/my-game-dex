@@ -2,7 +2,7 @@
 
 **Written for:** the product owner and catalog editors deciding how real NES/Famicom, SNES/Super Famicom and PlayStation releases enter the catalog.
 
-**Status: design provisionally accepted on 2026-11-18, with the approved directions recorded in section 10. Nothing here is implemented.** Section 6 was extended after that review (importer format selection and the MIG-2 to MIG-5 designs) and awaits independent review before M11b-1. M11b-0 is analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
+**Status: accepted as the design foundation on 2026-11-18, subject to the corrections now in sections 6 and 8. MIG-1 (the cartridge formats) is implemented on the test stack in M11b-1a and not applied to development. MIG-2 to MIG-5 are revised designs awaiting review.** Decisions are in section 10. M11b-0 is analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
 
 Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalog), [relationships.md § Physical release examples](relationships.md#physical-release-examples), [security-rls.md § Catalog import](security-rls.md#catalog-import), [architecture-decisions.md § M5 decisions](architecture-decisions.md#m5-decisions-the-catalog-and-its-import), [ADR-031](architecture-decisions.md#adr-031-platform-identity-is-separate-from-its-names), [ADR-032](architecture-decisions.md#adr-032-physical-media-is-a-category-plus-a-reference-format), [reference-data-sources.md](reference-data-sources.md).
 
@@ -10,13 +10,18 @@ Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalo
 
 - **Reuse the existing catalog.** Game, game–platform pairing, Release, release markets, components, field locks, provenance, the M5b importer, the review guard and the merge tooling already express almost everything. No parallel catalog is proposed.
 - **Famicom and Super Famicom stay on the `nes` and `snes` platforms** (ADR-031). Their physical difference moves from "implied by platform and region" to an explicit **media format**: four new formats for the cartridge shells. The format is already enforced by foreign key, already an identity field for verification, and already a merge guard.
-- **Five migrations** would eventually be needed, each detailed in section 6: the shell formats (MIG-1), format and normalized values in both release identity rules (MIG-2), a packaging vocabulary that keeps existing text and starts every row `unclassified` (MIG-3), release identifiers for disc serials and aliases (MIG-4), and editor acceptance of a held source record as evidence (MIG-5). None is written yet.
+- **Migrations**, detailed in section 6:
+  - The shell formats (MIG-1) are **implemented on the test stack** (M11b-1a).
+  - MIG-2 and MIG-3 are one migration: identity and packaging, checked against the exact final key, and keeping legacy distinctions.
+  - MIG-4 adds release identifiers.
+  - MIG-5 adds fact-level source links that can support several releases.
+  - MIG-2 to MIG-5 are revised designs, not written.
 - **Sources:**
   - **Wikidata** (CC0) for game identity on all three platforms.
   - **No-Intro**, whose Data Usage License permits commercial reuse of data it can license, as evidence for NES and SNES cartridge releases. Manual saved downloads only, since its site bans bots.
   - **Redump** has a public-domain statement on one side of a split project, but no named licence, and restricted automated access. It stays **held**, rather than requiring written permission as the M5 decision said.
   - **Specialist reference sites** are cited by editors one fact at a time, never bulk-imported.
-- **Pilot:** 8 games and 38 release candidates, of which 30 have confirmed evidence and 8 are held, within the ceiling of 30 games and 45 releases. Every candidate needs human review by someone other than its creator. The product owner approves the final selection before anything reaches the development demo.
+- **Pilot:** 8 games and 38 release candidates, within the ceiling of 30 games and 45 releases: 16 with item-level evidence, 14 partial and 8 held. Packaging is a gap for all 38. Every candidate needs human review by someone other than its creator. The product owner approves the final selection before anything reaches the development demo.
 
 ## 1. Existing catalog architecture assessment
 
@@ -119,24 +124,30 @@ Their own terms weren't reviewed for bulk reuse.
 | **C. A release attribute** (new `cartridge_shell` column) | **Rejected.** It duplicates what `media_format_code` already means, without the foreign key and merge guard |
 | **D. Specific media formats per shell, one platform** | **Recommended.** ADR-032 already provides for it. The format is a foreign key to the platform's valid formats, is a verification identity field (`release_identity_fields()`), and is a merge guard (M7b-2c) |
 
-### Recommendation (D)
+### Recommendation (D), implemented in M11b-1a
 
-| Format code | Category | Name | Platform | Physical facts it records |
-| --- | --- | --- | --- | --- |
-| `famicom-cartridge` | cartridge | Famicom cartridge | `nes` | 60-pin, no lockout chip in the Japanese console |
-| `nes-game-pak` | cartridge | NES Game Pak | `nes` | 72-pin front-loader cartridge with the 10NES lockout chip. NTSC and PAL share the shell; the lockout region is a release fact (region code, product code suffix, markets) |
-| `super-famicom-cartridge` | cartridge | Super Famicom and PAL SNES cartridge | `snes` | Narrow shell with a curved front and no grooves, as used in Japan and PAL territories. The CIC region lock is a release fact |
-| `snes-game-pak-na` | cartridge | North American SNES Game Pak | `snes` | Rectangular bottom with inset grooves matching the North American console's tabs |
-| `famicom-disk-card` (exists) | magnetic disk | Famicom Disk Card | `famicom-disk-system` | Unchanged |
-| `cd-rom` (exists) | optical disc | CD-ROM | `playstation` | Unchanged. PlayStation needs no specific format for the pilot |
+**Implemented on the test stack only:** migration `20261130100000_m11b1a_media_formats.sql`, with the identifiers the product owner approved on 2026-11-18. **These codes are stable catalog identifiers:** once used, they are never renamed, reused or removed.
 
-Evidence for the shells: [NESdev cartridge connector](https://www.nesdev.org/wiki/Cartridge_connector) (60- and 72-pin pinouts), [Wikipedia, NES](https://en.wikipedia.org/wiki/Nintendo_Entertainment_System) ("The Famicom as released in Japan contains no lock-out hardware"), [Wikipedia, SNES](https://en.wikipedia.org/wiki/Super_Nintendo_Entertainment_System) ("North American cartridges have a rectangular bottom with inset grooves matching protruding tabs in the console"). Checked 2026-11-18. Exact names are open for the product owner: the codes, once used, are permanent.
+| Format code | Category | Name | Position | Platform | Physical facts it records |
+| --- | --- | --- | --- | --- | --- |
+| `famicom-cartridge` | cartridge | Famicom Cartridge | 80 | `nes` | 60-pin Family Computer cartridge. Not interchangeable with the 72-pin NES Game Pak |
+| `nes-game-pak` | cartridge | NES Game Pak | 81 | `nes` | 72-pin NES cartridge with a lockout chip. NTSC and PAL share the shell; the lockout region belongs to the release |
+| `snes-cartridge-jp-pal` | cartridge | Super Famicom / PAL SNES Cartridge | 82 | `snes` | The narrow Super Famicom and PAL SNES shell with a curved front. The region lock belongs to the release |
+| `snes-game-pak-na` | cartridge | North American SNES Game Pak | 83 | `snes` | The North American SNES shell, with a rectangular bottom and grooves for the console's tabs |
+| `famicom-disk-card` (exists) | magnetic disk | Famicom Disk Card | 410 | `famicom-disk-system` | Unchanged |
+| `cd-rom` (exists) | optical disc | CD-ROM | 110 | `playstation` | Unchanged. PlayStation needs no specific format for the pilot |
+
+Evidence for the shells, checked 2026-11-18:
+- [NESdev cartridge connector](https://www.nesdev.org/wiki/Cartridge_connector): the 60- and 72-pin pinouts.
+- [Wikipedia, NES](https://en.wikipedia.org/wiki/Nintendo_Entertainment_System): "The Famicom as released in Japan contains no lock-out hardware".
+- [Wikipedia, SNES](https://en.wikipedia.org/wiki/Super_Nintendo_Entertainment_System): "North American cartridges have a rectangular bottom with inset grooves matching protruding tabs in the console".
 
 **What stays as it is:**
-- `nes` and `snes` remain one platform each, with Famicom and Super Famicom as regional names.
-- `rom-cartridge` stays linked to `nes` and `snes`, as "shell not recorded", because existing releases use it and the foreign key restricts removing it.
-  - New pilot releases use a specific format.
-  - Existing development releases are reclassified by an editor, through `update_release` with a reason. That re-verification is a separate, approved step.
+- `nes` and `snes` remain one platform each, with Famicom and Super Famicom as regional names. No platform was added.
+- `rom-cartridge` stays linked to `nes` and `snes` for records whose shape hasn't been classified. The foreign key also prevents unlinking it while records use it.
+- **No release was changed.** The migration only inserts four formats and four platform links, then checks the four links exist.
+- An existing release moves to a shell only by an individual, verified editor correction (`update_release`, with a reason). The format is an identity field, so the correction ends an unpublished release's verification, and a published one needs recent MFA. The 17 development SNES releases are not touched (M11b-D12).
+- **A shell is never derived from a region label.** The key allows an NES Game Pak classified `ntsc-j` if the item is one; the editor decides from the item.
 
 **How each required property is preserved:**
 
@@ -149,7 +160,7 @@ Evidence for the shells: [NESdev cartridge connector](https://www.nesdev.org/wik
 | Video standard | **Not a new column.** For these three platforms the approved region codes already carry it (`ntsc-uc`, `ntsc-j`, `pal`, `pal-m`). Add a column only if a pilot record shows a distinction they can't express (decision M11b-D6) |
 | Packaging | `releases.packaging_code`, from a controlled vocabulary with an explicit `unclassified` state; the recorded text is kept (MIG-3) |
 | Edition or reprint | `edition_kind` (`standard`, `reprint` and the rest) and `edition_name` ("Players' Choice", "Greatest Hits", "Platinum", "PlayStation the Best", "Classic Series") |
-| Print or label variant | `variant_name` ("Gold cartridge", "Two-line logo label", "German packaging") |
+| Print or label variant | `variant_name` ("Gold cartridge", "Two-line logo label"), only when the source states the difference |
 | Product code and barcode | `releases.product_code` (as printed on the package), further codes, disc serials and aliases in `release_identifiers` (MIG-4), `releases.barcode` |
 | Release-specific components | `release_components` |
 | The collector's owned copy | `collection_items` on the exact release, with per-copy completeness, conditions and pieces |
@@ -180,13 +191,13 @@ Evidence for the shells: [NESdev cartridge connector](https://www.nesdev.org/wik
 ### SNES / Super Famicom
 
 - **Regional cartridge shells:**
-  - Super Famicom and PAL shell (`super-famicom-cartridge`);
+  - Super Famicom and PAL shell (`snes-cartridge-jp-pal`);
   - North American shell (`snes-game-pak-na`).
 - **Codes:**
   - `SHVC-xx` for Japan;
   - `SNS-xx-USA` and `SNS-xx-CAN` for North America;
   - `SNSP-xx-<country>` for PAL, such as UKV, NOE, FAH, FRA, ESP and AUS.
-  - Some PAL carts carry two codes, such as `SNSP-ZL-NOE/SFRG`.
+  - Some PAL carts print a combined code, such as `SNSP-ZL-NOE/SFRG`, stored whole as printed (MIG-4).
 - **Reprints and variants:**
   - Players' Choice reprints share the base code with a suffix (`SNS-ZL-USA-1`, `-2`);
   - a suffix can also mark a label revision (`SNS-MW-USA-1`, two-line logo).
@@ -208,9 +219,9 @@ Evidence for the shells: [NESdev cartridge connector](https://www.nesdev.org/wik
   - All are `edition_kind = 'reprint'` with the line's name as `edition_name`.
 - **Packaging:**
   - standard jewel case;
-  - double-width or multi-disc jewel case;
-  - Japanese cases with a spine card.
-  - Exact vocabulary is decided with section 6. The pilot records only what the evidence states.
+  - double-depth jewel case (types are defined by construction, not disc count);
+  - Japanese cases with a spine card (the spine card is a component; the case is a jewel case).
+  - The vocabulary is in section 6 (MIG-3). The pilot records only what the evidence states, and packaging is a gap for every pilot release.
 
 ## 6. Required reference-data changes and eventual migrations
 
@@ -220,195 +231,284 @@ Evidence for the shells: [NESdev cartridge connector](https://www.nesdev.org/wik
 2. The packaging vocabulary (MIG-3).
 3. No new region codes or markets. No new platforms.
 
-**Eventual migrations.** These are proposals, not written. All are forward-only, with no `DROP ... CASCADE`, no change to Supabase-managed schemas, and exact-signature replacements for functions.
+**Migrations.** MIG-1 is implemented (M11b-1a, test stack only). MIG-2 to MIG-5 are designs, not written. All are forward-only, with no `DROP ... CASCADE`, no change to Supabase-managed schemas, and exact-signature replacements for functions.
 
 | # | Migration | Detail |
 | --- | --- | --- |
-| MIG-1 | Cartridge-shell formats: four `media_formats` rows and four `platform_media_formats` rows | Section 4, and the importer behavior below |
-| MIG-2 | Media format and normalized values in **both** release identity rules, and in the submission duplicate check | [Release identity](#mig-2-release-identity) |
-| MIG-3 | Controlled packaging vocabulary, with a "not yet classified" state and the existing text preserved | [Packaging](#mig-3-packaging-vocabulary) |
-| MIG-4 | Release identifiers: release-level codes, disc serials, alternate identifiers and source aliases | [Identifiers](#mig-4-release-identifiers) |
-| MIG-5 | An editor accepts a held source record as evidence for a release | [Accepting held records](#mig-5-accepting-a-held-source-record) |
+| MIG-1 | Cartridge-shell formats: four `media_formats` rows and four `platform_media_formats` rows. **Implemented in M11b-1a** | Section 4, and the importer behavior below |
+| MIG-2 and MIG-3 | **One migration**: media format, normalized names and codes, and a packaging key in **both** release identity rules and the submission duplicate check, checked against the exact final key before any index changes; a controlled packaging vocabulary with `unclassified` and `unknown` | [Identity and packaging](#mig-2-and-mig-3-together-release-identity-and-packaging-revised-after-review) |
+| MIG-4 | Release identifiers: further printed codes, disc serials, alternate identifiers and staff-only source aliases | [Identifiers](#mig-4-release-identifiers-approved-in-principle-clarified) |
+| MIG-5 | Fact-level links from a source record to one or more releases, by an editor | [Source evidence](#mig-5-source-evidence-for-editor-built-releases-revised-after-review) |
 
 **Importer code (M11b-1, no migration):**
 - add `nes`, `famicom-disk-system` and `playstation` to `WIKIDATA_PLATFORMS`, after confirming their item ids;
 - test the No-Intro parser against an NES snapshot.
 
-### Importer format selection (MIG-1)
+### Importer format selection (MIG-1, implemented and tested in M11b-1a)
 
 **Today.** `private.import_apply_release` creates a release candidate only when the run's platform has exactly one format in `platform_media_formats`. Otherwise it sets the source record to `needs_review` with tier A, the matched game, and the note "format unknown", and creates nothing. A source id already linked to a release never changes that release's format.
 
-**After MIG-1.** `nes` has `rom-cartridge`, `famicom-cartridge` and `nes-game-pak`, and `snes` has `rom-cartridge`, `super-famicom-cartridge` and `snes-game-pak-na`. So every new NES and SNES release entry is held as "format unknown". That is the intended behavior, and the importer code stays as it is:
+**After MIG-1.** `nes` has `rom-cartridge`, `famicom-cartridge` and `nes-game-pak`, and `snes` has `rom-cartridge`, `snes-cartridge-jp-pal` and `snes-game-pak-na`. So every new NES and SNES release entry is held as "format unknown". That is the intended behavior, and the importer code stays as it is:
 
 | Rule | How it holds |
 | --- | --- |
 | Never guess the shape from a title | The importer doesn't read the format from anything: the only automatic path is the single-format rule |
 | Never assign a format from a ROM dump name | No-Intro names and region tags are never mapped to a format. A "(Japan)" tag doesn't mean a Famicom cartridge, and one NES DAT holds both Famicom and NES dumps |
 | Hold ambiguous records | "Format unknown" entries stay `needs_review`, with the matched game, and appear in the run report and the admin import pages (M10d) |
-| Allow verified evidence or an editor to choose | **Editor:** chooses the format when creating the release (`create_release`), or corrects it (`update_release`, an identity field, so verification ends), then accepts the record as evidence (MIG-5).<br>**Source:** a source may set the format only if a field of that specific record explicitly states the physical form. The mapping must be added to the parser's allowlist with a test, and stored as evidence on `media_format_code`, already an allowed `release_evidence` field. No cleared source provides such a field today, so none is added in M11b-1 |
-| Preserve provenance and audit history | The held record stays unchanged: source records are immutable (`guard_provider_record`). The editor's release has origin `staff` and an audit row with its reason. Acceptance adds the evidence link and its own audit row |
+| Allow verified evidence or an editor to choose | **Editor:** chooses the format when creating the release (`create_release`), or corrects it (`update_release`, an identity field, so verification ends), then links the record to the facts it supports (MIG-5).<br>**Source:** a source may set the format only if a field of that specific record explicitly states the physical form. The mapping must be added to the parser's allowlist with a test, and stored as evidence on `media_format_code`, already an allowed `release_evidence` field. No cleared source provides such a field today, so none is added in M11b-1 |
+| Preserve provenance and audit history | The held record stays unchanged: source records are immutable (`guard_provider_record`). The editor's release has origin `staff` and an audit row with its reason. A MIG-5 link adds fact-level evidence and its own audit row |
 
 Single-format platforms, such as PlayStation with `cd-rom`, keep the automatic path unchanged.
 
-### MIG-2: release identity
+**Proof (M11b-1a, test stack):**
+- `44_physical_media_formats.test.sql` (53 pgTAP tests) stages synthetic NES and SNES entries. Their region tags (Japan, USA, Europe), serial patterns (HVC, NES, SHVC, SNS, SNSP) and a payload that names a format are all held as "format unknown" with their game. None creates a release, pairing, external reference, evidence or audit row, and no source record changes. A PlayStation entry is still created on `cd-rom`, with only what the source states, and its evidence.
+- `db-import-checks.mjs` runs the real tool under the `catalog_importer` login, and gets the same result for NES and SNES snapshots.
+- The importer still can call only its eight functions, and no editor, verification or publication function.
+- The M5b importer tests (17, 18, 19, 24) and the tool flow now run on `mega-drive`, a cartridge platform with one format, so the automatic candidate path keeps its full coverage.
 
-**Today.** Two identity rules exist:
+### MIG-2 and MIG-3 together: release identity and packaging (revised after review)
 
-| Index | Covers | Columns |
-| --- | --- | --- |
-| `releases_published_identity_key` | Published releases | `game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code` |
-| `releases_pending_submission_key` | Pending submissions with a submitter | `submitted_by` plus the same columns |
+**Correction.** The first design gave every existing release `packaging_code = 'unclassified'` and then put only `packaging_code` in the identity key. Two published releases that differed only in their packaging text, such as "Jewel case" and "Big box", would then have the same identity. The guard it proposed checked normalized packaging *text*, which isn't the key the index would enforce. The revised design below replaces it.
 
-Neither includes `media_format_code`. Both compare text exactly, so "Players' Choice" and "Players Choice", or "SCES-00867" and "SCES 00867", are different identities.
+**Principle: one migration, one final key, checked exactly.** MIG-2 and MIG-3 ship as one migration, so the identity indexes change once. Its guard evaluates the **same expressions the new indexes will use**, through the same immutable functions, before any index is touched.
 
-**Dependencies found:**
+#### The final key
 
-| Dependency | Where | Effect on MIG-2 |
-| --- | --- | --- |
-| Error mapping by index name | `submit_release` and `update_submission` (`m7a_submissions`), `approve_submission` (`m7b1_review`, replaced in `m10c`), `publish_release` (`m10c`) compare `constraint_name` with the two index names to return a friendly outcome | **Keep both names.** Create each new index under a temporary name, drop the old index by its exact name (no `CASCADE`), and rename the new one to the old name, in one migration |
-| Published-duplicate check | `submit_release` compares game, platform, region, edition, variant, packaging and product code with `is not distinct from` before creating a submission | **Replace it** with the same normalized comparison and media format, by exact signature. Otherwise a Famicom submission would be reported as a duplicate of an NES release |
-| Merge candidates and merge | `m7b2c` lists and accepts only published releases of the same platform and `media_format_code` | Already consistent. No change |
-| Verification | `release_identity_fields()` already includes `media_format_code` and `packaging` | No change. Changing either ends an unpublished release's verification |
-| Published edits | `update_release` may change the format of a published release with recent MFA and a reason | No change. Reclassifying an existing release is an individual, audited correction (decision M11b-D12) |
-| Foreign keys | `(platform_id, media_format_code)` to `platform_media_formats` | Unchanged |
-| Mutation test | `scripts/security-mutations.mjs` drops `releases_published_identity_key` by name | Keeps working with the kept name. Add mutations for the new expressions |
-
-**Proposed key, for both indexes** (the pending one with `submitted_by` first):
+For both indexes. The pending one starts with `submitted_by` and keeps its partial condition.
 
 ```text
 game_id, platform_id, media_format_code, region_code,
-private.release_label_key(edition_name), private.release_label_key(variant_name),
-packaging_code, private.release_code_key(product_code)
+private.release_label_key(edition_name),
+private.release_label_key(variant_name),
+private.release_packaging_key(packaging_code, packaging),
+private.release_code_key(product_code)
 ```
 
-- `release_label_key`: lower case, accents removed, apostrophes, punctuation and runs of spaces removed.
-- `release_code_key`: upper case, with spaces, hyphens, dots and slashes removed.
-- Both are `immutable` SQL functions, and null stays null (`nulls not distinct`).
-- The displayed values are never rewritten: the key only compares them.
-- `packaging_code` comes from MIG-3. Until it exists, MIG-2 uses the packaging text through `release_label_key`.
-
-**Effect on existing rows.**
-- Adding `media_format_code` only relaxes the key.
-- Normalizing tightens it, so MIG-2 starts with a guard that raises, listing the conflicting release ids, if any published release, or any pending submission of one submitter, would collide. It never changes data to make the index fit.
-- Development check, read-only, 2026-11-18: no collisions among published releases, nor among published and open candidates.
-
-**What it guarantees:**
-
-| Case | Today | After MIG-2 |
+| Function (immutable SQL, null in, null out) | What it compares | What it never does |
 | --- | --- | --- |
-| HVC-SM (Famicom cartridge, `ntsc-j`) and NES-SM-USA (NES Game Pak, `ntsc-uc`) | Separate (region and code differ) | Separate |
-| Two `asia` releases identical except Famicom versus NES shell | **Collide**: the second can't be published | Separate |
-| SNS-ZL-USA standard and SNS-ZL-USA-1 Players' Choice | Separate | Separate (code and edition differ) |
-| FF7 US black label and Greatest Hits, both SCUS-94163 | Separate (edition differs) | Separate |
-| The same NES-SM-USA entered twice as "Cardboard box" and "cardboard box" | **Both publishable** | Second refused at publish |
-| The same SCES-00867 entered as "SCES-00867" and "SCES 00867" | **Both publishable** | Second refused at publish |
-| A three-disc game | One release | One release: discs are `media_count` and MIG-4 identifiers |
+| `release_label_key(text)` | `lower()` of the trimmed text, with runs of white space made one space, and typographic apostrophes, quotes and dashes made ASCII | Remove letters, digits or punctuation. "Players' Choice" and "Players Choice" stay different; review catches that, not the key |
+| `release_code_key(text)` | Upper case, trimmed, runs of white space made one space, Unicode dash variants made `-` | Remove hyphens, slashes, dots or spaces. `SNS-ZL-USA-1` and `SNS-ZLUSA-1` stay different |
+| `release_packaging_key(code, text)` | The code itself for a classified release. For `unclassified`, the code plus the **exact** legacy text: `'unclassified' \|\| chr(31) \|\| coalesce(text, '')` | Merge two unclassified releases whose recorded packaging text differs in any way |
 
-**Unpublished candidates.** Imported and editor-created candidates have no submitter, so neither index covers them, by design (the M7b-1 privacy rule). For those, duplicates are caught by:
-- the review checks in section 7;
-- the merge candidate list;
-- the publish-time key.
+**Why the legacy text is exact.** The current index compares packaging text exactly. An unclassified release keeps exactly that component, so two existing rows that the current index keeps apart stay apart on packaging, and nothing previously distinct is merged by MIG-3. Only the other normalizations (labels, codes) can tighten the key, and the guard catches any collision they would cause.
 
-### MIG-3: packaging vocabulary
+#### The guard, before any DDL
 
-**Design:**
-- A reference table `packaging_types (code, name, description, position)`, read-only like `media_formats`.
-- A new column `releases.packaging_code`, not null, defaulting to `unclassified`, with a foreign key to `packaging_types`.
-- The existing `packaging` text is kept, as the value **as recorded**.
+In one transaction:
 
-**Two explicit states that aren't a type:**
-- `unclassified`: no editor has classified the packaging yet. The default, and the value every existing row starts with.
-- `unknown`: an editor looked, and the packaging can't be determined.
+1. Create the three key functions and `packaging_types`. Add `releases.packaging_code` (not null, default `unclassified`, foreign key to `packaging_types`).
+2. Compute the final key for every **published** release, and for every **pending submission** (`status in ('unverified', 'under_review')` with a submitter). Group exactly as each index will.
+3. If any group has more than one row, raise an exception that lists the release ids, and stop. The whole migration rolls back, the old indexes are untouched, and **no data is changed to make an index fit**.
+4. Create each new index under a temporary name. Building it is a second, independent check.
+5. Drop the old index by its exact name, without `CASCADE`, and rename the new index to the old name.
 
-**Initial types** (names for approval; assigned to a release only from evidence):
-- `cardboard-box`;
-- `jewel-case`;
-- `double-jewel-case`;
-- `multi-disc-jewel-case`;
-- `big-box`, for the existing development value.
+Development, read-only, 2026-11-18: no collisions among published releases, nor among published and open candidates, using normalized labels and codes and normalized packaging text. That is **stricter** than the final key, whose packaging component for unclassified rows is exact. M11b-1b repeats the check with the final functions, on the test stack and then on a restored copy of development.
 
-Other types are added by forward migration when a release needs one, as with media formats.
+#### Transitional strategy for unclassified historical releases
 
-**Rules:**
-- **No automatic conversion.** MIG-3 sets every existing row to `unclassified` and keeps its text, including the three development rows ("Jewel case" twice, "Big box" once). An editor classifies each with `update_release` and a reason, which sets the code. The text stays as recorded.
-- **New writes use the code.**
-  - Editor functions (`create_release`, `update_release`), `submit_release` and correction requests accept `packaging_code`.
-  - The free-text field becomes a note shown to editors, and is no longer part of identity.
-  - The admin, submission and correction forms change from a text input to a select. That is an M11b-1 app change.
-- **Identity.** `packaging_code` replaces the packaging text in both MIG-2 keys.
-  - Every existing row starts `unclassified`, so the change could tighten uniqueness. MIG-3 therefore runs the MIG-2 guard first, including the packaging text through `release_label_key`, and refuses to proceed on any collision.
-  - Development has none.
-- **Publication.** `publish_release` refuses `unclassified` for releases it publishes from then on. The editor chooses a type or `unknown`. Already-published releases are not changed and stay readable.
-- **Verification.** `packaging_code` joins `release_identity_fields()`.
+| Situation | Rule |
+| --- | --- |
+| Existing releases (published or not) | Start `unclassified`, with their packaging text kept as recorded. No classification is guessed. Their identity keeps the exact text, so earlier distinctions survive |
+| An editor classifies a legacy release | `update_release` sets `packaging_code` with a reason. The key changes from "unclassified plus text" to the code. If that collides with another published release, the update fails with the existing friendly duplicate message, and the editor merges or corrects instead. Classification never silently merges two releases |
+| A newly published release | Must be classified: an editor chooses a type, or `unknown` |
+| A new candidate whose packaging isn't known | Stays `unclassified` and visible as a gap in review. It can't be published until an editor chooses a type or `unknown` |
 
-### MIG-4: release identifiers
+**Duplicates between an unclassified legacy release and a classified new one** have different keys, so the index doesn't catch them. Review does: the release picker, `search_catalog_records` and the merge candidate list show the legacy release. This gap closes as legacy releases are classified, and the classification step is where a duplicate surfaces.
 
-`releases.product_code` stays the **release-level code printed on the package**: one per release, in the form printed. A new child table holds everything else:
+#### `unclassified` versus `unknown`
+
+| State | Meaning | Who sets it | Publishable |
+| --- | --- | --- | --- |
+| `unclassified` | Nobody has determined the packaging. The default, and every legacy row's starting value | Only the default. No function sets it, and nothing can return a release to it | **No**, for a release becoming published from MIG-3 onward. Legacy published releases stay published and readable |
+| `unknown` | An editor examined the evidence, and the packaging can't be established, for example when only a loose cartridge is documented | An editor, with a reason | Yes, shown as "Packaging unknown" |
+| A type | The packaging is established by evidence | An editor, with a reason citing it | Yes |
+
+**Enforcement:**
+- A trigger refuses a transition to `published` while `packaging_code = 'unclassified'`, whatever the path (`publish_release` or `approve_submission`). It also refuses setting `packaging_code` back to `unclassified`.
+- It is a trigger, not a `CHECK`, so legacy published rows stay valid.
+- Imports never set `packaging_code`, so imported candidates are `unclassified` until an editor acts (M5 decision 2).
+
+#### Packaging types, by construction
+
+Types describe how the package is **built**, never how many discs it holds. Disc count is `media_count`; inner trays, slipcovers and spine cards are `release_components`. This removes the overlap between the earlier `double-jewel-case` and `multi-disc-jewel-case`, which both meant a thick multi-disc case.
+
+| Code | Construction |
+| --- | --- |
+| `unclassified` | Not a type: not yet determined |
+| `unknown` | Not a type: determined to be unknowable |
+| `cardboard-box` | A folding paperboard carton, with or without an inner tray (the tray is a component) |
+| `jewel-case` | A standard-depth hinged polystyrene disc case (about 10 mm). It may hold a hinged flip tray for a second disc; disc count is `media_count` |
+| `double-depth-jewel-case` | A double-depth hinged disc case (about 24 mm) with internal hinged trays for several discs |
+| `big-box` | A large paperboard box with a separate inner holder, used by computer games. Kept for the existing development value |
+
+Further types are added by forward migration when a release needs one. Names are open for approval (M11b-D5).
+
+#### What else the migration changes, and what it keeps
+
+| Item | Change |
+| --- | --- |
+| Index names | **Kept**: `releases_published_identity_key` and `releases_pending_submission_key`. `submit_release`, `update_submission`, `approve_submission` and `publish_release` map these names to friendly duplicate messages, unchanged |
+| `submit_release` published-duplicate check | Replaced by exact signature with the same key functions, plus `media_format_code` and the packaging key, so it agrees with the index. Without that, a Famicom submission would be reported as a duplicate of an NES release |
+| `release_identity_fields()` | Gains `packaging_code`. A change ends an unpublished release's verification (M10c revision binding). Changing a published release still needs recent MFA |
+| Editor and submission functions | Accept `packaging_code` (validated against `packaging_types`). The packaging text becomes a note, kept on existing rows |
+| No-self-review | Unchanged. The creator still can't verify or publish |
+| Merge | Unchanged. It already requires the same platform and `media_format_code` |
+| App | The admin, submission and correction forms change from free text to a select. The app checks for these screens are updated |
+
+**Tests, in M11b-1b:**
+- pgTAP for each key function, including separators kept and dash variants unified.
+- The guard raising on a seeded collision, and nothing changed afterwards.
+- Both indexes refusing a normalized duplicate and allowing a different shell.
+- The submission duplicate check agreeing with the index.
+- The publication trigger on both paths, and that nothing returns a release to `unclassified`.
+- Classification of a legacy row that collides, surfacing the friendly message.
+- Mutations that drop each new index, weaken each key function, and remove the trigger.
+
+### MIG-4: release identifiers (approved in principle; clarified)
+
+#### Kinds of code
+
+| Where | Meaning | Printed on the item? | Visible to |
+| --- | --- | --- | --- |
+| `releases.product_code` | **The release's package code**, exactly as printed on the box or package, one per release | Yes | Everyone, when published |
+| `release_identifiers.kind = 'release_code'` | Another code printed on the **same package**, beside the package code | Yes | Everyone, when published |
+| `media_serial` | The serial printed on **one disc or cartridge** of the release, with its `disc_number` | Yes, on the medium | Everyone, when published |
+| `alternate_identifier` | Another official identifier printed on the package, such as a second barcode or a catalog number | Yes | Everyone, when published |
+| `code_alias` | A form a source uses that **isn't printed on the item**, such as `NES-P-SM` against a printed `NES-SM-EEC`. Kept for matching and duplicate search only | No | **Catalog editors only** |
+
+**A disc serial isn't the package code.** A PlayStation box code often equals disc 1's serial, but that is a fact to confirm from the package, never a default. Until it is confirmed, the pilot records the disc serials as `media_serial` and leaves `product_code` empty.
+
+**Combined codes stay whole.** `SNSP-ZL-NOE/SFRG` is stored as printed, as one `product_code`. It is split into a `product_code` and a `release_code` only when evidence shows two separately printed codes, and never just because of the slash. The first pilot table wrongly split it, and is corrected in section 8.
+
+#### Exact strings, and safe comparison
+
+- **Storage is exact.** `value`, like `product_code`, keeps the printed case, separators and spacing. The only check is no leading or trailing space, no control characters, and 1 to 40 characters.
+- **Comparison uses `release_code_key()`** (MIG-2): upper case, trimmed, white space runs made one space, Unicode dash variants made `-`. Hyphens, slashes, dots and spaces are separators that can carry meaning, so they are **never removed** for uniqueness.
+- **Duplicate suggestions** in staff search may also compare a compact form with every separator removed. That form only suggests, never enforces and never merges.
+
+#### Uniqueness: expression indexes, not `UNIQUE` constraints
+
+- PostgreSQL `UNIQUE` constraints can't contain expressions, so uniqueness on the comparison key is a **unique index**: `release_identifiers_key` on `(release_id, kind, private.release_code_key(value))`.
+- A second, partial unique index, `release_identifiers_disc_key` on `(release_id, disc_number) where kind = 'media_serial'`, gives one serial per disc.
+- **Consequences:**
+  - A violation names the index, not a constraint.
+  - The writing function catches `unique_violation` and maps the index name to a friendly message, as M7a and M10c do.
+  - `ON CONFLICT` would need the expression to infer the index, so the function doesn't use it.
+- **Nothing is unique across releases, deliberately:**
+  - Greatest Hits and Platinum reprints carry the original's disc serials.
+  - A label revision keeps its code.
+  - Regional packages can share a disc.
+  - A global unique rule would force one of two real releases to lie about its serial. A shared code is evidence for lookup, the importer's `serial_also_on` note and duplicate search, never identity or a reason to merge (M5 identity decision).
+
+#### Disc numbers under concurrent changes
+
+A disc number must stay between 1 and the release's `media_count`. Two triggers keep it there; each locks or reads the other side:
+
+1. **On `release_identifiers` insert or update:** it reads the release with `select media_count ... for share`, then refuses a `disc_number` above it. A media serial needs a known `media_count`.
+2. **On a `releases` update of `media_count`:** it refuses a value below the highest `disc_number` recorded.
+
+`FOR SHARE` conflicts with the row lock an update takes. Under read committed, each trigger statement reads after the other transaction commits, so the two sides serialize:
+- **Identifier first:** the count update waits, then sees the new serial and refuses.
+- **Count first:** the identifier insert waits, then sees the lower count and refuses.
+
+Writes also go through editor functions that lock the release first (`lock_release_for_edit`). The triggers are the backstop. A pgTAP test covers both orders, and `db-review-checks`-style checks hold a transaction open for each race.
+
+#### Writes, visibility and evidence
+
+- **Writes:** only `set_release_identifiers(release, identifiers, reason)`, for catalog editors.
+  - It needs a reason, and recent MFA on a published release.
+  - Each change records an audit row.
+  - It raises the release's revision, so an unpublished verification ends.
+- **Visibility:** RLS follows the release, like `release_markets`. The public and authenticated policy also requires `kind <> 'code_alias'`, and editors read all kinds. Column grants never expose who wrote a row.
+- **Evidence:** a source can support an identifier through the MIG-5 fact links, field `identifiers`, naming the exact identifier.
+
+### MIG-5: source evidence for editor-built releases (revised after review)
+
+**Correction.** The first design attached one held source record to one release, through `matched_release_id` and `external_references`. A No-Intro entry describes a **ROM dump**: one dump can be the software of several retail packages, such as an original, its Players' Choice reprint and a label revision. Tying it to one release would lose the others, and would imply facts a dump can't establish.
+
+#### What a ROM-level record can and can't establish
+
+| A No-Intro (ROM-level) record **can** support | It **never** establishes |
+| --- | --- |
+| That the release's medium carries this software (`software`) | A specific box, edition, reprint line or variant |
+| The serial it states, when it equals the release's code (`product_code` or an identifier) | The region of retail distribution, or markets |
+| The languages of the software it states (`languages`) | Packaging, media format or shell, media count |
+| | Release date, publisher, barcode, components |
+
+The allowed facts are a per-provider list in the database:
+- **`no-intro`:** `software`, `product_code`, `identifiers`, `languages`.
+- **`wikidata`:** game-level only, as today.
+- **`redump`:** none while held.
+
+A provider's list is extended only by a reviewed migration. **A No-Intro region tag is never evidence for `region_code`**: it describes the dump, and "(Europe)" spans many packages.
+
+#### The relationship: reuse `release_evidence`, add a small link table
 
 ```text
-release_identifiers (id, release_id, kind, value, disc_number, note)
-  kind: release_code | media_serial | alternate_identifier | code_alias
+private.source_record_links (
+  id, provider_record_id, release_id,
+  linked_by, linked_at, reason,          -- the editor and why
+  revoked_by, revoked_at, revoke_reason, -- nothing is deleted
+  unique (provider_record_id, release_id)
+)
+private.release_evidence (existing)
+  + link_id        -- the link the fact came through; null for the importer's own match
+  + stated_value   -- jsonb copy of exactly what the record states for this fact
+  + record_sha256  -- the record's payload hash at link time
+  field_name gains: 'software', 'identifiers'
 ```
 
-| Kind | Meaning | Example |
-| --- | --- | --- |
-| `release_code` | A further code printed on the package, beside `product_code` | `SFRG` beside `SNSP-ZL-NOE` |
-| `media_serial` | The serial of one disc or cartridge in the release, with `disc_number` | FF7 US discs: SCUS-94163 (1), SCUS-94164 (2), SCUS-94165 (3) |
-| `alternate_identifier` | Another official identifier of the same product, such as a second barcode or a catalog number | A second EAN on a sticker |
-| `code_alias` | A form of a code used by a source that isn't printed on the item, kept for matching only | `NES-P-SM` for a release printed `NES-SM-EEC`, if the item confirms which is printed |
+- **Many releases per record, many records per release.** One record can link to several releases, one link each. A release can have links from several records and providers.
+- **The importer's path is unchanged.** `matched_release_id` and `external_references` still mean "the release this source id created or resolved to", one per source id, written only by the importer. Editor links never write them. So a later snapshot never fills fields on an editor-built release: an editor link is never followed automatically.
+- **Every evidence row names one fact.** It holds `field_name`, plus `stated_value` copied from the immutable payload, plus the payload hash. Each row says exactly which fact of which record version supports which release field.
+- **Gate 5 is generalized.** The existing trigger requires release evidence to come from a record matched to that release. It now accepts either that, or an **active** link between this record and this release, with `field_name` in the provider's allowed list.
 
-**Constraints:**
-- `unique (release_id, kind, private.release_code_key(value))`.
-- `disc_number` is required for `media_serial` and otherwise null, and unique per release.
-- A trigger keeps `disc_number` between 1 and the release's `media_count`, rechecked when `media_count` changes.
-
-**Rules:**
-- **A three-disc game is one release.** Its discs are `media_count = 3` plus three `media_serial` rows. No identifier creates or splits a release.
-- **Identifiers are evidence, never identity.**
-  - Nothing is unique across releases: Greatest Hits and Platinum share serials with their originals.
-  - No identifier is part of the MIG-2 key.
-  - The importer's `serial_also_on` note and staff search look identifiers up, and never merge on them.
-- **Visibility and writes.**
-  - Visibility follows the release, like `release_markets`.
-  - `code_alias` is staff-only, because it isn't printed on the item.
-  - Written only through an editor function, with a reason and an audit row.
-  - Identifier changes raise the release's revision, so they end an unpublished verification.
-  - `release_evidence` gains the field name `identifiers`.
-
-### MIG-5: accepting a held source record
+#### The editor function
 
 ```text
-accept_import_record(p_record uuid, p_release uuid, p_fields text[], p_reason text, p_expected_revision bigint)
+link_source_record(p_record uuid, p_release uuid, p_facts text[], p_reason text, p_expected_revision bigint)
+revoke_source_link(p_link uuid, p_reason text)
 ```
 
-**Who:**
-- An active catalog editor or administrator, with a live session and a recent TOTP verification.
-- `catalog_importer` gets no grant, and no new privilege of any kind.
+| Check | Rule |
+| --- | --- |
+| Who | An active catalog editor or administrator, with a live session and recent TOTP. `catalog_importer` gets no grant and no new privilege |
+| Record | A release-level provider record, from a run on the release's platform. Any status except `ignored` and `failed`: a held record can support several releases |
+| Clearance | The provider is still cleared against the terms hash its run cited, rechecked at link time |
+| Release | Unpublished, and not merged, excluded or rejected, at `p_expected_revision`. Linking to a published release is a published edit, needing recent MFA (as above) and a reason |
+| Facts | Each fact is in the provider's allowed list, **is present in the record's payload**, and equals the release's current value under the MIG-2 key functions. Anything else is refused: a record can't be used to claim a fact it doesn't contain |
+| Values | Never changed. Linking only adds evidence; the editor sets values with `update_release` first |
+| Locks | Field locks are unaffected. The importer still honours them |
 
-**What it checks:**
-- The record is a release-level provider record in `needs_review` (held, or "format unknown").
-- It isn't linked to any other release, through `matched_release_id` or `external_references`.
-- Its provider is still cleared against the terms hash its run cited.
-- The release is unpublished, and not merged, excluded or rejected.
-- The release is on the run's platform, at the expected revision.
-- Every name in `p_fields` is a field the record states, and the release's current value equals what the record states, compared with the MIG-2 key functions. For example, the record's serial against `product_code`, or its single region against `region_code`. A field that doesn't match is refused, never copied over.
+**What it writes:**
+- the link;
+- one `release_evidence` row per fact;
+- an audit row (`catalog_source_linked`, or `catalog_source_unlinked`), with the editor, the reason, and the record, run, provider and facts;
+- a raised release revision: evidence is part of what a verifier attests, so an unpublished verification ends and must be repeated against the current evidence.
 
-**What it does:**
-- Sets the record's `matched_release_id`, status `matched` and `match_notes` (`accepted_by_editor`). The record's own content stays immutable.
-- Writes the `external_references` row, and a `release_evidence` row per accepted field.
-- Records the audit action `catalog_import_record_accepted`, with the editor, the reason, and the record, run and provider.
-- The release's origin stays `staff`. Its values aren't changed, and its revision and verification are untouched: evidence isn't content.
+The record's status becomes `matched`. Its `match_notes` gain `editor_links`, the number of active links. Its content stays immutable (`guard_provider_record`).
 
-**What it never does:**
-- verify or publish;
-- create a release or game;
-- change a field value;
-- override a field lock;
-- act on a published release.
+**Concurrency:**
+- The function locks the release first (`lock_release_for_edit`, `FOR UPDATE`), then the record (`FOR SHARE`).
+- `unique (provider_record_id, release_id)` makes a repeated link idempotent: a unique violation returns the existing link.
+- The existing `release_evidence` primary key `(release_id, field_name, provider_record_id)` makes a repeated fact a no-op.
+- Two editors linking the same record to two different releases is allowed, by design. Linking it to the same release twice yields one link.
 
-The no-self-review guard is unchanged:
-- the editor who created the release still can't verify or publish it;
-- accepting evidence doesn't count as review.
+**Review is unchanged:**
+- Linking isn't verification.
+- The release's origin and creator don't change.
+- The creator still can't verify or publish (M10c).
+- A verifier sees every link and its stated values in `get_release_record`.
+- Revoking a link keeps the row with who revoked it and why, ends the evidence rows' effect, and raises the revision again.
+
+**Tests, when implemented:**
+- One record supporting two releases.
+- Refusal of a disallowed fact (No-Intro `region_code`), an absent fact, and a mismatched value.
+- Idempotent repeats, and concurrent links held open.
+- Refusal after clearance is withdrawn.
+- No grant to the importer.
+- Revision and verification ending, and revocation keeping history.
+- Mutations: drop the allowed-facts check, the payload check, the clearance recheck, and gate 5's link condition.
 
 ## 7. Physical-release identity and duplicate-prevention rules
 
@@ -435,6 +535,8 @@ A Release is one distinguishable manufactured product. After MIG-2 and MIG-3, it
 ### Multiple product codes or aliases
 
 - `product_code` is the package code as printed, in the form printed. Store the source's form only when the item isn't available, and say so in the reason.
+- A combined code such as `SNSP-ZL-NOE/SFRG` is stored whole. It is split only on evidence of two separately printed codes.
+- A disc serial is not the package code unless a source showing the package says so.
 - Disc serials, further printed codes, alternate identifiers and source aliases go in `release_identifiers` (MIG-4). A multi-disc game stays one release.
 - Matching codes are evidence, never identity: Greatest Hits and Platinum share serials with their originals.
 
@@ -482,102 +584,116 @@ Verification ends with any identity change (M10c).
 
 ## 8. Proposed pilot titles and physical releases
 
-**Within the ceilings:**
+**The pilot is unchanged in scope:** 8 games and 38 release candidates, within the ceilings of 30 and 45. It is a review candidate, not an approved import (M11b-D10). Nothing has been imported or published.
 
-| Platform group | Games | Releases (confirmed / held) | Ceiling |
-| --- | --- | --- | --- |
-| NES / Famicom | 2 | 10 (5 / 5) | 10 games, 15 releases |
-| SNES / Super Famicom | 3 | 15 (14 / 1) | 10 games, 15 releases |
-| PlayStation | 3 | 13 (11 / 2) | 10 games, 15 releases |
-| **Total** | **8** | **38 (30 / 8)** | 30 games, 45 releases |
+### Evidence rules (revised after review)
 
-These are proposals for the product owner's approval.
-- **Traceability.** Every row names the exact page each identifying fact came from. A fact seen only in a search-engine snippet is labeled as such and never counts as confirmed. Before entry, editor A re-reads each page and cites it, with the check date, in the release's reason.
-- **Confirmed** means each identifying fact was read on a page fetched on 2026-11-18, cited below. It is still a candidate until an editor verifies it.
-- **Held** means a fact is missing or conflicting. It enters the pilot only as a held entry for an editor, and is published only once the gap is closed.
+- **A verified game is not a verified edition.** A game page (Wikipedia, MarioWiki, Wikidata) supports a title, a game identity and often an original release date. It doesn't establish a specific package.
+- **A disc serial is not necessarily the package code.** PlayStation package codes are left empty until a source showing the package confirms them, and the serials are recorded per disc (MIG-4).
+- **A ROM dump is not a retail package.** No release below rests on a No-Intro entry. No-Intro can later add only `software`, serial and language facts (MIG-5).
+- **Missing packaging is a visible gap.** None of the sources cited states the package construction. Every release starts `unclassified` and can't be published until an editor chooses a type or `unknown` (MIG-3).
+- **Search snippets confirm nothing.** A fact seen only in a search-engine result is held.
+- **Held entries never become published silently.** Publication needs a human verifier who isn't the creator, and a verification that matches the record as it is (M10c).
+- **Who read what.** The facts below were read on 2026-11-18 by a research pass with a text-only fetch. Editor A re-reads each cited page and cites it, with the date, in the release's reason before entering anything.
+
+**Evidence classes**, which replace "Confirmed":
+
+| Class | Meaning |
+| --- | --- |
+| **A: item-level** | A source that documents this specific physical item (its cartridge or package entry) supports the platform, shell, printed code and edition. The listed gaps remain |
+| **B: partial** | Some identifying facts come from a general or secondary source, or by inference (a code from a wiki list, or a package code taken from a disc serial). An editor must close the gap from an item-level source before verifying |
+| **H: held** | An identifying fact is missing, conflicting or seen only in a snippet. The release isn't entered until it's resolved |
+
+| Platform group | Games | A | B | H | Releases | Ceiling |
+| --- | --- | --- | --- | --- | --- | --- |
+| NES / Famicom | 2 | 2 | 3 | 5 | 10 | 10 games, 15 releases |
+| SNES / Super Famicom | 3 | 14 | 0 | 1 | 15 | 10 games, 15 releases |
+| PlayStation | 3 | 0 | 11 | 2 | 13 | 10 games, 15 releases |
+| **Total** | **8** | **16** | **14** | **8** | **38** | 30 games, 45 releases |
+
+**Gaps common to every row:**
+- packaging (all 38);
+- markets, where only a code suffix suggests them;
+- release dates for SNES (SNES Central gives none; its "Man. Dates" are manufacturing codes).
+
+They are not repeated in each row.
+
+**Corrections to the first table:**
+- **Package codes are no longer taken from disc serials.** PlayStation package codes were taken from disc 1 serials; they are now gaps.
+- **No combined code is split.** `SNSP-ZL-NOE/SFRG` was split into a code and an alias; it is now stored as printed.
+- **No variant is invented.** "German packaging", "French packaging" and "Spanish packaging" were variant names the sources don't state, and are removed. The printed code and languages already distinguish those releases.
+- **Changed classes:**
+  - NES rows resting on MarioWiki's code lists move to B.
+  - US Greatest Hits FF7 moves to H, because its package is evidenced only by cover images filed under the original serial, which weren't inspected.
+  - Metal Gear Solid moves from H to B, because a packaging gap no longer holds a row on its own: it is universal and explicit.
 
 ### NES / Famicom
 
-**What it exercises:**
-- the same game as a Famicom cartridge, an NES Game Pak and a disk card;
-- a PAL country release;
-- the gold cartridge;
-- a Classic Series reprint.
-
-| # | Game | Platform, format | Region, market | Product code | Edition, variant | Media | Status | Evidence |
+| # | Game | Platform, format | Region | Printed code | Edition, variant | Media | Class and gaps | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| N1 | Super Mario Bros. | `nes`, `famicom-cartridge` | `ntsc-j`, JP | HVC-SM | Standard | 1 | Confirmed (date 1985-09-13) | [MarioWiki: Super Mario Bros.](https://www.mariowiki.com/Super_Mario_Bros.), [Wikipedia: Super Mario Bros.](https://en.wikipedia.org/wiki/Super_Mario_Bros.) |
-| N2 | Super Mario Bros. | `famicom-disk-system`, `famicom-disk-card` | `ntsc-j`, JP | FMC-SMA | Re-release on disk | 1 | Confirmed (1986-02-21) | [MarioWiki: Super Mario Bros.](https://www.mariowiki.com/Super_Mario_Bros.), [Wikipedia: Super Mario Bros.](https://en.wikipedia.org/wiki/Super_Mario_Bros.) |
-| N3 | Super Mario Bros. | `nes`, `nes-game-pak` | `ntsc-uc`, US | NES-SM-USA | Standard | 1 | Confirmed. Date "debated" per Wikipedia, so year only | [NesCartDB 270](https://nescartdb.com/profile/view/270), [Wikipedia: Super Mario Bros.](https://en.wikipedia.org/wiki/Super_Mario_Bros.) |
-| N4 | Super Mario Bros. | `nes`, `nes-game-pak` | `pal`, Europe | NES-SM-EEC or NES-P-SM | Standard | 1 | **Held**: sources disagree on the printed code | [MarioWiki: Super Mario Bros.](https://www.mariowiki.com/Super_Mario_Bros.) (gives NES-P-SM). NES-SM-EEC seen only in a search snippet of VGCollect item 18369, not fetched |
-| N5 | Super Mario Bros. | `nes`, `nes-game-pak` | `pal`, AU | NES-SM-AUS | Standard | 1 | Confirmed (July 1987) | [MarioWiki: Super Mario Bros.](https://www.mariowiki.com/Super_Mario_Bros.) |
-| N6 | The Legend of Zelda | `famicom-disk-system`, `famicom-disk-card` | `ntsc-j`, JP | FMC-ZEL | Standard | 1 | **Held**: code seen only in a search snippet (date 1986-02-21 confirmed) | [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) (date). FMC-ZEL seen only in a search snippet, not fetched |
-| N7 | The Legend of Zelda | `nes`, `nes-game-pak` | `ntsc-uc`, US | NES-ZL-USA | Standard, "Gold cartridge" | 1 | Confirmed. Date conflict (July versus August 22, 1987), so 1987 | [NesCartDB 490](https://nescartdb.com/profile/view/490), [NesCartDB 872](https://nescartdb.com/profile/view/872), [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) |
-| N8 | The Legend of Zelda | `nes`, `nes-game-pak` | `ntsc-uc`, US | not confirmed | Reprint, "Classic Series", grey cartridge | 1 | **Held**: code not confirmed (1992 and grey cartridge confirmed) | [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) |
-| N9 | The Legend of Zelda | `nes`, `nes-game-pak` | `pal` | not confirmed | Standard | 1 | **Held**: code and country package not confirmed | [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) |
-| N10 | The Legend of Zelda | `nes`, `famicom-cartridge` | `ntsc-j`, JP | not confirmed | Cartridge re-release (1994) | 1 | **Held**: code not confirmed | [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) |
+| N1 | Super Mario Bros. | `nes`, `famicom-cartridge` | `ntsc-j` | HVC-SM | Standard | 1 | **B**: the code is from a wiki list, not an item page. Date 1985-09-13 is the game's | [MarioWiki: Super Mario Bros.](https://www.mariowiki.com/Super_Mario_Bros.), [Wikipedia: Super Mario Bros.](https://en.wikipedia.org/wiki/Super_Mario_Bros.) |
+| N2 | Super Mario Bros. | `famicom-disk-system`, `famicom-disk-card` | `ntsc-j` | FMC-SMA | Disk re-release | 1 | **B**: the code is from a wiki list. Date 1986-02-21 | MarioWiki, Wikipedia (as N1) |
+| N3 | Super Mario Bros. | `nes`, `nes-game-pak` | `ntsc-uc` | NES-SM-USA | Standard | 1 | **A**. Date year only ("debated") | [NesCartDB 270](https://nescartdb.com/profile/view/270), Wikipedia (as N1) |
+| N4 | Super Mario Bros. | `nes`, `nes-game-pak` | `pal` | NES-SM-EEC or NES-P-SM | Standard | 1 | **H**: the code conflicts; NES-SM-EEC only in a snippet | [MarioWiki](https://www.mariowiki.com/Super_Mario_Bros.) (NES-P-SM); VGCollect item 18369 snippet, not fetched |
+| N5 | Super Mario Bros. | `nes`, `nes-game-pak` | `pal` | NES-SM-AUS | Standard | 1 | **B**: the code is from a wiki list. July 1987 | MarioWiki (as N1) |
+| N6 | The Legend of Zelda | `famicom-disk-system`, `famicom-disk-card` | `ntsc-j` | FMC-ZEL | Standard | 1 | **H**: the code only in a snippet. Date 1986-02-21 from the game page | [Wikipedia: The Legend of Zelda](https://en.wikipedia.org/wiki/The_Legend_of_Zelda_(video_game)) |
+| N7 | The Legend of Zelda | `nes`, `nes-game-pak` | `ntsc-uc` | NES-ZL-USA | Standard, "Gold cartridge" | 1 | **A**. Date conflict (July versus August 22, 1987), so 1987 | [NesCartDB 490](https://nescartdb.com/profile/view/490), [NesCartDB 872](https://nescartdb.com/profile/view/872), Wikipedia (as N6) |
+| N8 | The Legend of Zelda | `nes`, `nes-game-pak` | `ntsc-uc` | not confirmed | Reprint, "Classic Series", grey cartridge | 1 | **H**: no code | Wikipedia (as N6) |
+| N9 | The Legend of Zelda | `nes`, `nes-game-pak` | `pal` | not confirmed | Standard | 1 | **H**: no code or country package | Wikipedia (as N6) |
+| N10 | The Legend of Zelda | `nes`, `famicom-cartridge` | `ntsc-j` | not confirmed | Cartridge re-release (1994) | 1 | **H**: no code | Wikipedia (as N6) |
 
 ### SNES / Super Famicom
 
-**What it exercises:**
-- both shells;
-- PAL country packages;
-- Players' Choice reprints with two ratings;
-- a label revision that is not a reprint.
+SNES Central documents each cartridge and package by its printed code. The region below is its listing, which editor A confirms from the page, not from the code prefix.
 
-| # | Game | Format | Region, market | Product code | Edition, variant | Media | Status | Evidence |
+| # | Game | Format | Region | Printed code | Edition, variant | Media | Class and gaps | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S1 | Super Mario World | `super-famicom-cartridge` | `ntsc-j`, JP | SHVC-MW | Standard | 1 | Confirmed | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S2 | Super Mario World | `snes-game-pak-na` | `ntsc-uc`, US | SNS-MW-USA | Standard | 1 | Confirmed | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S3 | Super Mario World | `snes-game-pak-na` | `ntsc-uc`, US | SNS-MW-USA-1 | Standard, "Two-line logo label" | 1 | Confirmed | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S4 | Super Mario World | `super-famicom-cartridge` | `pal`, DE | SNSP-MW-NOE | Standard, "German packaging" | 1 | Confirmed | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S5 | Super Mario World | `super-famicom-cartridge` | `pal`, GB | printed "SNS-MW-UKV" on the source | Standard | 1 | **Held**: the missing "P" may be a source error; check an item | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S6 | Super Mario World | `super-famicom-cartridge` | `pal`, FR, NL | SNSP-MW-FAH-1 | Standard | 1 | Confirmed | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
-| S7 | The Legend of Zelda: A Link to the Past | `super-famicom-cartridge` | `ntsc-j`, JP | SHVC-ZL | Standard | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S8 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc`, US | SNS-ZL-USA | Standard | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S9 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc`, US | SNS-ZL-USA-1 | Reprint, "Players' Choice", "K-A rating" | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S10 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc`, US | SNS-ZL-USA-2 | Reprint, "Players' Choice", "E rating" | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S11 | A Link to the Past | `super-famicom-cartridge` | `pal`, GB | SNSP-ZL-UKV | Standard | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S12 | A Link to the Past | `super-famicom-cartridge` | `pal`, DE | SNSP-ZL-NOE, alias SFRG | Standard, "German packaging" | 1 | Confirmed | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
-| S13 | Super Metroid | `snes-game-pak-na` | `ntsc-uc`, US | SNS-RI-USA | Standard | 1 | Confirmed | [SNES Central 0885](https://snescentral.com/article.php?id=0885) |
-| S14 | Super Metroid | `super-famicom-cartridge` | `pal`, FR, NL | SNSP-RI-FAH | Standard | 1 | Confirmed | [SNES Central 0885](https://snescentral.com/article.php?id=0885) |
-| S15 | Super Metroid | `super-famicom-cartridge` | `pal`, GB | SNSP-RI-UKV | Standard | 1 | Confirmed | [SNES Central 0885](https://snescentral.com/article.php?id=0885) |
+| S1 | Super Mario World | `snes-cartridge-jp-pal` | `ntsc-j` | SHVC-MW | Standard | 1 | **A** | [SNES Central 0000](https://snescentral.com/article.php?id=0000) |
+| S2 | Super Mario World | `snes-game-pak-na` | `ntsc-uc` | SNS-MW-USA | Standard | 1 | **A** | SNES Central 0000 |
+| S3 | Super Mario World | `snes-game-pak-na` | `ntsc-uc` | SNS-MW-USA-1 | Standard, "Two-line logo label" | 1 | **A**: a label revision, not a reprint | SNES Central 0000 |
+| S4 | Super Mario World | `snes-cartridge-jp-pal` | `pal` | SNSP-MW-NOE | Standard | 1 | **A** | SNES Central 0000 |
+| S5 | Super Mario World | `snes-cartridge-jp-pal` | `pal` | "SNS-MW-UKV" as listed | Standard | 1 | **H**: the missing "P" may be a source error | SNES Central 0000 |
+| S6 | Super Mario World | `snes-cartridge-jp-pal` | `pal` | SNSP-MW-FAH-1 | Standard | 1 | **A** | SNES Central 0000 |
+| S7 | The Legend of Zelda: A Link to the Past | `snes-cartridge-jp-pal` | `ntsc-j` | SHVC-ZL | Standard | 1 | **A** | [SNES Central 0164](https://snescentral.com/article.php?id=0164) |
+| S8 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc` | SNS-ZL-USA | Standard | 1 | **A** | SNES Central 0164 |
+| S9 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc` | SNS-ZL-USA-1 | Reprint, "Players' Choice", "K-A rating" | 1 | **A** | SNES Central 0164 |
+| S10 | A Link to the Past | `snes-game-pak-na` | `ntsc-uc` | SNS-ZL-USA-2 | Reprint, "Players' Choice", "E rating" | 1 | **A** | SNES Central 0164 |
+| S11 | A Link to the Past | `snes-cartridge-jp-pal` | `pal` | SNSP-ZL-UKV | Standard | 1 | **A** | SNES Central 0164 |
+| S12 | A Link to the Past | `snes-cartridge-jp-pal` | `pal` | SNSP-ZL-NOE/SFRG, as printed | Standard | 1 | **A**: stored whole, not split | SNES Central 0164 |
+| S13 | Super Metroid | `snes-game-pak-na` | `ntsc-uc` | SNS-RI-USA | Standard | 1 | **A** | [SNES Central 0885](https://snescentral.com/article.php?id=0885) |
+| S14 | Super Metroid | `snes-cartridge-jp-pal` | `pal` | SNSP-RI-FAH | Standard | 1 | **A** | SNES Central 0885 |
+| S15 | Super Metroid | `snes-cartridge-jp-pal` | `pal` | SNSP-RI-UKV | Standard | 1 | **A** | SNES Central 0885 |
 
-**SNES dates.** All SNES release dates are unconfirmed: SNES Central gives none. They stay unknown until a source that states the date is cited. The Japanese Super Metroid code wasn't found on SNES Central, so that release isn't proposed.
+The Japanese Super Metroid code wasn't found on SNES Central, so that release isn't proposed.
 
 ### PlayStation
 
-**What it exercises:**
-- multi-disc sets;
-- the per-language PAL releases of one game;
-- Greatest Hits and Platinum reprints that share a serial;
-- a Japanese reprint with its own serial;
-- a third-party SLUS title.
+PSXDataCenter documents each disc by serial, with dates and languages. No package code below is confirmed. Each is a gap until a source showing the package confirms it.
 
-| # | Game | Region, market | Product code (box), disc serials | Edition | Media | Status | Evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| P1 | Final Fantasy VII | `ntsc-j`, JP | SLPS-00700; discs 00700–00702 | Standard | 3 | Confirmed (1997-01-31) | [PSXDataCenter SLPS-00700](https://psxdatacenter.com/games/J/F/SLPS-00700.html) |
-| P2 | Final Fantasy VII | `ntsc-uc`, US | SCUS-94163; discs 94163–94165 | Standard, "Black label" | 3 | Confirmed (1997-08-15) | [PSXDataCenter SCUS-94163](https://psxdatacenter.com/games/U/F/SCUS-94163.html) |
-| P3 | Final Fantasy VII | `ntsc-uc`, US | SCUS-94163 (shared) | Reprint, "Greatest Hits" | 3 | Confirmed as a package; date unknown | [PSXDataCenter SCUS-94163](https://psxdatacenter.com/games/U/F/SCUS-94163.html) (Greatest Hits covers filed under this serial) |
-| P4 | Final Fantasy VII | `pal`, English | SCES-00867; discs 00867, 10867, 20867 | Standard | 3 | Confirmed (1997-11-14) | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html) |
-| P5 | Final Fantasy VII | `pal`, French | SCES-00868; 10868, 20868 | Standard, "French packaging" | 3 | Confirmed | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html), [PSXDataCenter PAL list](https://psxdatacenter.com/plist.html) |
-| P6 | Final Fantasy VII | `pal`, German | SCES-00869; 10869, 20869 | Standard, "German packaging" | 3 | Confirmed | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html), [PSXDataCenter PAL list](https://psxdatacenter.com/plist.html) |
-| P7 | Final Fantasy VII | `pal`, Spanish | SCES-00900; 10900, 20900 | Standard, "Spanish packaging" | 3 | Confirmed | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html), [PSXDataCenter PAL list](https://psxdatacenter.com/plist.html) |
-| P8 | Final Fantasy VII | `pal`, English | SCES-00867 (shared) | Reprint, "Platinum" | 3 | **Held**: a bonus disc (implied SCED-20062) isn't confirmed | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html) (Platinum covers and a "PLATINUM BONUS DISC" image) |
-| P9 | Crash Bandicoot | `ntsc-uc`, US | SCUS-94900 | Standard, "Black label" | 1 | Confirmed (1996-09-09) | [PSXDataCenter SCUS-94900](https://psxdatacenter.com/games/U/C/SCUS-94900.html) |
-| P10 | Crash Bandicoot | `pal` | SCES-00344 | Standard | 1 | Confirmed (1996-11-15) | [PSXDataCenter SCES-00344](https://psxdatacenter.com/games/P/C/SCES-00344.html) |
-| P11 | Crash Bandicoot | `ntsc-j`, JP | SCPS-10031 | Standard | 1 | Confirmed (1996-12-06) | [PSXDataCenter SCPS-10031](https://psxdatacenter.com/games/J/C/SCPS-10031.html) |
-| P12 | Crash Bandicoot | `ntsc-j`, JP | SCPS-91057 | Reprint, "PlayStation the Best for Family" | 1 | Confirmed (1998-05-28) | [PSXDataCenter SCPS-91057](https://psxdatacenter.com/games/J/C/SCPS-91057.html) |
-| P13 | Metal Gear Solid | `ntsc-uc`, US | SLUS-00594; discs SLUS-00594, 00776 | Standard | 2 | **Held** for packaging: the 2-disc case type isn't stated (serials and 1998-10-21 confirmed) | [PSXDataCenter SLUS-00594](https://psxdatacenter.com/games/U/M/SLUS-00594.html) |
+| # | Game | Region | Package code | Disc serials (MIG-4) | Edition | Media | Class and gaps | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| P1 | Final Fantasy VII | `ntsc-j` | gap | SLPS-00700, 00701, 00702 | Standard | 3 | **B**: package code. Date 1997-01-31 | [PSXDataCenter SLPS-00700](https://psxdatacenter.com/games/J/F/SLPS-00700.html) |
+| P2 | Final Fantasy VII | `ntsc-uc` | gap | SCUS-94163, 94164, 94165 | Standard, "Black label" | 3 | **B**: package code. Date 1997-08-15 | [PSXDataCenter SCUS-94163](https://psxdatacenter.com/games/U/F/SCUS-94163.html) |
+| P3 | Final Fantasy VII | `ntsc-uc` | gap | as P2 | Reprint, "Greatest Hits" | 3 | **H**: the package is evidenced only by cover images filed under P2's serial, not inspected | PSXDataCenter SCUS-94163 |
+| P4 | Final Fantasy VII | `pal` (English) | gap | SCES-00867, 10867, 20867 | Standard | 3 | **B**: package code. Date 1997-11-14 | [PSXDataCenter SCES-00867](https://psxdatacenter.com/games/P/F/SCES-00867.html) |
+| P5 | Final Fantasy VII | `pal` (French) | gap | SCES-00868, 10868, 20868 | Standard | 3 | **B**: package code, date | PSXDataCenter SCES-00867, [PAL list](https://psxdatacenter.com/plist.html) |
+| P6 | Final Fantasy VII | `pal` (German) | gap | SCES-00869, 10869, 20869 | Standard | 3 | **B**: package code, date | As P5 |
+| P7 | Final Fantasy VII | `pal` (Spanish) | gap | SCES-00900, 10900, 20900 | Standard | 3 | **B**: package code, date | As P5 |
+| P8 | Final Fantasy VII | `pal` (English) | gap | as P4 | Reprint, "Platinum" | 3 | **H**: the package and a possible bonus disc (SCED-20062, implied by an image link) aren't confirmed | PSXDataCenter SCES-00867 |
+| P9 | Crash Bandicoot | `ntsc-uc` | gap | SCUS-94900 | Standard, "Black label" | 1 | **B**: package code. Date 1996-09-09 | [PSXDataCenter SCUS-94900](https://psxdatacenter.com/games/U/C/SCUS-94900.html) |
+| P10 | Crash Bandicoot | `pal` | gap | SCES-00344 | Standard | 1 | **B**: package code. Date 1996-11-15 | [PSXDataCenter SCES-00344](https://psxdatacenter.com/games/P/C/SCES-00344.html) |
+| P11 | Crash Bandicoot | `ntsc-j` | gap | SCPS-10031 | Standard | 1 | **B**: package code. Date 1996-12-06 | [PSXDataCenter SCPS-10031](https://psxdatacenter.com/games/J/C/SCPS-10031.html) |
+| P12 | Crash Bandicoot | `ntsc-j` | gap | SCPS-91057 | Reprint, "PlayStation the Best for Family" | 1 | **B**: package code. Date 1998-05-28 | [PSXDataCenter SCPS-91057](https://psxdatacenter.com/games/J/C/SCPS-91057.html) |
+| P13 | Metal Gear Solid | `ntsc-uc` | gap | SLUS-00594, SLUS-00776 | Standard | 2 | **B**: package code. Date 1998-10-21 | [PSXDataCenter SLUS-00594](https://psxdatacenter.com/games/U/M/SLUS-00594.html) |
 
 **Left out on purpose:**
-- Final Fantasy VII's second Japanese serial set (SCPS-45007–9), which is unexplained;
-- Final Fantasy VII International, whose Ultimate Hits serials conflict within one source;
-- Crash Bandicoot's US Greatest Hits, which is not proposed separately until its package is described.
-
-**Markets.** For the PAL rows, markets are recorded only where a source states them.
+- Final Fantasy VII's second Japanese serial set (SCPS-45007–9), which is unexplained.
+- Final Fantasy VII International, whose Ultimate Hits serials conflict within one source.
+- Crash Bandicoot's US Greatest Hits, for the same reason as P3.
 
 **Wikidata ids.** No Wikidata item id is claimed here. They are found and checked when games are imported in M11b-2.
+
+**Where releases come from.** No release enters the catalog from a No-Intro entry. Editors build every release from the item-level sources above. NES and SNES dumps can then support `software`, serial and language facts through MIG-5 links, once MIG-5 is implemented and No-Intro's conditions (M11b-D2) are met.
 
 ## 9. Import, review and publication workflow
 
@@ -590,7 +706,7 @@ These are proposals for the product owner's approval.
    - Nothing is verified or published.
 6. **Editor A builds the candidates.** From the held entries and the evidence table, editor A:
    - creates or completes each release (format, region, edition, variant, packaging, product code, markets, components) with a reason citing the evidence;
-   - accepts the source record as evidence (MIG-5);
+   - links source records to the exact facts they support (MIG-5), never to a box, edition or retail region;
    - locks the fields they set.
 7. **Editor B reviews.** A different staff member, with recent MFA, checks each candidate against its evidence and the duplicate checks in section 7. Editor B then verifies and publishes it, or rejects it with a reason. The review guard refuses self-review.
 8. **Report.** The run report, the evidence table and the review outcomes go to the product owner.
@@ -604,7 +720,7 @@ These are proposals for the product owner's approval.
 | --- | --- | --- |
 | A source's terms change or are misread | Data reused without permission | Clearance bound to a terms hash, rechecked each run. **Legal** review before any commercial launch |
 | EU database right in specialist sites (NesCartDB, SNES Central, PSXDataCenter) | Systematic extraction could infringe | Editors cite individual facts with a URL. No scraping, no bulk import. **Legal** |
-| No-Intro entries treated as physical releases | One ROM merges several packages, or invents country variants | Held entries, an editor chooses format and edition, MIG-5 accept function, no automatic release per entry for `nes`/`snes` |
+| No-Intro entries treated as physical releases | One ROM merges several packages, or invents country variants | Held entries (proved in M11b-1a). Editors build releases from item-level sources. MIG-5 links a dump only to `software`, serial and language facts, possibly on several releases |
 | Product-code traps (shared reprint serials, suffix meanings, combined codes, source typos) | Wrong releases or false merges | Codes are evidence only. Printed form wins. Conflicts held |
 | Wrong serial in an automated summary | Wrong release identity | Verify every serial on its own detail page (a summary paired Crash Bandicoot with the Crash 2 serial) |
 | Date conflicts | False precision | Keep only the agreed precision |
@@ -619,12 +735,12 @@ These are proposals for the product owner's approval.
 | M11b-D1 | Wikidata for game identity | **Approved.** Clearance is recorded by an operator in M11b-2 with a saved terms copy |
 | M11b-D2 | No-Intro metadata | **Conditionally approved**: metadata only, respecting its terms and permitted access (manual saved downloads). Still open: a person accepts the gate and confirms what an NES and SNES record holds |
 | M11b-D3 | Redump | **Held** pending clarification of rights and access conditions |
-| M11b-D4 | Explicit cartridge differences, one platform per family | **Approved in direction.** The four codes and names are confirmed with MIG-1 |
-| M11b-D5 | Controlled packaging vocabulary | **Approved in direction**, with backward compatibility and normalization. Open: the type names and publication refusing `unclassified` (MIG-3) |
+| M11b-D4 | Explicit cartridge differences, one platform per family | **Approved** with the identifiers `famicom-cartridge`, `nes-game-pak`, `snes-cartridge-jp-pal`, `snes-game-pak-na`. Implemented in M11b-1a, test stack only |
+| M11b-D5 | Controlled packaging vocabulary | **Approved in direction.** Revised design in section 6: types by construction, `unclassified` and `unknown`, legacy text kept in the key. Open: the type names |
 | M11b-D6 | Video standard column | **Approved: not now** |
-| M11b-D7 | Release identifiers (MIG-4) | Open: design in section 6 |
-| M11b-D8 | Accepting a held record (MIG-5) | Open: design in section 6 |
-| M11b-D9 | MIG-2: format and normalized values in both identity rules, the submission duplicate check, kept index names | Open: design in section 6 |
+| M11b-D7 | Release identifiers (MIG-4) | **Approved in principle.** Clarifications in section 6, for review |
+| M11b-D8 | Source evidence links (MIG-5) | Revised design in section 6, for review. Not to be implemented before that review |
+| M11b-D9 | MIG-2 and MIG-3 as one collision-safe migration | Revised design in section 6, for review. Not to be implemented before that review |
 | M11b-D10 | The pilot list in section 8 | **Accepted as a review candidate, not an approved import.** The final selection is approved before any development import |
 | M11b-D11 | Who reviews on development | Open. No-self-review and every staff publication protection are kept (approved). No permanent Owner account is created for it |
 | M11b-D12 | The 17 existing development SNES releases | **Not modified without individual verification** (approved). No bulk reclassification |
@@ -633,18 +749,23 @@ These are proposals for the product owner's approval.
 
 Each step is a checkpoint, stopped for review.
 
-1. **M11b-1, reference data and schema.**
-   - Migrations MIG-1 to MIG-5, with tests and mutation checks for the new functions and keys.
-   - The importer's Wikidata platform ids.
-   - An NES No-Intro parser test.
-   - Test stack only. Then development, behind a backup, with approval.
-2. **M11b-2, NES / Famicom pilot.**
+1. **M11b-1a, media formats.** MIG-1, importer behavior proof, test updates. **Done on the test stack** (2026-11-18). Not applied to development.
+2. **M11b-1b, identity and packaging.** MIG-2 and MIG-3 as one migration, after review of section 6:
+   - the final-key guard, run against the test stack and a restored copy of development;
+   - the publication trigger;
+   - the form changes from free text to a select;
+   - tests and focused mutations.
+3. **M11b-1c, identifiers and source links.** MIG-4, then MIG-5, after review. Also:
+   - the importer's Wikidata platform ids;
+   - an NES No-Intro parser test with a synthetic DAT.
+4. **M11b-1 on development.** Apply M11b-1a to M11b-1c to development behind a backup and restore check, with approval.
+5. **M11b-2, NES / Famicom pilot.**
    - Clearance, snapshots and a fixed-id import on the test stack.
    - Editor A builds the candidates and editor B reviews.
    - A report, then the approved load into development.
-3. **M11b-3, SNES / Super Famicom pilot.** The same, plus reclassifying existing development SNES releases if D12 is approved.
-4. **M11b-4, PlayStation pilot.** Wikidata games plus editor-entered releases with disc serials (MIG-4), and Redump only if cleared.
-5. **M11b-5, quality.**
+6. **M11b-3, SNES / Super Famicom pilot.** The same. Existing development SNES releases change only by individual, verified correction (D12).
+7. **M11b-4, PlayStation pilot.** Wikidata games plus editor-entered releases with disc serials (MIG-4), and Redump only if cleared.
+8. **M11b-5, quality.**
    - A duplicate audit across the three platforms.
    - Search checks on localized titles and codes.
    - Review of the held entries.
