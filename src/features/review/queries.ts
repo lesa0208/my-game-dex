@@ -51,6 +51,7 @@ export type ReviewRelease = {
   local_title: string | null;
   publisher_name: string | null;
   packaging: string | null;
+  packaging_code: string;
   release_date: string | null;
   release_date_precision: string;
   components: { kind: string; label: string; quantity: number }[];

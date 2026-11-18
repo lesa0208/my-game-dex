@@ -8,6 +8,8 @@
 /** The values the submission form offers (features/submissions/form.ts); a unit test keeps them the same. */
 export const EDITION_KIND_VALUES = ["standard", "limited", "collector", "reprint", "bundle", "promotional", "other"] as const;
 export const GAME_KIND_VALUES = ["game", "compilation", "expansion"] as const;
+/** The packaging codes (features/catalog/packaging.ts, public.packaging_types); a unit test keeps them the same. */
+export const PACKAGING_CODE_VALUES = ["unclassified", "unknown", "cardboard-box", "jewel-case", "double-depth-jewel-case", "plastic-case", "paper-sleeve"] as const;
 
 export const QUEUE_FILTERS = [
   { value: "active", label: "To review" },
@@ -94,6 +96,7 @@ export type ReleaseRecord = {
   publisher_name: string | null;
   media_count: number | null;
   packaging: string | null;
+  packaging_code: string;
   region_code: string;
   region_unknown_confirmed: boolean;
   release_date: string | null;
@@ -129,6 +132,12 @@ export function readReleaseCorrections(read: Read, current: ReleaseRecord, regio
     if (value.length > max) return { error: `${label} can be up to ${max} characters.` };
     wanted[name] = value || null;
   }
+  const packagingCode = text("packaging_code") || current.packaging_code;
+  if (!(PACKAGING_CODE_VALUES as readonly string[]).includes(packagingCode)) return { error: "Choose the packaging from the list." };
+  if (packagingCode === "unclassified" && current.packaging_code !== "unclassified") {
+    return { error: "Packaging that has been classified can't go back to Not yet classified. Choose Unknown if it can't be established." };
+  }
+  wanted.packaging_code = packagingCode;
   const editionKind = text("edition_kind");
   if (editionKind && !oneOf(EDITION_KIND_VALUES, editionKind)) return { error: "Choose an edition type from the list." };
   wanted.edition_kind = editionKind || null;
@@ -246,6 +255,12 @@ export function reviewErrorMessage(message: unknown): string {
       return "An identical release is already in the catalog, so this one can't be published as well. Reject it, and say which release it duplicates.";
     case "release incomplete":
       return "To publish, the release needs an edition name, an edition type and the number of discs or cartridges, and an unknown region must be confirmed.";
+    case "packaging classification required":
+      return "Classify the packaging before approving: choose a type, or Unknown if the evidence can't establish it.";
+    case "packaging already classified":
+      return "Packaging that has been classified can't go back to Not yet classified. Choose Unknown if it can't be established.";
+    case "physical format unverified":
+      return "Choose the cartridge shell before approving. New NES and SNES releases can't use the generic ROM cartridge format.";
     case "game not verified":
       return "This release's game is still awaiting its own review. Approve the game's submission first.";
     case "reason required":
@@ -260,3 +275,4 @@ export function reviewErrorMessage(message: unknown): string {
       return "The review couldn't be saved. Try again.";
   }
 }
+

@@ -7,6 +7,7 @@ import { startTransition, useActionState, useState } from "react";
 import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SUBMITTER_PACKAGING_CHOICES } from "@/features/catalog/packaging";
 import {
   type SubmissionState,
   submitToCatalog,
@@ -34,6 +35,7 @@ export type SubmissionValues = {
   publisherName: string;
   mediaCount: string;
   packaging: string;
+  packagingCode: string;
   releaseYear: string;
   pieces: { kind: string; label: string; quantity: string }[];
   note: string;
@@ -55,6 +57,7 @@ export const EMPTY_SUBMISSION: SubmissionValues = {
   publisherName: "",
   mediaCount: "",
   packaging: "",
+  packagingCode: "unclassified",
   releaseYear: "",
   pieces: [],
   note: "",
@@ -234,8 +237,17 @@ export function SubmissionForm({
             <Field id="variant_name" label="Variant">
               <Input id="variant_name" name="variant_name" maxLength={120} defaultValue={values.variantName} autoComplete="off" className="h-10" />
             </Field>
-            <Field id="packaging" label="Packaging">
-              <Input id="packaging" name="packaging" maxLength={80} defaultValue={values.packaging} placeholder="Jewel case, big box…" autoComplete="off" className="h-10" />
+            <Field id="packaging_code" label="Packaging">
+              <select id="packaging_code" name="packaging_code" defaultValue={values.packagingCode} className={selectClassName}>
+                {SUBMITTER_PACKAGING_CHOICES.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field id="packaging" label="Packaging details">
+              <Input id="packaging" name="packaging" maxLength={80} defaultValue={values.packaging} placeholder="As printed or described" autoComplete="off" className="h-10" />
             </Field>
             <Field id="product_code" label="Product code">
               <Input id="product_code" name="product_code" maxLength={40} defaultValue={values.productCode} autoComplete="off" className="h-10" />

@@ -1,6 +1,7 @@
 import { ArrowLeft, CircleCheck, Lock, MessageSquareText, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { packagingStaffLabel } from "@/features/catalog/packaging";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Suspense } from "react";
@@ -182,7 +183,7 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
             { label: "Edition", value: details.edition_name },
             { label: "Edition type", value: details.edition_kind ? editionKindLabel(details.edition_kind) : null },
             { label: "Variant", value: details.variant_name },
-            { label: "Packaging", value: details.packaging },
+            { label: "Packaging", value: packagingStaffLabel(details.packaging_code, details.packaging) },
             { label: "Product code", value: details.product_code },
             { label: "Barcode", value: details.barcode },
             { label: "Title on the package", value: details.local_title },

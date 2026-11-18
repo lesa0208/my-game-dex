@@ -228,9 +228,10 @@ async function details({ owner, detailed, second }) {
   check("the release's listed pieces, as recorded", page.includes("Instruction manual</dt><dd class=\"break-words\">Included") && page.includes("World map poster</dt><dd class=\"break-words\">Not recorded"));
   check("the owner's private details", page.includes("March 4, 2021") && page.includes("€37.42") && page.includes("Shelf A") && page.includes("Signed by the artist"));
   check("the release's catalog facts", page.includes("SNS-ZSFE-USA") && page.includes("0451234500017") && page.includes("ROM cartridge"));
-  check("and no packaging the catalog doesn't record", !page.includes("Packaging"));
+  // M11b-1b: the fixture's releases are classified, and a classified release shows its type.
+  check("and the packaging type the catalog records", text(page).includes("Packaging</dt><dd class=\"break-words\">Cardboard box"));
   const ce = await owner.browser.get(`/collection/${psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${starfallCe}';`)}`);
-  check("a release that records packaging shows it", text(ce.html).includes("Packaging</dt><dd class=\"break-words\">Big box") && text(ce.html).includes("Art book"));
+  check("a classified release shows its type, not the wording it was recorded with", text(ce.html).includes("Packaging</dt><dd class=\"break-words\">Cardboard box") && !text(ce.html).includes("Big box") && text(ce.html).includes("Art book"));
   const bare = await owner.browser.get(`/collection/${psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${warden}';`)}`);
   check("a release without listed pieces shows none", !text(bare.html).includes("Pieces listed for this release"));
   check("the other copies of the release are listed, to tell them apart", page.includes("Your 3 copies of this release") && html.includes(`href="/collection/${second}"`));

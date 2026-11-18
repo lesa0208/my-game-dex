@@ -50,6 +50,8 @@ export type SubmissionDetails = {
   publisher_name: string | null;
   media_count: number | null;
   packaging: string | null;
+  /** Absent from snapshots taken before M11b-1b. */
+  packaging_code?: string;
   release_date: string | null;
   release_date_precision: string;
   components: { kind: string; label: string; quantity: number }[];

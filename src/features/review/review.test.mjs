@@ -32,6 +32,7 @@ const release = {
   publisher_name: null,
   media_count: null,
   packaging: null,
+  packaging_code: "unclassified",
   region_code: "pal",
   region_unknown_confirmed: false,
   release_date: "1994-01-01",

@@ -1,6 +1,7 @@
 import { ArrowLeft, CircleCheck, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { packagingLabel } from "@/features/catalog/packaging";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Suspense } from "react";
@@ -262,7 +263,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
                 label: "Format",
                 value: release.format.name ? `${release.format.name}${release.media_count && release.media_count > 1 ? ` · ${release.media_count} ${plural(medium, release.media_count)}` : ""}` : null,
               },
-              { label: "Packaging", value: release.packaging },
+              { label: "Packaging", value: packagingLabel(release.packaging_code, release.packaging) },
               { label: "Product code", value: release.identifiers.product_code },
               { label: "Barcode", value: release.identifiers.barcode },
             ]}

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { CatalogCover } from "@/components/games/catalog-cover";
+import { packagingLabel } from "@/features/catalog/packaging";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   aliasKindLabel,
@@ -68,7 +69,7 @@ function details(release: PickerRelease): { key: string; label: string; value: s
     { key: "edition", label: "Edition", value: editionText(release.edition) },
     { key: "variant", label: "Variant", value: release.variantName },
     { key: "format", label: "Format", value: release.format ? (release.mediaCount && release.mediaCount > 1 ? `${release.mediaCount} × ${release.format.name}` : release.format.name) : null },
-    { key: "packaging", label: "Packaging", value: release.packaging },
+    { key: "packaging", label: "Packaging", value: packagingLabel(release.packagingCode, release.packaging) },
     { key: "product_code", label: "Product code", value: release.identifiers.productCode },
     { key: "barcode", label: "Barcode", value: release.identifiers.barcode },
     { key: "date", label: "Released", value: release.releaseDate ? formatCatalogDate(release.releaseDate) : null },

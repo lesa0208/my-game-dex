@@ -95,13 +95,18 @@ try {
   const someone = await person();
   // A published duplicate of us, made by the editor and, as nobody reviews their own
   // record (M10c), verified and published by the administrator.
-  const dup = psql(`begin; select set_config('request.jwt.claims', '${claimsFor(editor.id)}', true); set local role authenticated;
+  // M11b-1b: the duplicate is on the legacy cartridge, like the fixture release it is merged
+  // into, so that format is reopened for publication only inside this transaction.
+  const dup = psql(`begin; update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+    select set_config('request.jwt.claims', '${claimsFor(editor.id)}', true); set local role authenticated;
     select public.create_release('${game}', (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
-      '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "MGA-DUP"}', 'Merge checks');
+      '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "MGA-DUP", "packaging_code": "cardboard-box"}', 'Merge checks');
     select set_config('request.jwt.claims', '${claimsFor(admin.id)}', true);
     select public.verify_release(r.id, 'Merge checks', r.revision) from public.releases r where r.product_code = 'MGA-DUP';
     select public.publish_release(r.id, 'Merge checks', r.revision) from public.releases r where r.product_code = 'MGA-DUP';
-    reset role; select id from public.releases where product_code = 'MGA-DUP'; commit;`).split("\n").filter((l) => /^[0-9a-f-]{36}$/.test(l)).at(-1);
+    reset role; update public.platform_media_formats f set accepts_new_publications = false from public.platforms p
+      where p.id = f.platform_id and p.slug in ('nes', 'snes') and f.media_format_code = 'rom-cartridge';
+    select id from public.releases where product_code = 'MGA-DUP'; commit;`).split("\n").filter((l) => /^[0-9a-f-]{36}$/.test(l)).at(-1);
   const copy = await add(owner, dup, { completeness: "complete", notes: "From a fair" });
   // A piece recorded that neither release lists: kept through the merge, as no longer listed.
   psql(`begin; set local session_replication_role = replica;

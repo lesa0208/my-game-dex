@@ -5,6 +5,7 @@ import { startTransition, useActionState, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EDITOR_PACKAGING_CHOICES } from "@/features/catalog/packaging";
 import { correctSubmission, correctSubmissionFromForm, type ReviewState } from "@/features/review/actions";
 import { type GameRecord, type Piece, PIECE_LIMIT, pieceRows, type ReleaseRecord } from "@/features/review/form";
 import { EDITION_KINDS, GAME_KINDS } from "@/features/submissions/form";
@@ -231,7 +232,16 @@ export function CorrectionForm(
             <Field id={`${id}-variant_name`} label="Variant">
               <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={props.release.variant_name ?? ""} autoComplete="off" className={adminControl} />
             </Field>
-            <Field id={`${id}-packaging`} label="Packaging">
+            <Field id={`${id}-packaging_code`} label="Packaging">
+              <select id={`${id}-packaging_code`} name="packaging_code" defaultValue={props.release.packaging_code ?? "unclassified"} className={adminSelect}>
+                {EDITOR_PACKAGING_CHOICES.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field id={`${id}-packaging`} label="Packaging as recorded">
               <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={props.release.packaging ?? ""} autoComplete="off" className={adminControl} />
             </Field>
             <Field id={`${id}-product_code`} label="Product code">

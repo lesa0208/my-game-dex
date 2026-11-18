@@ -124,6 +124,7 @@ export type ReleaseRecord = {
   media_count: number | null;
   media_playability: string | null;
   packaging: string | null;
+  packaging_code: string;
   identifiers: { product_code: string | null; barcode: string | null };
   languages: string[] | null;
   rating_labels: string[] | null;

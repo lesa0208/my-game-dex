@@ -50,6 +50,11 @@ export function statusLabel(status: string) {
   return STATUS_LABELS[status] ?? STATUS_LABELS.unavailable;
 }
 
+/** What a collector may choose (features/catalog/packaging.ts): a type, or not sure. Only an editor records Unknown. A unit test keeps them the same. */
+export const SUBMITTER_PACKAGING_VALUES = [
+  { value: "unclassified" }, { value: "cardboard-box" }, { value: "jewel-case" }, { value: "double-depth-jewel-case" }, { value: "plastic-case" }, { value: "paper-sleeve" },
+] as const;
+
 export type Piece = { kind: string; label: string; quantity: number };
 export type ReleaseDetails = {
   edition_name?: string;
@@ -61,6 +66,7 @@ export type ReleaseDetails = {
   publisher_name?: string;
   media_count?: number;
   packaging?: string;
+  packaging_code?: string;
   release_date?: string;
   release_date_precision?: string;
 };
@@ -111,6 +117,11 @@ function readRelease(read: Read, currentYear: number): Result<{ details: Release
     const problem = limited(name, max, label);
     if (problem) return { error: problem };
   }
+
+  const packagingCode = text("packaging_code") || "unclassified";
+  if (!SUBMITTER_PACKAGING_VALUES.some((p) => p.value === packagingCode)) return { error: "Choose the packaging from the list." };
+  // Not sure is the database default, so nothing is sent for it.
+  if (packagingCode !== "unclassified") details.packaging_code = packagingCode;
 
   const editionKind = text("edition_kind");
   if (editionKind) {

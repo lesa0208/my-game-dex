@@ -170,6 +170,7 @@ function pickerRelease(value: unknown, path: string): PickerRelease {
         ? null
         : oneOf(r.media_playability, ["playable_from_media", "download_required"] as const, `${path}.media_playability`),
     packaging: optionalString(r.packaging, `${path}.packaging`),
+    packagingCode: optionalString(r.packaging_code, `${path}.packaging_code`) ?? "unclassified",
     identifiers: identifiers(r.identifiers, `${path}.identifiers`),
     languages: stringList(r.languages, `${path}.languages`),
     ratingLabels: stringList(r.rating_labels, `${path}.rating_labels`),

@@ -365,7 +365,7 @@ try {
   const snes = psql("select id from public.platforms where slug = 'snes';");
   const dup = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'ntsc-uc', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "AYB-DUP"}', 'Browser checks: a duplicate')`);
   as(admin, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
-  as(admin, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  // M11b-1b: not published, since a new release can't be published on the generic cartridge; a merge doesn't need it.
   const merged = as(admin, `select public.merge_release('${dup}', '${releaseUs}', p ->> 'token', 'Browser checks: the same release', null,
     array(select d ->> 'field' from jsonb_array_elements(p -> 'differences') d), true)::text from (select public.get_merge_preview('${dup}', '${releaseUs}') as p) x`);
   const mergeId = psql(`select id from private.catalog_merges where source_release_id = '${dup}';`);

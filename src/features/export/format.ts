@@ -81,6 +81,7 @@ function releaseOf(item: Row, lookups: Lookups): { release: Row | null; game: Ro
         format: { code: r.media_format_code ?? null, name: format?.name ?? null },
         media_count: r.media_count ?? null,
         packaging: r.packaging ?? null,
+        packaging_code: r.packaging_code ?? null,
         languages: r.languages ?? null,
         release_date: r.release_date ?? null,
         release_date_precision: r.release_date_precision ?? null,

@@ -55,7 +55,7 @@ export type CopyPiece = {
 };
 
 export type CopyDetail = Omit<CollectionEntry, "has_notes" | "release"> & {
-  release: (CopyRelease & { packaging: string | null; identifiers: { product_code: string | null; barcode: string | null } }) | null;
+  release: (CopyRelease & { packaging: string | null; packaging_code?: string; identifiers: { product_code: string | null; barcode: string | null } }) | null;
   notes: string | null;
   components: CopyPiece[];
 };

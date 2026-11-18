@@ -42,7 +42,7 @@ export const LOCKABLE_FIELDS = {
   game: ["first_release_date", "first_release_precision", "kind", "sort_title", "summary", "title"],
   release: [
     "barcode", "components", "edition_kind", "edition_name", "languages", "local_title", "markets", "media_count",
-    "media_format_code", "media_playability", "packaging", "product_code", "publisher_name", "rating_labels",
+    "media_format_code", "media_playability", "packaging", "packaging_code", "product_code", "publisher_name", "rating_labels",
     "region_code", "release_date", "release_date_precision", "requirements", "variant_name",
   ],
 } as const;
@@ -231,6 +231,12 @@ export function editErrorMessage(message: unknown): string {
       return "This game contains others, so it stays a compilation.";
     case "already published":
       return "An identical release is already in the catalog.";
+    case "packaging classification required":
+      return "Classify the packaging before publishing: choose a type, or Unknown if the evidence can't establish it.";
+    case "packaging already classified":
+      return "Packaging that has been classified can't go back to Not yet classified. Choose Unknown if it can't be established.";
+    case "physical format unverified":
+      return "Choose the cartridge shell before publishing. New NES and SNES releases can't use the generic ROM cartridge format.";
     case "reauthentication required":
       return "Verify with your authenticator again to continue.";
     default:

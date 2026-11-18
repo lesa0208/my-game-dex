@@ -60,7 +60,7 @@ async function allRows(build: (from: number, to: number) => PromiseLike<{ data: 
 const byKey = (rows: Row[], key: string) => new Map(rows.map((r) => [String(r[key]), r]));
 
 const RELEASE_COLUMNS =
-  "id,game_id,platform_id,region_code,edition_name,edition_kind,variant_name,product_code,barcode,local_title,publisher_name,media_format_code,media_count,packaging,languages,release_date,release_date_precision,status";
+  "id,game_id,platform_id,region_code,edition_name,edition_kind,variant_name,product_code,barcode,local_title,publisher_name,media_format_code,media_count,packaging,packaging_code,languages,release_date,release_date_precision,status";
 const ITEM_COLUMNS = "id,release_id,completeness,overall_condition,box_condition,media_condition,manual_condition,visibility,record_status,invalidated_at,created_at,updated_at";
 
 export async function* exportChunks(supabase: Client, account: { id: string; email: string | null }, now: Date): AsyncGenerator<string> {

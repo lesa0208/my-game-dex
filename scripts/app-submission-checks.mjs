@@ -97,6 +97,11 @@ async function newGame() {
   const form = formById(page.html, "new-submission");
   check("the form is for a new game, with the required fields", form?.hidden.mode === "game" && ["title", "platform", "media_format", "region", "physical"].every((n) => form.names.includes(n)));
   check("unknown region is a choice", page.html.includes('value="unknown"'));
+  // M11b-1b: packaging is a choice from the vocabulary; only an editor can record Unknown.
+  const packagingSelect = /<select[^>]*name="packaging_code"[^>]*>([\s\S]*?)<\/select>/.exec(page.html)?.[1] ?? "";
+  check("packaging is chosen from the vocabulary, with Not sure and never Unknown",
+    [...packagingSelect.matchAll(/value="([^"]+)"/g)].map((m) => m[1]).join(",") === "unclassified,cardboard-box,jewel-case,double-depth-jewel-case,plastic-case,paper-sleeve"
+      && plain(packagingSelect).includes("Not sure"));
   check("it says who will see it", plain(page.html).includes("Only you and catalog editors can see it until it's published"));
   const posted = await owner.browser.submit("/submit", form, NEW_GAME);
   const target = location(posted.response);
@@ -168,13 +173,14 @@ async function missingRelease() {
 
   const before = count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`);
   const edition = psql("select edition_name from public.releases where product_code = 'SNS-ZSFE-USA';");
-  await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on" });
+  await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", packaging_code: "cardboard-box", physical: "on" });
   check("a release that's already published isn't submitted again", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
   // The enhanced form names the published release and links to it, through the
   // release's pairing (a direct releases-to-games embed failed with PGRST200).
   const published = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
   const duplicate = await callAction(owner.browser, "/submit?game=starfall-odyssey", "submitToCatalog", { status: "idle", message: null }, {
-    ...form.hidden, platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on",
+    // M11b-1b: identical includes the packaging type, which the fixture's release has.
+    ...form.hidden, platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", packaging_code: "cardboard-box", physical: "on",
   });
   check("the form links a duplicate to the published release on its game's page",
     duplicate.response.status === 200 && duplicate.text.includes('"status":"duplicate"') && duplicate.text.includes(`"/games/starfall-odyssey?release=${published}"`),

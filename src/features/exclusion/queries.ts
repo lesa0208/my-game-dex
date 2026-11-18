@@ -81,6 +81,7 @@ export type PreservedRelease = {
     format: { code: string | null; name: string | null };
     media_count: number | null;
     packaging: string | null;
+    packaging_code?: string;
     identifiers: { product_code: string | null; barcode: string | null };
   };
   game: { title: string; slug: string | null };
