@@ -1,4 +1,7 @@
 -- M7b-1 follow-up: imports and private submissions. A source entry whose title matches a
+-- Since M11b-1a this runs on mega-drive, a cartridge platform with one format, so the automatic
+-- candidate path is still covered: snes now has several cartridge formats, and its release
+-- entries are held for an editor (44_physical_media_formats.test.sql).
 -- collector's pending submission never matches it, changes it or takes it over;
 -- published records and import-owned candidates are matched as before.
 begin;
@@ -43,7 +46,7 @@ end $t$;
 -- A new game submitted by a collector, naming its game and release.
 create function pg_temp.subgame(p_name text, p_actor text, p_title text) returns void language plpgsql as $$
 declare r jsonb := pg_temp.as_user(p_actor, format('select public.submit_game(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
-  p_title, 'game', null, 'snes', 'rom-cartridge', 'pal', '{}', '[]', null, true))::jsonb;
+  p_title, 'game', null, 'mega-drive', 'rom-cartridge', 'pal', '{}', '[]', null, true))::jsonb;
 begin
   insert into ids values (p_name || '-g', (r ->> 'game_id')::uuid), (p_name || '-r', (r ->> 'release_id')::uuid);
 end $$;
@@ -98,7 +101,7 @@ insert into ids select 'pub', public.create_game('Zqp Harbor Run', 'game', null,
 select pg_temp.fx_off();
 select public.verify_game(pg_temp.id('pub'), 'Import privacy tests', (select revision from public.games where id = pg_temp.id('pub')));
 select pg_temp.fx_on();
-insert into ids select 'pub-r', public.create_release(pg_temp.id('pub'), (select id from public.platforms where slug = 'snes'), 'rom-cartridge', 'ntsc-uc',
+insert into ids select 'pub-r', public.create_release(pg_temp.id('pub'), (select id from public.platforms where slug = 'mega-drive'), 'rom-cartridge', 'ntsc-uc',
   '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "ZQP-PUB"}', 'Import privacy tests');
 select pg_temp.fx_off();
 select public.verify_release(pg_temp.id('pub-r'), 'Import privacy tests', (select revision from public.releases where id = pg_temp.id('pub-r')));
@@ -106,7 +109,7 @@ select public.publish_release(pg_temp.id('pub-r'), 'Import privacy tests', (sele
 select pg_temp.fx_on();
 insert into ids select 'draft', public.create_game('Zqp Editor Draft', 'game', null, null, null, 'unknown', 'Import privacy tests');
 select pg_temp.fx_off();
-select public.set_game_platform(pg_temp.id('draft'), (select id from public.platforms where slug = 'snes'), 'Import privacy tests');
+select public.set_game_platform(pg_temp.id('draft'), (select id from public.platforms where slug = 'mega-drive'), 'Import privacy tests');
 select set_config('role', 'none', true);
 
 -- Private submissions with titles an import will collide with.
@@ -115,7 +118,7 @@ select pg_temp.subgame('copper', 'a1', 'Zqp Copper Harbor');
 select pg_temp.subgame('moon', 'a1', 'Zqp Moon Saga');
 select pg_temp.subgame('orphan', 'a2', 'Zqp Orphan Isle');
 insert into ids select 'serial-r', (pg_temp.as_user('a1', format('select public.submit_release(%L, %L, %L, %L, %L, %L, %L, %L)::text',
-  pg_temp.id('pub'), 'snes', 'rom-cartridge', 'pal', '{"product_code": "ZQP-SER"}', '[]', null, true))::jsonb ->> 'release_id')::uuid;
+  pg_temp.id('pub'), 'mega-drive', 'rom-cartridge', 'pal', '{"product_code": "ZQP-SER"}', '[]', null, true))::jsonb ->> 'release_id')::uuid;
 delete from auth.users where id = pg_temp.u('a2');
 create temp table before as select name, pg_temp.footprint(id) as f from ids where name like '%-g';
 
@@ -125,7 +128,7 @@ select ok(not has_function_privilege('catalog_importer', 'private.import_private
 
 insert into private.external_providers (code, name) values ('fixture-private', 'Private submissions fixture');
 select private.record_provider_clearance('fixture-private', true, null, repeat('6', 64), 'Import privacy test fixture');
-select ok(catalog_import.start_run('fixture-private', 'snes', 'private.json', repeat('5', 64), now(), repeat('6', 64), 'Import privacy tests', pg_temp.u('e9')) is not null, 'an import starts');
+select ok(catalog_import.start_run('fixture-private', 'mega-drive', 'private.json', repeat('5', 64), now(), repeat('6', 64), 'Import privacy tests', pg_temp.u('e9')) is not null, 'an import starts');
 
 -- ---------------------------------------------------------------------------
 -- Games with a pending submission's title

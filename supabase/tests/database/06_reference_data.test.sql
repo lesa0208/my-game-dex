@@ -90,7 +90,7 @@ select is((select count(*)::int from public.platform_names where name ~* '(dendy
 select is((select count(*)::int from information_schema.columns where table_schema = 'public' and table_name = 'platform_names' and column_name ~ 'compat'), 0, 'aliases carry no compatibility meaning');
 
 -- Media model
-select is((select count(*)::int from public.media_formats), 25, '24 media formats seeded, plus the MVS cartridge in M5a');
+select is((select count(*)::int from public.media_formats), 29, '24 media formats seeded, plus the MVS cartridge in M5a and four NES and SNES cartridge shells in M11b-1a');
 select enum_has_labels('public', 'media_category', array['cartridge', 'optical_disc', 'solid_state_card', 'magnetic_disk', 'magnetic_tape'], 'categories cover home-computer and PC media');
 select is((select count(*)::int from public.media_formats where code ~* '(^other$|digital|download|stream|cloud|entitlement)'), 0, 'no generic other or digital format exists');
 select throws_ok(

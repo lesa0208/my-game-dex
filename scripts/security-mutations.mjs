@@ -1056,4 +1056,11 @@ export const m11a2InvitationMutations = [
   sql("the revocation reads the handle without the lock", "api", rewrite(M11A2_REVOKE, "select * into i from private.account_invitations where id = p_id for update;", "select * into i from private.account_invitations where id = p_id;")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations };
+// M11b-1a: nes and snes have several cartridge formats, so their release entries must be
+// held for an editor. The importer may choose a format only when a platform has exactly one.
+export const m11b1aMutations = [
+  sql("the importer picks a format when a platform has several", "both",
+    rewrite(APPLY_RELEASE, "where f.platform_id = p_run.platform_id having pg_catalog.count(*) = 1;", "where f.platform_id = p_run.platform_id;")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations };

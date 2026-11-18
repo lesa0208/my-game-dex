@@ -1,4 +1,7 @@
 -- M5b: title matching, held entries and suggestions, after the SNES pilot.
+-- Since M11b-1a this runs on mega-drive, a cartridge platform with one format, so the automatic
+-- candidate path is still covered: snes now has several cartridge formats, and its release
+-- entries are held for an editor (44_physical_media_formats.test.sql).
 -- Uses its own provider and titles, so it runs beside existing catalog data.
 begin;
 create extension if not exists pgtap with schema extensions;
@@ -57,7 +60,7 @@ select is((select string_agg(title_key || ':' || origin, ',') from private.game_
 -- ---------------------------------------------------------------------------
 insert into private.external_providers (code, name) values ('fixture-match', 'Matching fixture');
 select private.record_provider_clearance('fixture-match', true, null, repeat('7', 64), 'Matching test fixture');
-select ok(catalog_import.start_run('fixture-match', 'snes', 'match.json', repeat('8', 64), now(), repeat('7', 64), 'Matching tests', pg_temp.u('e9')) is not null, 'a run starts');
+select ok(catalog_import.start_run('fixture-match', 'mega-drive', 'match.json', repeat('8', 64), now(), repeat('7', 64), 'Matching tests', pg_temp.u('e9')) is not null, 'a run starts');
 select is(pg_temp.stage('[
   {"entity_type": "game", "external_id": "ZQ1", "payload": {"title": "Zqx Clay Fighter 2: Judgment Clay", "titles": ["Zqx Clay Fighter 2: Judgment Clay"]}},
   {"entity_type": "game", "external_id": "ZQ2", "payload": {"title": "Zqx Breath of Fire II", "titles": ["Zqx Breath of Fire II"]}},
@@ -95,7 +98,7 @@ insert into public.games (id, title, sort_title, kind, status) values
   (pg_temp.u('f4'), 'Zq Ab', 'Zq Ab', 'game', 'under_review'), (pg_temp.u('f5'), 'Zqx NES Only Game', 'Zqx NES Only Game', 'game', 'under_review'),
   (pg_temp.u('f6'), 'Zqx Mega Lo Mania', 'Zqx Mega Lo Mania', 'game', 'under_review');
 insert into public.game_platforms (game_id, platform_id, status)
-select g, (select id from public.platforms where slug = 'snes'), 'under_review'::public.catalog_status from unnest(array[pg_temp.u('f2'), pg_temp.u('f3'), pg_temp.u('f4'), pg_temp.u('f6')]) g
+select g, (select id from public.platforms where slug = 'mega-drive'), 'under_review'::public.catalog_status from unnest(array[pg_temp.u('f2'), pg_temp.u('f3'), pg_temp.u('f4'), pg_temp.u('f6')]) g
 union all select pg_temp.u('f5'), (select id from public.platforms where slug = 'nes'), 'under_review';
 select is(pg_temp.stage('[
   {"entity_type": "game", "external_id": "ZQ6", "payload": {"title": "Zqx ClayFighter Two", "titles": ["Zqx ClayFighter Two"]}},

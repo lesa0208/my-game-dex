@@ -411,7 +411,7 @@ Official regional names and common collector aliases. Clones, codenames and unre
 
 ### `media_formats`
 
-The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24, and M5a adds the Neo Geo MVS cartridge.
+The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24, M5a adds the Neo Geo MVS cartridge, and M11b-1a adds four NES and SNES cartridge shells.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -428,6 +428,19 @@ The controlled list of genuine physical game media. A category is general, and a
 - **Constraints:** a `CHECK` rejects codes and names suggesting a digital product, as a backstop. Eligibility is still an editorial decision, because a Game-Key Card looks like a game card
 
 Later computer and PC batches add rows such as compact cassette and 3.5-inch floppy disk, with no schema change. Tests confirm this.
+
+**Format codes are stable catalog identifiers.** Once a release uses a code, it is never renamed, reused or removed. A name or description can be corrected.
+
+**NES and SNES cartridge shells (M11b-1a).** Famicom and Super Famicom stay names of the `nes` and `snes` platforms (ADR-031). Their physical differences are formats, so a release's shell is enforced by the platform key and compared by merge and verification. Design: [physical-catalog-m11b.md](physical-catalog-m11b.md#recommendation-d-implemented-in-m11b-1a).
+
+| Code | Name | Platform |
+| --- | --- | --- |
+| `famicom-cartridge` | Famicom Cartridge | `nes` |
+| `nes-game-pak` | NES Game Pak | `nes` |
+| `snes-cartridge-jp-pal` | Super Famicom / PAL SNES Cartridge | `snes` |
+| `snes-game-pak-na` | North American SNES Game Pak | `snes` |
+
+`rom-cartridge` stays valid on both platforms for records whose shape hasn't been classified. Because each platform now has several formats, the importer holds their release entries for an editor instead of choosing one.
 
 ### `platform_media_formats`
 

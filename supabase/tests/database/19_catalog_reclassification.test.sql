@@ -1,4 +1,7 @@
 -- M5b: reclassifying imported candidates, and the editor review queue.
+-- Since M11b-1a this runs on mega-drive, a cartridge platform with one format, so the automatic
+-- candidate path is still covered: snes now has several cartridge formats, and its release
+-- entries are held for an editor (44_physical_media_formats.test.sql).
 -- Uses its own provider, titles and accounts, so it runs beside existing catalog data.
 begin;
 create extension if not exists pgtap with schema extensions;
@@ -53,7 +56,7 @@ exception when others then
   return jsonb_build_object('outcome', 'error: ' || sqlerrm);
 end $t$;
 create function pg_temp.start(p_sha text) returns uuid language sql as $$
-  select catalog_import.start_run('fixture-reclass', 'snes', 'reclass.json', p_sha, now(), repeat('6', 64), 'Reclassification tests', pg_temp.u('d9')) $$;
+  select catalog_import.start_run('fixture-reclass', 'mega-drive', 'reclass.json', p_sha, now(), repeat('6', 64), 'Reclassification tests', pg_temp.u('d9')) $$;
 create function pg_temp.finish() returns void language sql as $$ select catalog_import.finish_run(pg_temp.run(), pg_temp.u('d9'), 'completed') $$;
 create function pg_temp.entry(p_id text, p_extra jsonb default '{}') returns jsonb language sql immutable as $$
   select jsonb_build_object('entity_type', 'release', 'external_id', p_id, 'payload', jsonb_build_object('title', 'Zrx Alpha', 'region_codes', jsonb_build_array('ntsc-uc'), 'name', p_id)) || p_extra $$;
@@ -86,7 +89,7 @@ insert into private.catalog_field_locks (release_id, field_name) values (pg_temp
 select private.record_catalog_audit(pg_temp.u('c1'), 'catalog_record_updated', 'release', pg_temp.rel('R-edited'), 'Editor correction', '{"fields": ["packaging"]}');
 update public.releases set status = 'excluded' where id = pg_temp.rel('R-excluded');
 insert into private.import_runs (id, provider_code, platform_id, source_name, source_sha256, source_fetched_at, status, finished_at)
-values (pg_temp.u('a7'), 'fixture-other', (select id from public.platforms where slug = 'snes'), 'other.json', repeat('2', 64), now(), 'completed', now());
+values (pg_temp.u('a7'), 'fixture-other', (select id from public.platforms where slug = 'mega-drive'), 'other.json', repeat('2', 64), now(), 'completed', now());
 insert into private.provider_records (id, provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, matched_release_id)
 values (pg_temp.u('a8'), 'fixture-other', 'release', 'OTHER-1', '{"title": "Zrx Alpha"}', repeat('3', 64), pg_temp.u('a7'), 'matched', pg_temp.rel('R-other-source'));
 insert into private.release_evidence (release_id, field_name, provider_record_id) values (pg_temp.rel('R-other-source'), 'region_code', pg_temp.u('a8'));

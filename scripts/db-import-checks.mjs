@@ -162,7 +162,9 @@ async function flow() {
     [`${T("Pilot")} (USA) (Proto)`, null],
     [`${T("Pilot")} (USA) [b]`, null],
   ]));
-  const run = (provider, file, extra = []) => tool(["import", "--provider", provider, "--platform", "snes", "--file", file, "--terms-file", terms, "--reason", `${REASON} ${tag}`, ...extra]);
+  // mega-drive has one cartridge format, so release candidates are still created automatically.
+  // Since M11b-1a snes has several, and its release entries are held instead (shells() below).
+  const run = (provider, file, extra = []) => tool(["import", "--provider", provider, "--platform", "mega-drive", "--file", file, "--terms-file", terms, "--reason", `${REASON} ${tag}`, ...extra]);
 
   let result = run("wikidata", games);
   check("an uncleared source is refused by the database", result.status === 2 && /provider not cleared/.test(result.out), result.out.trim().split("\n").pop());
@@ -191,6 +193,29 @@ select private.record_provider_clearance('no-intro', true, 'https://example.test
     where action in ('catalog_record_created', 'catalog_record_updated') and metadata ->> 'import_run_id' in (select id::text from private.import_runs where reason = ${q(`${REASON} ${tag}`)});`);
   check("every catalog change is audited with the run's reason and no actor", audits === "7/7", audits);
   return { terms, termsHash };
+}
+
+/** M11b-1a: nes and snes have several cartridge formats, so release entries are held, never guessed. */
+async function shells({ terms }) {
+  section("NES and SNES cartridge shells (M11b-1a)");
+  const run = (provider, platform, file) => tool(["import", "--provider", provider, "--platform", platform, "--file", file, "--terms-file", terms, "--reason", `${REASON} ${tag} shells`]);
+  const report = (result) => (result.status === 0 ? JSON.parse(result.out.slice(result.out.indexOf("{"))).report : null);
+  const plumber = write("wikidata-nes.json", wikidataSnapshot([["Q900000011", T("Shell Plumber"), "1985-09-13"]]));
+  const quest = write("wikidata-snes.json", wikidataSnapshot([["Q900000012", T("Shell Quest"), "1991-11-21"]]));
+  check("an nes game imports", run("wikidata", "nes", plumber).status === 0);
+  check("an snes game imports", run("wikidata", "snes", quest).status === 0);
+  const nes = report(run("no-intro", "nes", write("nes.dat", dat([[`${T("Shell Plumber")} (Japan)`, "HVC-ZZ"], [`${T("Shell Plumber")} (USA)`, "NES-ZZ-USA"]]))));
+  const snes = report(run("no-intro", "snes", write("snes-shells.dat", dat([
+    [`${T("Shell Quest")} (Japan)`, "SHVC-ZZ"], [`${T("Shell Quest")} (USA)`, "SNS-ZZ-USA"], [`${T("Shell Quest")} (Europe)`, null]]))));
+  check("no nes or snes release candidate is created", nes?.releases_created === 0 && snes?.releases_created === 0, JSON.stringify([nes?.by_status, snes?.by_status]));
+  const held = psql(`select count(*) || '/' || count(*) filter (where pr.status = 'needs_review' and pr.match_tier = 'A' and pr.match_notes ->> 'reason' = 'format unknown'
+      and pr.matched_game_id is not null and pr.matched_release_id is null)
+    from private.provider_records pr join private.import_runs r on r.id = pr.import_run_id
+    where pr.entity_type = 'release' and r.provider_code = 'no-intro' and r.reason = ${q(`${REASON} ${tag} shells`)};`);
+  check("every entry is held as format unknown with its game, whatever its region tag or serial", held === "5/5", held);
+  const evidence = psql(`select count(*) from private.release_evidence e join private.provider_records pr on pr.id = e.provider_record_id
+    join private.import_runs r on r.id = pr.import_run_id where r.reason = ${q(`${REASON} ${tag} shells`)};`);
+  check("and no evidence or release is written for them", evidence === "0", evidence);
 }
 
 async function concurrency({ termsHash }) {
@@ -299,6 +324,7 @@ try {
   psql(`alter role catalog_importer login password ${q(scramVerifier(password))};`);
   await role();
   const ctx = await flow();
+  await shells(ctx);
   await concurrency(ctx);
   await api();
 } catch (error) {
