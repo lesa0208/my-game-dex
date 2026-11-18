@@ -757,7 +757,7 @@ The app signs users in with `@supabase/ssr` and `@supabase/supabase-js`, followi
 
 **Known limits of this design:**
 
-- **A signed-out access token stays valid until it expires.** Sign-out revokes the refresh token in Auth and clears the cookies, but `getClaims()` verifies access tokens locally, so a copied token keeps working for up to `jwt_expiry` (an hour locally). The account and its status are still read from the database on each request.
+- **A signed-out access token stays valid until it expires.** Sign-out revokes the refresh token in Auth and clears the cookies, but `getClaims()` verifies access tokens locally, so a copied token keeps working for up to `jwt_expiry` (an hour locally). The account and its status are still read from the database on each request. *(Since the M11a session-revocation checkpoint, the database refuses such a token at once for the person's own data: see [Ended sessions](#ended-sessions-m11a).)*
 - **Refresh tokens are single use.** If two requests refresh the same expired session at once, one may see no session until the browser has the new cookie. The proxy refreshing once per navigation makes this rare.
 - **No sign-in throttling in the app.** It remains blocker 1 below.
 
@@ -1657,7 +1657,7 @@ Local development only: reset emails go to Mailpit on the isolated test stack. N
 
 **Signing out.** "Sign out" ends this device's session only (as before). "Sign out on all devices" (`signOut({ scope: "global" })`) ends every session of the account in Auth, this one included.
 
-**What "signed out" means for a token already issued (demonstrated, not assumed).** After a reset, a change or signing out everywhere, no other device can refresh (`refresh_token_not_found`) and Auth refuses its access token (`session_not_found`). **But the access token itself stays valid until it expires (`jwt_expiry`, an hour at most)**: tokens are signed with ES256 and verified without asking Auth, so the app (`getClaims`) and the database accept it for ordinary reads and collector writes (`db-password-checks` blocks another account with one). Staff functions refuse it at once, because `mfa_session_ok` requires the session's row in `auth.sessions`. The pages say "can keep working for up to an hour". Making collector access end at once would mean checking the session in `is_active_user`, a change to the shared helper not made here.
+**What "signed out" means for a token already issued (demonstrated, not assumed).** After a reset, a change or signing out everywhere, no other device can refresh (`refresh_token_not_found`) and Auth refuses its access token (`session_not_found`). **But the access token itself stays valid until it expires (`jwt_expiry`, an hour at most)**: tokens are signed with ES256 and verified without asking Auth, so the app (`getClaims`) and the database accept it for ordinary reads and collector writes (`db-password-checks` blocks another account with one). Staff functions refuse it at once, because `mfa_session_ok` requires the session's row in `auth.sessions`. The pages said "can keep working for up to an hour". Making collector access end at once would mean checking the session in `is_active_user`, a change to the shared helper not made here. *(Since the M11a session-revocation checkpoint, the database refuses such a token at once for the person's own data: see [Ended sessions](#ended-sessions-m11a).)*
 
 **Tests.** `password:test` (8): the recovery rules, input, messages, the template, and that no password code uses the secret key. `db-password-checks` (40) drives real Auth: the reset answers, single use, expiry, replacement, bans, aal1 refused and the step-up, the day-old session, the other sessions, and what an ended session's access token can still do. `app:password-checks` (114) drives the pages over HTTP with Mailpit: generic answers with timing, GET without spending, the POST, cross-site refusals, the mark, session confusion, interrupted and expired resets, the authenticator path, changing with and without one, and both kinds of sign-out. `app:a11y-checks` covers every new page and state, with keyboard. 10 app mutations (`scripts/app-mutation-checks.mjs`).
 
@@ -1676,7 +1676,7 @@ Local development only. Design: [ADR-065](architecture-decisions.md#adr-065-the-
 - **Failure part way.** A failed activation removes the new file and keeps the current photo (tested with a failing trigger); the page says only that the photo wasn't saved. Trying again works.
 - **Leftovers (new in the workflow, `removeLeftovers`).** After each change, files in the user's own folder other than the current photo and **older than ten minutes** are removed with the secret key: an old file whose removal failed, or a file a crash left between upload and activation. A recent file is kept, because another change in progress may be about to activate it. Best effort; a failure is logged as one fixed line, naming nobody, and the next change retries. Only after the session is verified, only in that user's folder.
 - **Removal** clears the path and removes the file. A public file can stay in browser and CDN caches for a while, and the page says so.
-- **An ended session.** After signing out everywhere (or a reset), an old device's still-unexpired access token **can't** change the photo (the workflow asks Auth), but **can** still save the name and bio until it expires (PostgREST trusts the token, as M11a-2 found for collector writes). Observed and printed by `app:profile-checks`.
+- **An ended session.** After signing out everywhere (or a reset), an old device's still-unexpired access token **can't** change the photo (the workflow asks Auth), and, since the M11a session-revocation checkpoint, can't save the name and bio either (checked by `app:profile-checks`; before it, PostgREST trusted the token).
 - **Not added in M11a-3:** per-user upload rate limits (added in M11a-4a: see [Personal data export](#personal-data-export-m11a-4a)), an operator sweep of orphaned files across all folders, and a page for public profiles (`/u/[handle]`, M11c). `/profile` sends a signed-in person to the editor.
 
 **Authenticators and staff.** Profile changes are ordinary collector writes: like the rest of the collector app they don't ask an account with an authenticator to verify first (a session at aal1 can save them), and staff have no way to edit anyone else's profile here. Password, factor and staff protections are unchanged.
@@ -1689,8 +1689,8 @@ Recorded, not implemented. **The first two need an explicit decision before real
 
 | Decision | Where it stands |
 | --- | --- |
-| **Ending access tokens at once** after signing out everywhere or a password reset | They stay valid for ordinary reads and collector writes (now including the name and bio) until they expire, an hour at most (M11a-2). Staff functions, the photo and the data export already refuse an ended session. **Analysed in M11a-4a,** with a recommended design: [session-and-password-decisions.md](session-and-password-decisions.md) |
-| **Hosted "require current password"** for a password change | Auth accepts a change from any session signed in within a day without the current password (the app asks for it; Auth doesn't). **Analysed in M11a-4a:** [session-and-password-decisions.md § 4](session-and-password-decisions.md#4-the-password-change-policy) |
+| **Ending access tokens at once** after signing out everywhere or a password reset | **Done** in the M11a session-revocation checkpoint: [Ended sessions](#ended-sessions-m11a) |
+| **Hosted "require current password"** for a password change | **Verified** on GoTrue v2.197 with a probe Auth server, and the app now sends the current password to Auth: [session-and-password-decisions.md § 4](session-and-password-decisions.md#4-the-password-change-policy). Enabling it on the hosted project is a launch prerequisite |
 | **Email response timing** | Reset requests and invitations answer alike in at least two seconds; a real SMTP sending slower than that would stand out. Measure on staging with the real provider |
 | **Retention and self-service deletion (D10)** | Nothing is deleted by age; account deletion exists only as the server workflow (`deleteAccountWithAvatars`) with no route. **Decision document, M11a-4a:** [account-deletion-d10.md](account-deletion-d10.md) |
 | **Minimum age (D12)** | No age is collected or checked. Public registration stays closed until it's decided ([account-deletion-d10.md § 6](account-deletion-d10.md#6-d12-minimum-age--still-open)) |
@@ -1763,6 +1763,81 @@ A copy on a release the catalog no longer shows keeps the title and platform the
 
 Analysed in M11a-4a, nothing implemented: [ended sessions and the password policy](session-and-password-decisions.md), and [D10 deletion and retention](account-deletion-d10.md).
 
+## Ended sessions (M11a)
+
+Migration `20261128100000_m11a_session_revocation`. Design: [session-and-password-decisions.md](session-and-password-decisions.md), option A (approved), and [ADR-067](architecture-decisions.md#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has).
+
+**The rule.** A signed-in request reaches the person's own data only while its token's session is one Auth still has. `private.session_is_live()` reads the token's signed `session_id` and looks for that row in `auth.sessions`, for this user, not past its `not_after`. Auth deletes the row when a session ends, which happens on:
+- sign-out on this device;
+- sign-out on every device;
+- a password change (for the other sessions);
+- a reset (for the other sessions);
+- an account deletion;
+- an authenticator's first verification (Auth ends the other sessions then too).
+
+**Details of the check.**
+- It's a definer function. No API role can read `auth.sessions`, and clients can't call the check.
+- It fails closed. A missing or malformed `session_id`, another user's session, or an Auth schema change (caught and logged) all answer no. `31_auth_contract` pins the columns it reads.
+- It's always written `(select private.session_is_live())`, so it runs once per statement, never per row.
+
+**Where it applies.**
+- **Through the shared guards.** `is_active_user()` and `require_verified_user()` now include it, so it reaches every collector write and every function built on them:
+  - copies, private details and pieces (inserts and updates);
+  - the profile and preferences;
+  - follows, blocks and notifications;
+  - submissions (`begin_submission` reads `get_my_account`);
+  - relinking;
+  - the catalog editor checks (`is_catalog_editor`).
+- **In owner-only policies that used no guard:** reads and deletes of copies, private details and pieces, preferences, and staff roles. Deleting your own copies is still allowed for an account that isn't active, but not from an ended session.
+- **In the catalog, only for a submitter's own unpublished records:** `games_read_authenticated`, `releases_read_authenticated`, `can_read_release` and `can_use_release`.
+- **In owner-scoped functions that checked only `auth.uid()`:**
+  - `get_my_account`, which then returns no row, so the app treats the device as signed out;
+  - `my_catalog_submissions`, `get_my_submission`, `my_submission_for_release`, `get_my_merged_submission`;
+  - the preserved-copy reads;
+  - `get_my_factor_status`, `get_my_onboarding`, `complete_my_password_setup`;
+  - `claim_handle` and `take_request_slot`.
+- **Already required a live session (unchanged):** staff and Owner functions (`mfa_session_ok`, M8b), the photo workflow, and the data export (both ask Auth).
+- **Not changed:** public reads. The published catalog, catalog search and public profile cards look the same from an ended session as they do signed out.
+
+`43_session_revocation` checks the coverage itself. Every policy that names the caller, and every definer function a signed-in user can run that uses `auth.uid()`, must reach a session check, so a future function without one fails the suite.
+
+**Before and after (demonstrated, `db-session-checks`).** Before, after any of the events above, the old access token kept working for up to an hour (`jwt_expiry`) for everything except staff functions. Now that token, still unexpired:
+- reads none of the 14 protected read paths probed (copies, purchase details, pieces, preferences, the account, submissions and the own unpublished release, authenticators, notifications, onboarding);
+- performs none of the 8 protected writes probed (add, edit and remove copies, delete through the table, profile, preferences, blocks, request slots);
+- still reads what's public;
+- in the app, sends the device to sign in on its next page.
+
+The checks cover:
+- sign-out on one of two devices (the other keeps working) and on every device;
+- a password change and a reset (the session that made the change keeps working);
+- a suspended account (a live session still reads, and only removes; an ended one gets nothing);
+- an invited but unfinished account;
+- a deleted account;
+- a moderator, a catalog editor, an administrator and the Owner (staff work still needs aal2, and stops when the session ends; the Owner record is untouched).
+
+**Concurrency.** The check is STABLE, so it reads with its statement's snapshot.
+- **A statement already running when the session ends completes.** Tested: an update sleeping three seconds while the sign-out committed was saved.
+- **Every statement that starts afterwards is refused.** In one transaction, an update made before the sign-out committed, and one made after changed nothing.
+- **PostgREST runs each request in its own transaction,** so a request that begins after the sign-out gets nothing.
+- **Auth's sign-out doesn't wait** for statements in progress: the check reads the session row without locking it.
+
+**Performance** (`db:session-benchmark`). The benchmark used 50,000 copies with private details, 2,000 other sessions in `auth.sessions`, and each query run as the user, with and without the check in the same transaction.
+- On small queries the check adds tens of microseconds: reading the account +44 µs, updating preferences +26 µs, notifications +7 µs, the admin overview +6 µs, account search +11 µs.
+- On whole-collection queries (a page, search, the summary, a copy in full, an export page, an edit) the difference was within run-to-run noise.
+- **A finding unrelated to this change:** at 50,000 copies, `get_my_collection` takes about 250 ms a page, and `get_my_collection_item` about 7 ms, with or without the check. Both count over the whole collection. They're worth optimizing before collections that large are common.
+
+**Tests.**
+- `43_session_revocation` (40): the check's cases, the guards, the tables, the functions, and the coverage rules.
+- `db-session-checks` (64): real Auth, as above.
+- Updated to the new behaviour, where they had documented the old gap: `db-password-checks`, `app:password-checks` and `app:profile-checks`.
+- The pages no longer say that a device "can keep working for up to an hour".
+- 8 database mutations (`db-session-mutations.mjs`).
+
+**Remaining.**
+- Other entry points don't go through these checks. Only PostgREST serves client requests today. Storage has no client write path for avatars, and Realtime isn't used. A future client of Storage or Realtime needs its own check.
+- A token stolen from a session that's still live keeps working until that session is ended. Ending it is what "sign out on all devices" is for.
+- Auth's inactivity timeout, if configured, is applied by Auth at refresh. It isn't stored in `auth.sessions`, so the check doesn't see it.
+
 ## Production launch prerequisites (M8)
 
 **None of M8 or M10 has run on a hosted project, and none of these is resolved.** Before production, in addition to [Blockers before public authentication](#blockers-before-public-authentication) and [Requirements before any hosted registration](#requirements-before-any-hosted-registration):
@@ -1773,6 +1848,7 @@ Analysed in M11a-4a, nothing implemented: [ended sessions and the password polic
 | **Password recovery (M11a-2):** the recovery template (`supabase/templates/recovery.html`) set in hosted Auth; the site URL and redirect allow-list naming only the app's origin; `secure_password_change` on; `otp_expiry` an hour; SMTP whose sending time doesn't stand out (or a longer floor); consider Auth's "password changed" notification email; then rerun `db-password-checks` (in configuration B) and `app:password-checks` against staging | Tested locally only. Without the template, Auth's default email links to a GET that spends the token |
 | **Profile and photo (M11a-3):** `SUPABASE_SECRET_KEY` server-only on the host (the avatar workflow uses it for the avatars bucket and `set_avatar_path` only); the `avatars` bucket created by the migration as public, WebP only, 2 MB; the Server Action body limit kept at 2 MB plus 64 KB, and any proxy or CDN in front allowing that much for `/settings/profile` only; then rerun `app:profile-checks` and `app:export-checks` against staging | Tested locally only. Uploads decode images server-side |
 | **Data export (M11a-4a):** the hosting platform must not buffer or cache `/settings/account/export` (streamed, `no-store`) and must allow a long enough response for a large collection; then rerun `app:export-checks` against staging | Tested locally only |
+| **Session revocation and password policy (M11a):** turn on "require current password" in hosted Auth (GoTrue `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`) and keep "secure password change" on; confirm sessions still carry `session_id` and that sign-out deletes the session row; then rerun `db-session-checks`, `auth:password-policy-checks` (adapted to staging), `db-password-checks` and `app:password-checks` against staging | Tested locally only |
 | **Enable TOTP on the hosted project** (`[auth.mfa.totp]`), then rerun `31_auth_contract`, `db-mfa-checks`, `db-owner-checks`, `db-ownership-checks` and `app:admin-checks` against staging | Local only so far (D19). Without it no staff member can act |
 | **Infrastructure key holders (D18):** name the people holding the database password, the Auth secret key and dashboard access; require MFA on dashboard accounts; enable `pgaudit` for DDL and writes to the Owner, staff and audit tables; alert on Owner changes, recoveries and trigger refusals in the server log | `postgres`, superusers and the secret key bypass every protection here |
 | **Rehearse the [runbook](../operations/owner-recovery-runbook.md) on staging**, each scenario end to end, including the Admin API factor removal | The procedures are tested locally by the suites, not by people |
@@ -1788,10 +1864,9 @@ Analysed in M11a-4a, nothing implemented: [ended sessions and the password polic
 - **Staff can remove their last factor through Auth directly,** bypassing the app's guard. The result is no staff access.
 - **The procedural controls:** that the operator isn't the beneficiary, that approvers are independent, and identity checks, are recorded in case files outside the database.
 - **Enrolling an authenticator needs JavaScript** to show the QR code and setup key.
-- **An ended session's access token works until it expires** (an hour at most) for ordinary reads and collector writes (M11a-2); staff functions refuse it at once.
-- **Any session signed in within a day can change the password through Auth directly**, without the current password: the app asks for it, Auth doesn't (`secure_password_change` only asks for reauthentication after a day). Someone holding a stolen session could. Hosted Auth's "require current password" setting may close this; evaluate it before the beta.
+- ~~An ended session's access token works until it expires~~: closed by the session-revocation checkpoint for every protected path through PostgREST. Public reads are unaffected, and a future Storage or Realtime client path needs its own check.
+- **Any session signed in within a day can change the password through Auth directly**, without the current password, until hosted Auth's "require current password" is turned on (verified locally to close this; recovery sessions stay exempt). The app already sends the current password.
 - **Reset and change requests reach Auth from the server's address,** so Auth's per-IP limits count every visitor together.
-- **An ended session's access token can still save the name and bio** until it expires (M11a-3), like other collector writes; it can't change the photo.
 - **Display names may say "Admin", "Moderator" or "Staff".** The database refuses only names presenting as the platform (M2); reserved staff words apply to handles. A staff-impersonation rule for display names would be a new policy (and a database change), not made in M11a-3.
 - **Photo uploads are limited to ten an hour per account** (M11a-4a), but each still decodes an image of up to 16 megapixels on the server, and decoding across accounts isn't limited.
 

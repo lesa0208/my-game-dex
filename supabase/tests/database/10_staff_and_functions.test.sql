@@ -101,7 +101,7 @@ select is(
     'private.guard_catalog_record_origin()', 'private.handle_new_user()', 'private.has_staff_role(staff_role)', 'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)', 'private.is_active_user()',
     'private.is_blocked_between(uuid)', 'private.is_catalog_editor()', 'private.is_designated_owner(uuid)', 'private.lock_usable_release(uuid,uuid)', 'private.mature_totp_factor_count(uuid)',
     'private.mfa_recent(interval)', 'private.mfa_session_ok()', 'private.my_preserved_releases(uuid[])', 'private.notify_follow_change()', 'private.owner_authority_refusal()', 'private.owner_integrity()',
-    'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.require_active_user()', 'private.require_verified_user()', 'private.sync_catalog_verification()',
+    'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.require_active_user()', 'private.require_verified_user()', 'private.session_is_live()', 'private.sync_catalog_verification()',
     'private.totp_factor_count(uuid,interval)', 'private.validate_display_name()', 'publish_release(uuid,text,bigint)', 'reconcile_invitation(uuid)', 'record_invitation_delivery(uuid,text,text)',
     'register_my_verified_factors()', 'register_succession_document(text,text)', 'reject_follow_request(uuid)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)', 'remove_follower(uuid)',
     'remove_game_alias(uuid,text)', 'request_follow(uuid)', 'request_invitation_resend(uuid,text)', 'request_invitation_revocation(uuid,text)', 'request_submission_changes(uuid,integer,text,text)',

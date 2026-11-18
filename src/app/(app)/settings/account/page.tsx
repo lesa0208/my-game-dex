@@ -96,7 +96,7 @@ async function AccountView({ searchParams }: { searchParams: PageProps<"/setting
           </div>
           <div>
             <p className="mb-2 text-sm text-muted-foreground">
-              Sign out on every device, this one included, if you think someone else is signed in to your account. No device can renew its sign-in afterwards; one that&apos;s in use right now can keep working for up to an hour. Change your password too if it may be known.
+              Sign out on every device, this one included, if you think someone else is signed in to your account. Every device is signed out at once. Change your password too if it may be known.
             </p>
             <form action={signOutEverywhere}>
               <Button type="submit" variant="destructive" size="lg">

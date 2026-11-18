@@ -135,7 +135,10 @@ export async function changePassword(formData: FormData): Promise<void> {
   const checked = await checkCurrentPassword(email, current);
   if (checked !== "ok") redirect(withParam(ACCOUNT, "error", checked === "wrong" ? "wrong_password" : checked));
 
-  const { error } = await supabase.auth.updateUser({ password });
+  // The current password goes to Auth too, so the change still works once hosted Auth
+  // requires it ("require current password"), and Auth, not only this page, checks it.
+  // With the setting off Auth ignores it (auth-password-policy-checks.mjs).
+  const { error } = await supabase.auth.updateUser({ password, current_password: current });
   if (error) {
     const code = passwordErrorCode(error);
     if (code === "verify_first") redirect(verifyHref(ACCOUNT));
@@ -155,8 +158,8 @@ export async function signInAgain(): Promise<void> {
 
 /**
  * Ends every session of this account in Auth, this one included: no device can refresh
- * afterwards. An access token already issued stays valid until it expires (an hour at
- * most), which the page says; staff abilities need a live session and stop at once.
+ * afterwards. Since the session-revocation checkpoint, an access token already issued
+ * reaches no protected data either: the database checks the session is still Auth's.
  */
 export async function signOutEverywhere(): Promise<void> {
   const supabase = await createSupabaseServerClient();

@@ -1,6 +1,6 @@
 # Ended sessions and the password-change policy — analysis (M11a-4a)
 
-**Status: analysis and recommendation, for decision before real beta users.** Nothing here changes `is_active_user`, RLS, any authorization function or any Auth setting. Behaviour cited as observed was measured on the local test stack (GoTrue v2.197.0) in M11a-2, M11a-3 and M11a-4a.
+**Status: option A implemented** in the M11a session-revocation checkpoint ([security-rls.md § Ended sessions](security-rls.md#ended-sessions-m11a), [ADR-067](architecture-decisions.md#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has)); **the password policy was verified locally,** and enabling it on the hosted project remains a launch prerequisite. The analysis below is kept as written in M11a-4a; section 5 records what the checkpoint found. Behaviour cited as observed was measured on the local test stack (GoTrue v2.197.0) in M11a-2, M11a-3 and M11a-4a.
 
 ## 1. Ended sessions still write
 
@@ -59,3 +59,28 @@ Three different things:
 **Recommendation for the private beta:** turn on "require current password" in hosted Auth, keep secure password change on, and change `changePassword` to pass `current_password` to `updateUser` (supabase-js ≥ 2.102 supports it; the app uses 2.118), so Auth, not only the page, checks it. Keep the app's own check for its fixed error messages. Before enabling: on staging, verify that (1) a change without the current password is refused, (2) a recovery session within the hour still resets without it (and, if the 15-minute limit has shipped, that `/reset-password`'s one-hour window is shortened to match), (3) a TOTP account still needs aal2. Rerun `db-password-checks` and `app:password-checks` there. Until staging exists this stays a launch prerequisite.
 
 Sources on the hosted option: supabase/auth PR #2215 (adds the setting), PR #2396 (limits the recovery exemption to 15 minutes, open), and the supabase-js `UserAttributes.current_password` documentation.
+
+## 5. What the checkpoint found
+
+- **Session revocation:**
+  - Option A was implemented as sketched, with `require_verified_user` added next to `is_active_user` (blocks, notifications and follow lists use it).
+  - Ten owner-only policies and eleven owner-scoped functions that used neither guard were changed too.
+  - Read paths were covered as well (option B), because the audit found owner-only reads with no guard at all.
+  - Measured cost: tens of microseconds on small queries, and within noise on large ones.
+  - A statement already running when the session ends completes; later ones are refused.
+- **Auth ends other sessions when an authenticator is first verified,** like a password change. This matters for tests, not users.
+- **Require current password (GoTrue v2.197),** verified with a throwaway Auth server that used the test stack's settings plus this one (`auth-password-policy-checks.mjs`, 21 checks):
+  - a signed-in change without the current password is refused (`current_password_required`), and with a wrong one too (`current_password_invalid`);
+  - with the right one it works;
+  - a recovery session may reset without the old password, still with no 15-minute limit in this version (a 50-minute-old recovery session was allowed);
+  - an account with an authenticator still needs aal2, and so does its recovery session;
+  - an administrator changes their password the same way and keeps their role.
+- **App compatibility:**
+  - The signed-in change now passes `current_password` to `updateUser`. With the setting off, Auth ignores it (tested), and the app's own check stays for its messages.
+  - The two new error codes have messages.
+  - The reset passes no current password, as recovery is exempt.
+- **Recommended hosted configuration for the beta:**
+  - "require current password" on;
+  - "secure password change" on;
+  - `otp_expiry` an hour.
+  - If a later Auth version adds a shorter recovery window, shorten `/reset-password`'s one-hour mark to match.

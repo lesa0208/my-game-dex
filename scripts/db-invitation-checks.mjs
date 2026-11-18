@@ -317,7 +317,11 @@ try {
     const pass = pw();
     await Promise.all(sessions.map((c) => c.auth.updateUser({ password: pass })));
     const marks = await Promise.all(sessions.map((c) => rpc({ c }, "complete_my_password_setup")));
-    check("every session's password step ends recorded or unchanged, none in error", marks.every((m) => m?.result === "recorded" || m?.result === "unchanged"), JSON.stringify(marks));
+    // Setting the password ends the account's other sessions in Auth; since the session-
+    // revocation checkpoint, a session it ended is refused ("not permitted") rather than
+    // let through. Every live session's step ends recorded or unchanged, and at least one is.
+    const live = marks.filter((m) => m?.error !== "not permitted");
+    check("every live session's password step ends recorded or unchanged, none in error; ended ones are refused", live.length >= 1 && live.every((m) => m?.result === "recorded" || m?.result === "unchanged") && marks.every((m) => m?.result || m?.error === "not permitted"), JSON.stringify(marks));
     check("the marker is set exactly once on one ledger row", psql(`select count(*) from private.account_invitations where email = '${email}' and password_set_at is not null;`) === "1");
     const claims = await Promise.all(sessions.map((c, i) => rpc({ c }, "claim_handle", { p_handle: `iv${tag}r${i}` })));
     const handle = psql(`select handle from public.profiles where id = '${userIdOf(email)}';`);

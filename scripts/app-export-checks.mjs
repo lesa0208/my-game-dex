@@ -125,7 +125,7 @@ try {
   psql(`begin;
 create temp table ex_ids on commit drop as select private.uuid_v7() as id, g from generate_series(1, ${BULK}) g;
 grant select on ex_ids to authenticated;
-select set_config('request.jwt.claims', ${sql(JSON.stringify({ sub: a.id, role: "authenticated" }))}, true);
+select set_config('request.jwt.claims', ${sql(JSON.stringify({ sub: a.id, role: "authenticated", session_id: JSON.parse(Buffer.from(tokenOf(a).split(".")[1], "base64url").toString("utf8")).session_id }))}, true);
 set local role authenticated;
 insert into public.collection_items (id, owner_id, release_id, completeness) select x.id, ${sql(a.id)}, case when x.g % 2 = 0 then ${sql(releases.ce)}::uuid else ${sql(releases.eu)}::uuid end, 'complete' from ex_ids x;
 insert into public.collection_item_private (item_id, owner_id, notes) select c.id, c.owner_id, 'bulk note' from public.collection_items c where c.owner_id = ${sql(a.id)} and c.release_id = ${sql(releases.eu)};

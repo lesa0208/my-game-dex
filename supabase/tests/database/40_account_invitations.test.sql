@@ -7,6 +7,16 @@ create extension if not exists pgtap with schema extensions;
 select plan(87);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
+-- A password session (aal1), as Auth creates one at sign-in: since the session-revocation
+-- checkpoint, owner-scoped reads and writes need the token's session to exist.
+create function pg_temp.plain(p_user uuid) returns jsonb language plpgsql as $plain$
+declare v_session uuid := md5('plain:' || p_user::text)::uuid;
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, created_at, updated_at) values (v_session, p_user, 'aal1', now(), now()) on conflict (id) do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal1', 'session_id', v_session);
+end $plain$;
 -- A TOTP-verified session for p_user, verified p_age ago (fresh: zero; stale: 20 minutes).
 create function pg_temp.session(p_user uuid, p_age interval) returns jsonb language plpgsql as $mfa$
 begin
@@ -37,7 +47,7 @@ create function pg_temp.as_user(p_actor text, p_sql text) returns text language 
 create function pg_temp.as_plain(p_actor text, p_sql text) returns text language plpgsql as $t$
 declare r text;
 begin
-  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  perform set_config('request.jwt.claims', pg_temp.plain(pg_temp.u(p_actor))::text, true);
   perform set_config('role', 'authenticated', true);
   execute p_sql into r;
   perform set_config('role', 'none', true);

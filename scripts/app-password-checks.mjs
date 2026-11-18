@@ -27,6 +27,7 @@ import {
   section,
   signInAs,
   startApp,
+  streamedRedirectTo,
   stopApp,
   verifyBrowser,
   writeSession,
@@ -204,7 +205,7 @@ try {
     const done = await choose(resetter, fresh);
     check("a good password is saved, then on to the account page", location(done.res.response) === "/settings/account?notice=password_reset", location(done.res.response));
     check("the recovery mark is cleared", done.res.response.headers.getSetCookie().some((c) => c.startsWith("mgd-recovery=;") || (c.startsWith("mgd-recovery=") && /Max-Age=0|Expires=Thu, 01 Jan 1970/i.test(c))));
-    check("the account page says other devices were signed out, with the hour caveat", visible((await resetter.get("/settings/account?notice=password_reset")).html).includes("up to an hour"));
+    check("the account page says other devices were signed out", visible((await resetter.get("/settings/account?notice=password_reset")).html).includes("your other devices were signed out"));
     check("the old password no longer signs in", (await apiSignIn(known.email, known.password)) === 400);
     check("the new one does", (await apiSignIn(known.email, fresh)) === 200);
     check("the other device can't renew its session", !(await canRefresh(other)));
@@ -222,11 +223,14 @@ try {
     const b = new Browser();
     await openLink(b, link.path);
     await choose(b, newPassword());
+    // Since the session-revocation checkpoint: its unexpired token reaches no protected data,
+    // so the app treats the device as signed out at once.
     const stillOpen = await second.get("/collection");
-    check("documented: the other device's current access token still opens pages until it expires", stillOpen.response.status === 200 && !location(stillOpen.response));
+    check("the other device is signed out at once, although its token hasn't expired", streamedRedirectTo(stillOpen.html, "/sign-in") || location(stillOpen.response).startsWith("/sign-in"), `${stillOpen.response.status} ${location(stillOpen.response)}`);
+    check("and its page shows nothing of the account", !stillOpen.html.includes(user.handle));
     expire(second);
     const after = await second.get("/collection");
-    check("once it expires it can't be renewed, and the device is signed out", location(after.response).startsWith("/sign-in"), location(after.response));
+    check("once it expires it can't be renewed either", location(after.response).startsWith("/sign-in"), location(after.response));
   }
 
   section("Links that can't be used");
@@ -416,15 +420,15 @@ try {
     check("ordinary sign-out ends this device's session only", sessions(admin.id) === count - 1 && third.authCookieNames().length === 0);
     const everywhere = await admin.browser.submit("/settings/account", { hidden: formHidden(page, "Sign out on all devices") }, {}, {});
     check("signing out everywhere goes to sign in with a notice", location(everywhere.response) === "/sign-in?notice=signed_out_everywhere", location(everywhere.response));
-    check("which says a device in use can keep working for up to an hour", visible((await new Browser().get("/sign-in?notice=signed_out_everywhere")).html).includes("up to an hour"));
+    check("which says every device was signed out", visible((await new Browser().get("/sign-in?notice=signed_out_everywhere")).html).includes("You were signed out on every device."));
     check("this browser's session cookies are cleared", admin.browser.authCookieNames().length === 0);
     check("no session of the account is left in Auth", psql(`select count(*) from auth.sessions where user_id = '${admin.id}';`) === "0");
     check("the other device can't renew its session", !(await canRefresh(second)));
     check("its staff pages stop at once (they need a live session)", !staffWorks((await second.get("/admin/invitations")).html));
     const stillOpen = await second.get("/collection");
-    check("documented: its current access token still opens ordinary pages until it expires", stillOpen.response.status === 200 && !location(stillOpen.response));
+    check("its ordinary pages stop at once too (since the session-revocation checkpoint)", streamedRedirectTo(stillOpen.html, "/sign-in") || location(stillOpen.response).startsWith("/sign-in"), `${stillOpen.response.status} ${location(stillOpen.response)}`);
     expire(second);
-    check("then it's signed out", location((await second.get("/collection")).response).startsWith("/sign-in"));
+    check("and once its token expires it stays signed out", location((await second.get("/collection")).response).startsWith("/sign-in"));
     const evilUser = await person();
     const evilPage = await evilUser.browser.get("/settings/account");
     const evil = await evilUser.browser.submit("/settings/account", { hidden: formHidden(evilPage, "Sign out on all devices") }, {}, { origin: "https://evil.example" });

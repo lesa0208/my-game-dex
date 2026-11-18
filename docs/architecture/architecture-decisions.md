@@ -833,7 +833,7 @@ There's no sign-up or password-reset page, and nothing on a hosted project chang
 
 **Trade-offs.**
 - Any later client-side Supabase use, such as Realtime, needs a browser client and non-`httpOnly` cookies, so this decision would need revisiting.
-- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out.
+- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out. *(Superseded for the person's own data by [ADR-067](#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has).)*
 - Pages that read the session render per request and can't be prefetched.
 - Avatars aren't shown yet, because the image component would need the storage host configured.
 
@@ -1150,7 +1150,7 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **Bound to the browser and the hour.** An httpOnly cookie holds the new recovery session's id; `/reset-password` accepts only that session, within an hour of the link. Anywhere else, the current password is needed.
 - **TOTP first.** A recovery session is aal1; with an authenticator, the existing verification page takes it to aal2 and back. No factor is removed; a lost one is the operator's runbook.
 - **Changing** asks for the current password (checked in a detached session that's ended at once), then Auth's rules: aal2 with an authenticator, a sign-in within a day.
-- **Signing out everywhere** is Auth's global sign-out, separate from signing out here. The pages say that a device in use can keep working for up to an hour: access tokens stay valid until they expire (demonstrated in M11a-2), though staff functions stop at once.
+- **Signing out everywhere** is Auth's global sign-out, separate from signing out here. The pages said that a device in use can keep working for up to an hour: access tokens stayed valid until they expired (demonstrated in M11a-2), though staff functions stopped at once. Since [ADR-067](#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has) every protected path stops at once.
 
 **Consequences.** No database change. Auth's behaviour is pinned by `db-password-checks`, to be rerun on staging. Residual risks (timing, tokens until expiry, Auth accepting a password change from any day-old session without the current password) are listed under [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 
@@ -1179,6 +1179,19 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **The 2 MB action body limit is narrowed to `/settings/profile`** by the proxy, which refuses other POSTs that declare more than 1 MB.
 
 **Consequences.** One migration (a table and a function). The export is a technical copy, not a legal access response (D10). Revoked sessions can still read and write ordinary data elsewhere until their token expires; the narrow fix is analysed in [session-and-password-decisions.md](session-and-password-decisions.md), and deletion and retention in [account-deletion-d10.md](account-deletion-d10.md), both for decision.
+
+### ADR-067: A signed-in request must belong to a session Auth still has
+
+**Status:** accepted (M11a session-revocation checkpoint). **Context:** an access token stayed usable for up to an hour after the session it came from was ended (sign-out everywhere, a reset, a change), because PostgREST verifies tokens by signature only. Staff functions already checked the session (M8b); collector data didn't.
+
+**Decision.**
+- **One fail-closed definer helper,** `private.session_is_live()`: the token's signed `session_id` must be a row in `auth.sessions` for this user, not past `not_after`.
+- **Added where the person's own data is reached:** the shared guards (`is_active_user`, `require_verified_user`), the owner-only policies that used neither, the own-submission branch of the catalog rules, and the owner-scoped functions that checked only `auth.uid()`. Always once per statement.
+- **Not added to public reads:** the published catalog and public profile cards behave the same for an ended session as for a signed-out visitor.
+- **Database-side, not a PostgREST pre-request hook.** A hook would cover every request in one place, but it depends on a role setting, which fails open if missing, and it would refuse public reads too. This way each object checks itself, and a pgTAP coverage rule keeps new functions honest.
+- **The signed-in password change passes `current_password` to Auth,** ready for hosted "require current password", which was verified on GoTrue v2.197 (recovery sessions exempt, aal2 still required).
+
+**Consequences.** One migration (15 functions redefined with one condition each, 10 policies, one helper). A statement already running when a session ends completes; later ones are refused. The cost is tens of microseconds on small queries and within noise on large ones. The pages now say other devices are signed out, without the hour caveat. Storage and Realtime paths would need their own check if clients ever use them.
 
 ## Risks to watch
 

@@ -390,7 +390,8 @@ async function avatars() {
   const stale = await c.browser.submit(PROFILE, cForm, { avatar: new File([await image(110, 110).png().toBuffer()], "c2.png", { type: "image/png" }) });
   check("after signing out everywhere, an old device's unexpired token can't change the photo", stored(c.id, "avatar_path") === cPhoto && !location(stale.response).includes("notice="), location(stale.response));
   await c.browser.submit(PROFILE, cProfileForm, { display_name: "After sign-out", bio: "" });
-  console.log(`  observed: a name-and-bio save with that token ${stored(c.id, "display_name") === "After sign-out" ? "was accepted (PostgREST trusts an unexpired access token, as M11a-2 documented)" : "was refused"}`);
+  // Accepted before the session-revocation checkpoint (PostgREST trusted the unexpired token).
+  check("nor save the name and bio (the database checks the session is still Auth's)", stored(c.id, "display_name") !== "After sign-out");
 
   section("Photo: an account that isn't active");
   const bForm = formWith((await b.browser.get(PROFILE)).html, "avatar");

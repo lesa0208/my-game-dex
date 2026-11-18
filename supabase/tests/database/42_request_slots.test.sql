@@ -6,6 +6,16 @@ create extension if not exists pgtap with schema extensions;
 select plan(17);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
+-- A password session (aal1), as Auth creates one at sign-in: since the session-revocation
+-- checkpoint, owner-scoped reads and writes need the token's session to exist.
+create function pg_temp.plain(p_user uuid) returns jsonb language plpgsql as $plain$
+declare v_session uuid := md5('plain:' || p_user::text)::uuid;
+begin
+  if exists (select 1 from auth.users where id = p_user) then
+    insert into auth.sessions (id, user_id, aal, created_at, updated_at) values (v_session, p_user, 'aal1', now(), now()) on conflict (id) do nothing;
+  end if;
+  return jsonb_build_object('sub', p_user, 'role', 'authenticated', 'aal', 'aal1', 'session_id', v_session);
+end $plain$;
 create function pg_temp.run(p_role text, p_claims jsonb, p_sql text) returns text language plpgsql as $t$
 declare r text;
 begin
@@ -19,7 +29,7 @@ exception when others then
   return 'error: ' || sqlerrm;
 end $t$;
 create function pg_temp.as_user(p_actor text, p_sql text) returns text language sql as $$
-  select pg_temp.run('authenticated', jsonb_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated', 'aal', 'aal1'), p_sql) $$;
+  select pg_temp.run('authenticated', pg_temp.plain(pg_temp.u(p_actor)), p_sql) $$;
 create function pg_temp.take(p_actor text, p_kind text) returns text language sql as $$
   select pg_temp.as_user(p_actor, format('select public.take_request_slot(%L)::text', p_kind)) $$;
 

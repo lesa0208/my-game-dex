@@ -85,7 +85,12 @@ test("Auth's errors become fixed messages", () => {
   assert.equal(passwordError("<script>"), null);
   assert.equal(passwordError("toString"), null);
   assert.equal(passwordNotice("constructor"), null);
-  for (const code of ["password_changed", "password_reset", "signed_out_everywhere"]) assert.match(passwordNotice(code), /up to an hour/, "no claim that other devices stop at once");
+  // Since the session-revocation checkpoint, an ended session's token reaches no protected
+  // data (db-session-checks), so the notices no longer warn of an hour's grace.
+  for (const code of ["password_changed", "password_reset", "signed_out_everywhere"]) {
+    assert.match(passwordNotice(code), /signed out/);
+    assert.doesNotMatch(passwordNotice(code), /up to an hour/);
+  }
 });
 
 test("password operations never use the secret key or the Auth Admin API", () => {
@@ -104,4 +109,13 @@ test("the reset email links to the confirmation page with the token's hash only"
   const template = readFileSync("supabase/templates/recovery.html", "utf8");
   assert.match(template, /\{\{ \.SiteURL \}\}\/auth\/confirm\?token_hash=\{\{ \.TokenHash \}\}&amp;type=recovery/);
   assert.ok(!/ConfirmationURL|\.Token \}\}|RedirectTo/.test(template), "no link that spends the token on a GET");
+});
+
+test("a change sends the current password to Auth too, and Auth's refusals have messages (session-revocation checkpoint)", () => {
+  assert.equal(passwordErrorCode({ code: "current_password_invalid", status: 400 }), "wrong_password");
+  assert.equal(passwordErrorCode({ code: "current_password_required", status: 400 }), "current_required");
+  const actions = readFileSync(join(import.meta.dirname, "actions.ts"), "utf8");
+  assert.match(actions, /updateUser\(\{ password, current_password: current \}\)/, "the signed-in change passes it");
+  // A reset has no current password to give: recovery sessions are exempt in Auth.
+  assert.equal(actions.match(/updateUser\(\{ password \}\)/g)?.length, 1, "only the reset omits it");
 });

@@ -37,6 +37,8 @@ insert into approved_function_grants values
   -- M8b: registering one's own verified factors, from a live aal2 session.
   ('register_my_verified_factors()', 'authenticated'),
   ('private.is_active_user()', 'authenticated'),
+  -- M11a session revocation: the live-session check, called from policies.
+  ('private.session_is_live()', 'authenticated'),
   -- M3: clients act only through these. follows and blocked_users have no client grants.
   ('request_follow(uuid)', 'authenticated'),
   ('cancel_follow_request(uuid)', 'authenticated'),

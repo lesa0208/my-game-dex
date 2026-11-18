@@ -169,10 +169,11 @@ try {
     check("signing out everywhere ends every session", everywhere.status === 204 && psql(`select count(*) from auth.sessions where user_id = '${a.id}';`) === "0");
     check("no device can refresh", (await refresh(four)).code === "refresh_token_not_found");
     check("Auth refuses the ended session's access token", (await auth("GET", "/user", { token: four.access_token })).code === "session_not_found");
+    // Since the session-revocation checkpoint (db-session-checks.mjs covers every path).
     const read = await rpc(four.access_token, "get_my_account");
-    check("documented: the database still accepts that access token until it expires", read.status === 200 && Array.isArray(read.body) && read.body.length === 1);
+    check("the database refuses that unexpired access token at once: no account to read", read.status === 200 && Array.isArray(read.body) && read.body.length === 0);
     const write = await rpc(four.access_token, "block_user", { p_target: target.id });
-    check("documented: including a collector's write", write.status === 204 || write.status === 200, `${write.status}`);
+    check("nor a collector's write", write.status === 403 && psql(`select count(*) from public.blocked_users where blocker_id = '${a.id}';`) === "0", `${write.status}`);
     psql(`delete from public.blocked_users where blocker_id = '${a.id}';`);
     const expiry = decodeClaims(four.access_token).exp - decodeClaims(four.access_token).iat;
     check("an access token lasts an hour at most (jwt_expiry)", expiry <= 3600, `${expiry}s`);

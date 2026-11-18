@@ -290,7 +290,9 @@ async function handleConcurrency() {
   const releaser = await createUser();
   const taker = await createUser({ claim: false });
   const session = psqlSession(`begin;
-    select set_config('request.jwt.claims', '{"sub":"${releaser.id}","role":"authenticated"}', true);
+    -- With the user's own session, as their token would carry (the session-revocation checkpoint).
+    select set_config('request.jwt.claims', jsonb_build_object('sub', '${releaser.id}', 'role', 'authenticated',
+      'session_id', (select id from auth.sessions where user_id = '${releaser.id}' order by created_at desc limit 1))::text, true);
     set local role authenticated;
     select public.claim_handle('${newHandle()}');
     select pg_sleep(3);

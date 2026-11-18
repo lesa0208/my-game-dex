@@ -74,6 +74,7 @@ const steps = {
   ownership: () => runNode("db-ownership-checks.mjs"),
   invitations: () => runNode("db-invitation-checks.mjs"),
   passwords: () => runNode("db-password-checks.mjs"),
+  sessions: () => runNode("db-session-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -97,8 +98,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

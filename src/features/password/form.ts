@@ -61,6 +61,11 @@ export function passwordErrorCode(error: { code?: string; status?: number } | nu
       return "reauthenticate";
     case "insufficient_aal":
       return "verify_first";
+    // When hosted Auth requires the current password (GoTrue v2.197 supports it).
+    case "current_password_invalid":
+      return "wrong_password";
+    case "current_password_required":
+      return "current_required";
     case "over_request_rate_limit":
       return "too_many";
     default:
@@ -90,9 +95,9 @@ export function passwordError(code: unknown): string | null {
 }
 
 const NOTICES: Record<string, string> = {
-  password_changed: "Your password was changed. Other devices were signed out; one that's in use right now can keep working for up to an hour.",
-  password_reset: "Your password was reset. Other devices were signed out; one that's in use right now can keep working for up to an hour.",
-  signed_out_everywhere: "You were signed out on every device. A device that's in use right now can keep working for up to an hour.",
+  password_changed: "Your password was changed, and your other devices were signed out.",
+  password_reset: "Your password was reset, and your other devices were signed out.",
+  signed_out_everywhere: "You were signed out on every device.",
 };
 
 export function passwordNotice(code: unknown): string | null {
