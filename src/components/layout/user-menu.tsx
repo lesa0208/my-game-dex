@@ -59,7 +59,7 @@ export function UserMenu({ viewer, isStaff = false }: { viewer: Viewer | null; i
           {viewer.handle ? (
             <>
               <DropdownMenuItem asChild>
-                <Link href="/profile">
+                <Link href="/settings/profile">
                   <UserRound aria-hidden="true" />
                   My Profile
                 </Link>

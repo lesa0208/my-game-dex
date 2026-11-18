@@ -127,10 +127,12 @@ async function lifecycle() {
   check("sign-in sends a signed-in user on", streamedRedirectTo(back.html, "/home") || isRedirect(back.response));
 
   // The settings form uses the same rules: a handle can be corrected within 24 hours.
+  // M11a-3 moved it to Settings → Profile.
+  const profilePage = await browser.get("/settings/profile");
   const corrected = `${handle}x`;
-  const changed = await browser.submit("/settings", formWith(settings.html, "handle"), { handle: corrected });
+  const changed = await browser.submit("/settings/profile", formWith(profilePage.html, "handle"), { handle: corrected });
   check("the handle can be corrected in settings", isRedirect(changed.response) && psql(`select handle from public.profiles where id = '${user.id}'`) === corrected);
-  const after = await browser.get("/settings");
+  const after = await browser.get("/settings/profile");
   check("after the correction, settings show the next allowed date", after.html.includes("You can change it again on") && !formWith(after.html, "handle"));
 
   // A valid session is only verified, never refreshed or rewritten, on ordinary requests.
@@ -211,7 +213,7 @@ async function suspended() {
     "a suspended account can still open settings",
     settings.response.status === 200 && /This account isn(&#x27;|')t active/.test(settings.html),
   );
-  check("a suspended account isn't offered a handle change", !formWith(settings.html, "handle"));
+  check("a suspended account isn't offered a handle change", !formWith(settings.html, "handle") && !formWith((await browser.get("/settings/profile")).html, "handle"));
   const forced = await browser.submit("/welcome", formWith(welcome.html, "handle"), { handle: `${handle}z` });
   check("a suspended account can't change its handle", psql(`select handle from public.profiles where id = '${user.id}'`) === handle, `status ${forced.response.status}`);
 }

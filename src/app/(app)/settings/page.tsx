@@ -1,73 +1,68 @@
+import { ChevronRight, KeyRound, ShieldCheck, UserRound, type LucideIcon } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { HandleForm } from "@/components/auth/handle-form";
 import { AccountPageSkeleton } from "@/components/auth/require-account";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { PageLayout } from "@/components/layout/page-layout";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { requireViewerWithHandle } from "@/features/account/queries";
-import { nextHandleChange } from "@/features/auth/account";
 
 export const metadata: Metadata = {
   title: "Settings",
 };
 
+const SECTIONS: { href: string; title: string; description: string; icon: LucideIcon }[] = [
+  { href: "/settings/profile", title: "Profile", description: "Display name, bio, photo, handle and collection privacy", icon: UserRound },
+  { href: "/settings/account", title: "Account and password", description: "Change your password, or sign out on your other devices", icon: KeyRound },
+  { href: "/settings/security", title: "Security", description: "Two-step verification with an authenticator app", icon: ShieldCheck },
+];
+
+/** Settings (M11a-3): who's signed in, and the way to each part of the account. */
 async function AccountSettings() {
   const viewer = await requireViewerWithHandle("/settings");
-  const waitUntil = nextHandleChange(viewer);
 
   return (
     <div className="flex flex-col gap-6">
-      <section aria-labelledby="account-heading" className="rounded-lg border p-4">
-        <h2 id="account-heading" className="font-medium">
+      <section aria-labelledby="account-heading" className="rounded-xl border bg-card p-4 sm:p-5">
+        <h2 id="account-heading" className="sr-only">
           Account
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Signed in as <span className="font-medium text-foreground">{viewer.displayName}</span> (@{viewer.handle})
-        </p>
-        {viewer.accountStatus !== "active" ? (
-          <p className="mt-3 text-sm text-destructive">
-            This account isn&apos;t active. You can still view your settings and sign out.
+        <div className="flex flex-wrap items-center gap-4">
+          <UserAvatar collector={viewer} size={48} />
+          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+            Signed in as <span className="font-medium break-words text-foreground">{viewer.displayName}</span>{" "}
+            <span className="break-all">(@{viewer.handle})</span>
           </p>
-        ) : null}
-        <div className="mt-4 flex flex-wrap items-center gap-4">
           <SignOutButton />
-          <Link href="/settings/account" className="text-sm text-primary-text underline underline-offset-4">
-            Password and sessions
-          </Link>
         </div>
-      </section>
-
-      <section aria-labelledby="handle-heading" className="rounded-lg border p-4">
-        <h2 id="handle-heading" className="mb-3 font-medium">
-          Handle
-        </h2>
         {viewer.accountStatus !== "active" ? (
-          <p className="text-sm text-muted-foreground">Your handle can&apos;t be changed while the account isn&apos;t active.</p>
-        ) : waitUntil ? (
-          <p className="text-sm text-muted-foreground">
-            Your handle is @{viewer.handle}. You can change it again on{" "}
-            {waitUntil.toLocaleDateString("en", { dateStyle: "long", timeZone: "UTC" })}.
-          </p>
-        ) : (
-          <HandleForm next="/settings" current={viewer.handle} submitLabel="Change handle" />
-        )}
+          <p className="mt-3 text-sm text-destructive">This account isn&apos;t active. You can still view your settings and sign out.</p>
+        ) : null}
       </section>
 
-      <section aria-labelledby="security-heading" className="rounded-lg border p-4">
-        <h2 id="security-heading" className="font-medium">
-          Security
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">Two-step verification with an authenticator app.</p>
-        <p className="mt-3">
-          <Link href="/settings/security" className="text-sm text-primary-text underline underline-offset-4">
-            Manage authenticators
-          </Link>
-        </p>
-      </section>
+      <nav aria-label="Settings">
+        <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+          {SECTIONS.map(({ href, title, description, icon: Icon }) => (
+            <li key={href}>
+              <Link
+                href={href}
+                className="flex min-h-16 items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/60 focus-visible:ring-inset sm:px-5"
+              >
+                <Icon aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{title}</span>
+                  <span className="block text-sm text-muted-foreground">{description}</span>
+                </span>
+                <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-      <p className="text-sm text-muted-foreground">Privacy and appearance settings arrive in a later update.</p>
+      <p className="text-sm text-muted-foreground">Appearance and notification settings arrive in a later update.</p>
     </div>
   );
 }

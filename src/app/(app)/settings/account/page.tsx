@@ -15,12 +15,12 @@ import { signOutEverywhere } from "@/features/password/actions";
 import { passwordError, passwordNotice } from "@/features/password/form";
 
 export const metadata: Metadata = {
-  title: "Password and sessions",
+  title: "Account and password",
 };
 
 const PATH = "/settings/account";
 
-/** Settings → Password and sessions (M11a-2): change the password, sign out here or everywhere. */
+/** Settings → Account and password (M11a-2; renamed in M11a-3): change the password, sign out here or everywhere. */
 async function AccountView({ searchParams }: { searchParams: PageProps<"/settings/account">["searchParams"] }) {
   const search = await searchParams;
   const viewer = await requireViewerWithHandle(PATH);
@@ -91,7 +91,7 @@ export default function AccountSecurityPage({ searchParams }: PageProps<"/settin
   return (
     <PageLayout>
       <div className="p-4 md:p-0">
-        <h1 className="mb-4 text-xl font-semibold tracking-tight">Password and sessions</h1>
+        <h1 className="mb-4 text-xl font-semibold tracking-tight">Account and password</h1>
         <Suspense fallback={<AccountPageSkeleton />}>
           <AccountView searchParams={searchParams} />
         </Suspense>
