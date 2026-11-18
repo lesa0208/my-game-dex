@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { chromium } from "playwright-core";
+import sharp from "sharp";
 
 import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, service, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
@@ -623,6 +624,92 @@ try {
       await structure(mfaPage, "reset page, authenticator first", tag);
       await keyboard(mfaPage, "reset page, authenticator first", tag);
       await mfaContext.close();
+    }
+
+    section(`${tag}: 2f. Settings, profile and photo (M11a-3)`);
+    {
+      const member = await person();
+      const { context, page } = await signIn(browser, viewport, member);
+      for (const [name, path] of [
+        ["settings", "/settings"],
+        ["profile", "/settings/profile"],
+        ["profile, saved", "/settings/profile?notice=profile_saved"],
+        ["profile, refused name", "/settings/profile?error=display_name_reserved"],
+        ["profile, refused bio", "/settings/profile?error=bio_too_long"],
+        ["profile, refused photo", "/settings/profile?error=avatar_type"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/settings`, { waitUntil: "networkidle" });
+      await keyboard(page, "settings", tag);
+      await page.goto(`${origin}/profile`);
+      await page.waitForURL((u) => u.pathname === "/settings/profile");
+      ok(`${tag} /profile opens the profile editor`, new URL(page.url()).pathname === "/settings/profile");
+      await page.waitForLoadState("networkidle");
+      await keyboard(page, "profile", tag);
+
+      // The controls line up: the name input is the admin height, the buttons too.
+      const sizes = await page.evaluate(() => ({
+        input: document.querySelector('input[name="display_name"]').getBoundingClientRect().height,
+        buttons: [...document.querySelectorAll("main button[type=submit]")].map((b) => Math.round(b.getBoundingClientRect().height)),
+      }));
+      ok(`${tag} profile: inputs and buttons share one height`, Math.round(sizes.input) === 40 && sizes.buttons.every((h) => h === 40), JSON.stringify(sizes));
+
+      // With JavaScript: the counter follows the typing, and a value over the limit is
+      // caught before sending, with the reason linked to the field and focus on it.
+      const name = page.locator('input[name="display_name"]');
+      await name.fill("x".repeat(51));
+      ok(`${tag} the counter shows the count against the limit`, (await visibleText(page)).includes("51 / 50"));
+      await page.click("main button:has-text('Save profile')");
+      await page.waitForTimeout(300);
+      const caught = await page.evaluate(() => {
+        const input = document.querySelector('input[name="display_name"]');
+        const ids = (input.getAttribute("aria-describedby") ?? "").split(" ");
+        return { url: location.search, invalid: input.getAttribute("aria-invalid"), focused: document.activeElement === input, described: ids.some((id) => document.getElementById(id)?.textContent?.includes("Use up to 50 characters")) };
+      });
+      ok(`${tag} a too-long name is caught before sending, described and focused`, caught.url === "" && caught.invalid === "true" && caught.focused && caught.described, JSON.stringify(caught));
+      await audit(page, "profile, name caught before sending", tag);
+      await name.fill("A Collector 🎮");
+      await page.fill('textarea[name="bio"]', "Boxed handhelds.\nAnd a few consoles.");
+      await page.click("main button:has-text('Save profile')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "profile_saved");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} with JavaScript the profile saves and says so`, (await visibleText(page)).includes("Your profile is saved.") && (await visibleText(page)).includes("A Collector 🎮"));
+
+      // A photo: previewed when chosen, uploaded, shown, then removed.
+      const png = await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 30, g: 140, b: 90 } } }).png().toBuffer();
+      const big = Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024 + 10)]);
+      await page.setInputFiles('input[name="avatar"]', { name: "big.png", mimeType: "image/png", buffer: big });
+      ok(`${tag} a file over 2 MB is flagged as soon as it's chosen`, (await visibleText(page)).includes("That file is over 2 MB") && (await page.getAttribute('input[name="avatar"]', "aria-invalid")) === "true");
+      await page.setInputFiles('input[name="avatar"]', { name: "photo.png", mimeType: "image/png", buffer: png });
+      ok(`${tag} a chosen photo is previewed`, (await page.locator('img[alt="The chosen photo, before uploading"]').count()) === 1);
+      await page.click("main button:has-text('Upload photo')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "avatar_saved");
+      await page.waitForLoadState("networkidle");
+      // next/image loads lazily and decodes asynchronously: wait for the file itself.
+      await page.waitForFunction(() => {
+        const img = document.querySelector('img[alt="Your current photo"]');
+        return Boolean(img?.complete && img.naturalWidth > 0);
+      }, null, { timeout: 10_000 }).catch(() => undefined);
+      const shown = await page.evaluate(() => {
+        const img = document.querySelector('img[alt="Your current photo"]');
+        return { src: img?.getAttribute("src") ?? "", complete: Boolean(img?.complete), width: img?.naturalWidth ?? -1, loading: img?.getAttribute("loading") ?? "" };
+      });
+      const fromBucket = /^http:\/\/127\.0\.0\.1:\d+\/storage\/v1\/object\/public\/avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.webp$/.test(shown.src);
+      ok(`${tag} the uploaded photo is shown, at 512 pixels from the avatars bucket`, shown.complete && shown.width === 512 && fromBucket, JSON.stringify({ complete: shown.complete, width: shown.width, loading: shown.loading, fromBucket }));
+      await audit(page, "profile with a photo", tag);
+      await structure(page, "profile with a photo", tag);
+      await page.click('button[aria-label="Account menu"]');
+      ok(`${tag} the account menu shows the photo and links to the profile editor`, (await page.locator('[role="menu"] a[href="/settings/profile"]').count()) === 1 && (await page.locator('button[aria-label="Account menu"] img').count()) === 1);
+      await page.keyboard.press("Escape");
+      await page.click("main button:has-text('Remove photo')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "avatar_removed");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} the photo is removed, and the initial shows again`, (await page.locator('img[alt="Your current photo"]').count()) === 0 && (await visibleText(page)).includes("No photo yet"));
+      ok(`${tag} and its file is gone`, psql(`select count(*) from storage.objects where bucket_id = 'avatars' and name like '${member.id}/%';`) === "0");
+      await context.close();
     }
 
     section(`${tag}: 3. The admin's pages`);

@@ -8,7 +8,9 @@
  * Destructive, so it refuses a protected development stack. Throwaway accounts only;
  * nothing printed contains a token, key, password or address.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+
+import sharp from "sharp";
 
 import {
   appErrorLines,
@@ -35,6 +37,8 @@ const stack = stackStatus({ label: "the profile app checks" });
 const api = stack.API_URL;
 const publishable = stack.PUBLISHABLE_KEY ?? stack.ANON_KEY;
 const anon = { apikey: publishable, Authorization: `Bearer ${publishable}` };
+const secret = stack.SECRET_KEY ?? stack.SERVICE_ROLE_KEY;
+const service = { apikey: secret, Authorization: `Bearer ${secret}` };
 await startApp(3299);
 
 const PROFILE = "/settings/profile";
@@ -207,14 +211,203 @@ try {
     check("an administrator edits their own profile like anyone", noticeOf(r.to) === "profile_saved" && stored(admin.id, "display_name") === "An Admin");
     check("staff get no way to edit someone else's here", !(await admin.browser.get(`${PROFILE}?user=${b.id}`)).html.includes("Person B"));
   }
+  await avatars();
 } catch (error) {
   check(`the checks ran to the end (${error.message})`, false);
 } finally {
   stopApp();
+  // Storage files don't cascade from a deleted user (security-rls.md#account-deletion):
+  // remove each test account's folder through the Storage API first.
+  const ids = psql("select id from auth.users where email like 'apppf-%';").split("\n").filter(Boolean);
+  let filesLeft = 0;
+  for (const id of ids) {
+    const paths = (await folder(id)) ?? [];
+    if (paths.length) await fetch(`${api}/storage/v1/object/avatars`, { method: "DELETE", headers: { ...service, "Content-Type": "application/json" }, body: JSON.stringify({ prefixes: paths }) });
+    filesLeft += ((await folder(id)) ?? [null]).length;
+  }
+  check("no test avatar file is left behind", filesLeft === 0, String(filesLeft));
   await deleteUsers();
   psql("delete from private.handle_holds where kind = 'released' and handle like 'pf\\_%';");
   check("no handle holds are left behind", psql("select count(*) from private.handle_holds where handle like 'pf\\_%';") === "0");
   check("no test account is left behind", psql("select count(*) from auth.users where email like 'apppf-%';") === "0");
+}
+
+// ---------------------------------------------------------------------------
+// Avatars
+// ---------------------------------------------------------------------------
+
+function image(width = 300, height = 200, colour = { r: 200, g: 40, b: 90 }) { return sharp({ create: { width, height, channels: 3, background: colour } }); }
+function publicFile(path) { return fetch(`${api}/storage/v1/object/public/avatars/${path}`); }
+function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+async function folder(userId) {
+  const r = await fetch(`${api}/storage/v1/object/list/avatars`, { method: "POST", headers: { ...service, "Content-Type": "application/json" }, body: JSON.stringify({ prefix: `${userId}/`, limit: 100 }) });
+  return r.ok ? (await r.json()).map((o) => `${userId}/${o.name}`).sort() : null;
+}
+
+/** Submits the photo form with a file, as a browser would. */
+async function upload(user, bytes, { name = "photo.jpg", type = "image/jpeg", headers = {}, extra = {} } = {}) {
+  const page = await user.browser.get(PROFILE);
+  const form = formWith(page.html, "avatar");
+  if (!form) throw new Error("no photo form");
+  const sent = await user.browser.submit(PROFILE, form, { ...extra, avatar: new File([bytes], name, { type }) }, headers);
+  return { ...sent, to: location(sent.response) };
+}
+
+/** Submits the "Remove photo" form. */
+async function removePhoto(user, headers = {}) {
+  const page = await user.browser.get(PROFILE);
+  const match = [...page.html.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/g)].find(([, inner]) => visible(inner).includes("Remove photo"));
+  if (!match) throw new Error("no remove form");
+  const hidden = {};
+  for (const [input] of match[1].matchAll(/<input\b[^>]*>/g)) {
+    const name = /\bname="([^"]*)"/.exec(input)?.[1];
+    if (name && /type="hidden"/.test(input)) hidden[decode(name)] = decode(/\bvalue="([^"]*)"/.exec(input)?.[1] ?? "");
+  }
+  const sent = await user.browser.submit(PROFILE, { hidden }, {}, headers);
+  return { ...sent, to: location(sent.response) };
+}
+
+async function avatars() {
+  section("Photo: upload, replace, remove");
+  const a = await person();
+  const b = await person();
+  let page = await a.browser.get(PROFILE);
+  check("with no photo, the initial is shown and there's nothing to remove", visible(page.html).includes("No photo yet") && !visible(page.html).includes("Remove photo"));
+  check("the file picker offers JPEG, PNG and WebP", /<input[^>]*accept="image\/jpeg,image\/png,image\/webp"/.test(page.html));
+  check("no page carries the secret key", !page.html.includes(secret));
+
+  const marker = "SECRET-GPS-MARKER";
+  const jpeg = await image().withExif({ IFD0: { Copyright: marker, Artist: marker }, IFD3: { GPSLatitudeRef: "N", GPSLatitude: "51/1 30/1 0/1" } }).jpeg().toBuffer();
+  check("the test photo really carries camera and location data", jpeg.includes(marker));
+  let r = await upload(a, jpeg);
+  const first = stored(a.id, "avatar_path");
+  check("a JPEG is uploaded", noticeOf(r.to) === "avatar_saved" && new RegExp(`^${a.id}/[0-9a-f-]{36}\\.webp$`).test(first), r.to);
+  const file = await publicFile(first);
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const meta = await sharp(bytes).metadata();
+  check("it's stored as a 512×512 WebP", file.ok && file.headers.get("content-type") === "image/webp" && meta.format === "webp" && meta.width === 512 && meta.height === 512, `${meta.format} ${meta.width}x${meta.height}`);
+  check("without the camera or location data", !meta.exif && !meta.xmp && !meta.iptc && !bytes.includes(marker));
+  page = await a.browser.get(r.to);
+  check("the page shows it, and offers to replace or remove it", page.html.includes(`/storage/v1/object/public/avatars/${first}`) && visible(page.html).includes("Your photo is updated.") && visible(page.html).includes("Remove photo"));
+  check("the settings page and account menu show it too", (await a.browser.get("/settings")).html.includes(first));
+
+  r = await upload(a, await image(400, 400, { r: 20, g: 120, b: 220 }).png().toBuffer(), { name: "photo.png", type: "image/png" });
+  const second = stored(a.id, "avatar_path");
+  check("a PNG replaces it, under a new name", noticeOf(r.to) === "avatar_saved" && second !== first && second.startsWith(`${a.id}/`));
+  check("the old file is removed from storage", !(await publicFile(first)).ok);
+  check("the folder holds only the current photo", same(await folder(a.id), [second]));
+  r = await upload(a, await image(64, 64).webp().toBuffer(), { name: "photo.webp", type: "image/webp" });
+  const third = stored(a.id, "avatar_path");
+  check("a WebP is accepted too", noticeOf(r.to) === "avatar_saved" && third !== second && same(await folder(a.id), [third]));
+
+  section("Photo: what's refused");
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script></svg>');
+  const refused = [
+    ["a text file claiming to be a PNG", Buffer.from("just text, not an image ".repeat(20)), "notes.png", "image/png", "avatar_type"],
+    ["an SVG", svg, "photo.svg", "image/svg+xml", "avatar_type"],
+    ["an SVG renamed and labelled as a JPEG", svg, "photo.jpg", "image/jpeg", "avatar_type"],
+    ["a GIF", await image().gif().toBuffer(), "photo.gif", "image/gif", "avatar_type"],
+    ["an HTML page labelled as a WebP", Buffer.from("<!doctype html><script>alert(1)</script>"), "x.webp", "image/webp", "avatar_type"],
+    ["a JPEG cut off part way", (await image(800, 800).jpeg().toBuffer()).subarray(0, 600), "cut.jpg", "image/jpeg", "avatar_invalid"],
+    ["JPEG markers followed by noise", Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(5000)]), "noise.jpg", "image/jpeg", "avatar_invalid"],
+    ["a 16-pixel image", await image(16, 16).png().toBuffer(), "tiny.png", "image/png", "avatar_dimensions"],
+    ["a 5000×40 image", await image(5000, 40).png().toBuffer(), "wide.png", "image/png", "avatar_dimensions"],
+    ["a file just over 2 MB", Buffer.concat([await image().jpeg().toBuffer(), Buffer.alloc(2 * 1024 * 1024)]), "big.jpg", "image/jpeg", "avatar_too_large"],
+    ["an empty file", Buffer.alloc(0), "empty.jpg", "image/jpeg", "avatar_missing"],
+  ];
+  for (const [label, body, name, type, code] of refused) {
+    r = await upload(a, body, { name, type });
+    check(`${label} is refused, saying why`, errorOf(r.to) === code && stored(a.id, "avatar_path") === third, r.to);
+  }
+  check("after all that, the current photo is untouched and alone", (await publicFile(third)).ok && same(await folder(a.id), [third]));
+  page = await a.browser.get(`${PROFILE}?error=avatar_type`);
+  check("the error is shown and the file field marked", visible(page.html).includes("Use a JPEG, PNG or WebP image") && /<input[^>]*type="file"[^>]*aria-invalid="true"/.test(page.html));
+  r = await upload(a, await image(100, 100).png().toBuffer(), { name: "photo.jpg", type: "image/jpeg" });
+  const fourth = stored(a.id, "avatar_path");
+  check("a real PNG with a .jpg name and JPEG type is judged by its bytes, and accepted", noticeOf(r.to) === "avatar_saved" && fourth !== third);
+
+  const huge = Buffer.concat([await image().jpeg().toBuffer(), randomBytes(3 * 1024 * 1024)]);
+  r = await upload(a, huge);
+  check("a request over the action's body limit is refused before the action runs", !r.to.includes("notice=") && !r.to.includes("error=") && r.response.status >= 400 && stored(a.id, "avatar_path") === fourth, `status ${r.response.status} ${r.to}`);
+  check("and leaves nothing in storage", same(await folder(a.id), [fourth]));
+
+  section("Photo: failures part way, and retrying");
+  try {
+    psql(`create function public.__pf_boom() returns trigger language plpgsql set search_path = '' as $$ begin raise exception 'secret internal detail'; end $$;
+          create trigger __pf_boom before update of avatar_path on public.profiles for each row execute function public.__pf_boom();`);
+    r = await upload(a, await image(200, 200).jpeg().toBuffer());
+    check("a failed activation says the photo wasn't saved, and nothing more", errorOf(r.to) === "avatar_failed" && !visible((await a.browser.get(r.to)).html).includes("secret internal detail"), r.to);
+    check("the new file is removed, and the current photo still works", same(await folder(a.id), [fourth]) && (await publicFile(fourth)).ok);
+  } finally {
+    psql("drop trigger if exists __pf_boom on public.profiles; drop function if exists public.__pf_boom();");
+  }
+  r = await upload(a, await image(200, 200).jpeg().toBuffer());
+  const fifth = stored(a.id, "avatar_path");
+  check("trying again then works", noticeOf(r.to) === "avatar_saved" && fifth !== fourth && same(await folder(a.id), [fifth]));
+
+  // Leftovers from an earlier failure (an old file not removed, or a crash before
+  // activation): one older than ten minutes goes with the next change, a recent one stays.
+  const oldLeftover = `${a.id}/${randomUUID()}.webp`;
+  const newLeftover = `${a.id}/${randomUUID()}.webp`;
+  for (const path of [oldLeftover, newLeftover]) {
+    await fetch(`${api}/storage/v1/object/avatars/${path}`, { method: "POST", headers: { ...service, "Content-Type": "image/webp" }, body: await image(64, 64).webp().toBuffer() });
+  }
+  psql(`update storage.objects set created_at = now() - interval '1 hour' where bucket_id = 'avatars' and name = ${sql(oldLeftover)};`);
+  r = await upload(a, await image(120, 120).png().toBuffer(), { name: "p.png", type: "image/png" });
+  const sixth = stored(a.id, "avatar_path");
+  const after = await folder(a.id);
+  check("the next change removes an old leftover file", noticeOf(r.to) === "avatar_saved" && !after.includes(oldLeftover) && !(await publicFile(oldLeftover)).ok);
+  check("but not a recent one, which a change in progress may be about to use", after.includes(newLeftover) && after.includes(sixth) && after.length === 2, String(after.length));
+  await fetch(`${api}/storage/v1/object/avatars`, { method: "DELETE", headers: { ...service, "Content-Type": "application/json" }, body: JSON.stringify({ prefixes: [newLeftover] }) });
+
+  section("Photo: only your own");
+  await upload(b, await image(90, 90).png().toBuffer(), { name: "b.png", type: "image/png" });
+  const bPhoto = stored(b.id, "avatar_path");
+  r = await upload(a, await image(91, 91).png().toBuffer(), { name: "a.png", type: "image/png", extra: { user_id: b.id, p_user_id: b.id, id: b.id, path: bPhoto } });
+  const seventh = stored(a.id, "avatar_path");
+  check("an upload naming someone else lands in your own folder", noticeOf(r.to) === "avatar_saved" && seventh.startsWith(`${a.id}/`) && seventh !== sixth);
+  check("and leaves theirs alone", stored(b.id, "avatar_path") === bPhoto && (await publicFile(bPhoto)).ok && same(await folder(b.id), [bPhoto]));
+  r = await upload(a, await image().jpeg().toBuffer(), { headers: { origin: "https://evil.example" } });
+  check("an upload posted from another site is refused", !isRedirect(r.response) && stored(a.id, "avatar_path") === seventh, `status ${r.response.status}`);
+  const visitor = new Browser();
+  const pageForm = formWith((await a.browser.get(PROFILE)).html, "avatar");
+  const outsider = await visitor.submit(PROFILE, pageForm, { avatar: new File([await image().jpeg().toBuffer()], "x.jpg", { type: "image/jpeg" }) });
+  check("an upload without a session is sent to sign in, and changes nothing", location(outsider.response).includes("/sign-in") && stored(a.id, "avatar_path") === seventh);
+  const direct = await fetch(`${api}/storage/v1/object/avatars/${a.id}/${randomUUID()}.webp`, { method: "POST", headers: { apikey: publishable, Authorization: `Bearer ${await tokenOf(a)}`, "Content-Type": "image/webp" }, body: await image(64, 64).webp().toBuffer() });
+  check("the browser's own session still can't write to the bucket directly", !direct.ok && (await folder(a.id)).length === 1, `status ${direct.status}`);
+
+  section("Photo: a session that has ended");
+  const c = await person();
+  await upload(c, await image(100, 100).png().toBuffer(), { name: "c.png", type: "image/png" });
+  const cPhoto = stored(c.id, "avatar_path");
+  const cForm = formWith((await c.browser.get(PROFILE)).html, "avatar");
+  const cProfileForm = formWith((await c.browser.get(PROFILE)).html, "display_name");
+  const elsewhere = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: { apikey: publishable, "Content-Type": "application/json" }, body: JSON.stringify({ email: c.email, password: c.password }) }).then((x) => x.json());
+  await fetch(`${api}/auth/v1/logout?scope=global`, { method: "POST", headers: { apikey: publishable, Authorization: `Bearer ${elsewhere.access_token}` } });
+  const stale = await c.browser.submit(PROFILE, cForm, { avatar: new File([await image(110, 110).png().toBuffer()], "c2.png", { type: "image/png" }) });
+  check("after signing out everywhere, an old device's unexpired token can't change the photo", stored(c.id, "avatar_path") === cPhoto && !location(stale.response).includes("notice="), location(stale.response));
+  await c.browser.submit(PROFILE, cProfileForm, { display_name: "After sign-out", bio: "" });
+  console.log(`  observed: a name-and-bio save with that token ${stored(c.id, "display_name") === "After sign-out" ? "was accepted (PostgREST trusts an unexpired access token, as M11a-2 documented)" : "was refused"}`);
+
+  section("Photo: an account that isn't active");
+  const bForm = formWith((await b.browser.get(PROFILE)).html, "avatar");
+  psql(`update public.profiles set account_status = 'suspended' where id = ${sql(b.id)};`);
+  r = await b.browser.submit(PROFILE, bForm, { avatar: new File([await image().jpeg().toBuffer()], "x.jpg", { type: "image/jpeg" }) });
+  check("a suspended account can't upload", errorOf(location(r.response)) === "avatar_not_eligible" && stored(b.id, "avatar_path") === bPhoto, location(r.response));
+  page = await b.browser.get(PROFILE);
+  check("and its photo controls are disabled", /<input[^>]*type="file"[^>]*disabled/.test(page.html));
+  psql(`update public.profiles set account_status = 'active' where id = ${sql(b.id)};`);
+
+  section("Photo: removal");
+  r = await removePhoto(a);
+  check("removing the photo clears it", noticeOf(r.to) === "avatar_removed" && stored(a.id, "avatar_path") === "<null>", r.to);
+  check("and removes its file from storage", !(await publicFile(seventh)).ok && (await folder(a.id)).length === 0);
+  page = await a.browser.get(r.to);
+  check("the page says so, shows the initial, and offers no removal", visible(page.html).includes("Your photo is removed") && visible(page.html).includes("No photo yet") && !visible(page.html).includes("Remove photo"));
+  r = await removePhoto(b, { origin: "https://evil.example" });
+  check("a removal posted from another site is refused", !isRedirect(r.response) && stored(b.id, "avatar_path") === bPhoto);
+  const card = await fetch(`${api}/rest/v1/profiles?id=eq.${b.id}&select=avatar_path`, { headers: anon }).then((x) => x.json());
+  check("a photo is public, as the page says: signed-out visitors see its path and file", card[0]?.avatar_path === bPhoto && (await publicFile(bPhoto)).ok);
 }
 
 /** The access token in a browser's session cookie. Never printed. */
@@ -224,7 +417,7 @@ async function tokenOf(user) {
 }
 
 // Expected: the cross-site post.
-const expected = /Invalid Server Actions request/;
+const expected = /Invalid Server Actions request|Body exceeded|Invalid Refresh Token|__isAuthError: true|session_not_found/;
 check("the app logged the cross-site refusal", expected.test(appLog()));
 const errorLines = appErrorLines(expected);
 check("the app logged no other errors", errorLines.length === 0, `${errorLines.length} lines`);

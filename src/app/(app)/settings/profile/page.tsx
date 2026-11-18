@@ -7,11 +7,13 @@ import { PageMessage, param } from "@/components/admin/admin-frame";
 import { HandleForm } from "@/components/auth/handle-form";
 import { AccountPageSkeleton } from "@/components/auth/require-account";
 import { PageLayout } from "@/components/layout/page-layout";
+import { AvatarSection } from "@/components/profile/avatar-section";
 import { ProfileForm } from "@/components/profile/profile-form";
 import { SettingsCard } from "@/components/profile/settings-card";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import { requireViewerWithHandle } from "@/features/account/queries";
 import { nextHandleChange } from "@/features/auth/account";
+import { avatarError, avatarNotice } from "@/features/avatars/form";
 import { collectionVisibilityText, profileError, profileNotice } from "@/features/profile/form";
 import { getMyProfile } from "@/features/profile/queries";
 
@@ -29,8 +31,8 @@ async function ProfileView({ searchParams }: { searchParams: PageProps<"/setting
   if (!profile || !viewer.handle) throw new Error("The profile couldn't be loaded.");
   const active = viewer.accountStatus === "active";
   const errorCode = param(search.error);
-  const error = profileError(errorCode);
-  const notice = profileNotice(param(search.notice));
+  const error = profileError(errorCode) ?? avatarError(errorCode);
+  const notice = profileNotice(param(search.notice)) ?? avatarNotice(param(search.notice));
   const waitUntil = nextHandleChange(viewer);
   const shownName = profile.displayName ?? viewer.handle;
 
@@ -65,6 +67,10 @@ async function ProfileView({ searchParams }: { searchParams: PageProps<"/setting
           </div>
         </div>
       </section>
+
+      <SettingsCard id="photo-heading" title="Photo">
+        <AvatarSection avatarUrl={profile.avatarUrl} displayName={shownName} disabled={!active} serverErrorCode={avatarError(errorCode) ? errorCode : null} />
+      </SettingsCard>
 
       <SettingsCard id="details-heading" title="Name and bio">
         <ProfileForm displayName={profile.displayName} bio={profile.bio} handle={viewer.handle} serverErrorCode={profileError(errorCode) ? errorCode : null} disabled={!active} />

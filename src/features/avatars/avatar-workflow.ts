@@ -1,8 +1,9 @@
 /**
  * Server-only avatar workflow. Import it through ./server, which enforces that.
  *
- * Clients have no write access to the avatars bucket. A future route handler
- * passes the user's access token and the uploaded bytes here. This file verifies
+ * Clients have no write access to the avatars bucket. The Settings → Profile Server
+ * Actions (src/features/avatars/actions.ts, M11a-3) pass the user's access token and the
+ * uploaded bytes here. This file verifies
  * the session on every mutation, validates and re-encodes the image, and writes
  * with the secret key, which never leaves the server.
  *
@@ -173,15 +174,46 @@ async function setAvatarPath(config: AvatarConfig, userId: string, path: string 
   return (await response.json()) as string | null;
 }
 
+/** How old a file other than the current avatar must be before it counts as left over (M11a-3). */
+export const LEFTOVER_AGE_MS = 10 * 60 * 1000;
+
 /**
- * Validates, stores and activates a new avatar, then removes the old file. A failed
- * activation removes the new file, so the current avatar keeps working.
+ * M11a-3: removes files left in the user's own folder by an earlier change that failed
+ * part way (an old file that couldn't be removed, or a crash between upload and
+ * activation), so a retry or the next change cleans up. Never the current avatar, and
+ * never a file under ten minutes old, which another change in progress may be about to
+ * activate. Only after the session was verified, only in that user's folder. Best
+ * effort: false if anything failed, and nothing is thrown.
+ */
+async function removeLeftovers(config: AvatarConfig, userId: string, current: string | null): Promise<boolean> {
+  try {
+    const listResponse = await fetch(`${config.supabaseUrl}/storage/v1/object/list/${BUCKET}`, {
+      method: "POST",
+      headers: { ...serviceHeaders(config), "Content-Type": "application/json" },
+      body: JSON.stringify({ prefix: `${userId}/`, limit: 100 }),
+    });
+    if (!listResponse.ok) return false;
+    const objects = (await listResponse.json()) as { name?: string; created_at?: string | null }[];
+    const now = Date.now();
+    const leftovers = objects
+      .filter((object) => typeof object.name === "string" && object.created_at && now - Date.parse(object.created_at) > LEFTOVER_AGE_MS)
+      .map((object) => `${userId}/${object.name}`)
+      .filter((path) => path !== current);
+    return await removeObjects(config, leftovers);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates, stores and activates a new avatar, then removes the old file and any
+ * leftovers. A failed activation removes the new file, so the current avatar keeps working.
  */
 export async function replaceAvatar(
   config: AvatarConfig,
   accessToken: string,
   input: Uint8Array,
-): Promise<{ path: string; previousRemoved: boolean }> {
+): Promise<{ path: string; previousRemoved: boolean; leftoversRemoved: boolean }> {
   const userId = await verifyActiveUser(config, accessToken);
   const image = await processAvatarImage(input);
   const path = `${userId}/${randomUUID()}.webp`;
@@ -197,16 +229,17 @@ export async function replaceAvatar(
   }
 
   const previousRemoved = previous ? await removeObjects(config, [previous]) : true;
-  return { path, previousRemoved };
+  return { path, previousRemoved, leftoversRemoved: await removeLeftovers(config, userId, path) };
 }
 
 export async function removeAvatar(
   config: AvatarConfig,
   accessToken: string,
-): Promise<{ previousRemoved: boolean }> {
+): Promise<{ previousRemoved: boolean; leftoversRemoved: boolean }> {
   const userId = await verifyActiveUser(config, accessToken);
   const previous = await setAvatarPath(config, userId, null);
-  return { previousRemoved: previous ? await removeObjects(config, [previous]) : true };
+  const removed = previous ? await removeObjects(config, [previous]) : true;
+  return { previousRemoved: removed, leftoversRemoved: await removeLeftovers(config, userId, null) };
 }
 
 /**

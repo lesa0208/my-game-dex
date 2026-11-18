@@ -3,8 +3,10 @@ import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * The only use of the Supabase secret key in the app (M11a-1, ADR-063 as amended in
- * M11a-2): the invitation steps that depend on what Auth holds, each taken only after a
+ * The only use of the Supabase secret key for Auth in the app (M11a-1, ADR-063 as amended
+ * in M11a-2). The only other use is the M2 avatar workflow (src/features/avatars, called
+ * from Settings → Profile since M11a-3, ADR-065), for the avatars bucket and
+ * set_avatar_path only, never Auth. Here: the invitation steps that depend on what Auth holds, each taken only after a
  * database function has authorized the administrator in their own session (role, recent
  * MFA, limits) for that invitation. Nothing else: no deletion, no unbanning, no generated
  * links, no password operations and no other data.

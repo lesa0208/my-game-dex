@@ -1154,6 +1154,18 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 
 **Consequences.** No database change. Auth's behaviour is pinned by `db-password-checks`, to be rerun on staging. Residual risks (timing, tokens until expiry, Auth accepting a password change from any day-old session without the current password) are listed under [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
 
+### ADR-065: The profile editor reuses the M2 rules, and the M2 avatar workflow unchanged in its checks
+
+**Status:** accepted (M11a-3). **Context:** members need to edit their public card (display name, bio, photo) and see their handle and collection privacy, without a second set of validation rules that could drift from the database's, and without a new privileged path to Storage.
+
+**Decision.**
+- **Name and bio as the person.** An update of the person's own row with the publishable key; the M2 column grants, `profiles_update_own`, `CHECK`s and trigger decide. The page mirrors the rules (tested against the migration) and maps the database's own refusals to fixed messages. No new field, no handle policy change.
+- **The photo through the M2 workflow.** Server Actions (not a route handler) call `replaceAvatar` and `removeAvatar`, so Next.js's same-origin check and body limit apply before the action runs. The limit is raised from 1 MB to 2 MB plus 64 KB for every action, the smallest that fits a 2 MB image. The secret key stays server-only and is used only as M2 designed: the avatars bucket and `set_avatar_path`, in the verified user's own folder. No storage policy changes; the browser has no write path.
+- **One addition to the workflow:** removing a user's own leftover files older than ten minutes after each change, so a partly failed change is cleaned up by the next one. Same key, same folder, same operations (list, remove) as M2's deletion.
+- **The public card is shown as it's saved,** with what's public said plainly; collection sharing waits for M11c (`/u/[handle]` too). `/profile` sends a signed-in person to `/settings/profile`.
+
+**Consequences.** No migration. The ended-session gap from M11a-2 now also covers name and bio saves (not the photo). Per-user upload rate limits and a global orphan sweep remain. Deferred security decisions are listed in [security-rls.md](security-rls.md#security-decisions-deferred-m11a-3).
+
 ## Risks to watch
 
 | Risk | Mitigation |

@@ -105,3 +105,42 @@ test("an avatar URL is only made for a path in the owner's folder", () => {
   assert.equal(avatarPublicUrl(null, owner, base), null);
   assert.equal(avatarPublicUrl(`${owner}/${file}.webp`, owner, undefined), null);
 });
+
+test("the avatar form's limits are the workflow's and the action body limit fits them", async () => {
+  const workflow = await import("../avatars/avatar-workflow.ts");
+  const form = await import("../avatars/form.ts");
+  assert.equal(form.AVATAR_MAX_BYTES, workflow.MAX_UPLOAD_BYTES);
+  assert.equal(form.AVATAR_MIN_DIMENSION, workflow.MIN_DIMENSION);
+  assert.equal(form.AVATAR_MAX_DIMENSION, workflow.MAX_DIMENSION);
+  assert.equal(form.AVATAR_OUTPUT_SIZE, workflow.OUTPUT_SIZE);
+  const config = readFileSync(join(import.meta.dirname, "..", "..", "..", "next.config.ts"), "utf8");
+  assert.match(config, /bodySizeLimit: 2 \* 1024 \* 1024 \+ 64 \* 1024,/);
+  assert.equal(form.ACTION_BODY_LIMIT_BYTES, 2 * 1024 * 1024 + 64 * 1024);
+  // Every workflow error has its own message, and unknown ones are a generic failure.
+  for (const code of ["file_too_large", "unsupported_type", "invalid_image", "dimensions_out_of_range", "not_eligible"]) {
+    assert.notEqual(form.avatarErrorCode(code), "avatar_failed", code);
+    assert.ok(form.avatarError(form.avatarErrorCode(code)), code);
+  }
+  assert.equal(form.avatarErrorCode("storage_failed"), "avatar_failed");
+  assert.equal(form.avatarErrorCode("toString"), "avatar_failed");
+  assert.equal(form.avatarErrorCode(undefined), "avatar_failed");
+  assert.ok(form.avatarError(form.avatarErrorCode("unsupported_type")).includes("JPEG, PNG or WebP"));
+  assert.equal(form.avatarError("__proto__"), null);
+  assert.equal(form.avatarNotice("avatar_saved"), "Your photo is updated.");
+});
+
+test("profile edits never use the secret key; photos use it only through the workflow, never for Auth", () => {
+  const src = join(import.meta.dirname, "..", "..");
+  const read = (...parts) => readFileSync(join(src, ...parts), "utf8");
+  for (const file of ["actions.ts", "form.ts", "queries.ts"]) {
+    assert.doesNotMatch(read("features", "profile", file), /SECRET_KEY|secretKey|service_role|auth\.admin/, file);
+  }
+  const actions = read("features", "avatars", "actions.ts");
+  assert.doesNotMatch(actions, /SECRET_KEY|auth\.admin|auth\/v1\/admin|deleteAccountWithAvatars/);
+  assert.match(actions, /^"use server";/);
+  assert.match(read("features", "avatars", "server.ts"), /^import "server-only";/);
+  // The workflow's only Auth Admin call is the (unrouted) account deletion.
+  const workflow = read("features", "avatars", "avatar-workflow.ts");
+  assert.equal(workflow.match(/auth\/v1\/admin/g)?.length, 1);
+  assert.match(workflow, /export async function deleteAccountWithAvatars[\s\S]*auth\/v1\/admin\/users/);
+});

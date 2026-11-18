@@ -1,10 +1,11 @@
 /**
- * M11a-2: proves the app checks detect real violations of the password and session rules,
- * which live in the app's code rather than the database (db-mutation-checks.mjs covers the
- * database). For each violation: change one source file, build, run app:password-checks
- * (which must fail), restore the file, and check it's byte-for-byte the original.
+ * M11a-2 and M11a-3: proves the app checks detect real violations of the password and
+ * session rules (set m11a2) and of the avatar and profile rules (set m11a3), which live in
+ * the app's code rather than the database (db-mutation-checks.mjs covers the database).
+ * For each violation: change one source file, build, run its suite (which must fail),
+ * restore the file, and check it's byte-for-byte the original.
  *
- *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--log file] [--only name,...]
+ *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3] [--log file] [--only name,...]
  *   node scripts/app-mutation-checks.mjs --recover
  *
  * Opens and closes with a clean baseline (a build and a passing suite). About four
@@ -34,9 +35,41 @@ function log(line) {
 const ACTIONS = "src/features/password/actions.ts";
 const FORM = "src/features/password/form.ts";
 const SERVER = "src/features/password/server.ts";
+const WORKFLOW = "src/features/avatars/avatar-workflow.ts";
+const PROFILE_PAGE = "src/app/(app)/settings/profile/page.tsx";
+
+/**
+ * M11a-3: the avatar workflow's new privileged step (removing leftovers with the secret
+ * key), the action body limit raised for uploads, and the profile's user-supplied text
+ * kept as text. Checked by app:profile-checks.
+ */
+// Not listed: dropping removeLeftovers' "never the current photo" filter. On every
+// reachable path the current photo was uploaded moments before, so the ten-minute rule
+// already keeps it, and the mutant survived (an equivalent mutant, 2026-11-18). The filter
+// stays as a guard against the app's clock running ahead of Storage's.
+const m11a3 = [
+  {
+    name: "leftover cleanup ignores a file's age",
+    file: WORKFLOW,
+    from: ` && now - Date.parse(object.created_at) > LEFTOVER_AGE_MS)`,
+    to: ` && now - Date.parse(object.created_at) > -LEFTOVER_AGE_MS)`,
+  },
+  {
+    name: "the action body limit is raised without bound",
+    file: "next.config.ts",
+    from: `      bodySizeLimit: 2 * 1024 * 1024 + 64 * 1024,`,
+    to: `      bodySizeLimit: 20 * 1024 * 1024,`,
+  },
+  {
+    name: "the bio is rendered as markup",
+    file: PROFILE_PAGE,
+    from: `<p className="mt-2 text-sm break-words whitespace-pre-line">{profile.bio}</p>`,
+    to: `<p className="mt-2 text-sm break-words whitespace-pre-line" dangerouslySetInnerHTML={{ __html: profile.bio }} />`,
+  },
+].map((m) => ({ ...m, set: "m11a3", suite: "app-profile-checks.mjs" }));
 
 /** Each: a violation of a rule M11a-2 relies on, as the smallest plausible code change. */
-export const mutations = [
+const m11a2 = [
   {
     name: "a reset needs no recovery session",
     file: ACTIONS,
@@ -97,7 +130,9 @@ export const mutations = [
     from: `    httpOnly: true,\n    sameSite: "lax",\n    secure: AUTH_COOKIE_OPTIONS.secure,\n    maxAge: RECOVERY_WINDOW_SECONDS,`,
     to: `    httpOnly: false,\n    sameSite: "lax",\n    secure: AUTH_COOKIE_OPTIONS.secure,\n    maxAge: RECOVERY_WINDOW_SECONDS,`,
   },
-];
+].map((m) => ({ ...m, set: "m11a2", suite: "app-password-checks.mjs" }));
+
+export const mutations = [...m11a2, ...m11a3];
 
 function run(command, args, label) {
   const started = Date.now();
@@ -106,7 +141,7 @@ function run(command, args, label) {
   return { ok: result.status === 0, status: result.status, seconds: Math.round((Date.now() - started) / 1000), output, label };
 }
 const build = () => run(process.execPath, [join(root, "node_modules", "next", "dist", "bin", "next"), "build"], "build");
-const suite = () => run(process.execPath, [join(root, "scripts", "app-password-checks.mjs")], "app:password-checks");
+const suite = (script) => run(process.execPath, [join(root, "scripts", script)], script);
 const failures = (output) => output.split("\n").filter((line) => line.startsWith("FAIL")).slice(0, 4).map((line) => line.slice(0, 140));
 
 function recover() {
@@ -137,12 +172,14 @@ function apply(mutation) {
   };
 }
 
-function baseline(label) {
+function baseline(label, scripts) {
   const b = build();
   if (!b.ok) throw new Error(`${label} baseline: the build failed.`);
-  const s = suite();
-  if (!s.ok) throw new Error(`${label} baseline: app:password-checks failed: ${failures(s.output).join("; ")}`);
-  log(`${label} baseline clean (build ${b.seconds}s, suite ${s.seconds}s: ${/(\d+) passed/.exec(s.output)?.[1]} passed)`);
+  for (const script of scripts) {
+    const s = suite(script);
+    if (!s.ok) throw new Error(`${label} baseline: ${script} failed: ${failures(s.output).join("; ")}`);
+    log(`${label} baseline clean (build ${b.seconds}s, ${script} ${s.seconds}s: ${/(\d+) passed/.exec(s.output)?.[1]} passed)`);
+  }
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
@@ -153,11 +190,16 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
   if (process.env.MGD_STACK !== "test") throw new Error("Run against the test stack: MGD_STACK=test.");
   if (existsSync(journal)) throw new Error("A journal from an interrupted run exists. Run --recover first.");
   const only = argument("--only")?.split(",");
-  const selected = only ? mutations.filter((m) => only.includes(m.name)) : mutations;
+  // --set m11a2 or m11a3 (M11a-3): one milestone's mutations, so earlier campaigns aren't rerun.
+  const set = argument("--set");
+  const inSet = set ? mutations.filter((m) => m.set === set) : mutations;
+  if (set && inSet.length === 0) throw new Error(`No mutations in set "${set}".`);
+  const selected = only ? inSet.filter((m) => only.includes(m.name)) : inSet;
+  const scripts = [...new Set(selected.map((m) => m.suite))];
   const fingerprints = Object.fromEntries([...new Set(mutations.map((m) => m.file))].map((file) => [file, sha(readFileSync(join(root, file), "utf8"))]));
   const results = [];
   const started = Date.now();
-  baseline("Opening");
+  baseline("Opening", scripts);
   for (const [index, mutation] of selected.entries()) {
     log(`start [${index + 1}/${selected.length}] ${mutation.name}`);
     const restore = apply(mutation);
@@ -166,8 +208,8 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
       const b = build();
       if (!b.ok) outcome = { result: "not built", detail: "the mutation didn't compile" };
       else {
-        const s = suite();
-        outcome = s.ok ? { result: "SURVIVED", detail: "app:password-checks passed" } : { result: "detected", detail: failures(s.output).join("; ") };
+        const s = suite(mutation.suite);
+        outcome = s.ok ? { result: "SURVIVED", detail: `${mutation.suite} passed` } : { result: "detected", detail: failures(s.output).join("; ") };
       }
     } finally {
       restore();
@@ -176,7 +218,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     log(`${outcome.result === "detected" ? "ok  " : "FAIL"} [${index + 1}/${selected.length}] ${mutation.name}: ${outcome.detail}`);
   }
   for (const [file, fingerprint] of Object.entries(fingerprints)) if (sha(readFileSync(join(root, file), "utf8")) !== fingerprint) throw new Error(`${file} differs from before the run.`);
-  baseline("Closing");
+  baseline("Closing", scripts);
   const detected = results.filter((r) => r.result === "detected").length;
   log(`\n${detected} of ${selected.length} violations detected, in ${((Date.now() - started) / 60000).toFixed(1)} min${only ? " (a partial run)" : ""}.`);
   process.exit(detected === selected.length && !only ? 0 : 1);
