@@ -1831,12 +1831,24 @@ The checks cover:
 - `db-session-checks` (64): real Auth, as above.
 - Updated to the new behaviour, where they had documented the old gap: `db-password-checks`, `app:password-checks` and `app:profile-checks`.
 - The pages no longer say that a device "can keep working for up to an hour".
-- 8 database mutations (`db-session-mutations.mjs`).
+- 9 database mutations (`db-session-mutations.mjs`; the ninth added in M11a-5).
 
 **Remaining.**
 - Other entry points don't go through these checks. Only PostgREST serves client requests today. Storage has no client write path for avatars, and Realtime isn't used. A future client of Storage or Realtime needs its own check.
 - A token stolen from a session that's still live keeps working until that session is ended. Ending it is what "sign out on all devices" is for.
 - Auth's inactivity timeout, if configured, is applied by Auth at refresh. It isn't stored in `auth.sessions`, so the check doesn't see it.
+
+### M11a-5 integration review
+
+An independent read of the whole M11a branch found three cross-feature defects, all fixed in M11a-5 and covered by new checks:
+
+1. **`get_my_admin_access()` still answered an ended session** with the account's staff roles, whether it is the Owner, a pending ownership transfer and an Owner recovery naming it. Its `is_active_user()` and `mfa_session_ok()` calls only set flags, so the coverage rule in `43_session_revocation`, which matches source text, let it through. Migration `20261129100000_m11a5_admin_access_session` makes it refuse an ended session; nothing it returned could be acted on. The pgTAP file now also checks this function's behaviour, since a source match can't tell a guard that gates the result from one that only sets a flag. One more database mutation (9 in all).
+2. **A signed-out POST to a protected path was redirected by the proxy** with a 307 and `next` set to the POST's own address. For the data export that meant a 405 after signing in again. The proxy now redirects page loads (GET, HEAD) only; Server Actions and the export route check the session themselves and send a signed-out request to sign in with a page it can return to (`/sign-in?next=%2Fsettings%2Faccount`, a 303).
+3. **Accepting an invitation while someone else was signed in on the device** replaced their session without ending it, which left it live in Auth. It now signs them out of this device first, and the page says so beforehand, as a reset link already did (ADR-064).
+
+**The two local stacks share their keys (local only).** The Supabase CLI gives every local project the same default signing keys and the same publishable and secret keys, so the test stack and the development stack accept each other's tokens at the signature check. Tested: a test-stack user's token reaches the development database (200) but reads nothing there (no account, copies, purchase details or preferences) and takes no request slot, because its session and its user don't exist on the development stack; development Auth refuses it (403). The suites never mix them: every script reads its own stack's address and keys, and the destructive ones refuse the protected development stack. Separate signing keys for the test stack would close even the signature-level overlap, and is worth doing if the stacks ever hold anything less disposable than a demo. Hosted projects have their own keys.
+
+**Local fixture repair (development data, not the app).** The catalog fixture made its two staff accounts in SQL without six fields that GoTrue v2.197 reads (`confirmation_token`, `recovery_token`, `email_change_token_new`, `email_change`, `created_at`, `updated_at`), so Auth's user listing failed for everyone (500). Each fixture factor's `secret` was also `NULL`, which fails reading that one account. The fixture now writes them as GoTrue does, and `installFixture()` refuses a malformed fixture account. `scripts/fixtures/repair-fixture-auth-tokens.sql` repairs the six fields on an existing local database, guarded by exact preconditions and postconditions. It was verified on an isolated restored copy with a throwaway GoTrue (listing then works for all accounts), and is applied to the development demo only with the product owner's approval.
 
 ## Production launch prerequisites (M8)
 
@@ -1844,6 +1856,7 @@ The checks cover:
 
 | Prerequisite | Why |
 | --- | --- |
+| **Self-service account deletion (M11a-4b), required before the beta:** decide the D10 rows marked as blocking in [account-deletion-d10.md § 7](account-deletion-d10.md#7-decision-proposal-for-the-product-owner) (audit retention, submission notes, the staff and Owner rules), get legal review where marked, write the Terms and Privacy Notice (including cache and backup windows), then build and test it | Not implemented. People admitted to the beta must be able to leave |
 | **Invite-only registration (M11a-1):** hosted `[auth] enable_signup = false` with the email provider **left on** (turning it off also blocks password sign-in and recovery, M11a-0); the invitation template (`supabase/templates/invite.html`) set in hosted Auth; `SUPABASE_SECRET_KEY` set server-only on the host; Auth audit logs still written to the database (the password step needs them); then rerun `db-invitation-checks` in configuration B and `app:invitation-checks` against staging | Tested locally only. Real invitations wait for hosting, SMTP and these checks |
 | **Password recovery (M11a-2):** the recovery template (`supabase/templates/recovery.html`) set in hosted Auth; the site URL and redirect allow-list naming only the app's origin; `secure_password_change` on; `otp_expiry` an hour; SMTP whose sending time doesn't stand out (or a longer floor); consider Auth's "password changed" notification email; then rerun `db-password-checks` (in configuration B) and `app:password-checks` against staging | Tested locally only. Without the template, Auth's default email links to a GET that spends the token |
 | **Profile and photo (M11a-3):** `SUPABASE_SECRET_KEY` server-only on the host (the avatar workflow uses it for the avatars bucket and `set_avatar_path` only); the `avatars` bucket created by the migration as public, WebP only, 2 MB; the Server Action body limit kept at 2 MB plus 64 KB, and any proxy or CDN in front allowing that much for `/settings/profile` only; then rerun `app:profile-checks` and `app:export-checks` against staging | Tested locally only. Uploads decode images server-side |

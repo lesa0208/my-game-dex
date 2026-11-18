@@ -1,6 +1,6 @@
 # D10: account deletion and retention — decision document (M11a-4a)
 
-**Status: proposed, for decision. Nothing here is implemented.** M11a-4a adds no deletion, anonymization or retention cleanup. Every period below is a proposal; none is adopted until the product owner approves it, and the items marked **Legal** also need legal review. The inventory comes from the migrations as of `20261127100000` and is cited by file.
+**Status: proposed, for decision. Nothing here is implemented. Self-service deletion (M11a-4b) is a required pre-beta task, blocked on these decisions and the legal review they name.** M11a-4a adds no deletion, anonymization or retention cleanup. Every period below is a proposal; none is adopted until the product owner approves it, and the items marked **Legal** also need legal review. The inventory comes from the migrations as of `20261127100000` and is cited by file.
 
 Related: [security-rls.md § Account deletion](security-rls.md#account-deletion), [§ Retention of unverified accounts](security-rls.md#retention-of-unverified-accounts), [§ Legal and age blockers](security-rls.md#legal-and-age-blockers), [architecture-decisions.md D10 (retention), A2, M4-D4, M4-D10, D12](architecture-decisions.md).
 

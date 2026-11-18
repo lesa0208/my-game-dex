@@ -4,7 +4,7 @@
 -- scripts/db-session-checks.mjs. Runs in one transaction that rolls back, on a local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(40);
+select plan(42);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.sid(s text) returns uuid language sql immutable as $$ select ('5e550000-0000-4000-8000-0000000000' || s)::uuid $$;
@@ -88,6 +88,10 @@ select is(pg_temp.as_ended($$select public.get_my_factor_status()::text$$), 'err
 select is(pg_temp.as_ended($$select public.get_my_onboarding()::text$$), 'error: not permitted', 'nor its onboarding state');
 select is(pg_temp.as_ended($$select public.get_my_preserved_titles(array[gen_random_uuid()])::text$$), '{}', 'nor its preserved copies');
 select is(pg_temp.as_ended($$select (public.get_my_collection()) ->> 'items'$$), '[]', 'and its collection reads as empty');
+-- M11a-5: a function that only computes the guards as flags passes the source-text rule
+-- below while still returning data, so functions that do that are checked by behaviour.
+select is(pg_temp.as_ended($$select public.get_my_admin_access()::text$$), 'error: not permitted', 'an ended session reads none of its staff, Owner, transfer or recovery state (M11a-5)');
+select is(pg_temp.as_live($$select public.get_my_admin_access() -> 'roles' ->> 0$$), 'moderator', 'a live session still reads its roles');
 
 -- 5. Coverage: every owner-only policy, and every owner-scoped function a signed-in user
 -- can run, reaches a session check (directly or through a guard), or reads under RLS.

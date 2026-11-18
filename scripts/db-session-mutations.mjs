@@ -38,6 +38,8 @@ const mutations = [
   ["copies are deleted without a session", () => "alter policy collection_items_delete_own on public.collection_items using (owner_id = (select auth.uid()));"],
   ["a submission is read without a session", () => without("public.get_my_submission(uuid)", LIVE)],
   ["blocking doesn't check the session (require_verified_user)", () => without("private.require_verified_user()", " or not (select private.session_is_live())")],
+  // M11a-5: found by the integration review; the coverage rule's source match didn't catch it.
+  ["admin access reads without a session (get_my_admin_access)", () => without("public.get_my_admin_access()", " or not (select private.session_is_live())")],
 ];
 
 function run(args, label) {

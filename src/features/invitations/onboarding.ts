@@ -30,6 +30,10 @@ export async function acceptInvitation(formData: FormData): Promise<void> {
   if (field(formData, "type") !== "invite" || !/^[A-Za-z0-9_-]{10,200}$/.test(tokenHash)) redirect("/auth/confirm?status=invalid");
   const supabase = await createSupabaseServerClient();
   if (!supabase) redirect("/auth/confirm?status=unavailable");
+  // M11a-5: whoever is signed in on this device is signed out first (the page says so), as
+  // a reset link does, so their session isn't silently replaced and left live in Auth.
+  const { data: before } = await supabase.auth.getClaims();
+  if (before?.claims?.sub) await supabase.auth.signOut({ scope: "local" });
   const { error } = await supabase.auth.verifyOtp({ type: "invite", token_hash: tokenHash });
   if (error) redirect("/auth/confirm?status=invalid");
   refresh();

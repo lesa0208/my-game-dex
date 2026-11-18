@@ -56,6 +56,7 @@ async function ConfirmContent({ search }: { search: Search }) {
       </EmptyState>
     );
   }
+  const viewer = await getCurrentViewer();
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start gap-3">
@@ -64,6 +65,11 @@ async function ConfirmContent({ search }: { search: Search }) {
           You&apos;ve been invited to the My Game Dex private beta. Accept to set a password and choose your handle. The link works once, for an hour after it was sent.
         </p>
       </div>
+      {viewer ? (
+        <p className="rounded-lg border px-3 py-2.5 text-sm">
+          You&apos;re signed in{viewer.handle ? ` as @${viewer.handle}` : ""}. Accepting signs you out of that account on this device first.
+        </p>
+      ) : null}
       <form action={acceptInvitation}>
         <input type="hidden" name="token_hash" value={tokenHash} />
         <input type="hidden" name="type" value="invite" />

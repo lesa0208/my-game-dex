@@ -188,7 +188,10 @@ commit;`);
   section("Who may download, and how");
   const visitor = new Browser();
   const out = await fetch(`${origin}${EXPORT}`, { method: "POST", redirect: "manual", headers: { origin } });
-  check("signed out: sent to sign in, no file", isRedirect(out.status ? out : out) && location(out).includes("/sign-in") && !(await out.text()).includes('"format"'));
+  check("signed out: sent to sign in, no file", isRedirect(out) && location(out).includes("/sign-in") && !(await out.text()).includes('"format"'));
+  // M11a-5: back to the account page after signing in, not to the POST-only export (which a
+  // GET can't open), and with a 303 so the form isn't re-sent to the sign-in page.
+  check("and back to the account page afterwards, with a 303", out.status === 303 && location(out) === "/sign-in?next=%2Fsettings%2Faccount", `${out.status} ${location(out)}`);
   void visitor;
   check("a GET isn't an export", (await fetch(`${origin}${EXPORT}`, { redirect: "manual", headers: { cookie: a.browser.cookieHeader() } })).status === 405);
   clearSlots(a, "data_export");

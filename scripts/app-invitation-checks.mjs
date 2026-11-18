@@ -114,6 +114,24 @@ try {
     check("no address appears on the page", !page.html.includes(`appinv-${tag}`));
   }
 
+  section("Accepting while someone else is signed in on this device (M11a-5)");
+  {
+    const email2 = address("shared");
+    const { sent: sent2 } = await createFromPage(admin, email2);
+    const link2 = await inviteLink(email2, sent2);
+    const handle = psql(`select handle from public.profiles where id = '${collector.id}';`);
+    const theirSession = sessionOf(collector);
+    const page = await collector.browser.get(link2);
+    check("the page says who is signed in, and that accepting signs them out first", visible(page.html).includes(`You're signed in as @${handle}. Accepting signs you out of that account on this device first.`));
+    const accepted2 = await collector.browser.submit(link2, formWith(page.html, "token_hash"));
+    check("accepting still goes to the password step, now as the invitee", location(accepted2.response) === "/welcome/password", location(accepted2.response));
+    check("the signed-in person's session was ended, not left live in Auth", psql(`select count(*) from auth.sessions where id = '${theirSession}';`) === "0");
+    check("and this browser now holds the invitee's session, not theirs", decodeClaims(readSession(collector.browser).session.access_token).sub !== collector.id);
+    // Sign the collector back in, in a fresh browser, for the checks after this one.
+    collector.browser = new Browser();
+    await signInAs(collector.browser, collector, "/home");
+  }
+
   section("Links that can't be used");
   for (const [label, path] of [["a malformed token", "/auth/confirm?token_hash=x&type=invite"], ["another link type", "/auth/confirm?token_hash=abcdefghijklmnop&type=magiclink"], ["no token", "/auth/confirm"]]) {
     check(`${label} gets the generic page`, visible((await new Browser().get(path)).html).includes("This link can't be used"));
