@@ -36,7 +36,15 @@ const psql = (sql) =>
 
 export function installFixture() {
   assertLocal();
-  return psql(readFileSync(join(root, "scripts", "fixtures", "catalog-search-fixture.sql"), "utf8"));
+  const out = psql(readFileSync(join(root, "scripts", "fixtures", "catalog-search-fixture.sql"), "utf8"));
+  // M11a-5: an Auth row made in SQL without the fields GoTrue reads breaks Auth's user
+  // listing for every account (and reading the account). Refuse to carry on with one.
+  const malformed = psql(`select count(*) from auth.users u where u.id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}')
+    and (u.confirmation_token is null or u.recovery_token is null or u.email_change_token_new is null or u.email_change is null
+         or u.created_at is null or u.updated_at is null
+         or exists (select 1 from auth.mfa_factors f where f.user_id = u.id and f.secret is null));`);
+  if (malformed !== "0") throw new Error("The catalog fixture's Auth accounts are missing fields GoTrue needs (see scripts/fixtures/repair-fixture-auth-tokens.sql).");
+  return out;
 }
 
 /**
