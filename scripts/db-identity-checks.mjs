@@ -1,3 +1,4 @@
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 /**
  * M2 Identity checks against the running local stack, through the real Auth, REST
  * and Storage APIs and real email delivery to Mailpit. Runs the actual avatar
@@ -8,8 +9,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import {
   AvatarError,
@@ -19,9 +18,7 @@ import {
   replaceAvatar,
 } from "../src/features/avatars/avatar-workflow.ts";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 
 let passed = 0;
 let failed = 0;
@@ -52,7 +49,7 @@ function psqlSession(sql) {
 }
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 const api = status.API_URL;
 const mailpit = status.MAILPIT_URL;
 const anonKey = status.ANON_KEY ?? status.PUBLISHABLE_KEY;
@@ -118,10 +115,29 @@ async function findMailLink(address, type) {
       const message = await (await fetch(`${mailpit}/api/v1/message/${summary.ID}`)).json();
       const match = /https?:\/\/[^\s"'<>]+\/auth\/v1\/verify\?[^\s"'<>]+/.exec(`${message.Text}\n${message.HTML}`);
       if (match && match[0].includes(`type=${type}`)) return match[0].replace(/&amp;/g, "&");
+      // M11a-2: the test stack's reset template links to the app's confirmation page instead.
+      const app = /https?:\/\/[^\s"'<>]+\/auth\/confirm\?token_hash=[A-Za-z0-9_-]+&(?:amp;)?type=([a-z]+)/.exec(`${message.HTML}`);
+      if (app && app[1] === type) return app[0].replace(/&amp;/g, "&");
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return null;
+}
+
+/**
+ * A reset link's recovery session, or null. Auth's own link (the development stack's default
+ * email) is spent by a GET and returns the session in the redirect's fragment; the app's link
+ * (supabase/templates/recovery.html, M11a-2, on the test stack) carries the token's hash,
+ * which the app verifies with a POST, as done here.
+ */
+async function openRecoveryLink(link) {
+  if (link?.includes("/auth/confirm?")) {
+    const hash = new URL(link).searchParams.get("token_hash");
+    const verified = await post("/auth/v1/verify", anon, { type: "recovery", token_hash: hash });
+    return verified.ok ? (await verified.json()).access_token ?? null : null;
+  }
+  const response = await fetch(link, { redirect: "manual" });
+  return new URLSearchParams((response.headers.get("location") ?? "").split("#")[1] ?? "").get("access_token");
 }
 
 async function signupLifecycle() {
@@ -274,7 +290,9 @@ async function handleConcurrency() {
   const releaser = await createUser();
   const taker = await createUser({ claim: false });
   const session = psqlSession(`begin;
-    select set_config('request.jwt.claims', '{"sub":"${releaser.id}","role":"authenticated"}', true);
+    -- With the user's own session, as their token would carry (the session-revocation checkpoint).
+    select set_config('request.jwt.claims', jsonb_build_object('sub', '${releaser.id}', 'role', 'authenticated',
+      'session_id', (select id from auth.sessions where user_id = '${releaser.id}' order by created_at desc limit 1))::text, true);
     set local role authenticated;
     select public.claim_handle('${newHandle()}');
     select pg_sleep(3);
@@ -425,17 +443,14 @@ async function authBehaviour() {
   check("a reset can be requested", response.ok, `status ${response.status}`);
   const link = await findMailLink(resetUser.email, "recovery");
   check("the reset email arrives", !!link);
-  response = await fetch(link, { redirect: "manual" });
-  const location = response.headers.get("location") ?? "";
-  const recoveryToken = new URLSearchParams(location.split("#")[1] ?? "").get("access_token");
-  check("the reset link gives a recovery session", !!recoveryToken, `status ${response.status}`);
+  const recoveryToken = await openRecoveryLink(link);
+  check("the reset link gives a recovery session", !!recoveryToken);
   const resetPassword = newPassword();
   response = await fetch(`${api}/auth/v1/user`, { method: "PUT", headers: asUser(recoveryToken), body: JSON.stringify({ password: resetPassword }) });
   check("the recovery session sets a new password", response.ok, `status ${response.status}`);
   check("the previous password stops working", (await signIn(resetUser.email, resetUser.password)).status === 400);
   check("the reset password works", (await signIn(resetUser.email, resetPassword)).ok);
-  response = await fetch(link, { redirect: "manual" });
-  check("a reset link works only once", !new URLSearchParams((response.headers.get("location") ?? "").split("#")[1] ?? "").get("access_token"));
+  check("a reset link works only once", !(await openRecoveryLink(link)));
 
   section("Generic responses");
   const known = await createUser();

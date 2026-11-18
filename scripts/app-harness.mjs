@@ -12,10 +12,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { elevate, totp } from "./lib/mfa-session.mjs";
+import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 
 // ---------------------------------------------------------------------------
 // Results
@@ -41,7 +41,7 @@ export function psql(sql) {
 // The local stack
 // ---------------------------------------------------------------------------
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 export const api = status.API_URL;
 export const publishableKey = status.PUBLISHABLE_KEY ?? status.ANON_KEY;
 const serviceKey = status.SECRET_KEY ?? status.SERVICE_ROLE_KEY;
@@ -76,6 +76,9 @@ let appErrors = "";
  * Starts `next start` on the production build, which must exist and be newer than every
  * source file, or the checks would test old code. Exits if it doesn't.
  */
+/** The server-only variable the app reads its Auth admin key from (M11a-1). */
+const SECRET_KEY_VARIABLE = "SUPABASE_SECRET_KEY";
+
 export async function startApp(port) {
   const buildId = join(root, ".next", "BUILD_ID");
   if (!existsSync(buildId)) {
@@ -90,7 +93,7 @@ export async function startApp(port) {
   app = spawn(process.execPath, [join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: root,
     // `next start` serves the production build, with NODE_ENV=production.
-    env: { ...process.env, NODE_ENV: "production", SUPABASE_URL: api, SUPABASE_PUBLISHABLE_KEY: publishableKey, ENABLE_SEED_DATA: "false" },
+    env: { ...process.env, NODE_ENV: "production", SUPABASE_URL: api, SUPABASE_PUBLISHABLE_KEY: publishableKey, [SECRET_KEY_VARIABLE]: serviceKey, ENABLE_SEED_DATA: "false" },
     stdio: ["ignore", "ignore", "pipe"],
   });
   app.stderr.on("data", (chunk) => (appErrors += chunk.toString()));

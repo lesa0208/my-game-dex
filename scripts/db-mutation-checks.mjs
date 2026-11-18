@@ -32,10 +32,11 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { suites } from "./security-mutations.mjs";
+import { stackConfigPath, stackStatus, workdirArgs } from "./lib/stack.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 
 /** No single subprocess may take longer than this. */
 const SUBPROCESS_TIMEOUT_MS = 4 * 60 * 1000;
@@ -365,7 +366,7 @@ function writeArtifact(folder, suiteName, index, mutation, result, raw) {
 }
 
 async function runPgtap(timeout) {
-  const run = await runProcess("pgTAP", [cli, "test", "db"], timeout);
+  const run = await runProcess("pgTAP", [cli, "test", "db", ...workdirArgs], timeout);
   lastRaw.pgtap = run.text;
   if (run.abnormal) return { abnormal: `pgTAP ${run.abnormal}`, elapsed: run.elapsed };
   if (!/^Files=\d+, Tests=\d+/m.test(run.text)) return { abnormal: `pgTAP produced no summary (exit ${run.status})`, elapsed: run.elapsed };
@@ -381,7 +382,7 @@ async function runApi(timeout) {
   let elapsed = 0;
   const stages = {};
   lastRaw.api = "";
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs", "scripts/db-mfa-checks.mjs", "scripts/db-ownership-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs", "scripts/db-mfa-checks.mjs", "scripts/db-ownership-checks.mjs", "scripts/db-invitation-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;
@@ -397,7 +398,7 @@ async function runApi(timeout) {
 }
 
 async function resetDatabase() {
-  const run = await runProcess("database reset", [cli, "db", "reset"]);
+  const run = await runProcess("database reset", [cli, "db", "reset", ...workdirArgs]);
   if (run.abnormal || run.status !== 0) {
     lockSnapshot();
     throw new Error(`database reset failed: ${run.abnormal ?? `exit ${run.status}`}`);
@@ -776,7 +777,7 @@ async function main() {
       return 0;
     }
 
-    const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const status = stackStatus();
     if (!/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(status.API_URL ?? "")) {
       log("Refusing to run: this tool only targets the local stack.");
       return 1;

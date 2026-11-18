@@ -36,6 +36,12 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run db:reset` | Recreate the local database and apply all migrations |
 | `npm run db:test` | Run database tests against the running stack |
 | `npm run db:verify` | Start, reset, migrate and test, in one command |
+| `npm run test-stack:start` / `test-stack:stop` | Start or stop the isolated test stack (see [The isolated test stack](#the-isolated-test-stack-m11a-0)) |
+| `npm run test-stack:run -- <script>` | Run any npm script against the isolated test stack |
+| `npm run test-stack:protect-dev` | Make destructive scripts refuse the development stack |
+| `npm run db:invitation-checks` | Invitations through the real Auth, API and Mailpit (run with `test-stack:run`) |
+| `npm run app:invitation-checks` | After a build, test `/admin/invitations` and an invitee's onboarding in the running app (run with `test-stack:run`) |
+| `npm run invitations:test` | Unit tests for the invitation pages' rules and messages |
 | `npm run secrets:check` | Scan files for secrets |
 | `npm run secrets:bundle` | Scan browser bundles for secrets, after a build |
 | `npm run secrets:test` | Test the secret scanner |
@@ -108,6 +114,23 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 It stops at the first failed stage and prints a summary. A failing test names the check that failed.
 
 To add a migration, run `npx supabase migration new <name>`, then `npm run db:verify`. A new table needs RLS, explicit grants and policies in the same migration, plus an entry in the approved lists in `03_schema_guards.test.sql`. See [Explicit grants](docs/architecture/security-rls.md#explicit-grants).
+
+### The isolated test stack (M11a-0)
+
+The checks reset the database, install and remove the catalog fixture, and create and delete accounts. To keep data you're using on the development stack, run them on a second, isolated local stack instead:
+
+```bash
+npm run test-stack:start                        # project "my-game-dex-test": API 55321, database 55322, Mailpit 55324
+npm run test-stack:run -- db:verify             # any npm script, against the test stack
+npm run test-stack:run -- app:admin-checks
+npm run test-stack:stop                         # keeps its data; test-stack:destroy deletes its volumes
+```
+
+- **Separate everything.** `scripts/test-stack.mjs` generates `.supabase-test/` (git-ignored) from `supabase/config.toml` on every start and reset: a different project id, every port moved up by 1000, and Studio, analytics and the edge runtime off. It copies `supabase/migrations/` and `supabase/tests/` there. Its containers, volumes and network are named after the test project, so nothing is shared with the development stack.
+- **One selector.** Every script reads the project, container, CLI arguments and status from `scripts/lib/stack.mjs`. `MGD_STACK=test` selects the test stack; without it, scripts use the development stack as before. Each refuses a config that names the wrong project, a status that isn't on a loopback address, or an API port that doesn't belong to the selected stack.
+- **Protecting the development stack.** `npm run test-stack:protect-dev` creates `~/.my-game-dex/protect-dev-stack`. While it exists, every check, fixture, benchmark and mutation script, and `db:reset`, `db:test` and `db:verify`, refuse the development stack unless `MGD_ALLOW_DEV_STACK=1` is set. Starting, stopping and using the development stack in the app aren't affected.
+- **The app under test** is the production build, started by each app check on its own port with the test stack's URL, publishable key and secret key (for invitations, M11a-1), so `.env.local` (the development stack's) isn't used.
+- **Invitations (M11a-1)** work on the test stack, which uses `supabase/templates/invite.html` for the invitation email (sent to its Mailpit). `MGD_TEST_SIGNUP=off npm run test-stack:reset` (after a `test-stack:stop`) makes it invite-only, as a hosted project will be: `[auth] enable_signup = false`, the email provider left on. The development stack's configuration is unchanged, so `/admin/invitations` there says invitations aren't available unless the server is given `SUPABASE_SECRET_KEY` and the template. Real invitations, SMTP and hosted settings are [pre-beta launch tasks](docs/architecture/security-rls.md#production-launch-prerequisites-m8). A lost authenticator is handled by the [operator runbook](docs/operations/lost-authenticator-runbook.md).
 
 ### Configuration
 

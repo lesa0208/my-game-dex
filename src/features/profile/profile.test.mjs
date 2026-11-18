@@ -1,0 +1,177 @@
+// Run with: npm run profile:test. Profile editing and avatars (M11a-3): the rules the page
+// applies before the database does, which must be the database's own. scripts/app-profile-checks.mjs
+// tests the running app against the database and Storage.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { avatarPublicUrl } from "../avatars/url.ts";
+import {
+  BIO_MAX,
+  characterCount,
+  collectionVisibilityText,
+  DISPLAY_NAME_MAX,
+  normalizeBio,
+  normalizeDisplayName,
+  profileError,
+  profileErrorField,
+  profileErrorFrom,
+  profileNotice,
+  profileProblem,
+} from "./form.ts";
+
+const schema = readFileSync(join(import.meta.dirname, "..", "..", "..", "supabase", "migrations", "20261106100000_m2_identity_schema.sql"), "utf8");
+
+test("the limits are the database's", () => {
+  assert.match(schema, new RegExp(`char_length\\(display_name\\) between 1 and ${DISPLAY_NAME_MAX}\\b`));
+  assert.match(schema, new RegExp(`char_length\\(bio\\) <= ${BIO_MAX}\\b`));
+  // Both columns refuse the same invisible characters, and the page checks exactly those.
+  const ranges = [...schema.matchAll(/!~ E'\[(\\\\u200B[^\]]+)\]'/g)].map((m) => m[1]);
+  assert.equal(ranges.length, 2);
+  assert.ok(ranges.every((r) => r === "\\\\u200B-\\\\u200F\\\\u202A-\\\\u202E\\\\u2066-\\\\u2069\\\\uFEFF"), ranges.join(" | "));
+  for (const c of ["​", "‍", "‏", "‪", "‮", "⁦", "⁩", "﻿"]) {
+    assert.equal(profileProblem(`a${c}b`, null), "display_name_invisible");
+    assert.equal(profileProblem(null, `a${c}b`), "bio_invisible");
+  }
+  assert.equal(profileProblem("⁰", null), null, "a character next to a range is allowed");
+});
+
+test("characters are counted as Postgres counts them", () => {
+  assert.equal(characterCount("🎮".repeat(50)), 50);
+  assert.equal(profileProblem("🎮".repeat(50), null), null);
+  assert.equal(profileProblem("🎮".repeat(51), null), "display_name_too_long");
+  assert.equal(profileProblem("x".repeat(DISPLAY_NAME_MAX), null), null);
+  assert.equal(profileProblem("x".repeat(DISPLAY_NAME_MAX + 1), null), "display_name_too_long");
+  assert.equal(profileProblem(null, "y".repeat(BIO_MAX)), null);
+  assert.equal(profileProblem(null, "y".repeat(BIO_MAX + 1)), "bio_too_long");
+});
+
+test("values are saved as the database requires, and empty means none", () => {
+  assert.equal(normalizeDisplayName("  Mike  "), "Mike");
+  assert.equal(normalizeDisplayName("   "), null);
+  assert.equal(normalizeDisplayName(""), null);
+  assert.equal(normalizeDisplayName("ﬁsh"), "fish", "NFKC, which the CHECK requires");
+  assert.equal(normalizeBio("  \r\n "), null);
+  assert.equal(normalizeBio("one\r\ntwo\rthree\n"), "one\ntwo\nthree");
+  // A browser sends 500 characters with line breaks as more: they count once, as typed.
+  const typed = `${"a".repeat(249)}\r\n${"b".repeat(250)}`;
+  assert.equal(profileProblem(null, normalizeBio(typed)), null);
+});
+
+test("control characters: refused in a display name, line breaks allowed in a bio", () => {
+  assert.equal(profileProblem("a\nb", null), "display_name_characters");
+  assert.equal(profileProblem("a\u0007b", null), "display_name_characters");
+  assert.equal(profileProblem("a\u0085b", null), "display_name_characters");
+  assert.equal(profileProblem(null, "line one\nline two\ttab"), null);
+});
+
+test("database refusals become fixed codes, and everything else a generic failure", () => {
+  assert.equal(profileErrorFrom({ code: "23514", message: "display name not allowed" }), "display_name_reserved");
+  assert.equal(profileErrorFrom({ code: "23514", message: 'new row for relation "profiles" violates check constraint "profiles_display_name_check"' }), "display_name_invalid");
+  assert.equal(profileErrorFrom({ code: "23514", message: 'new row for relation "profiles" violates check constraint "profiles_bio_check"' }), "bio_invalid");
+  assert.equal(profileErrorFrom({ code: "42501", message: "permission denied for table profiles" }), "failed");
+  assert.equal(profileErrorFrom(null), "failed");
+  assert.equal(profileErrorField("display_name_reserved"), "display_name");
+  assert.equal(profileErrorField("bio_too_long"), "bio");
+  assert.equal(profileErrorField("failed"), null);
+});
+
+test("only known codes show a message", () => {
+  assert.match(profileError("display_name_reserved"), /My Game Dex/);
+  assert.equal(profileError("<script>"), null);
+  assert.equal(profileError("toString"), null);
+  assert.equal(profileError(null), null);
+  assert.equal(profileNotice("profile_saved"), "Your profile is saved.");
+  assert.equal(profileNotice("constructor"), null);
+});
+
+test("the collection's privacy is described as it is", () => {
+  assert.match(collectionVisibilityText("private"), /^Private\. Only you/);
+  assert.match(collectionVisibilityText("followers"), /^Followers/);
+  assert.match(collectionVisibilityText("public"), /^Public/);
+  assert.match(collectionVisibilityText(null), /^Unknown/);
+});
+
+test("an avatar URL is only made for a path in the owner's folder", () => {
+  const owner = "11111111-2222-4333-8444-555555555555";
+  const file = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const base = "http://127.0.0.1:54321/";
+  assert.equal(avatarPublicUrl(`${owner}/${file}.webp`, owner, base), `http://127.0.0.1:54321/storage/v1/object/public/avatars/${owner}/${file}.webp`);
+  assert.equal(avatarPublicUrl(`${file}/${file}.webp`, owner, base), null, "someone else's folder");
+  assert.equal(avatarPublicUrl(`${owner}/../${file}.webp`, owner, base), null);
+  assert.equal(avatarPublicUrl(`${owner}/${file}.png`, owner, base), null);
+  assert.equal(avatarPublicUrl(`https://evil.example/${owner}/${file}.webp`, owner, base), null);
+  assert.equal(avatarPublicUrl(null, owner, base), null);
+  assert.equal(avatarPublicUrl(`${owner}/${file}.webp`, owner, undefined), null);
+});
+
+test("the avatar form's limits are the workflow's and the action body limit fits them", async () => {
+  const workflow = await import("../avatars/avatar-workflow.ts");
+  const form = await import("../avatars/form.ts");
+  assert.equal(form.AVATAR_MAX_BYTES, workflow.MAX_UPLOAD_BYTES);
+  assert.equal(form.AVATAR_MIN_DIMENSION, workflow.MIN_DIMENSION);
+  assert.equal(form.AVATAR_MAX_DIMENSION, workflow.MAX_DIMENSION);
+  assert.equal(form.AVATAR_OUTPUT_SIZE, workflow.OUTPUT_SIZE);
+  const config = readFileSync(join(import.meta.dirname, "..", "..", "..", "next.config.ts"), "utf8");
+  assert.match(config, /bodySizeLimit: 2 \* 1024 \* 1024 \+ 64 \* 1024,/);
+  assert.equal(form.ACTION_BODY_LIMIT_BYTES, 2 * 1024 * 1024 + 64 * 1024);
+  // Every workflow error has its own message, and unknown ones are a generic failure.
+  for (const code of ["file_too_large", "unsupported_type", "invalid_image", "dimensions_out_of_range", "not_eligible"]) {
+    assert.notEqual(form.avatarErrorCode(code), "avatar_failed", code);
+    assert.ok(form.avatarError(form.avatarErrorCode(code)), code);
+  }
+  assert.equal(form.avatarErrorCode("storage_failed"), "avatar_failed");
+  assert.equal(form.avatarErrorCode("toString"), "avatar_failed");
+  assert.equal(form.avatarErrorCode(undefined), "avatar_failed");
+  assert.ok(form.avatarError(form.avatarErrorCode("unsupported_type")).includes("JPEG, PNG or WebP"));
+  assert.equal(form.avatarError("__proto__"), null);
+  assert.equal(form.avatarNotice("avatar_saved"), "Your photo is updated.");
+});
+
+test("profile edits never use the secret key; photos use it only through the workflow, never for Auth", () => {
+  const src = join(import.meta.dirname, "..", "..");
+  const read = (...parts) => readFileSync(join(src, ...parts), "utf8");
+  for (const file of ["actions.ts", "form.ts", "queries.ts"]) {
+    assert.doesNotMatch(read("features", "profile", file), /SECRET_KEY|secretKey|service_role|auth\.admin/, file);
+  }
+  const actions = read("features", "avatars", "actions.ts");
+  assert.doesNotMatch(actions, /SECRET_KEY|auth\.admin|auth\/v1\/admin|deleteAccountWithAvatars/);
+  assert.match(actions, /^"use server";/);
+  assert.match(read("features", "avatars", "server.ts"), /^import "server-only";/);
+  // The workflow's only Auth Admin call is the (unrouted) account deletion.
+  const workflow = read("features", "avatars", "avatar-workflow.ts");
+  assert.equal(workflow.match(/auth\/v1\/admin/g)?.length, 1);
+  assert.match(workflow, /export async function deleteAccountWithAvatars[\s\S]*auth\/v1\/admin\/users/);
+});
+
+test("leftovers are judged by Storage's clock, and never include the current photo (M11a-4a)", async () => {
+  const { leftoverPaths, LEFTOVER_AGE_MS } = await import("../avatars/avatar-workflow.ts");
+  const user = "11111111-2222-4333-8444-555555555555";
+  const storageNow = Date.parse("2026-11-18T12:00:00Z");
+  const at = (minutesAgo) => new Date(storageNow - minutesAgo * 60_000).toISOString();
+  const objects = [
+    { name: "old.webp", created_at: at(60) },
+    { name: "fresh.webp", created_at: at(1) },
+    { name: "current.webp", created_at: at(60) },
+    { name: "edge.webp", created_at: new Date(storageNow - LEFTOVER_AGE_MS).toISOString() },
+    { name: "folder", created_at: null },
+  ];
+  assert.deepEqual(leftoverPaths(objects, user, `${user}/current.webp`, storageNow), [`${user}/old.webp`]);
+  // An app clock an hour ahead doesn't matter: only Storage's time is used.
+  assert.deepEqual(leftoverPaths([{ name: "just-uploaded.webp", created_at: at(0) }], user, null, storageNow), []);
+  // Even if Storage's clock were far ahead, the current photo is never a leftover.
+  assert.deepEqual(leftoverPaths([{ name: "current.webp", created_at: at(0) }], user, `${user}/current.webp`, storageNow + 3_600_000), []);
+});
+
+test("only the profile page may send a body over 1 MB (M11a-4a)", async () => {
+  const { bodyTooLarge, DEFAULT_BODY_LIMIT } = await import("../../lib/body-limit.ts");
+  assert.equal(DEFAULT_BODY_LIMIT, 1024 * 1024);
+  assert.equal(bodyTooLarge("POST", "/settings/profile", String(2 * 1024 * 1024)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/account", String(DEFAULT_BODY_LIMIT + 1)), true);
+  assert.equal(bodyTooLarge("POST", "/collection/add", String(DEFAULT_BODY_LIMIT)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/profile/", String(2 * 1024 * 1024)), true, "an exact path, not a prefix");
+  assert.equal(bodyTooLarge("GET", "/settings/account", String(5 * 1024 * 1024)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/account", null), false, "no length: Next.js's own limit applies");
+  assert.equal(bodyTooLarge("POST", "/settings/account", "nonsense"), false);
+});

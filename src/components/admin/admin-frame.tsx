@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { CurrentTabIntoView } from "@/components/admin/current-tab-into-view";
 import { adminControl, AdminField } from "@/components/admin/form-controls";
 
-export type AdminSection = "overview" | "catalog" | "reference" | "imports" | "accounts" | "staff" | "audit" | "ownership" | "system";
+export type AdminSection = "overview" | "catalog" | "reference" | "imports" | "accounts" | "invitations" | "staff" | "audit" | "ownership" | "system";
 
 const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: AdminAccess) => boolean }[] = [
   { id: "overview", label: "Overview", href: "/admin", allowed: (a) => a.staff },
@@ -19,6 +19,7 @@ const SECTIONS: { id: AdminSection; label: string; href: string; allowed: (a: Ad
   { id: "reference", label: "Reference", href: "/admin/reference", allowed: (a) => a.editor },
   { id: "imports", label: "Imports", href: "/admin/imports", allowed: (a) => a.admin },
   { id: "accounts", label: "Accounts", href: "/admin/accounts", allowed: (a) => a.moderator },
+  { id: "invitations", label: "Invitations", href: "/admin/invitations", allowed: (a) => a.admin },
   { id: "staff", label: "Staff", href: "/admin/staff", allowed: (a) => a.admin },
   { id: "audit", label: "Audit log", href: "/admin/audit", allowed: (a) => a.admin },
   { id: "ownership", label: "Ownership", href: "/admin/ownership", allowed: (a) => a.admin },
@@ -110,7 +111,7 @@ export function TabNav({ label, items }: { label: string; items: { href: string;
 }
 
 /** The outcome of the last action, from the page's URL: a fixed notice or error, or nothing. */
-export function PageMessage({ notice, error }: { notice: string | null; error: string | null }) {
+export function PageMessage({ notice, error, errorId }: { notice: string | null; error: string | null; errorId?: string }) {
   return (
     <>
       {notice ? (
@@ -122,7 +123,7 @@ export function PageMessage({ notice, error }: { notice: string | null; error: s
       {/* Always present, so an error is announced; while empty it takes back the gap above it. */}
       <div role="alert" aria-live="assertive" className="empty:-mt-5">
         {error ? (
-          <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          <p id={errorId} className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
             <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             {error}
           </p>

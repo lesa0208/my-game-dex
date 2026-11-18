@@ -20,29 +20,37 @@ select exists (select 1 from auth.users where id = 'f1c5f1c5-0000-4000-8000-0000
   \quit
 \endif
 
--- The fixture editor.
-insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
-values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'authenticated', 'authenticated', 'catalog-fixture@example.test', now(), '00000000-0000-0000-0000-000000000000');
+-- The fixture editor. Made in SQL (it needs a fixed id, and its Auth rows below in the
+-- same transaction), so the row sets what GoTrue itself writes: v2.197 reads these four
+-- token columns as strings and the two times as times, and none has a default. Without
+-- them Auth can't list users at all (M11a-5).
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id,
+                        confirmation_token, recovery_token, email_change_token_new, email_change, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'authenticated', 'authenticated', 'catalog-fixture@example.test', now(), '00000000-0000-0000-0000-000000000000',
+        '', '', '', '', now(), now());
 update public.profiles set handle = 'catalog_fixture', handle_changed_at = now() where id = 'f1c5f1c5-0000-4000-8000-00000000c5c5';
 insert into public.staff_roles (user_id, role) values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'catalog_editor');
 -- M8b: staff need a live aal2 session with a verified TOTP factor. The fixture editor
--- is made in SQL, so it gets Auth rows of the shape GoTrue writes, removed with it.
+-- is made in SQL, so it gets Auth rows of the shape GoTrue writes, removed with it. Its
+-- factor's secret is '' (GoTrue reads it as a string; this factor never verifies a code).
 insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
 values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'aal2', 'f1c5f1c5-0000-4000-8000-00000000c5c5', now(), now());
-insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
-values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'fixture', 'totp', 'verified', now(), now());
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c5', 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'fixture', 'totp', 'verified', now(), now(), '');
 insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
 values (gen_random_uuid(), 'f1c5f1c5-0000-4000-8000-00000000c5c5', 'totp', now(), now());
 
 -- The fixture reviewer, with the same Auth rows.
-insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
-values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'authenticated', 'authenticated', 'catalog-fixture-reviewer@example.test', now(), '00000000-0000-0000-0000-000000000000');
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id,
+                        confirmation_token, recovery_token, email_change_token_new, email_change, created_at, updated_at)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'authenticated', 'authenticated', 'catalog-fixture-reviewer@example.test', now(), '00000000-0000-0000-0000-000000000000',
+        '', '', '', '', now(), now());
 update public.profiles set handle = 'catalog_fixture_rv', handle_changed_at = now() where id = 'f1c5f1c5-0000-4000-8000-00000000c5c6';
 insert into public.staff_roles (user_id, role) values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'catalog_editor');
 insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at)
 values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'aal2', 'f1c5f1c5-0000-4000-8000-00000000c5c6', now(), now());
-insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at)
-values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'fixture', 'totp', 'verified', now(), now());
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret)
+values ('f1c5f1c5-0000-4000-8000-00000000c5c6', 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'fixture', 'totp', 'verified', now(), now(), '');
 insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at)
 values (gen_random_uuid(), 'f1c5f1c5-0000-4000-8000-00000000c5c6', 'totp', now(), now());
 

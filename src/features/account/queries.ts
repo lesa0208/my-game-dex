@@ -6,6 +6,7 @@ import { cache } from "react";
 import { parseAccount } from "@/features/auth/account";
 import { signInHref, welcomeHref } from "@/features/auth/redirect";
 import { createSupabaseServerClient } from "@/features/auth/server";
+import { avatarPublicUrl } from "@/features/avatars/url";
 import type { Viewer } from "@/types/user";
 
 /**
@@ -26,7 +27,11 @@ export const getCurrentViewer = cache(async (): Promise<Viewer | null> => {
 
   const { data, error } = await supabase.rpc("get_my_account");
   if (error) throw new Error("The account couldn't be loaded.");
-  return parseAccount(Array.isArray(data) ? data[0] : null, userId);
+  const row = Array.isArray(data) ? data[0] : null;
+  const viewer = parseAccount(row, userId);
+  // M11a-3: the avatar, for the account menu. Only a path in this account's own folder.
+  const avatarUrl = viewer ? avatarPublicUrl((row as { avatar_path?: string | null }).avatar_path, userId) : null;
+  return viewer && avatarUrl ? { ...viewer, avatarUrl } : viewer;
 });
 
 /** For a protected page: the viewer, or a redirect to sign in and back to `path`. */

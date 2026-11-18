@@ -39,11 +39,13 @@ begin
 exception when others then
   return 'error: ' || sqlerrm;
 end $t$;
--- As a signed-in user with no session or factor rows at all: an aal1 token.
+-- As a signed-in user at aal1: a password session Auth has (since the session-revocation
+-- checkpoint, owner-scoped reads need one), with no verified factor behind it.
 create function pg_temp.as_aal1(p_actor text, p_sql text) returns text language plpgsql as $t$
-declare r text;
+declare r text; v_session uuid := md5('aal1:' || pg_temp.u(p_actor)::text)::uuid;
 begin
-  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  insert into auth.sessions (id, user_id, aal, created_at, updated_at) values (v_session, pg_temp.u(p_actor), 'aal1', now(), now()) on conflict (id) do nothing;
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated', 'aal', 'aal1', 'session_id', v_session)::text, true);
   perform set_config('role', 'authenticated', true);
   execute p_sql into r;
   perform set_config('role', 'none', true);

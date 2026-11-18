@@ -14,15 +14,13 @@
  * Writes bench-results.json and bench-plans.txt to --out (default: the system temp
  * directory). Prints only timings.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { stackConfigPath, stackStatus } from "../../scripts/lib/stack.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(join(root, "supabase", "config.toml"), "utf8"))[1];
+const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 const arg = (name, fallback) => {
   const index = process.argv.indexOf(name);
   return index > 0 ? process.argv[index + 1] : fallback;
@@ -40,7 +38,7 @@ const probe = 3 * Math.floor(games / 6);
 const seqscan = arg("--seqscan", "on");
 if (!["on", "off"].includes(seqscan)) throw new Error("--seqscan must be on or off");
 
-const status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+const status = stackStatus();
 if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(status.API_URL).hostname)) {
   throw new Error("Refusing: the stack isn't local.");
 }

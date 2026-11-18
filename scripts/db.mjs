@@ -1,5 +1,7 @@
 /**
- * Local database workflow. Always targets the local Supabase stack.
+ * Local database workflow. Always targets a local Supabase stack: the development stack,
+ * or with MGD_STACK=test the isolated test stack (scripts/lib/stack.mjs). Resetting and
+ * testing refuse a protected development stack.
  *
  *   node scripts/db.mjs start | stop | status | reset | test | verify
  *
@@ -14,13 +16,10 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 
-export function redact(text) {
-  return text
-    .replace(/sb_(secret|publishable)_[A-Za-z0-9_-]+/g, "[REDACTED]")
-    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[REDACTED]")
-    .replace(/(postgres(?:ql)?:\/\/[^:\s"]+:)[^@\s"]+@/g, "$1[REDACTED]@")
-    .replace(/"([A-Z0-9_]*(?:SECRET|KEY|PASSWORD|TOKEN)[A-Z0-9_]*)"\s*:\s*"[^"]*"/g, '"$1":"[REDACTED]"');
-}
+import { redact } from "./lib/redact.mjs";
+import { guardDevStack, stackName, workdirArgs } from "./lib/stack.mjs";
+
+export { redact };
 
 function requireDocker() {
   const result = spawnSync("docker", ["info", "--format", "{{.ServerVersion}}"], { encoding: "utf8" });
@@ -32,7 +31,7 @@ function requireDocker() {
 
 function runCli(args) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args], {
+    const child = spawn(process.execPath, [cli, ...args, ...workdirArgs], {
       cwd: root,
       env: { ...process.env, NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
@@ -73,6 +72,9 @@ const steps = {
   owner: () => runNode("db-owner-checks.mjs"),
   mfa: () => runNode("db-mfa-checks.mjs"),
   ownership: () => runNode("db-ownership-checks.mjs"),
+  invitations: () => runNode("db-invitation-checks.mjs"),
+  passwords: () => runNode("db-password-checks.mjs"),
+  sessions: () => runNode("db-session-checks.mjs"),
 };
 
 async function runSteps(names) {
@@ -96,8 +98,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");
@@ -108,6 +110,8 @@ async function main() {
     process.exit(1);
   }
   requireDocker();
+  if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`);
+  console.log(`Stack: ${stackName}`);
   process.exit(await runSteps(plans[command]));
 }
 

@@ -1374,6 +1374,28 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 - **Retention:** undecided (M4-D10). Nothing removes rows, which is an interim state, not a commitment
 - **Read through:** `get_audit_log` (administrators), `get_account_summary` (moderators, without reasons) and `get_staff_overview` (M10e), each through one allow-list; catalog editors through the record history (M10b). The raw `get_audit_events` was retired in the M10 integration review
 
+### `account_invitations` (M11a-1)
+
+In the `private` schema, RLS on, no privilege for any API role. Written only by the invitation functions; see [Invitations and registration](security-rls.md#invitations-and-registration-m11a-1).
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `id` | `uuid` (v7) | No | |
+| `email` | `text` | No | Trimmed, lowercased, a plausible address of 3 to 254 characters. Lists show it masked |
+| `invited_user_id` | `uuid` | Yes | → `profiles(id)`, on delete set null. Linked by the database once Auth holds the invited account |
+| `invited_by`, `revoke_requested_by` | `uuid` | Yes | → `profiles(id)`, on delete set null |
+| `state` | `text` | No | `pending`, `sent`, `send_failed`, `revoke_pending`, `revoked`, `revoked_after_acceptance` |
+| `reason`, `revoke_reason` | `text` | No / Yes | 1 to 500 characters |
+| `created_at`, `first_sent_at`, `last_sent_at`, `last_resend_requested_at`, `revoke_requested_at`, `revoked_at` | `timestamptz` | | |
+| `resend_count` | `integer` | No | 0 to 5 |
+| `password_set_at` | `timestamptz` | Yes | The password step, set only after Auth logged the change |
+| `withheld` | `boolean` | No | M11a-2: the address already had an account (or an invitation out) in Auth. Nothing is sent, it's never linked, and no page sees it |
+| `last_failed_at` | `timestamptz` | Yes | M11a-2: the last failed email for a row that really sends, for "emails are failing" |
+| `last_resend_requested_by` | `uuid` | Yes | M11a-2: → `profiles(id)`, on delete set null. Who asked for the latest resend, for its audit row |
+
+- **Indexes:** one open invitation per address (unique where not revoked and not withheld), one invitation per account, and by inviter and state.
+- **Retention:** undecided (D10). Nothing removes rows.
+
 ### Owner and MFA tables (M8)
 
 All in the `private` schema, with RLS on and no privilege for any API role. Written only by the M8 functions. See [The Owner (M8)](security-rls.md#the-owner-m8) and [MFA for staff (M8)](security-rls.md#mfa-for-staff-m8).

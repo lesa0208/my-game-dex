@@ -70,6 +70,7 @@ This records why the database is designed as it is, what each choice costs, and 
 | [060](#adr-060-imports-and-the-system-are-read-only-views-for-administrators-and-reference-data-is-the-public-tables) | Imports and the system are read-only views for administrators, and reference data is the public tables |
 | [061](#adr-061-accounts-audit-and-staff-are-allow-listed-reads-over-the-m8-functions) | Accounts, audit and staff are allow-listed reads over the M8 functions |
 | [062](#adr-062-the-m10-integration-review-retires-the-raw-admin-reads-and-withholds-staff-reasons-from-moderators) | The M10 integration review retires the raw admin reads and withholds staff reasons from moderators |
+| [063](#adr-063-invitations-are-supabase-native-sent-with-a-server-only-secret-key-after-the-database-authorizes) | Invitations are Supabase-native, sent with a server-only secret key after the database authorizes |
 
 ## Decisions requiring product-owner approval
 
@@ -821,7 +822,7 @@ Most general game databases focus on games rather than physical releases. Expect
 - Server code takes identity only from `getClaims()`.
 - `getCurrentViewer()` reads the account through the existing `get_my_account()`.
 
-There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
+There's no browser client, so the auth cookies are `httpOnly`. Sign-in, sign-out and the handle claim are Server Actions. **Amended by [ADR-063](#adr-063-invitations-are-supabase-native-sent-with-a-server-only-secret-key-after-the-database-authorizes):** the server now also holds the Supabase secret key, for two Auth Admin calls behind invitations, and has an invitation confirmation page and a password step. They also run without JavaScript, but their messages then don't show, so JavaScript is required for form feedback. With partial prerendering, Next.js renders the page after a no-JavaScript action by resuming the prerendered shell, and React's resume API takes no action result (`formState`); only a fully dynamic render does. Fixing it would mean giving up prerendering for those pages, so it's accepted (found in M6c). The claim goes through the existing `claim_handle`. Protected pages are checked by the proxy and again by the page. Return paths must be on this site.
 
 There's no sign-up or password-reset page, and nothing on a hosted project changed. The seed viewer no longer appears in the header; seed content stays limited to the development preview feed. The design is in [security-rls.md](security-rls.md#web-sessions-m6a).
 
@@ -832,7 +833,7 @@ There's no sign-up or password-reset page, and nothing on a hosted project chang
 
 **Trade-offs.**
 - Any later client-side Supabase use, such as Realtime, needs a browser client and non-`httpOnly` cookies, so this decision would need revisiting.
-- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out.
+- Access tokens are verified locally, so a copied token keeps working until it expires, up to an hour, even after sign-out. *(Superseded for the person's own data by [ADR-067](#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has).)*
 - Pages that read the session render per request and can't be prefetched.
 - Avatars aren't shown yet, because the image component would need the storage host configured.
 
@@ -1110,6 +1111,87 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **A script that called the retired reads breaks,** by design. None exists in the repository; operators read `private.audit_events` with SQL, as before.
 - **A moderator can't read a colleague's reasoning** for a suspension; they ask an administrator, who sees it in the account and the audit log.
 - **Covered by** `14_audit`, `34_admin`, `39_accounts_audit_staff` (85), `db-audit-checks`, `db-mfa-checks`, `app:admin-checks`, and six `m10i` mutations; the historical mutations on the retired reads now target the replacements.
+
+### ADR-063: Invitations are Supabase-native, sent with a server-only secret key after the database authorizes
+
+**Decision.** M11a-1 (migrations `20261125100000`, `20261125100100`; [security-rls.md](security-rls.md#invitations-and-registration-m11a-1)), local development only. The private beta is invitation only:
+
+- **Auth sends the invitations.** The server calls Auth's Admin API (`inviteUserByEmail`) with the secret key; Auth sends the email (Mailpit locally) with the app's own template, which links to `/auth/confirm` with the token's hash.
+- **The database decides first, and checks Auth after.** Every action starts with a SECURITY DEFINER function in the administrator's own session: active administrator, a verification in the last 10 minutes, a reason, limits (20 open per administrator, 200 in all; one resend per 10 minutes, five per invitation), an audited ledger row (`private.account_invitations`, no API access). Only then the Admin API call, with what the function returned. The database then reads `auth.users` itself to record the outcome, never the server's word.
+- **The secret key** is the server-only `SUPABASE_SECRET_KEY`, used only in `src/features/auth-admin/server.ts` (marked `server-only`), for two operations: send an invitation and ban an invitee. No deletion, no unbanning, no generated links, no data queries, nothing logged. This amends [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server).
+- **Revocation never deletes an account.** It's recorded and audited first, which at once blocks the invitee's password step and handle claim in the database; then the server bans the account in Auth; then reconciliation reads the ban back. A ban that fails leaves "revoking", which still blocks onboarding and can be retried. An invitee who accepted before the ban is recorded as revoked after acceptance and stays banned; nothing unbans them automatically. An invitee who has already chosen a handle has a working account: that's a suspension.
+- **Accepting is an explicit POST.** `/auth/confirm`'s GET shows a button; only its POST calls `verifyOtp`, so mail scanners can't spend the single-use token. Then `/welcome/password`, then the existing handle claim.
+- **The password step is authoritative.** `complete_my_password_setup` records it only when Auth's own log (`auth.audit_log_entries`, `user_updated_password` for this account, after it accepted) shows the change, and `claim_handle` refuses an invitee whose step isn't recorded or whose invitation is being revoked. Accounts not made by invitation are unaffected.
+- **Hosted:** `[auth] enable_signup = false` with the email provider left on, documented for the pre-beta launch tasks and tested on the isolated test stack (configuration B). Hosted settings, SMTP and real invitations are pre-beta tasks, not part of this milestone.
+
+**Why.** The M11a-0 spike showed Auth's invitation works with public sign-up off, that turning the email provider off breaks sign-in and recovery, that Auth's delete has no guard against an accepted account, that a ban makes the invite link fail, that a GET on Auth's own link spends the token, and that simultaneous verifications of one token can all succeed. The design keeps public registration closed, reuses Auth's email delivery, keeps every rule in the database, and makes every step safe to repeat.
+
+**Trade-offs.**
+- **A secret key in the server runtime** widens what a server compromise exposes. Narrow use, server-only, bundle scans (`secrets:bundle`) and no logging limit it.
+- **The password step depends on Auth's audit log table**, a GoTrue internal. It fails closed (the step stays undone) if that table changes; hosted projects must keep writing Auth audit logs to the database (a pre-beta check).
+- **Revoked invitees' accounts remain in Auth, banned.** Removing them is an operator task, under the retention policy (D10).
+- **The invitation flow needs the template**, set on the test stack only; the development stack keeps its configuration, so invitations aren't available there until it's given the template and the key.
+- **Lost authenticators** are operator-assisted only ([runbook](../operations/lost-authenticator-runbook.md)).
+
+**Amended in M11a-2** (migration `20261126100000`, approved by the product owner), after a review found that an administrator could tell which addresses already had an account: M11a-1 gave such an address no ledger row and no count, skipped the limit check for it, audited it with a distinct code, returned no id from the API, and handed the server's address back to whoever asked for a resend.
+- **Every accepted address gets a row and the same answers.** An address Auth already holds gets a "withheld" row: nothing is ever sent for it, it's never linked to that account and never blocks its onboarding, and nothing an administrator can read (list, counts, limits, audit details, API responses, refusals) differs from an invitation that was sent. While invitation emails are failing, withheld rows show as failed too.
+- **The steps that depend on what Auth holds are the server's only.** Whether and where to send (`invitation_delivery_plan`), recording what Auth did (`record_invitation_delivery`), the account to ban (`invitation_revocation_target`) and reconciling (`reconcile_invitation`) are executable by `service_role` alone, which the server calls with its secret key after the administrator's own function has authorized the step. The authorization (active administrator, recent MFA, reason, limits) and its audit row stay in the administrator's session; the audit rows for the server's steps name the administrator who asked. So **the secret-key module now makes four database calls** as well as its two Auth Admin calls, still no others.
+- **Timing.** Sending takes at least two seconds whether or not an email goes out, so the two answer alike; a send slower than that still stands out.
+- **A handle claim and a revocation are serialized** on the invitation row: `claim_handle` locks it before deciding (it read it without a lock, so both could succeed).
+
+### ADR-064: Password recovery is Supabase-native, verified by POST and bound to the browser that opened the link
+
+**Status:** accepted (M11a-2). **Context:** members need to reset a forgotten password, change it, and end other sessions, without the app learning or revealing who has an account, and without a reset weakening TOTP or staff protections. Auth's own reset link is spent by a GET (M11a-0), and its `/recover` answer differs for an address with an account when asked twice in a minute.
+
+**Decision.**
+- **Supabase Auth's recovery, as the person.** `resetPasswordForEmail`, `verifyOtp({ type: "recovery" })` and `updateUser`, with the publishable key only: no secret key, no Auth Admin call, nothing that bypasses Auth's rules.
+- **One answer.** `/forgot-password` answers every address alike, whatever Auth says, in at least two seconds.
+- **POST-verified links.** The template links to `/auth/confirm` (shared with invitations); the GET shows a button, the POST signs out whoever is signed in here, then verifies.
+- **Bound to the browser and the hour.** An httpOnly cookie holds the new recovery session's id; `/reset-password` accepts only that session, within an hour of the link. Anywhere else, the current password is needed.
+- **TOTP first.** A recovery session is aal1; with an authenticator, the existing verification page takes it to aal2 and back. No factor is removed; a lost one is the operator's runbook.
+- **Changing** asks for the current password (checked in a detached session that's ended at once), then Auth's rules: aal2 with an authenticator, a sign-in within a day.
+- **Signing out everywhere** is Auth's global sign-out, separate from signing out here. The pages said that a device in use can keep working for up to an hour: access tokens stayed valid until they expired (demonstrated in M11a-2), though staff functions stopped at once. Since [ADR-067](#adr-067-a-signed-in-request-must-belong-to-a-session-auth-still-has) every protected path stops at once.
+
+**Consequences.** No database change. Auth's behaviour is pinned by `db-password-checks`, to be rerun on staging. Residual risks (timing, tokens until expiry, Auth accepting a password change from any day-old session without the current password) are listed under [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
+
+### ADR-065: The profile editor reuses the M2 rules, and the M2 avatar workflow unchanged in its checks
+
+**Status:** accepted (M11a-3). **Context:** members need to edit their public card (display name, bio, photo) and see their handle and collection privacy, without a second set of validation rules that could drift from the database's, and without a new privileged path to Storage.
+
+**Decision.**
+- **Name and bio as the person.** An update of the person's own row with the publishable key; the M2 column grants, `profiles_update_own`, `CHECK`s and trigger decide. The page mirrors the rules (tested against the migration) and maps the database's own refusals to fixed messages. No new field, no handle policy change.
+- **The photo through the M2 workflow.** Server Actions (not a route handler) call `replaceAvatar` and `removeAvatar`, so Next.js's same-origin check and body limit apply before the action runs. The limit is raised from 1 MB to 2 MB plus 64 KB for every action, the smallest that fits a 2 MB image. The secret key stays server-only and is used only as M2 designed: the avatars bucket and `set_avatar_path`, in the verified user's own folder. No storage policy changes; the browser has no write path.
+- **One addition to the workflow:** removing a user's own leftover files older than ten minutes after each change, so a partly failed change is cleaned up by the next one. Same key, same folder, same operations (list, remove) as M2's deletion.
+- **The public card is shown as it's saved,** with what's public said plainly; collection sharing waits for M11c (`/u/[handle]` too). `/profile` sends a signed-in person to `/settings/profile`.
+
+**Consequences.** No migration. The ended-session gap from M11a-2 now also covers name and bio saves (not the photo). Per-user upload rate limits and a global orphan sweep remain. Deferred security decisions are listed in [security-rls.md](security-rls.md#security-decisions-deferred-m11a-3).
+
+### ADR-066: The data export is a streamed download read as the person, and expensive requests are counted in the database
+
+**Status:** accepted (M11a-4a). **Context:** collectors need a portable copy of their own data, including private purchase details, without a privileged read path; uploads and exports are expensive enough to need per-account limits that hold across app instances.
+
+**Decision.**
+- **A POST route handler** (`/settings/account/export`), not a Server Action, because the answer is a file download; it checks the origin itself, since Next.js's Server Action check doesn't apply to route handlers.
+- **Read as the person**, with the publishable key, through existing owner-scoped reads (RLS, `get_my_account`, `get_my_preserved_titles`, the submission functions). No service role, no new read function.
+- **Streamed JSON in pages of 200 copies**, keyset by id, with a final `"complete": true`; a failure ends the stream unfinished rather than producing a file that looks complete.
+- **Stronger than ordinary reads:** aal2 for accounts with an authenticator, and a live-session check with Auth, because an export is a bulk copy of private data.
+- **`take_request_slot`**, a small definer function over a private table, counts exports (3 an hour) and photo uploads (10 an hour) per account. Fixed kinds and limits; nothing the client chooses.
+- **The 2 MB action body limit is narrowed to `/settings/profile`** by the proxy, which refuses other POSTs that declare more than 1 MB.
+
+**Consequences.** One migration (a table and a function). The export is a technical copy, not a legal access response (D10). Revoked sessions can still read and write ordinary data elsewhere until their token expires; the narrow fix is analysed in [session-and-password-decisions.md](session-and-password-decisions.md), and deletion and retention in [account-deletion-d10.md](account-deletion-d10.md), both for decision.
+
+### ADR-067: A signed-in request must belong to a session Auth still has
+
+**Status:** accepted (M11a session-revocation checkpoint). **Context:** an access token stayed usable for up to an hour after the session it came from was ended (sign-out everywhere, a reset, a change), because PostgREST verifies tokens by signature only. Staff functions already checked the session (M8b); collector data didn't.
+
+**Decision.**
+- **One fail-closed definer helper,** `private.session_is_live()`: the token's signed `session_id` must be a row in `auth.sessions` for this user, not past `not_after`.
+- **Added where the person's own data is reached:** the shared guards (`is_active_user`, `require_verified_user`), the owner-only policies that used neither, the own-submission branch of the catalog rules, and the owner-scoped functions that checked only `auth.uid()`. Always once per statement.
+- **Not added to public reads:** the published catalog and public profile cards behave the same for an ended session as for a signed-out visitor.
+- **Database-side, not a PostgREST pre-request hook.** A hook would cover every request in one place, but it depends on a role setting, which fails open if missing, and it would refuse public reads too. This way each object checks itself, and a pgTAP coverage rule keeps new functions honest.
+- **The signed-in password change passes `current_password` to Auth,** ready for hosted "require current password", which was verified on GoTrue v2.197 (recovery sessions exempt, aal2 still required).
+
+**Consequences.** One migration (15 functions redefined with one condition each, 10 policies, one helper). A statement already running when a session ends completes; later ones are refused. The cost is tens of microseconds on small queries and within noise on large ones. The pages now say other devices are signed out, without the hour caveat. Storage and Realtime paths would need their own check if clients ever use them.
 
 ## Risks to watch
 

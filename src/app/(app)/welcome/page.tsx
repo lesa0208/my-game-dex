@@ -10,6 +10,7 @@ import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireViewer } from "@/features/account/queries";
 import { safeNextPath } from "@/features/auth/redirect";
+import { getMyOnboarding } from "@/features/invitations/queries";
 
 export const metadata: Metadata = {
   title: "Choose your handle",
@@ -21,6 +22,17 @@ async function WelcomeContent({ searchParams }: { searchParams: PageProps<"/welc
   const next = safeNextPath(Array.isArray(raw) ? raw[0] : raw);
   const viewer = await requireViewer(`/welcome${next === "/home" ? "" : `?next=${encodeURIComponent(next)}`}`);
   if (viewer.handle) redirect(next);
+
+  // An invitee sets a password before choosing a handle (M11a-1); claim_handle enforces it too.
+  const onboarding = await getMyOnboarding();
+  if (onboarding?.revoked) {
+    return (
+      <EmptyState icon={UserRoundX} title="This invitation was revoked" action={<SignOutButton />}>
+        The account can&apos;t be set up. If you think this is a mistake, contact the person who invited you.
+      </EmptyState>
+    );
+  }
+  if (onboarding?.invited && !onboarding.password_set) redirect("/welcome/password");
 
   if (viewer.accountStatus !== "active") {
     return (

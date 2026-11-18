@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_OPTIONS, supabaseConfig } from "@/features/auth/cookies";
 import { isProtectedPath, signInHref } from "@/features/auth/redirect";
+import { bodyTooLarge } from "@/lib/body-limit";
 
 /**
  * Refreshes the Supabase session before anything renders, following the
@@ -14,6 +15,9 @@ import { isProtectedPath, signInHref } from "@/features/auth/redirect";
  * optimistic check only: each page and Server Action verifies the session itself.
  */
 export async function proxy(request: NextRequest) {
+  if (bodyTooLarge(request.method, request.nextUrl.pathname, request.headers.get("content-length"))) {
+    return new NextResponse("Payload Too Large", { status: 413, headers: { "Cache-Control": "no-store" } });
+  }
   const config = supabaseConfig();
   if (!config) return NextResponse.next({ request });
 
@@ -38,7 +42,12 @@ export async function proxy(request: NextRequest) {
   // access token and refreshes the session when needed.
   const { data } = await supabase.auth.getClaims();
 
-  if (!data?.claims?.sub && isProtectedPath(request.nextUrl.pathname)) {
+  // Page loads only (M11a-5): a POST (a Server Action, or the data export) checks the
+  // session itself and sends a signed-out request to sign in with a page it can come back
+  // to. Redirecting it here would make `next` a POST-only address, which a GET after
+  // signing in can't open, and a 307 would re-send the form to the sign-in page.
+  const pageLoad = request.method === "GET" || request.method === "HEAD";
+  if (pageLoad && !data?.claims?.sub && isProtectedPath(request.nextUrl.pathname)) {
     const target = new URL(signInHref(`${request.nextUrl.pathname}${request.nextUrl.search}`), request.url);
     const redirect = NextResponse.redirect(target);
     // Keep any cookie changes, such as clearing an expired session.

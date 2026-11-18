@@ -28,8 +28,9 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { chromium } from "playwright-core";
+import sharp from "sharp";
 
-import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { api, appErrorLines, Browser, check, createUser, deleteUsers, formById, formWith, location, psql, publishableKey, results, section, service, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { addFactor, claimsFor, decodeClaims, reverify, totp } from "./lib/mfa-session.mjs";
 import { matureFactors, removeTestOwner, requireNoOwner } from "./lib/test-owner.mjs";
@@ -156,7 +157,9 @@ async function structure(page, name, tag) {
     const fields = [...document.querySelectorAll("input:not([type=hidden]), select, textarea")].filter(visible);
     const unnamed = fields.filter((el) => !(el.labels?.length || el.getAttribute("aria-label") || el.getAttribute("aria-labelledby"))).map((el) => el.id || el.name || el.tagName);
     const buttons = [...document.querySelectorAll("button, a[href]")].filter(visible).filter((el) => !(el.innerText.trim() || el.getAttribute("aria-label") || el.getAttribute("title"))).map((el) => el.outerHTML.slice(0, 80));
-    return { h1: document.querySelectorAll("h1").length, unnamed, buttons };
+    // Rendered headings only: after a client-side navigation Next.js can keep the previous
+    // page mounted with display: none, out of the accessibility tree (seen in M11a-1).
+    return { h1: [...document.querySelectorAll("h1")].filter(visible).length, unnamed, buttons };
   });
   await collapse();
   ok(`${tag} ${name}: one main heading`, facts.h1 === 1, `${facts.h1} h1`);
@@ -332,7 +335,7 @@ try {
     (now() - interval '1 day', '${moderator.id}', 'staff_change_refused', '${admin.id}', 'Refused: admin_required', '{"code": "admin_required", "operation": "set_account_status", "status": "suspended"}');`);
   ok("setup: a test Owner with two mature factors", psql("select user_id from private.platform_owner;") === owner.id && psql(`select private.mature_totp_factor_count('${owner.id}');`) === "2");
 
-  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
+  const ADMIN_PAGES = ["/admin", "/admin/catalog", "/admin/reference", "/admin/imports", "/admin/accounts", "/admin/invitations", "/admin/staff", "/admin/audit", "/admin/ownership", "/admin/system"];
 
   // M10a: a collector's submission and the fixture's releases, for the catalog pages.
   const form = await collector.http.get("/submit?game=starfall-odyssey");
@@ -428,7 +431,7 @@ try {
       const expected = {
         editor: { who: editor, sections: ["Overview", "Catalog", "Reference"], pages: ["/admin", "/admin/catalog", "/admin/reference"] },
         moderator: { who: moderator, sections: ["Overview", "Accounts"], pages: ["/admin", "/admin/accounts"] },
-        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
+        admin: { who: admin, sections: ["Overview", "Catalog", "Reference", "Imports", "Accounts", "Invitations", "Staff", "Audit log", "Ownership", "System"], pages: ADMIN_PAGES },
       };
       for (const [name, { who, sections, pages }] of Object.entries(expected)) {
         const s = await signIn(browser, viewport, who);
@@ -513,6 +516,217 @@ try {
       await e.context.close();
     }
 
+    section(`${tag}: 2d. An invitee's pages (M11a-1)`);
+    {
+      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const page = await context.newPage();
+      for (const [name, path] of [["invitation confirmation", "/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=invite"], ["an unusable invitation link", "/auth/confirm?type=invite"]]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=invite`, { waitUntil: "networkidle" });
+      await keyboard(page, "invitation confirmation", tag);
+      // The invitee's real path: Auth issues an invitation, the ledger records it, and the
+      // confirmation page's button (a POST, with JavaScript here) accepts it.
+      const inviteeEmail = `${PREFIX}-invitee-${tag}-${randomBytes(3).toString("hex")}@example.test`;
+      const issued = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "invite", email: inviteeEmail }) })).json();
+      psql(`insert into private.account_invitations (email, invited_by, state, reason, first_sent_at, last_sent_at)
+        values ('${inviteeEmail}', '${admin.id}', 'sent', 'Browser checks', now(), now());`);
+      await page.goto(`${origin}/auth/confirm?token_hash=${issued.hashed_token ?? issued.properties?.hashed_token}&type=invite`, { waitUntil: "networkidle" });
+      await page.click('main button[type="submit"]');
+      await page.waitForURL((u) => u.pathname === "/welcome/password");
+      // /welcome redirects here from its streamed section, so the URL changes before the form renders.
+      await page.waitForSelector("#password", { state: "visible" });
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} accepting an invitation takes the invitee to set a password`, new URL(page.url()).pathname === "/welcome/password");
+      await audit(page, "password step", tag);
+      await structure(page, "password step", tag);
+      await keyboard(page, "password step", tag);
+      await context.close();
+    }
+
+    section(`${tag}: 2e. Password recovery and account security (M11a-2)`);
+    {
+      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const page = await context.newPage();
+      for (const [name, path] of [
+        ["forgot password", "/forgot-password"],
+        ["forgot password, malformed address", "/forgot-password?error=invalid_email"],
+        ["forgot password, answered", "/forgot-password?status=sent"],
+        ["reset confirmation", "/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=recovery"],
+        ["an unusable reset link", "/auth/confirm?type=recovery&status=invalid"],
+        ["reset page without a link", "/reset-password"],
+        ["sign in after signing out everywhere", "/sign-in?notice=signed_out_everywhere"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/forgot-password`, { waitUntil: "networkidle" });
+      await keyboard(page, "forgot password", tag);
+
+      // A real reset, with JavaScript: Auth issues the link, its button (a POST) verifies it,
+      // and the new password is typed and submitted with the keyboard.
+      const member = await person();
+      const issued = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "recovery", email: member.email }) })).json();
+      await page.goto(`${origin}/auth/confirm?token_hash=${issued.hashed_token ?? issued.properties?.hashed_token}&type=recovery`, { waitUntil: "networkidle" });
+      await keyboard(page, "reset confirmation", tag);
+      await page.click('main button[type="submit"]');
+      await page.waitForURL((u) => u.pathname === "/reset-password");
+      await page.waitForSelector("#password", { state: "visible" });
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} pressing the reset link's button goes to choose a new password`, new URL(page.url()).pathname === "/reset-password");
+      await audit(page, "reset page", tag);
+      await structure(page, "reset page", tag);
+      await keyboard(page, "reset page", tag);
+      await page.fill("#password", "short");
+      await page.fill("#confirm", "short");
+      await page.keyboard.press("Enter");
+      await page.waitForURL((u) => u.searchParams.get("error") === "too_short");
+      await page.waitForSelector("#password", { state: "visible" });
+      ok(`${tag} a short password comes back with the reason, linked to the field`, (await visibleText(page)).includes("Use at least 12 characters") && (await page.getAttribute("#password", "aria-describedby")) === "page-error password-hint" && (await page.locator("#page-error").count()) === 1);
+      await audit(page, "reset page with an error", tag);
+      const fresh = `Pw-${randomBytes(12).toString("base64url")}`;
+      secrets.add(fresh);
+      await page.focus("#password");
+      await page.keyboard.type(fresh);
+      await page.focus("#confirm");
+      await page.keyboard.type(fresh);
+      await page.keyboard.press("Enter");
+      await page.waitForURL((u) => u.pathname === "/settings/account" && u.searchParams.get("notice") === "password_reset");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} the new password is saved, then the account page says so`, (await visibleText(page)).includes("Your password was reset"));
+      await audit(page, "password and sessions, after a reset", tag);
+      await structure(page, "password and sessions", tag);
+      await keyboard(page, "password and sessions", tag);
+      for (const [name, path] of [
+        ["password and sessions, wrong current password", "/settings/account?error=wrong_password"],
+        ["password and sessions, sign in again", "/settings/account?error=reauthenticate"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await context.close();
+
+      // With an authenticator, the reset page explains the verification first.
+      const guarded = await person(null, { mfa: true });
+      const mfaContext = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const mfaPage = await mfaContext.newPage();
+      const link = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "recovery", email: guarded.email }) })).json();
+      await mfaPage.goto(`${origin}/auth/confirm?token_hash=${link.hashed_token ?? link.properties?.hashed_token}&type=recovery`, { waitUntil: "networkidle" });
+      await mfaPage.click('main button[type="submit"]');
+      await mfaPage.waitForURL((u) => u.pathname === "/reset-password");
+      await mfaPage.waitForLoadState("networkidle");
+      ok(`${tag} with an authenticator, the reset page asks to verify first`, (await visibleText(mfaPage)).includes("Lost your authenticator?") && (await mfaPage.locator("#password").count()) === 0);
+      await audit(mfaPage, "reset page, authenticator first", tag);
+      await structure(mfaPage, "reset page, authenticator first", tag);
+      await keyboard(mfaPage, "reset page, authenticator first", tag);
+      await mfaContext.close();
+    }
+
+    section(`${tag}: 2f. Settings, profile and photo (M11a-3)`);
+    {
+      const member = await person();
+      const { context, page } = await signIn(browser, viewport, member);
+      for (const [name, path] of [
+        ["settings", "/settings"],
+        ["profile", "/settings/profile"],
+        ["profile, saved", "/settings/profile?notice=profile_saved"],
+        ["profile, refused name", "/settings/profile?error=display_name_reserved"],
+        ["profile, refused bio", "/settings/profile?error=bio_too_long"],
+        ["profile, refused photo", "/settings/profile?error=avatar_type"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/settings`, { waitUntil: "networkidle" });
+      await keyboard(page, "settings", tag);
+      await page.goto(`${origin}/profile`);
+      await page.waitForURL((u) => u.pathname === "/settings/profile");
+      ok(`${tag} /profile opens the profile editor`, new URL(page.url()).pathname === "/settings/profile");
+      await page.waitForLoadState("networkidle");
+      await keyboard(page, "profile", tag);
+
+      // The controls line up: the name input is the admin height, the buttons too.
+      const sizes = await page.evaluate(() => ({
+        input: document.querySelector('input[name="display_name"]').getBoundingClientRect().height,
+        buttons: [...document.querySelectorAll("main button[type=submit]")].map((b) => Math.round(b.getBoundingClientRect().height)),
+      }));
+      ok(`${tag} profile: inputs and buttons share one height`, Math.round(sizes.input) === 40 && sizes.buttons.every((h) => h === 40), JSON.stringify(sizes));
+
+      // With JavaScript: the counter follows the typing, and a value over the limit is
+      // caught before sending, with the reason linked to the field and focus on it.
+      const name = page.locator('input[name="display_name"]');
+      await name.fill("x".repeat(51));
+      ok(`${tag} the counter shows the count against the limit`, (await visibleText(page)).includes("51 / 50"));
+      await page.click("main button:has-text('Save profile')");
+      await page.waitForTimeout(300);
+      const caught = await page.evaluate(() => {
+        const input = document.querySelector('input[name="display_name"]');
+        const ids = (input.getAttribute("aria-describedby") ?? "").split(" ");
+        return { url: location.search, invalid: input.getAttribute("aria-invalid"), focused: document.activeElement === input, described: ids.some((id) => document.getElementById(id)?.textContent?.includes("Use up to 50 characters")) };
+      });
+      ok(`${tag} a too-long name is caught before sending, described and focused`, caught.url === "" && caught.invalid === "true" && caught.focused && caught.described, JSON.stringify(caught));
+      await audit(page, "profile, name caught before sending", tag);
+      await name.fill("A Collector 🎮");
+      await page.fill('textarea[name="bio"]', "Boxed handhelds.\nAnd a few consoles.");
+      await page.click("main button:has-text('Save profile')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "profile_saved");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} with JavaScript the profile saves and says so`, (await visibleText(page)).includes("Your profile is saved.") && (await visibleText(page)).includes("A Collector 🎮"));
+
+      // A photo: previewed when chosen, uploaded, shown, then removed.
+      const png = await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 30, g: 140, b: 90 } } }).png().toBuffer();
+      const big = Buffer.concat([png, Buffer.alloc(2 * 1024 * 1024 + 10)]);
+      await page.setInputFiles('input[name="avatar"]', { name: "big.png", mimeType: "image/png", buffer: big });
+      ok(`${tag} a file over 2 MB is flagged as soon as it's chosen`, (await visibleText(page)).includes("That file is over 2 MB") && (await page.getAttribute('input[name="avatar"]', "aria-invalid")) === "true");
+      await page.setInputFiles('input[name="avatar"]', { name: "photo.png", mimeType: "image/png", buffer: png });
+      ok(`${tag} a chosen photo is previewed`, (await page.locator('img[alt="The chosen photo, before uploading"]').count()) === 1);
+      await page.click("main button:has-text('Upload photo')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "avatar_saved");
+      await page.waitForLoadState("networkidle");
+      // next/image loads lazily and decodes asynchronously: wait for the file itself.
+      await page.waitForFunction(() => {
+        const img = document.querySelector('img[alt="Your current photo"]');
+        return Boolean(img?.complete && img.naturalWidth > 0);
+      }, null, { timeout: 10_000 }).catch(() => undefined);
+      const shown = await page.evaluate(() => {
+        const img = document.querySelector('img[alt="Your current photo"]');
+        return { src: img?.getAttribute("src") ?? "", complete: Boolean(img?.complete), width: img?.naturalWidth ?? -1, loading: img?.getAttribute("loading") ?? "" };
+      });
+      const fromBucket = /^http:\/\/127\.0\.0\.1:\d+\/storage\/v1\/object\/public\/avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.webp$/.test(shown.src);
+      ok(`${tag} the uploaded photo is shown, at 512 pixels from the avatars bucket`, shown.complete && shown.width === 512 && fromBucket, JSON.stringify({ complete: shown.complete, width: shown.width, loading: shown.loading, fromBucket }));
+      await audit(page, "profile with a photo", tag);
+      await structure(page, "profile with a photo", tag);
+      await page.click('button[aria-label="Account menu"]');
+      ok(`${tag} the account menu shows the photo and links to the profile editor`, (await page.locator('[role="menu"] a[href="/settings/profile"]').count()) === 1 && (await page.locator('button[aria-label="Account menu"] img').count()) === 1);
+      await page.keyboard.press("Escape");
+      await page.click("main button:has-text('Remove photo')");
+      await page.waitForURL((u) => u.searchParams.get("notice") === "avatar_removed");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} the photo is removed, and the initial shows again`, (await page.locator('img[alt="Your current photo"]').count()) === 0 && (await visibleText(page)).includes("No photo yet"));
+      ok(`${tag} and its file is gone`, psql(`select count(*) from storage.objects where bucket_id = 'avatars' and name like '${member.id}/%';`) === "0");
+
+      // M11a-4a: downloading your data, with JavaScript, from the keyboard.
+      await page.goto(`${origin}/settings/account`, { waitUntil: "networkidle" });
+      await audit(page, "account, with the data download", tag);
+      await structure(page, "account, with the data download", tag);
+      const button = page.locator("main button:has-text('Download my data')");
+      await button.focus();
+      const [file] = await Promise.all([page.waitForEvent("download"), page.keyboard.press("Enter")]);
+      const saved = await file.path();
+      const exported = JSON.parse(readFileSync(saved, "utf8"));
+      ok(`${tag} the data download arrives as a file, complete, for this account`, file.suggestedFilename().startsWith(`my-game-dex-${member.handle}-`) && exported.complete === true && exported.account?.id === member.id);
+      ok(`${tag} and the page stays where it was`, new URL(page.url()).pathname === "/settings/account");
+      await page.goto(`${origin}/settings/account?error=export_too_many`, { waitUntil: "networkidle" });
+      ok(`${tag} a refused download says why`, (await visibleText(page)).includes("three times in the last hour"));
+      await audit(page, "account, download refused", tag);
+      await context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -525,6 +739,8 @@ try {
         ["account with history", `/admin/accounts?handle=${collector.handle}`],
         ["account search refused", "/admin/accounts?handle=x"],
         ["audit log", "/admin/audit"],
+        ["invitations", "/admin/invitations"],
+        ["invitations with a refusal", "/admin/invitations?error=resend_too_soon"],
         ["audit log by kind and outcome", "/admin/audit?kind=accounts&outcome=succeeded"],
         ["audit log with a refused filter", "/admin/audit?kind=everything"],
         ["ownership", "/admin/ownership"],
@@ -555,6 +771,8 @@ try {
       ok(`${tag} the account shows its moderation summary and history`, (await visibleText(a.page)).includes("Browser checks: appeal") && /Reinstated\s+Once/.test(await visibleText(a.page)));
       await a.page.goto(`${origin}/admin/audit?kind=accounts`, { waitUntil: "networkidle" });
       await keyboard(a.page, "filtered audit log", tag);
+      await a.page.goto(`${origin}/admin/invitations`, { waitUntil: "networkidle" });
+      await keyboard(a.page, "invitations page", tag);
       await a.page.goto(`${origin}/settings/security/verify?next=%2Fadmin`, { waitUntil: "networkidle" });
       await keyboard(a.page, "verification page", tag);
       await a.context.close();
@@ -706,6 +924,10 @@ create temp table m10a_requests on commit drop as select * from public.catalog_c
 delete from public.releases where product_code = '${SUBMISSION_CODE}' or id in (select release_id from m10a_requests);
 delete from public.catalog_change_requests where id in (select id from m10a_requests);
 commit;`);
+  psql(`delete from private.account_invitations where email like '${PREFIX}-%';`);
+  for (const id of psql(`select coalesce(string_agg(id::text, ','), '') from auth.users where email like '${PREFIX}-invitee-%';`).split(",").filter(Boolean)) {
+    await fetch(`${api}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: service });
+  }
   const ids = await deleteUsers();
   const list = ids.map((id) => `'${id}'`).join(",") || "null";
   psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}); commit;`);
