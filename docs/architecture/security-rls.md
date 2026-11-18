@@ -1677,7 +1677,7 @@ Local development only. Design: [ADR-065](architecture-decisions.md#adr-065-the-
 - **Leftovers (new in the workflow, `removeLeftovers`).** After each change, files in the user's own folder other than the current photo and **older than ten minutes** are removed with the secret key: an old file whose removal failed, or a file a crash left between upload and activation. A recent file is kept, because another change in progress may be about to activate it. Best effort; a failure is logged as one fixed line, naming nobody, and the next change retries. Only after the session is verified, only in that user's folder.
 - **Removal** clears the path and removes the file. A public file can stay in browser and CDN caches for a while, and the page says so.
 - **An ended session.** After signing out everywhere (or a reset), an old device's still-unexpired access token **can't** change the photo (the workflow asks Auth), but **can** still save the name and bio until it expires (PostgREST trusts the token, as M11a-2 found for collector writes). Observed and printed by `app:profile-checks`.
-- **Not added:** per-user upload rate limits (each upload decodes an image of up to 16 megapixels), an operator sweep of orphaned files across all folders, and a page for public profiles (`/u/[handle]`, M11c). `/profile` sends a signed-in person to the editor.
+- **Not added in M11a-3:** per-user upload rate limits (added in M11a-4a: see [Personal data export](#personal-data-export-m11a-4a)), an operator sweep of orphaned files across all folders, and a page for public profiles (`/u/[handle]`, M11c). `/profile` sends a signed-in person to the editor.
 
 **Authenticators and staff.** Profile changes are ordinary collector writes: like the rest of the collector app they don't ask an account with an authenticator to verify first (a session at aal1 can save them), and staff have no way to edit anyone else's profile here. Password, factor and staff protections are unchanged.
 
@@ -1689,11 +1689,79 @@ Recorded, not implemented. **The first two need an explicit decision before real
 
 | Decision | Where it stands |
 | --- | --- |
-| **Ending access tokens at once** after signing out everywhere or a password reset | They stay valid for ordinary reads and collector writes (now including the name and bio) until they expire, an hour at most (M11a-2). Options: check the session in `is_active_user` (a shared helper used by every policy), shorten `jwt_expiry`, or accept and document. Staff functions and the photo already refuse an ended session |
-| **Hosted "require current password"** for a password change | Auth accepts a change from any session signed in within a day without the current password (the app asks for it; Auth doesn't). Evaluate the hosted setting, which the local CLI can't set, on staging |
+| **Ending access tokens at once** after signing out everywhere or a password reset | They stay valid for ordinary reads and collector writes (now including the name and bio) until they expire, an hour at most (M11a-2). Staff functions, the photo and the data export already refuse an ended session. **Analysed in M11a-4a,** with a recommended design: [session-and-password-decisions.md](session-and-password-decisions.md) |
+| **Hosted "require current password"** for a password change | Auth accepts a change from any session signed in within a day without the current password (the app asks for it; Auth doesn't). **Analysed in M11a-4a:** [session-and-password-decisions.md § 4](session-and-password-decisions.md#4-the-password-change-policy) |
 | **Email response timing** | Reset requests and invitations answer alike in at least two seconds; a real SMTP sending slower than that would stand out. Measure on staging with the real provider |
-| **Retention and self-service deletion (D10)** | Nothing is deleted by age; account deletion exists only as the server workflow (`deleteAccountWithAvatars`) with no route. M11a-4 |
-| **Minimum age (D12)** | No age is collected or checked. Public registration stays closed until it's decided |
+| **Retention and self-service deletion (D10)** | Nothing is deleted by age; account deletion exists only as the server workflow (`deleteAccountWithAvatars`) with no route. **Decision document, M11a-4a:** [account-deletion-d10.md](account-deletion-d10.md) |
+| **Minimum age (D12)** | No age is collected or checked. Public registration stays closed until it's decided ([account-deletion-d10.md § 6](account-deletion-d10.md#6-d12-minimum-age--still-open)) |
+
+## Personal data export (M11a-4a)
+
+Local development only. Design: [ADR-066](architecture-decisions.md#adr-066-the-data-export-is-a-streamed-download-read-as-the-person-and-expensive-requests-are-counted-in-the-database). `POST /settings/account/export` (a route handler; `src/features/export`) answers with the signed-in person's data as one JSON file (`my-game-dex-export`, version 1).
+
+**What's in it.**
+- The account id and email (from the verified token), the profile and handle, and preferences.
+- Authenticators: type, status, name and date only, never a secret.
+- Every copy in the collection, one entry per copy (two copies of a release are two entries), with:
+  - its status, completeness, conditions, and its recorded pieces with their condition;
+  - its private details: price and currency, date acquired, storage location and notes;
+  - its release (platform, region, edition, variant, local title, publisher, format, media count, packaging, languages, date, product code and barcode) and its game.
+- The person's catalog submissions, with status, their note, the reviewer's note and what was submitted.
+
+A copy on a release the catalog no longer shows keeps the title and platform the person may still see (`get_my_preserved_titles`); any other is marked `unavailable`.
+
+**Not in it**, and listed in the file: follows and blocks, notifications, security and audit records, other people's data (no reviewer is named), and any password, token or factor secret. The file says it isn't a complete answer to a legal access request.
+
+**How it's read.** Only as the person, with the publishable key and their session:
+- `get_my_account`, `user_preferences`, the owner-only collection tables (each read also names the owner, on top of RLS), the catalog as they may read it, and the existing submission functions;
+- no secret key, no Auth Admin call, and no new database read.
+
+**Paging and failure.**
+- Copies are read 200 at a time by id (keyset). Each page is four bounded reads, with pieces fetched 1,000 rows at a time, so a copy present throughout appears exactly once. The export stops at the 100,000-copy ceiling.
+- The response is streamed, so memory stays at one page.
+- A read that fails part way ends the download unfinished. A complete file always ends with `"complete": true`.
+- It's not a snapshot: a change made during the download may or may not appear.
+
+**Who, and how often.**
+- Same site only: `Origin` must match, and `Sec-Fetch-Site` must be same-origin when sent. The auth cookies are SameSite=Lax in any case.
+- The account is the verified token's subject. Nothing in the request is read.
+- An account with an authenticator must have verified it (aal2), as for a password change.
+- Auth must still know the session (`getUser`), so an ended session's unexpired token gets nothing.
+- A suspended account can still download its data.
+- **Three downloads an hour per account**, counted in the database (`take_request_slot`).
+- The response is `private, no-store`, with `X-Robots-Tag: noindex`, `nosniff` and `no-referrer`. It's an attachment named `my-game-dex-{handle}-{date}.json`.
+
+**Request limits** (migration `20261127100000_m11a4a_request_limits`).
+- `take_request_slot(kind)` is a definer function for signed-in users, with fixed kinds and limits: `data_export` three an hour, `avatar_upload` ten an hour.
+- It counts against the caller only and is serialized per account and kind. A refusal isn't counted, and expired times are removed on the next call.
+- The table, `private.request_slots`, holds only the user, the kind and the time. It has no client access and goes with the account.
+
+**Photo hardening (M11a-4a).**
+- **Ten uploads an hour.** The slot is taken before the image is read or decoded. Removing a photo isn't limited.
+- **The larger body limit now applies to `/settings/profile` only.** The proxy refuses any other POST that declares a body over 1 MB (413). A body without a declared length still meets Next.js's own limit of 2 MB plus 64 KB.
+- **Leftovers are judged by Storage's clock**, from the `Date` header of its own list response, not the app's. A difference between the two clocks can't make a file just uploaded look ten minutes old. Without a readable `Date`, nothing is removed. The "never the current photo" filter (M11a-3's equivalent mutant) is now covered by a unit test of the pure `leftoverPaths`.
+- **Concurrent replacements stay safe.** Each upload has its own name, and `set_avatar_path` locks the profile row and returns the previous path, so whichever activates second removes the first. A file still being activated is under ten minutes old, so it's kept.
+- **Not changed:** the 16-megapixel ceiling, decoding concurrency across accounts, and an operator sweep of all folders.
+
+**Tests.**
+- `export:test` (8): shaping, statuses, preserved copies, that nothing secret or internal is shaped in, the file name, and that the export code uses no secret key, no Auth Admin and no request-supplied id.
+- `profile:test` (12): adds the Storage-clock leftovers and the body-limit rule.
+- `42_request_slots` (17).
+- `app:export-checks` (57):
+  - the page;
+  - a collection of 1,053 copies with 4,202 recorded pieces, exported completely and once each across every page boundary, including two copies of one release and every field;
+  - another account's data absent in both directions, including with another account's id in the request;
+  - the headers;
+  - signed-out, GET, cross-site, missing-Origin and cross-site fetch-metadata requests refused, without using the allowance;
+  - the three-an-hour limit;
+  - an account with an authenticator at aal1 sent to verify, an ended session refused, and a suspended account served;
+  - failures before and part way through, never marked complete;
+  - ten photo uploads then a refusal;
+  - the 1 MB body limit elsewhere and 2 MB on the profile page.
+- `app:a11y-checks`: downloads the file with JavaScript, from the keyboard.
+- 6 app mutations (`--set m11a4a`).
+
+Analysed in M11a-4a, nothing implemented: [ended sessions and the password policy](session-and-password-decisions.md), and [D10 deletion and retention](account-deletion-d10.md).
 
 ## Production launch prerequisites (M8)
 
@@ -1703,7 +1771,8 @@ Recorded, not implemented. **The first two need an explicit decision before real
 | --- | --- |
 | **Invite-only registration (M11a-1):** hosted `[auth] enable_signup = false` with the email provider **left on** (turning it off also blocks password sign-in and recovery, M11a-0); the invitation template (`supabase/templates/invite.html`) set in hosted Auth; `SUPABASE_SECRET_KEY` set server-only on the host; Auth audit logs still written to the database (the password step needs them); then rerun `db-invitation-checks` in configuration B and `app:invitation-checks` against staging | Tested locally only. Real invitations wait for hosting, SMTP and these checks |
 | **Password recovery (M11a-2):** the recovery template (`supabase/templates/recovery.html`) set in hosted Auth; the site URL and redirect allow-list naming only the app's origin; `secure_password_change` on; `otp_expiry` an hour; SMTP whose sending time doesn't stand out (or a longer floor); consider Auth's "password changed" notification email; then rerun `db-password-checks` (in configuration B) and `app:password-checks` against staging | Tested locally only. Without the template, Auth's default email links to a GET that spends the token |
-| **Profile and photo (M11a-3):** `SUPABASE_SECRET_KEY` server-only on the host (the avatar workflow uses it for the avatars bucket and `set_avatar_path` only); the `avatars` bucket created by the migration as public, WebP only, 2 MB; the Server Action body limit kept at 2 MB plus 64 KB, and any proxy or CDN in front allowing that much; per-user upload rate limits; then rerun `app:profile-checks` against staging | Tested locally only. Uploads decode images server-side |
+| **Profile and photo (M11a-3):** `SUPABASE_SECRET_KEY` server-only on the host (the avatar workflow uses it for the avatars bucket and `set_avatar_path` only); the `avatars` bucket created by the migration as public, WebP only, 2 MB; the Server Action body limit kept at 2 MB plus 64 KB, and any proxy or CDN in front allowing that much for `/settings/profile` only; then rerun `app:profile-checks` and `app:export-checks` against staging | Tested locally only. Uploads decode images server-side |
+| **Data export (M11a-4a):** the hosting platform must not buffer or cache `/settings/account/export` (streamed, `no-store`) and must allow a long enough response for a large collection; then rerun `app:export-checks` against staging | Tested locally only |
 | **Enable TOTP on the hosted project** (`[auth.mfa.totp]`), then rerun `31_auth_contract`, `db-mfa-checks`, `db-owner-checks`, `db-ownership-checks` and `app:admin-checks` against staging | Local only so far (D19). Without it no staff member can act |
 | **Infrastructure key holders (D18):** name the people holding the database password, the Auth secret key and dashboard access; require MFA on dashboard accounts; enable `pgaudit` for DDL and writes to the Owner, staff and audit tables; alert on Owner changes, recoveries and trigger refusals in the server log | `postgres`, superusers and the secret key bypass every protection here |
 | **Rehearse the [runbook](../operations/owner-recovery-runbook.md) on staging**, each scenario end to end, including the Admin API factor removal | The procedures are tested locally by the suites, not by people |
@@ -1724,7 +1793,7 @@ Recorded, not implemented. **The first two need an explicit decision before real
 - **Reset and change requests reach Auth from the server's address,** so Auth's per-IP limits count every visitor together.
 - **An ended session's access token can still save the name and bio** until it expires (M11a-3), like other collector writes; it can't change the photo.
 - **Display names may say "Admin", "Moderator" or "Staff".** The database refuses only names presenting as the platform (M2); reserved staff words apply to handles. A staff-impersonation rule for display names would be a new policy (and a database change), not made in M11a-3.
-- **No per-user rate limit on photo uploads** (M11a-3): each one decodes an image of up to 16 megapixels on the server.
+- **Photo uploads are limited to ten an hour per account** (M11a-4a), but each still decodes an image of up to 16 megapixels on the server, and decoding across accounts isn't limited.
 
 ## Reference data, imports and system (M10d)
 

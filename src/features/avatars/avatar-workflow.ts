@@ -178,6 +178,25 @@ async function setAvatarPath(config: AvatarConfig, userId: string, path: string 
 export const LEFTOVER_AGE_MS = 10 * 60 * 1000;
 
 /**
+ * Which of a folder's files are leftovers (M11a-3; pure since M11a-4a, so it's tested
+ * alone): not the current avatar, and created more than LEFTOVER_AGE_MS before
+ * `storageNow`, Storage's own clock (its response's Date header), so a difference between
+ * the app's clock and Storage's can't make a file just uploaded look old.
+ */
+export function leftoverPaths(
+  objects: { name?: unknown; created_at?: unknown }[],
+  userId: string,
+  current: string | null,
+  storageNow: number,
+): string[] {
+  return objects
+    .filter((object) => typeof object.name === "string" && typeof object.created_at === "string")
+    .filter((object) => storageNow - Date.parse(object.created_at as string) > LEFTOVER_AGE_MS)
+    .map((object) => `${userId}/${object.name as string}`)
+    .filter((path) => path !== current);
+}
+
+/**
  * M11a-3: removes files left in the user's own folder by an earlier change that failed
  * part way (an old file that couldn't be removed, or a crash between upload and
  * activation), so a retry or the next change cleans up. Never the current avatar, and
@@ -194,12 +213,10 @@ async function removeLeftovers(config: AvatarConfig, userId: string, current: st
     });
     if (!listResponse.ok) return false;
     const objects = (await listResponse.json()) as { name?: string; created_at?: string | null }[];
-    const now = Date.now();
-    const leftovers = objects
-      .filter((object) => typeof object.name === "string" && object.created_at && now - Date.parse(object.created_at) > LEFTOVER_AGE_MS)
-      .map((object) => `${userId}/${object.name}`)
-      .filter((path) => path !== current);
-    return await removeObjects(config, leftovers);
+    // Storage's clock, not the app's. Without a readable Date header nothing is removed.
+    const storageNow = Date.parse(listResponse.headers.get("date") ?? "");
+    if (!Number.isFinite(storageNow)) return false;
+    return await removeObjects(config, leftoverPaths(objects, userId, current, storageNow));
   } catch {
     return false;
   }

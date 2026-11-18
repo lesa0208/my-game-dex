@@ -709,6 +709,21 @@ try {
       await page.waitForLoadState("networkidle");
       ok(`${tag} the photo is removed, and the initial shows again`, (await page.locator('img[alt="Your current photo"]').count()) === 0 && (await visibleText(page)).includes("No photo yet"));
       ok(`${tag} and its file is gone`, psql(`select count(*) from storage.objects where bucket_id = 'avatars' and name like '${member.id}/%';`) === "0");
+
+      // M11a-4a: downloading your data, with JavaScript, from the keyboard.
+      await page.goto(`${origin}/settings/account`, { waitUntil: "networkidle" });
+      await audit(page, "account, with the data download", tag);
+      await structure(page, "account, with the data download", tag);
+      const button = page.locator("main button:has-text('Download my data')");
+      await button.focus();
+      const [file] = await Promise.all([page.waitForEvent("download"), page.keyboard.press("Enter")]);
+      const saved = await file.path();
+      const exported = JSON.parse(readFileSync(saved, "utf8"));
+      ok(`${tag} the data download arrives as a file, complete, for this account`, file.suggestedFilename().startsWith(`my-game-dex-${member.handle}-`) && exported.complete === true && exported.account?.id === member.id);
+      ok(`${tag} and the page stays where it was`, new URL(page.url()).pathname === "/settings/account");
+      await page.goto(`${origin}/settings/account?error=export_too_many`, { waitUntil: "networkidle" });
+      ok(`${tag} a refused download says why`, (await visibleText(page)).includes("three times in the last hour"));
+      await audit(page, "account, download refused", tag);
       await context.close();
     }
 

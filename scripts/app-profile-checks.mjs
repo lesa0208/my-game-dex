@@ -246,6 +246,9 @@ async function folder(userId) {
 
 /** Submits the photo form with a file, as a browser would. */
 async function upload(user, bytes, { name = "photo.jpg", type = "image/jpeg", headers = {}, extra = {} } = {}) {
+  // M11a-4a limits uploads to ten an hour; these checks upload more, so each starts afresh
+  // (app-export-checks.mjs tests the limit itself).
+  psql(`delete from private.request_slots where user_id = ${sql(user.id)} and kind = 'avatar_upload';`);
   const page = await user.browser.get(PROFILE);
   const form = formWith(page.html, "avatar");
   if (!form) throw new Error("no photo form");

@@ -29,6 +29,7 @@ const MESSAGES: Record<string, string> = {
   avatar_not_eligible: "Your photo can't be changed while your account isn't active.",
   avatar_failed: "Your photo couldn't be saved, and your current one is unchanged. Try again.",
   avatar_unavailable: "Photos can't be changed right now. Try again later.",
+  avatar_too_many: "You've uploaded ten photos in the last hour. Try again later.",
 };
 
 const FROM_WORKFLOW: Record<string, string> = {

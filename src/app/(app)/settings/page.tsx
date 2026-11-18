@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 const SECTIONS: { href: string; title: string; description: string; icon: LucideIcon }[] = [
   { href: "/settings/profile", title: "Profile", description: "Display name, bio, photo, handle and collection privacy", icon: UserRound },
-  { href: "/settings/account", title: "Account and password", description: "Change your password, or sign out on your other devices", icon: KeyRound },
+  { href: "/settings/account", title: "Account and password", description: "Change your password, sign out on your other devices, or download your data", icon: KeyRound },
   { href: "/settings/security", title: "Security", description: "Two-step verification with an authenticator app", icon: ShieldCheck },
 ];
 

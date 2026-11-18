@@ -24,7 +24,7 @@ import { AvatarError, avatarConfig, removeAvatar, replaceAvatar } from "./server
 const PROFILE = "/settings/profile";
 
 /** The signed-in person's verified id and their session's access token, or a redirect to sign in. */
-async function session(): Promise<{ token: string }> {
+async function session(): Promise<{ token: string; supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>> }> {
   const supabase = await createSupabaseServerClient();
   if (!supabase) redirect(withParam(PROFILE, "error", "avatar_unavailable"));
   // The token's signature is verified first; the workflow then asks Auth whether its
@@ -34,7 +34,7 @@ async function session(): Promise<{ token: string }> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) redirect(signInHref(PROFILE));
-  return { token };
+  return { token, supabase };
 }
 
 function fail(error: unknown): never {
@@ -54,7 +54,12 @@ export async function uploadAvatar(formData: FormData): Promise<void> {
   if (file.size > AVATAR_MAX_BYTES) redirect(withParam(PROFILE, "error", "avatar_too_large"));
   const config = avatarConfig();
   if (!config) redirect(withParam(PROFILE, "error", "avatar_unavailable"));
-  const { token } = await session();
+  const { token, supabase } = await session();
+  // M11a-4a: ten uploads an hour per account, counted in the database before the image is
+  // read or decoded (each can be up to 16 megapixels). Removing a photo isn't counted.
+  const slot = await supabase.rpc("take_request_slot", { p_kind: "avatar_upload" });
+  if (slot.error) redirect(withParam(PROFILE, "error", "avatar_failed"));
+  if ((slot.data as { allowed?: boolean } | null)?.allowed !== true) redirect(withParam(PROFILE, "error", "avatar_too_many"));
 
   let result: Awaited<ReturnType<typeof replaceAvatar>>;
   try {

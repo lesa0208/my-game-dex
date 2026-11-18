@@ -1166,6 +1166,20 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 
 **Consequences.** No migration. The ended-session gap from M11a-2 now also covers name and bio saves (not the photo). Per-user upload rate limits and a global orphan sweep remain. Deferred security decisions are listed in [security-rls.md](security-rls.md#security-decisions-deferred-m11a-3).
 
+### ADR-066: The data export is a streamed download read as the person, and expensive requests are counted in the database
+
+**Status:** accepted (M11a-4a). **Context:** collectors need a portable copy of their own data, including private purchase details, without a privileged read path; uploads and exports are expensive enough to need per-account limits that hold across app instances.
+
+**Decision.**
+- **A POST route handler** (`/settings/account/export`), not a Server Action, because the answer is a file download; it checks the origin itself, since Next.js's Server Action check doesn't apply to route handlers.
+- **Read as the person**, with the publishable key, through existing owner-scoped reads (RLS, `get_my_account`, `get_my_preserved_titles`, the submission functions). No service role, no new read function.
+- **Streamed JSON in pages of 200 copies**, keyset by id, with a final `"complete": true`; a failure ends the stream unfinished rather than producing a file that looks complete.
+- **Stronger than ordinary reads:** aal2 for accounts with an authenticator, and a live-session check with Auth, because an export is a bulk copy of private data.
+- **`take_request_slot`**, a small definer function over a private table, counts exports (3 an hour) and photo uploads (10 an hour) per account. Fixed kinds and limits; nothing the client chooses.
+- **The 2 MB action body limit is narrowed to `/settings/profile`** by the proxy, which refuses other POSTs that declare more than 1 MB.
+
+**Consequences.** One migration (a table and a function). The export is a technical copy, not a legal access response (D10). Revoked sessions can still read and write ordinary data elsewhere until their token expires; the narrow fix is analysed in [session-and-password-decisions.md](session-and-password-decisions.md), and deletion and retention in [account-deletion-d10.md](account-deletion-d10.md), both for decision.
+
 ## Risks to watch
 
 | Risk | Mitigation |

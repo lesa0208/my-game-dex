@@ -144,3 +144,34 @@ test("profile edits never use the secret key; photos use it only through the wor
   assert.equal(workflow.match(/auth\/v1\/admin/g)?.length, 1);
   assert.match(workflow, /export async function deleteAccountWithAvatars[\s\S]*auth\/v1\/admin\/users/);
 });
+
+test("leftovers are judged by Storage's clock, and never include the current photo (M11a-4a)", async () => {
+  const { leftoverPaths, LEFTOVER_AGE_MS } = await import("../avatars/avatar-workflow.ts");
+  const user = "11111111-2222-4333-8444-555555555555";
+  const storageNow = Date.parse("2026-11-18T12:00:00Z");
+  const at = (minutesAgo) => new Date(storageNow - minutesAgo * 60_000).toISOString();
+  const objects = [
+    { name: "old.webp", created_at: at(60) },
+    { name: "fresh.webp", created_at: at(1) },
+    { name: "current.webp", created_at: at(60) },
+    { name: "edge.webp", created_at: new Date(storageNow - LEFTOVER_AGE_MS).toISOString() },
+    { name: "folder", created_at: null },
+  ];
+  assert.deepEqual(leftoverPaths(objects, user, `${user}/current.webp`, storageNow), [`${user}/old.webp`]);
+  // An app clock an hour ahead doesn't matter: only Storage's time is used.
+  assert.deepEqual(leftoverPaths([{ name: "just-uploaded.webp", created_at: at(0) }], user, null, storageNow), []);
+  // Even if Storage's clock were far ahead, the current photo is never a leftover.
+  assert.deepEqual(leftoverPaths([{ name: "current.webp", created_at: at(0) }], user, `${user}/current.webp`, storageNow + 3_600_000), []);
+});
+
+test("only the profile page may send a body over 1 MB (M11a-4a)", async () => {
+  const { bodyTooLarge, DEFAULT_BODY_LIMIT } = await import("../../lib/body-limit.ts");
+  assert.equal(DEFAULT_BODY_LIMIT, 1024 * 1024);
+  assert.equal(bodyTooLarge("POST", "/settings/profile", String(2 * 1024 * 1024)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/account", String(DEFAULT_BODY_LIMIT + 1)), true);
+  assert.equal(bodyTooLarge("POST", "/collection/add", String(DEFAULT_BODY_LIMIT)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/profile/", String(2 * 1024 * 1024)), true, "an exact path, not a prefix");
+  assert.equal(bodyTooLarge("GET", "/settings/account", String(5 * 1024 * 1024)), false);
+  assert.equal(bodyTooLarge("POST", "/settings/account", null), false, "no length: Next.js's own limit applies");
+  assert.equal(bodyTooLarge("POST", "/settings/account", "nonsense"), false);
+});

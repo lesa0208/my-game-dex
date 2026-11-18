@@ -5,7 +5,7 @@
  * For each violation: change one source file, build, run its suite (which must fail),
  * restore the file, and check it's byte-for-byte the original.
  *
- *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3] [--log file] [--only name,...]
+ *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3|m11a4a] [--log file] [--only name,...]
  *   node scripts/app-mutation-checks.mjs --recover
  *
  * Opens and closes with a clean baseline (a build and a passing suite). About four
@@ -67,6 +67,52 @@ const m11a3 = [
     to: `<p className="mt-2 text-sm break-words whitespace-pre-line" dangerouslySetInnerHTML={{ __html: profile.bio }} />`,
   },
 ].map((m) => ({ ...m, set: "m11a3", suite: "app-profile-checks.mjs" }));
+
+const EXPORT_ROUTE = "src/app/(app)/settings/account/export/route.ts";
+
+/**
+ * M11a-4a: the export route's checks (same site, verified authenticator, a session Auth
+ * still knows, the hourly limit), the photo upload limit and the narrowed body limit.
+ * Checked by app:export-checks.
+ */
+const m11a4a = [
+  {
+    name: "the export accepts a request from another site",
+    file: EXPORT_ROUTE,
+    from: `  if (!sameOrigin(request)) return new NextResponse(`,
+    to: `  if (!sameOrigin(request) && false) return new NextResponse(`,
+  },
+  {
+    name: "the export skips the authenticator",
+    file: EXPORT_ROUTE,
+    from: `  if (!level || (level.nextLevel === "aal2" && level.currentLevel !== "aal2")) {`,
+    to: `  if (!level) {`,
+  },
+  {
+    name: "the export trusts an ended session's token",
+    file: EXPORT_ROUTE,
+    from: `  if (liveError || live.user?.id !== userId) return to(SIGN_IN);`,
+    to: `  void liveError; void live;`,
+  },
+  {
+    name: "the export has no hourly limit",
+    file: EXPORT_ROUTE,
+    from: `  if ((slot.data as { allowed?: boolean } | null)?.allowed !== true) return back("export_too_many");`,
+    to: `  void slot.data;`,
+  },
+  {
+    name: "photo uploads have no hourly limit",
+    file: "src/features/avatars/actions.ts",
+    from: `  if ((slot.data as { allowed?: boolean } | null)?.allowed !== true) redirect(withParam(PROFILE, "error", "avatar_too_many"));`,
+    to: `  void slot.data;`,
+  },
+  {
+    name: "every page accepts the larger body",
+    file: "src/lib/body-limit.ts",
+    from: `  if (method !== "POST" || LARGE_BODY_PATHS.has(pathname)) return false;`,
+    to: `  if (method !== "POST" || LARGE_BODY_PATHS.has(pathname) || pathname.length > 0) return false;`,
+  },
+].map((m) => ({ ...m, set: "m11a4a", suite: "app-export-checks.mjs" }));
 
 /** Each: a violation of a rule M11a-2 relies on, as the smallest plausible code change. */
 const m11a2 = [
@@ -132,7 +178,7 @@ const m11a2 = [
   },
 ].map((m) => ({ ...m, set: "m11a2", suite: "app-password-checks.mjs" }));
 
-export const mutations = [...m11a2, ...m11a3];
+export const mutations = [...m11a2, ...m11a3, ...m11a4a];
 
 function run(command, args, label) {
   const started = Date.now();
