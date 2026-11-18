@@ -3,8 +3,8 @@
 import { useActionState } from "react";
 
 import { FormError } from "@/components/auth/form-error";
+import { PasswordFields } from "@/components/auth/password-fields";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { FormState } from "@/features/auth/actions";
 import { setInvitationPassword } from "@/features/invitations/onboarding";
 
@@ -18,31 +18,7 @@ export function PasswordForm() {
   return (
     <form action={action} className="flex flex-col gap-4" noValidate>
       <FormError id="password-error" message={state.error} />
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="password" className="text-sm font-medium">
-          New password
-        </label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          className="h-10"
-          aria-describedby={described}
-          aria-invalid={state.error ? true : undefined}
-        />
-        <p id="password-hint" className="text-xs text-muted-foreground">
-          At least 12 characters. A few unrelated words make a strong one.
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="confirm" className="text-sm font-medium">
-          The same password again
-        </label>
-        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" required minLength={12} className="h-10" aria-invalid={state.error ? true : undefined} />
-      </div>
+      <PasswordFields describedBy={described} invalid={Boolean(state.error)} />
       <Button type="submit" size="lg" className="h-10 self-start px-4" disabled={pending}>
         {pending ? "Saving…" : "Set password"}
       </Button>

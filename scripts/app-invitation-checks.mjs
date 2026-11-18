@@ -115,7 +115,7 @@ try {
   }
 
   section("Links that can't be used");
-  for (const [label, path] of [["a malformed token", "/auth/confirm?token_hash=x&type=invite"], ["another link type", "/auth/confirm?token_hash=abcdefghijklmnop&type=recovery"], ["no token", "/auth/confirm"]]) {
+  for (const [label, path] of [["a malformed token", "/auth/confirm?token_hash=x&type=invite"], ["another link type", "/auth/confirm?token_hash=abcdefghijklmnop&type=magiclink"], ["no token", "/auth/confirm"]]) {
     check(`${label} gets the generic page`, visible((await new Browser().get(path)).html).includes("This link can't be used"));
   }
 

@@ -15,7 +15,8 @@
  * reset: config.toml is supabase/config.toml with the project id changed, every port moved
  * up by 1000, and Studio, analytics and the edge runtime off; migrations, pgTAP tests and
  * email templates are copied from supabase/. The invitation email uses
- * supabase/templates/invite.html (M11a-1), on the test stack only. Every CLI call passes
+ * supabase/templates/invite.html (M11a-1) and the reset email supabase/templates/recovery.html
+ * (M11a-2), on the test stack only. Every CLI call passes
  * --workdir .supabase-test, and the generated config is checked to name the test project
  * before anything runs.
  *
@@ -60,6 +61,11 @@ export function testConfig(source, { signup = true } = {}) {
 [auth.email.template.invite]
 subject = "You're invited to My Game Dex"
 content_path = "./supabase/templates/invite.html"
+
+# The password reset email (M11a-2), on the test stack only.
+[auth.email.template.recovery]
+subject = "Reset your My Game Dex password"
+content_path = "./supabase/templates/recovery.html"
 `;
 }
 

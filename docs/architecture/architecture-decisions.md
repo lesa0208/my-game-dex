@@ -1139,6 +1139,21 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **Timing.** Sending takes at least two seconds whether or not an email goes out, so the two answer alike; a send slower than that still stands out.
 - **A handle claim and a revocation are serialized** on the invitation row: `claim_handle` locks it before deciding (it read it without a lock, so both could succeed).
 
+### ADR-064: Password recovery is Supabase-native, verified by POST and bound to the browser that opened the link
+
+**Status:** accepted (M11a-2). **Context:** members need to reset a forgotten password, change it, and end other sessions, without the app learning or revealing who has an account, and without a reset weakening TOTP or staff protections. Auth's own reset link is spent by a GET (M11a-0), and its `/recover` answer differs for an address with an account when asked twice in a minute.
+
+**Decision.**
+- **Supabase Auth's recovery, as the person.** `resetPasswordForEmail`, `verifyOtp({ type: "recovery" })` and `updateUser`, with the publishable key only: no secret key, no Auth Admin call, nothing that bypasses Auth's rules.
+- **One answer.** `/forgot-password` answers every address alike, whatever Auth says, in at least two seconds.
+- **POST-verified links.** The template links to `/auth/confirm` (shared with invitations); the GET shows a button, the POST signs out whoever is signed in here, then verifies.
+- **Bound to the browser and the hour.** An httpOnly cookie holds the new recovery session's id; `/reset-password` accepts only that session, within an hour of the link. Anywhere else, the current password is needed.
+- **TOTP first.** A recovery session is aal1; with an authenticator, the existing verification page takes it to aal2 and back. No factor is removed; a lost one is the operator's runbook.
+- **Changing** asks for the current password (checked in a detached session that's ended at once), then Auth's rules: aal2 with an authenticator, a sign-in within a day.
+- **Signing out everywhere** is Auth's global sign-out, separate from signing out here. The pages say that a device in use can keep working for up to an hour: access tokens stay valid until they expire (demonstrated in M11a-2), though staff functions stop at once.
+
+**Consequences.** No database change. Auth's behaviour is pinned by `db-password-checks`, to be rerun on staging. Residual risks (timing, tokens until expiry, Auth accepting a password change from any day-old session without the current password) are listed under [Production launch prerequisites](security-rls.md#production-launch-prerequisites-m8).
+
 ## Risks to watch
 
 | Risk | Mitigation |

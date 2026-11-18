@@ -111,7 +111,7 @@ export function TabNav({ label, items }: { label: string; items: { href: string;
 }
 
 /** The outcome of the last action, from the page's URL: a fixed notice or error, or nothing. */
-export function PageMessage({ notice, error }: { notice: string | null; error: string | null }) {
+export function PageMessage({ notice, error, errorId }: { notice: string | null; error: string | null; errorId?: string }) {
   return (
     <>
       {notice ? (
@@ -123,7 +123,7 @@ export function PageMessage({ notice, error }: { notice: string | null; error: s
       {/* Always present, so an error is announced; while empty it takes back the gap above it. */}
       <div role="alert" aria-live="assertive" className="empty:-mt-5">
         {error ? (
-          <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          <p id={errorId} className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
             <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             {error}
           </p>

@@ -11,7 +11,7 @@ These are facts about the current setup (Supabase Auth, GoTrue v2.197.0 locally;
 | Fact | Consequence |
 | --- | --- |
 | A password sign-in gives a password-only session (aal1) | Without the authenticator, a person can still sign in, but every staff ability is refused: they all require a session verified with TOTP (`mfa_session_ok`) |
-| Auth refuses to change the password of an account with a verified TOTP factor from an aal1 session (`insufficient_aal`) | They can't change their password, and a password reset stalls too: the recovery session is aal1 |
+| Auth refuses to change the password of an account with a verified TOTP factor from an aal1 session (`insufficient_aal`) | They can't change their password, and a password reset stalls too: the recovery session is aal1. Since M11a-2 the reset page says so, asks for the authenticator, and tells someone who lost it to contact the operator: this runbook. Nothing in the app removes a factor |
 | Removing a factor needs a TOTP-verified session | They can't remove the lost factor themselves |
 | An operator can remove a factor with the Auth Admin API (secret key) | That's the only way out, and why it must be controlled |
 

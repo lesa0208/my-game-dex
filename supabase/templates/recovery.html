@@ -1,0 +1,10 @@
+<!--
+  The password reset email (M11a-2). Used by the isolated test stack (scripts/test-stack.mjs);
+  a hosted project sets the same template in its Auth settings before the beta. The link
+  carries the token's hash to the app's own confirmation page, which verifies it only on
+  an explicit POST, so a mail scanner fetching the link can't use the single-use token.
+-->
+<h2>Reset your My Game Dex password</h2>
+<p>Someone asked to reset the password of the My Game Dex account that uses this address.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=recovery">Choose a new password</a></p>
+<p>The link works once, for an hour. If your account uses an authenticator app, you'll need it too. If you didn't ask for this, you can ignore this email: your password stays as it is.</p>

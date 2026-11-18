@@ -115,10 +115,29 @@ async function findMailLink(address, type) {
       const message = await (await fetch(`${mailpit}/api/v1/message/${summary.ID}`)).json();
       const match = /https?:\/\/[^\s"'<>]+\/auth\/v1\/verify\?[^\s"'<>]+/.exec(`${message.Text}\n${message.HTML}`);
       if (match && match[0].includes(`type=${type}`)) return match[0].replace(/&amp;/g, "&");
+      // M11a-2: the test stack's reset template links to the app's confirmation page instead.
+      const app = /https?:\/\/[^\s"'<>]+\/auth\/confirm\?token_hash=[A-Za-z0-9_-]+&(?:amp;)?type=([a-z]+)/.exec(`${message.HTML}`);
+      if (app && app[1] === type) return app[0].replace(/&amp;/g, "&");
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return null;
+}
+
+/**
+ * A reset link's recovery session, or null. Auth's own link (the development stack's default
+ * email) is spent by a GET and returns the session in the redirect's fragment; the app's link
+ * (supabase/templates/recovery.html, M11a-2, on the test stack) carries the token's hash,
+ * which the app verifies with a POST, as done here.
+ */
+async function openRecoveryLink(link) {
+  if (link?.includes("/auth/confirm?")) {
+    const hash = new URL(link).searchParams.get("token_hash");
+    const verified = await post("/auth/v1/verify", anon, { type: "recovery", token_hash: hash });
+    return verified.ok ? (await verified.json()).access_token ?? null : null;
+  }
+  const response = await fetch(link, { redirect: "manual" });
+  return new URLSearchParams((response.headers.get("location") ?? "").split("#")[1] ?? "").get("access_token");
 }
 
 async function signupLifecycle() {
@@ -422,17 +441,14 @@ async function authBehaviour() {
   check("a reset can be requested", response.ok, `status ${response.status}`);
   const link = await findMailLink(resetUser.email, "recovery");
   check("the reset email arrives", !!link);
-  response = await fetch(link, { redirect: "manual" });
-  const location = response.headers.get("location") ?? "";
-  const recoveryToken = new URLSearchParams(location.split("#")[1] ?? "").get("access_token");
-  check("the reset link gives a recovery session", !!recoveryToken, `status ${response.status}`);
+  const recoveryToken = await openRecoveryLink(link);
+  check("the reset link gives a recovery session", !!recoveryToken);
   const resetPassword = newPassword();
   response = await fetch(`${api}/auth/v1/user`, { method: "PUT", headers: asUser(recoveryToken), body: JSON.stringify({ password: resetPassword }) });
   check("the recovery session sets a new password", response.ok, `status ${response.status}`);
   check("the previous password stops working", (await signIn(resetUser.email, resetUser.password)).status === 400);
   check("the reset password works", (await signIn(resetUser.email, resetPassword)).ok);
-  response = await fetch(link, { redirect: "manual" });
-  check("a reset link works only once", !new URLSearchParams((response.headers.get("location") ?? "").split("#")[1] ?? "").get("access_token"));
+  check("a reset link works only once", !(await openRecoveryLink(link)));
 
   section("Generic responses");
   const known = await createUser();

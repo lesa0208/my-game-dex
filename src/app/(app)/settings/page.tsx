@@ -31,8 +31,11 @@ async function AccountSettings() {
             This account isn&apos;t active. You can still view your settings and sign out.
           </p>
         ) : null}
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-4">
           <SignOutButton />
+          <Link href="/settings/account" className="text-sm text-primary-text underline underline-offset-4">
+            Password and sessions
+          </Link>
         </div>
       </section>
 

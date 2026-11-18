@@ -62,7 +62,9 @@ async function signedOut() {
   check("an outside return path is replaced", formWith(page.html, "password")?.hidden.next === "/home", formWith(page.html, "password")?.hidden.next);
   const slashes = await browser.get("/sign-in?next=%2F%2Fevil.example");
   check("a protocol-relative return path is replaced", formWith(slashes.html, "password")?.hidden.next === "/home");
-  check("no sign-up or password reset page exists", (await browser.get("/sign-up")).response.status === 404 && (await browser.get("/reset-password")).response.status === 404);
+  check("no sign-up page exists", (await browser.get("/sign-up")).response.status === 404);
+  // M11a-2 added password recovery; scripts/app-password-checks.mjs covers it.
+  check("the reset pages exist, and a visitor without a reset link can't reset", (await browser.get("/forgot-password")).response.status === 200 && !formWith((await browser.get("/reset-password")).html, "confirm"));
 }
 
 async function failedSignIns() {

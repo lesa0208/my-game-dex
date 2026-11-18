@@ -545,6 +545,86 @@ try {
       await context.close();
     }
 
+    section(`${tag}: 2e. Password recovery and account security (M11a-2)`);
+    {
+      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const page = await context.newPage();
+      for (const [name, path] of [
+        ["forgot password", "/forgot-password"],
+        ["forgot password, malformed address", "/forgot-password?error=invalid_email"],
+        ["forgot password, answered", "/forgot-password?status=sent"],
+        ["reset confirmation", "/auth/confirm?token_hash=abcdefghijklmnopqrstuvwx&type=recovery"],
+        ["an unusable reset link", "/auth/confirm?type=recovery&status=invalid"],
+        ["reset page without a link", "/reset-password"],
+        ["sign in after signing out everywhere", "/sign-in?notice=signed_out_everywhere"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}/forgot-password`, { waitUntil: "networkidle" });
+      await keyboard(page, "forgot password", tag);
+
+      // A real reset, with JavaScript: Auth issues the link, its button (a POST) verifies it,
+      // and the new password is typed and submitted with the keyboard.
+      const member = await person();
+      const issued = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "recovery", email: member.email }) })).json();
+      await page.goto(`${origin}/auth/confirm?token_hash=${issued.hashed_token ?? issued.properties?.hashed_token}&type=recovery`, { waitUntil: "networkidle" });
+      await keyboard(page, "reset confirmation", tag);
+      await page.click('main button[type="submit"]');
+      await page.waitForURL((u) => u.pathname === "/reset-password");
+      await page.waitForSelector("#password", { state: "visible" });
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} pressing the reset link's button goes to choose a new password`, new URL(page.url()).pathname === "/reset-password");
+      await audit(page, "reset page", tag);
+      await structure(page, "reset page", tag);
+      await keyboard(page, "reset page", tag);
+      await page.fill("#password", "short");
+      await page.fill("#confirm", "short");
+      await page.keyboard.press("Enter");
+      await page.waitForURL((u) => u.searchParams.get("error") === "too_short");
+      await page.waitForSelector("#password", { state: "visible" });
+      ok(`${tag} a short password comes back with the reason, linked to the field`, (await visibleText(page)).includes("Use at least 12 characters") && (await page.getAttribute("#password", "aria-describedby")) === "page-error password-hint" && (await page.locator("#page-error").count()) === 1);
+      await audit(page, "reset page with an error", tag);
+      const fresh = `Pw-${randomBytes(12).toString("base64url")}`;
+      secrets.add(fresh);
+      await page.focus("#password");
+      await page.keyboard.type(fresh);
+      await page.focus("#confirm");
+      await page.keyboard.type(fresh);
+      await page.keyboard.press("Enter");
+      await page.waitForURL((u) => u.pathname === "/settings/account" && u.searchParams.get("notice") === "password_reset");
+      await page.waitForLoadState("networkidle");
+      ok(`${tag} the new password is saved, then the account page says so`, (await visibleText(page)).includes("Your password was reset"));
+      await audit(page, "password and sessions, after a reset", tag);
+      await structure(page, "password and sessions", tag);
+      await keyboard(page, "password and sessions", tag);
+      for (const [name, path] of [
+        ["password and sessions, wrong current password", "/settings/account?error=wrong_password"],
+        ["password and sessions, sign in again", "/settings/account?error=reauthenticate"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await context.close();
+
+      // With an authenticator, the reset page explains the verification first.
+      const guarded = await person(null, { mfa: true });
+      const mfaContext = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, colorScheme: "dark" });
+      const mfaPage = await mfaContext.newPage();
+      const link = await (await fetch(`${api}/auth/v1/admin/generate_link`, { method: "POST", headers: service, body: JSON.stringify({ type: "recovery", email: guarded.email }) })).json();
+      await mfaPage.goto(`${origin}/auth/confirm?token_hash=${link.hashed_token ?? link.properties?.hashed_token}&type=recovery`, { waitUntil: "networkidle" });
+      await mfaPage.click('main button[type="submit"]');
+      await mfaPage.waitForURL((u) => u.pathname === "/reset-password");
+      await mfaPage.waitForLoadState("networkidle");
+      ok(`${tag} with an authenticator, the reset page asks to verify first`, (await visibleText(mfaPage)).includes("Lost your authenticator?") && (await mfaPage.locator("#password").count()) === 0);
+      await audit(mfaPage, "reset page, authenticator first", tag);
+      await structure(mfaPage, "reset page, authenticator first", tag);
+      await keyboard(mfaPage, "reset page, authenticator first", tag);
+      await mfaContext.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);

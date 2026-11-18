@@ -483,7 +483,8 @@ try {
       const res = await fetch(`${mailpit}/api/v1/search?query=${encodeURIComponent(`to:"${first}"`)}`);
       for (const m of ((await res.json()).messages ?? []).filter((x) => Date.parse(x.Created) >= sentAt - 2000)) {
         const body = await (await fetch(`${mailpit}/api/v1/message/${m.ID}`)).json();
-        const t = /[?&]token=([A-Za-z0-9_-]+)&(?:amp;)?type=recovery/.exec(`${body.HTML}`);
+        // Auth's default link (token=), or the app's reset template (token_hash=, M11a-2).
+        const t = /[?&]token(?:_hash)?=([A-Za-z0-9_-]+)&(?:amp;)?type=recovery/.exec(`${body.HTML}`);
         if (t) token = t[1];
       }
       if (!token) await pause(250);
