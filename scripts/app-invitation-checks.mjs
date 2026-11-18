@@ -149,6 +149,37 @@ try {
     check("the list shows it as revoked", visible((await admin.browser.get("/admin/invitations")).html).includes("Revoked"));
   }
 
+  section("An address with an account looks like any other on the page (M11a-2)");
+  {
+    // The collector's address has an account; the other has none. Same reason, same page.
+    const other = address("parity");
+    const before = await fetch(`${mailpit}/api/v1/search?query=${encodeURIComponent(`to:"${collector.email}"`)}`).then((r) => r.json());
+    const timed = async (email) => {
+      const t0 = performance.now();
+      const made = await createFromPage(admin, email, "Parity");
+      return { ...made, ms: performance.now() - t0 };
+    };
+    const known = await timed(collector.email);
+    const unknown = await timed(other);
+    check("both are answered with the same notice", location(known.res.response) === "/admin/invitations?notice=invited" && location(unknown.res.response) === location(known.res.response),
+      `${location(known.res.response)} ${location(unknown.res.response)}`);
+    console.log(`     time to answer: address with an account ${known.ms.toFixed(0)} ms, without ${unknown.ms.toFixed(0)} ms`);
+    check("both take at least the 2-second floor, within 250 ms of each other", known.ms >= 2000 && unknown.ms >= 2000 && Math.abs(known.ms - unknown.ms) < 250);
+    check("the address without an account gets its email", Boolean(await inviteLink(other, unknown.sent)));
+    await pause(1000);
+    const after = await fetch(`${mailpit}/api/v1/search?query=${encodeURIComponent(`to:"${collector.email}"`)}`).then((r) => r.json());
+    check("the account's address gets none", (after.messages ?? []).length === (before.messages ?? []).length);
+    const page = await admin.browser.get("/admin/invitations");
+    const ids = psql(`select string_agg(id::text, ',' order by email = '${other}') from private.account_invitations where email in ('${collector.email.toLowerCase()}', '${other}') and reason = 'Parity';`).split(",");
+    // Each list item, without its masked address and times.
+    const item = (id) => {
+      const start = page.html.lastIndexOf("<li", page.html.indexOf(id));
+      const end = page.html.indexOf("</li>", page.html.indexOf(id));
+      return visible(page.html.slice(start, end)).replace(/\S+\*\*\*@\S+/g, "").replace(/\d/g, "#");
+    };
+    check("and the two list entries read the same", ids.length === 2 && item(ids[0]) === item(ids[1]), `${item(ids[0])} | ${item(ids[1])}`);
+  }
+
   section("A stale verification asks for a new one, and nothing is replayed");
   {
     stale(admin);
@@ -161,7 +192,7 @@ try {
   check(`the checks ran to the end (${error.message})`, false);
 } finally {
   stopApp();
-  psql(`delete from private.account_invitations where email like 'appinv-${tag}-%';`);
+  psql(`delete from private.account_invitations where email like 'appinv-${tag}-%' or reason = 'Parity';`);
   const ids = psql(`select string_agg(id::text, ',') from auth.users where email like 'appinv-${tag}-%';`).split(",").filter(Boolean);
   const key = stack.SECRET_KEY ?? stack.SERVICE_ROLE_KEY;
   for (const id of ids) await fetch(`${stack.API_URL}/auth/v1/admin/users/${id}`, { method: "DELETE", headers: { apikey: key, Authorization: `Bearer ${key}` } });

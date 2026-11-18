@@ -76,10 +76,13 @@ insert into approved_function_grants values
   ('get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)', 'authenticated'), ('get_staff_overview()', 'authenticated'),
   -- M11a-1: invitations for administrators (recent MFA for every write), and the invitee's own
   -- onboarding. Each checks the caller itself.
-  ('create_account_invitation(text,text)', 'authenticated'), ('record_invitation_delivery(uuid,text,boolean)', 'authenticated'),
+  ('create_account_invitation(text,text)', 'authenticated'),
   ('request_invitation_resend(uuid,text)', 'authenticated'), ('request_invitation_revocation(uuid,text)', 'authenticated'),
-  ('retry_invitation_revocation(uuid)', 'authenticated'), ('reconcile_invitation(uuid)', 'authenticated'),
+  ('retry_invitation_revocation(uuid)', 'authenticated'),
   ('get_account_invitations(integer,uuid)', 'authenticated'), ('get_my_onboarding()', 'authenticated'), ('complete_my_password_setup()', 'authenticated'),
+  -- M11a-2: the invitation steps that depend on Auth, for the server's secret key only.
+  ('invitation_delivery_plan(uuid)', 'service_role'), ('record_invitation_delivery(uuid,text,text)', 'service_role'),
+  ('invitation_revocation_target(uuid)', 'service_role'), ('reconcile_invitation(uuid)', 'service_role'),
   -- M10b: catalog search, records and history for editors. Each checks the caller itself.
   ('search_catalog_records(text,text,text,text,integer,text)', 'authenticated'), ('get_game_record(uuid)', 'authenticated'),
   ('get_release_record(uuid)', 'authenticated'), ('get_catalog_record_history(text,uuid,integer,uuid)', 'authenticated'),

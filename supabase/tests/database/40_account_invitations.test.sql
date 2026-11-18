@@ -4,7 +4,7 @@
 -- Runs in one transaction that rolls back, on a local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(84);
+select plan(87);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 -- A TOTP-verified session for p_user, verified p_age ago (fresh: zero; stale: 20 minutes).
@@ -58,9 +58,22 @@ exception when others then
   perform set_config('role', 'none', true);
   return 'error: ' || sqlerrm;
 end $t$;
+-- The server's secret key (service_role), as features/auth-admin/server does.
+create function pg_temp.as_service(p_sql text) returns text language plpgsql as $t$
+declare r text;
+begin
+  perform set_config('request.jwt.claims', '{"role": "service_role"}', true);
+  perform set_config('role', 'service_role', true);
+  execute p_sql into r;
+  perform set_config('role', 'none', true);
+  return coalesce(r, '');
+exception when others then
+  perform set_config('role', 'none', true);
+  return 'error: ' || sqlerrm;
+end $t$;
 create function pg_temp.res(j text) returns text language sql as $$
   select case when j like 'error:%' then j else coalesce((j::jsonb ->> 'result'), 'refused: ' || (j::jsonb ->> 'refusal')) end $$;
-create function pg_temp.inv(p_email text) returns private.account_invitations language sql as $$ select * from private.account_invitations where email = p_email $$;
+create function pg_temp.inv(p_email text) returns private.account_invitations language sql as $$ select * from private.account_invitations where email = p_email and not withheld $$;
 
 -- a1: administrator. a2: administrator whose verification is 20 minutes old. b1: moderator.
 -- e1: catalog editor. c1: collector. Invitees d1..d4 are created as Auth does for an invite.
@@ -83,13 +96,14 @@ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'serv
 select is((select relrowsecurity from pg_class where oid = 'private.account_invitations'::regclass), true, 'and it has RLS on');
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
   and p.proname in ('create_account_invitation', 'record_invitation_delivery', 'request_invitation_resend', 'request_invitation_revocation',
-    'retry_invitation_revocation', 'reconcile_invitation', 'get_account_invitations', 'get_my_onboarding', 'complete_my_password_setup')
-  and p.prosecdef and p.proconfig = array['search_path=""']), 9, 'the nine functions are SECURITY DEFINER with an empty search_path');
+    'retry_invitation_revocation', 'reconcile_invitation', 'get_account_invitations', 'get_my_onboarding', 'complete_my_password_setup',
+    'invitation_delivery_plan', 'invitation_revocation_target')
+  and p.prosecdef and p.proconfig = array['search_path=""']), 11, 'the eleven functions are SECURITY DEFINER with an empty search_path');
 select is((select bool_or(has_function_privilege(r, f, 'execute')) from unnest(array['anon', 'service_role', 'catalog_importer']) r,
-  unnest(array['public.create_account_invitation(text,text)', 'public.record_invitation_delivery(uuid,text,boolean)', 'public.request_invitation_resend(uuid,text)',
-    'public.request_invitation_revocation(uuid,text)', 'public.retry_invitation_revocation(uuid)', 'public.reconcile_invitation(uuid)',
+  unnest(array['public.create_account_invitation(text,text)', 'public.request_invitation_resend(uuid,text)',
+    'public.request_invitation_revocation(uuid,text)', 'public.retry_invitation_revocation(uuid)',
     'public.get_account_invitations(integer,uuid)', 'public.get_my_onboarding()', 'public.complete_my_password_setup()']) f), false,
-  'anon, service_role and the importer can execute none of them');
+  'anon, service_role and the importer can execute none of the session functions (the server''s steps are separate, M11a-2)');
 select is((select bool_or(has_function_privilege(r, f, 'execute')) from unnest(array['anon', 'authenticated', 'service_role']) r,
   unnest(array['private.mask_email(text)', 'private.invitation_for_user(uuid)', 'private.invitation_onboarding_blocked(uuid)',
     'private.outstanding_invitations(uuid)', 'private.normalize_invitation_email(text)']) f), false, 'and none of the private helpers');
@@ -119,33 +133,33 @@ select is((pg_temp.inv('one@example.test')).state, 'pending', 'recorded as pendi
 select is((pg_temp.inv('one@example.test')).invited_by, pg_temp.u('a1'), 'and who invited');
 select is((select metadata ->> 'status' from private.audit_events where action = 'account_invited' order by id desc limit 1), 'pending', 'audited');
 select is((select count(*)::int from private.audit_events where action::text like 'account_invit%' and (reason || metadata::text) ~ 'example\.test'), 0, 'and no audit row holds an address');
-select is(pg_temp.as_user('a1', $$select (public.create_account_invitation('one@example.test', 'Again') ?| array['id'])::text$$), 'false', 'a second invitation to an open address gets the same answer, with no id');
-select is((select count(*)::int from private.account_invitations where email = 'one@example.test'), 1, 'and creates nothing');
+select is(pg_temp.as_user('a1', $$select (public.create_account_invitation('one@example.test', 'Again') ?| array['id'])::text$$), 'true', 'a second invitation to an open address gets the same answer, with an id (M11a-2)');
+select is((select count(*)::int from private.account_invitations where email = 'one@example.test' and withheld), 1, 'as a withheld row, for which nothing is sent');
 select is(pg_temp.as_user('a1', $$select (public.create_account_invitation('c1@staff.example.test', 'Existing') ->> 'result')$$), 'accepted', 'an address with an account gets the same answer too');
-select is((select count(*)::int from private.account_invitations where email = 'c1@staff.example.test'), 0, 'and nothing is created for it');
-select is((select metadata ->> 'code' from private.audit_events where action = 'account_invited' order by id desc limit 1), 'address_unavailable', 'the refusal is audited without the address');
+select is((select count(*)::int from private.account_invitations where email = 'c1@staff.example.test' and withheld), 1, 'and a withheld row');
+select is((select metadata - 'withheld' from private.audit_events where action = 'account_invited' order by id desc limit 1), '{"status": "pending"}'::jsonb, 'audited like any invitation, the withheld mark kept from pages');
 
 -- ---------------------------------------------------------------------------
 -- 4. Delivery: the server's report is checked against Auth
 -- ---------------------------------------------------------------------------
 create temp table ids as select (pg_temp.inv('one@example.test')).id as one;
-grant select on ids to authenticated;
+grant select on ids to authenticated, service_role;
 create temp table inv_ids (email text primary key, id uuid);
-grant select on inv_ids to authenticated;
+grant select on inv_ids to authenticated, service_role;
 create function pg_temp.remember(p_email text) returns void language sql as $$
   insert into inv_ids select p_email, (pg_temp.inv(p_email)).id on conflict (email) do update set id = excluded.id $$;
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.record_invitation_delivery((select one from ids), 'invite', true)::text$$)), 'send_failed', 'a claimed send with no invited account in Auth is recorded as failed');
+select is(pg_temp.res(pg_temp.as_service($$select public.record_invitation_delivery((select one from ids), 'invite', 'sent')::text$$)), 'send_failed', 'a claimed send with no invited account in Auth is recorded as failed');
 select pg_temp.invitee('d1', 'one@example.test');
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.record_invitation_delivery((select one from ids), 'invite', true)::text$$)), 'sent', 'once Auth holds the invited account, the send is recorded');
+select is(pg_temp.res(pg_temp.as_service($$select public.record_invitation_delivery((select one from ids), 'invite', 'sent')::text$$)), 'sent', 'once Auth holds the invited account, the send is recorded');
 select is((pg_temp.inv('one@example.test')).invited_user_id, pg_temp.u('d1'), 'and the account is linked, found by the database, not given by the server');
-select is(pg_temp.as_user('a1', $$select public.record_invitation_delivery((select one from ids), 'other', true)::text$$), 'error: invalid invitation', 'an unknown operation is refused');
+select is(pg_temp.as_service($$select public.record_invitation_delivery((select one from ids), 'other', 'sent')::text$$), 'error: invalid invitation', 'an unknown operation is refused');
 
 -- ---------------------------------------------------------------------------
 -- 5. Resending
 -- ---------------------------------------------------------------------------
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_resend((select one from ids), 'Lost it')::text$$)), 'refused: resend_too_soon', 'not within 10 minutes of the last email');
 update private.account_invitations set last_sent_at = now() - interval '11 minutes' where email = 'one@example.test';
-select is(pg_temp.as_user('a1', $$select public.request_invitation_resend((select one from ids), 'Lost it') ->> 'email'$$), 'one@example.test', 'after 10 minutes it''s allowed, and the address goes to the server');
+select is(pg_temp.as_user('a1', $$select public.request_invitation_resend((select one from ids), 'Lost it')::text$$), '{"ok": true, "result": "resend"}', 'after 10 minutes it''s allowed, with nothing about the address (the server asks for it, M11a-2)');
 select is((pg_temp.inv('one@example.test')).resend_count, 1, 'counted when asked');
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_resend((select one from ids), 'Again')::text$$)), 'refused: resend_too_soon', 'and asking again at once is refused');
 update private.account_invitations set last_sent_at = now() - interval '1 hour', last_resend_requested_at = now() - interval '1 hour', resend_count = 5 where email = 'one@example.test';
@@ -184,15 +198,16 @@ select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_r
 select pg_temp.as_user('a1', $$select public.create_account_invitation('two@example.test', 'Beta')::text$$);
 select pg_temp.invitee('d2', 'two@example.test');
 select pg_temp.remember('two@example.test');
-select pg_temp.as_user('a1', $$select public.record_invitation_delivery((select id from inv_ids where email = 'two@example.test'), 'invite', true)::text$$);
+select pg_temp.as_service($$select public.record_invitation_delivery((select id from inv_ids where email = 'two@example.test'), 'invite', 'sent')::text$$);
 create temp view two as select id from private.account_invitations where email = 'two@example.test';
-grant select on two to authenticated;
+grant select on two to authenticated, service_role;
 select is(pg_temp.as_user('a1', $$select public.request_invitation_revocation((select id from two), 'Wrong person')::text$$),
-  format('{"ok": true, "result": "revoke_pending", "user_id": "%s"}', pg_temp.u('d2')), 'revocation is recorded first, returning the account to ban');
+  '{"ok": true, "result": "revoke_pending"}', 'revocation is recorded first, returning nothing about the account');
+select is(pg_temp.as_service($$select public.invitation_revocation_target((select id from two)) ->> 'user_id'$$), pg_temp.u('d2')::text, 'which only the server''s step names, for banning');
 select is((select metadata ->> 'status' from private.audit_events where action = 'account_invitation_revoke_requested' order by id desc limit 1), 'revoke_pending', 'and audited before anything changes in Auth');
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_revocation((select id from two), 'Again')::text$$)), 'unchanged', 'asking again changes nothing');
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.reconcile_invitation((select id from two))::text$$)), 'revoke_pending', 'without a ban in Auth, it stays pending');
-select is(pg_temp.as_user('a1', $$select public.retry_invitation_revocation((select id from two)) ->> 'user_id'$$), pg_temp.u('d2')::text, 'and the account to ban can be asked for again');
+select is(pg_temp.res(pg_temp.as_service($$select public.reconcile_invitation((select id from two))::text$$)), 'revoke_pending', 'without a ban in Auth, it stays pending');
+select is(pg_temp.as_user('a1', $$select public.retry_invitation_revocation((select id from two))::text$$), '{"ok": true, "result": "revoke_pending"}', 'and it can be retried, again naming no account');
 -- Meanwhile the invitee accepts with a token issued before the ban, and sets a password.
 update auth.users set email_confirmed_at = now() where id = pg_temp.u('d2');
 insert into auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
@@ -201,7 +216,7 @@ select is(pg_temp.res(pg_temp.as_plain('d2', $$select public.complete_my_passwor
 select is(pg_temp.as_plain('d2', $$select public.claim_handle('invitee_two')$$), 'error: account not eligible', 'nor claim a handle, so onboarding can''t finish');
 select is(pg_temp.as_plain('d2', $$select public.get_my_onboarding() ->> 'revoked'$$), 'true', 'and is told it was revoked');
 update auth.users set banned_until = now() + interval '100 years' where id = pg_temp.u('d2');
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.reconcile_invitation((select id from two))::text$$)), 'revoked_after_acceptance', 'with the ban in Auth, an invitee who accepted first is recorded as revoked after acceptance');
+select is(pg_temp.res(pg_temp.as_service($$select public.reconcile_invitation((select id from two))::text$$)), 'revoked_after_acceptance', 'with the ban in Auth, an invitee who accepted first is recorded as revoked after acceptance');
 select is((select count(*)::int from auth.users where id = pg_temp.u('d2')), 1, 'and the account isn''t deleted');
 select is((select metadata ->> 'status' from private.audit_events where action = 'account_invitation_revoked' order by id desc limit 1), 'revoked_after_acceptance', 'the outcome is audited');
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.retry_invitation_revocation((select id from two))::text$$)), 'refused: invitation_closed', 'a completed revocation can''t be retried');
@@ -209,17 +224,18 @@ select is(pg_temp.res(pg_temp.as_user('a1', $$select public.retry_invitation_rev
 select pg_temp.as_user('a1', $$select public.create_account_invitation('three@example.test', 'Beta')::text$$);
 select pg_temp.remember('three@example.test');
 select pg_temp.invitee('d3', 'three@example.test');
-select pg_temp.as_user('a1', $$select public.record_invitation_delivery((select id from inv_ids where email = 'three@example.test'), 'invite', true)::text$$);
+select pg_temp.as_service($$select public.record_invitation_delivery((select id from inv_ids where email = 'three@example.test'), 'invite', 'sent')::text$$);
 select pg_temp.as_user('a1', $$select public.request_invitation_revocation((select id from inv_ids where email = 'three@example.test'), 'No longer needed')::text$$);
 update auth.users set banned_until = now() + interval '100 years' where id = pg_temp.u('d3');
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.reconcile_invitation((select id from inv_ids where email = 'three@example.test'))::text$$)), 'revoked', 'an unaccepted, banned invitee is revoked');
+select is(pg_temp.res(pg_temp.as_service($$select public.reconcile_invitation((select id from inv_ids where email = 'three@example.test'))::text$$)), 'revoked', 'an unaccepted, banned invitee is revoked');
 -- An invitation never sent.
 select pg_temp.as_user('a1', $$select public.create_account_invitation('four@example.test', 'Beta')::text$$);
 select pg_temp.remember('four@example.test');
-select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_revocation((select id from inv_ids where email = 'four@example.test'), 'Not sent')::text$$)), 'revoked', 'with no Auth account, revocation completes at once');
+select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_revocation((select id from inv_ids where email = 'four@example.test'), 'Not sent')::text$$)), 'revoke_pending', 'a revocation with no Auth account answers the same way');
+select is(pg_temp.res(pg_temp.as_service($$select public.reconcile_invitation((select id from inv_ids where email = 'four@example.test'))::text$$)), 'revoked', 'and completes at reconciliation, with nothing to ban');
 -- The server sent it anyway, while the revocation was recorded.
 select pg_temp.invitee('d4', 'four@example.test');
-select is(pg_temp.as_user('a1', $$select public.record_invitation_delivery((select id from inv_ids where email = 'four@example.test'), 'invite', true) ->> 'user_id'$$), pg_temp.u('d4')::text,
+select is(pg_temp.as_service($$select public.record_invitation_delivery((select id from inv_ids where email = 'four@example.test'), 'invite', 'sent') ->> 'user_id'$$), pg_temp.u('d4')::text,
   'a send that lands after the revocation returns the new account for banning');
 select is((pg_temp.inv('four@example.test')).state, 'revoke_pending', 'and the revocation goes back to pending until that ban is confirmed');
 select is(pg_temp.as_plain('d4', $$select public.claim_handle('invitee_four')$$), 'error: account not eligible', 'meanwhile that account can''t onboard');
@@ -228,7 +244,7 @@ select is(pg_temp.res(pg_temp.as_user('a1', $$select public.request_invitation_r
 select pg_temp.as_user('a1', $$select public.create_account_invitation('five@example.test', 'Beta')::text$$);
 select pg_temp.remember('five@example.test');
 select pg_temp.invitee('d5', 'five@example.test');
-select pg_temp.as_user('a1', $$select public.record_invitation_delivery((select id from inv_ids where email = 'five@example.test'), 'invite', true)::text$$);
+select pg_temp.as_service($$select public.record_invitation_delivery((select id from inv_ids where email = 'five@example.test'), 'invite', 'sent')::text$$);
 update auth.users set email_confirmed_at = now() where id = pg_temp.u('d5');
 insert into auth.audit_log_entries (instance_id, id, payload, created_at, ip_address)
 values ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), json_build_object('action', 'user_updated_password', 'actor_id', pg_temp.u('d5')), now() + interval '1 second', '');
@@ -241,27 +257,28 @@ select is(pg_temp.as_plain('d5', $$select public.claim_handle('invitee_five')$$)
 -- 8. The list
 -- ---------------------------------------------------------------------------
 select is(pg_temp.as_user('a1', $$select string_agg(x ->> 'email', ',' order by x ->> 'email') from jsonb_array_elements(public.get_account_invitations() -> 'invitations') x$$),
-  'f***@e***.test,f***@e***.test,o***@e***.test,t***@e***.test,t***@e***.test', 'addresses are masked');
+  'c***@s***.test,f***@e***.test,f***@e***.test,o***@e***.test,o***@e***.test,t***@e***.test,t***@e***.test', 'addresses are masked');
 select is(pg_temp.as_user('a1', $$select public.get_account_invitations()::text$$) ~ '@example\.test|Beta tester|Wrong person', false, 'no address or reason appears');
 select is(pg_temp.as_user('a1', $$select string_agg(distinct k, ',' order by k) from jsonb_array_elements(public.get_account_invitations() -> 'invitations') x, jsonb_object_keys(x) k$$),
   'created_at,email,id,invited_by,last_sent_at,next_resend_at,resends_left,revoked_at,status', 'each entry has fixed keys: no account id');
 select is(pg_temp.as_user('a1', $$select string_agg(x ->> 'status', ',' order by x ->> 'id') from jsonb_array_elements(public.get_account_invitations() -> 'invitations') x$$),
-  'active,revoked_after_acceptance,revoked,revoke_pending,revoke_pending', 'each with its status, from the ledger and Auth');
+  'active,sending,sending,revoked_after_acceptance,revoked,revoke_pending,revoke_pending', 'each with its status, from the ledger and Auth');
 update private.account_invitations set state = 'sent', last_sent_at = now() - interval '2 hours' where email = 'three@example.test';
 update auth.users set banned_until = null where id = pg_temp.u('d3');
 select is(pg_temp.as_user('a1', $$select x ->> 'status' from jsonb_array_elements(public.get_account_invitations() -> 'invitations') x where x ->> 'email' = 't***@e***.test' and x ->> 'status' in ('sent', 'expired')$$),
   'expired', 'an unaccepted invitation older than an hour shows as expired');
-select is(pg_temp.as_user('a1', $$select (public.get_account_invitations() -> 'limits')::text$$), '{"mine": 2, "total": 2, "mine_max": 20, "total_max": 200}', 'with the open counts and limits');
+select is(pg_temp.as_user('a1', $$select (public.get_account_invitations() -> 'limits')::text$$), '{"mine": 4, "total": 4, "mine_max": 20, "total_max": 200}', 'with the open counts and limits');
 
 -- ---------------------------------------------------------------------------
 -- 9. Limits
 -- ---------------------------------------------------------------------------
 insert into private.account_invitations (email, invited_by, reason)
-select 'bulk' || g || '@example.test', pg_temp.u('a1'), 'Bulk' from generate_series(1, 18) g;
+select 'bulk' || g || '@example.test', pg_temp.u('a1'), 'Bulk' from generate_series(1, 16) g;
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.create_account_invitation('over@example.test', 'One too many')::text$$)), 'refused: invitation_limit', '20 open invitations per administrator');
 insert into private.account_invitations (email, invited_by, reason)
 select 'many' || g || '@example.test', pg_temp.u('a2'), 'Bulk' from generate_series(1, 190) g;
 update private.account_invitations set state = 'revoked' where email like 'bulk1%';
+select is(pg_temp.res(pg_temp.as_user('a1', $$select public.create_account_invitation('c1@staff.example.test', 'Existing')::text$$)), 'refused: invitation_limit_total', 'an address with an account meets the same limits (M11a-2)');
 select is(pg_temp.res(pg_temp.as_user('a1', $$select public.create_account_invitation('over@example.test', 'One too many')::text$$)), 'refused: invitation_limit_total', 'and 200 in all');
 select is(pg_temp.as_user('a1', $$select (public.get_account_invitations(1000) -> 'invitations') is not null and jsonb_array_length(public.get_account_invitations(1000) -> 'invitations') <= 100$$), 'true', 'a page holds at most 100');
 

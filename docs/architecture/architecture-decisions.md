@@ -1133,6 +1133,12 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **The invitation flow needs the template**, set on the test stack only; the development stack keeps its configuration, so invitations aren't available there until it's given the template and the key.
 - **Lost authenticators** are operator-assisted only ([runbook](../operations/lost-authenticator-runbook.md)).
 
+**Amended in M11a-2** (migration `20261126100000`, approved by the product owner), after a review found that an administrator could tell which addresses already had an account: M11a-1 gave such an address no ledger row and no count, skipped the limit check for it, audited it with a distinct code, returned no id from the API, and handed the server's address back to whoever asked for a resend.
+- **Every accepted address gets a row and the same answers.** An address Auth already holds gets a "withheld" row: nothing is ever sent for it, it's never linked to that account and never blocks its onboarding, and nothing an administrator can read (list, counts, limits, audit details, API responses, refusals) differs from an invitation that was sent. While invitation emails are failing, withheld rows show as failed too.
+- **The steps that depend on what Auth holds are the server's only.** Whether and where to send (`invitation_delivery_plan`), recording what Auth did (`record_invitation_delivery`), the account to ban (`invitation_revocation_target`) and reconciling (`reconcile_invitation`) are executable by `service_role` alone, which the server calls with its secret key after the administrator's own function has authorized the step. The authorization (active administrator, recent MFA, reason, limits) and its audit row stay in the administrator's session; the audit rows for the server's steps name the administrator who asked. So **the secret-key module now makes four database calls** as well as its two Auth Admin calls, still no others.
+- **Timing.** Sending takes at least two seconds whether or not an email goes out, so the two answer alike; a send slower than that still stands out.
+- **A handle claim and a revocation are serialized** on the invitation row: `claim_handle` locks it before deciding (it read it without a lock, so both could succeed).
+
 ## Risks to watch
 
 | Risk | Mitigation |

@@ -1031,4 +1031,29 @@ export const m11a1Mutations = [
   sql("the list shows addresses", "both", rewrite(M11A1_LIST, "'email', private.mask_email(x.email),", "'email', x.email,")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations };
+// M11a-2 fixes to invitations: account enumeration and the claim/revocation race.
+const M11A2_CREATE = "public.create_account_invitation(text, text)";
+const M11A2_PLAN = "public.invitation_delivery_plan(uuid)";
+const M11A2_DELIVERY = "public.record_invitation_delivery(uuid, text, text)";
+const M11A2_RESEND = "public.request_invitation_resend(uuid, text)";
+const M11A2_REVOKE = "public.request_invitation_revocation(uuid, text)";
+
+export const m11a2InvitationMutations = [
+  // An address with an account must look like any other
+  sql("an address with an account gets no row", "both", rewrite(M11A2_CREATE, "  v_withheld := private.invitation_address_taken(v_email);\n",
+    "  v_withheld := private.invitation_address_taken(v_email);\n  if v_withheld then\n    return pg_catalog.jsonb_build_object('ok', true, 'result', 'accepted');\n  end if;\n")),
+  sql("the audit log shows the withheld mark", "both", rewrite("private.audit_details(jsonb)", "'previous_status', 'copies', 'entity')", "'previous_status', 'copies', 'entity', 'withheld')")),
+  sql("an address with an account is sent an email", "both", rewrite(M11A2_PLAN, "'send', not i.withheld and i.state", "'send', i.state")),
+  sql("withheld rows ignore delivery failures", "both", rewrite(M11A2_DELIVERY, "case when i.withheld then not private.invitation_delivery_failing() else", "case when i.withheld then true else")),
+  sql("a resend gives the administrator the address", "both", rewrite(M11A2_RESEND, "jsonb_build_object('ok', true, 'result', 'resend')", "jsonb_build_object('ok', true, 'result', 'resend', 'email', i.email)")),
+  sql("a withheld row's revocation looks up the account", "api", rewrite(M11A2_REVOKE, "  if not i.withheld then\n    v_user", "  if true then\n    v_user")),
+  // The server's steps are the server's only
+  sql("administrators may record a delivery", "both", `grant execute on function ${M11A2_DELIVERY} to authenticated;`),
+  sql("administrators may ask for the account to ban", "both", "grant execute on function public.invitation_revocation_target(uuid) to authenticated;"),
+  // A handle claim and a revocation never both succeed
+  sql("claim_handle doesn't lock the invitation", "both", rewrite("public.claim_handle(text)",
+    "  if v_me is not null then\n    perform 1 from private.account_invitations i\n    where i.id = (select x.id from private.invitation_for_user(v_me) x)\n    for update;\n  end if;\n", "")),
+  sql("the revocation reads the handle without the lock", "api", rewrite(M11A2_REVOKE, "select * into i from private.account_invitations where id = p_id for update;", "select * into i from private.account_invitations where id = p_id;")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations };

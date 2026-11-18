@@ -1389,8 +1389,11 @@ In the `private` schema, RLS on, no privilege for any API role. Written only by 
 | `created_at`, `first_sent_at`, `last_sent_at`, `last_resend_requested_at`, `revoke_requested_at`, `revoked_at` | `timestamptz` | | |
 | `resend_count` | `integer` | No | 0 to 5 |
 | `password_set_at` | `timestamptz` | Yes | The password step, set only after Auth logged the change |
+| `withheld` | `boolean` | No | M11a-2: the address already had an account (or an invitation out) in Auth. Nothing is sent, it's never linked, and no page sees it |
+| `last_failed_at` | `timestamptz` | Yes | M11a-2: the last failed email for a row that really sends, for "emails are failing" |
+| `last_resend_requested_by` | `uuid` | Yes | M11a-2: → `profiles(id)`, on delete set null. Who asked for the latest resend, for its audit row |
 
-- **Indexes:** one open invitation per address (unique where not revoked), one invitation per account, and by inviter and state.
+- **Indexes:** one open invitation per address (unique where not revoked and not withheld), one invitation per account, and by inviter and state.
 - **Retention:** undecided (D10). Nothing removes rows.
 
 ### Owner and MFA tables (M8)
