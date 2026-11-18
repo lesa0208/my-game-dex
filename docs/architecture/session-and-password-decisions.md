@@ -84,3 +84,12 @@ Sources on the hosted option: supabase/auth PR #2215 (adds the setting), PR #239
   - "secure password change" on;
   - `otp_expiry` an hour.
   - If a later Auth version adds a shorter recovery window, shorten `/reset-password`'s one-hour mark to match.
+
+## 6. Approved pre-beta password policy
+
+Approved by the product owner after the session-revocation checkpoint. Not yet applied to any hosted project; nothing here changes hosted settings.
+
+- **Require the current password for signed-in password changes, in Auth itself** ("require current password", `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`), where the hosted Auth version supports it (GoTrue v2.197 does). The app already sends it and keeps its own check for its messages.
+- **Keep "secure password change" on** (reauthentication for a session older than a day).
+- **Keep email recovery without the old password** (recovery sessions are exempt in Auth) and **keep TOTP requirements**: aal2 for an account with an authenticator, for a change and for a reset.
+- **Verify the exact hosted behaviour on staging** before admitting beta users: rerun `auth-password-policy-checks.mjs` (adapted to staging), `db-password-checks`, `db-session-checks` and `app:password-checks`, in configuration B (sign-up off). Configuration B was verified locally on the test stack after the checkpoint: every one of these passes with sign-up off.
