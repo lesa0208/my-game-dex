@@ -2,7 +2,7 @@
 
 **Written for:** the product owner and catalog editors deciding how real NES/Famicom, SNES/Super Famicom and PlayStation releases enter the catalog.
 
-**Status: accepted as the design foundation on 2026-11-18, subject to the corrections now in sections 6 and 8. MIG-1 (the cartridge formats) is implemented on the test stack in M11b-1a and not applied to development. MIG-2 to MIG-5 are revised designs awaiting review.** Decisions are in section 10. M11b-0 is analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
+**Status: accepted as the design foundation on 2026-11-18, subject to the corrections now in sections 6 and 8. MIG-1 (the cartridge formats, M11b-1a) and MIG-2 with MIG-3 (identity and packaging, M11b-1b) are implemented on the test stack and not applied to development. MIG-4 and MIG-5 are revised designs awaiting review.** Decisions are in section 10. M11b-0 is analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
 
 Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalog), [relationships.md § Physical release examples](relationships.md#physical-release-examples), [security-rls.md § Catalog import](security-rls.md#catalog-import), [architecture-decisions.md § M5 decisions](architecture-decisions.md#m5-decisions-the-catalog-and-its-import), [ADR-031](architecture-decisions.md#adr-031-platform-identity-is-separate-from-its-names), [ADR-032](architecture-decisions.md#adr-032-physical-media-is-a-category-plus-a-reference-format), [reference-data-sources.md](reference-data-sources.md).
 
@@ -12,7 +12,7 @@ Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalo
 - **Famicom and Super Famicom stay on the `nes` and `snes` platforms** (ADR-031). Their physical difference moves from "implied by platform and region" to an explicit **media format**: four new formats for the cartridge shells. The format is already enforced by foreign key, already an identity field for verification, and already a merge guard.
 - **Migrations**, detailed in section 6:
   - The shell formats (MIG-1) are **implemented on the test stack** (M11b-1a).
-  - MIG-2 and MIG-3 are one migration: identity and packaging, checked against the exact final key, and keeping legacy distinctions.
+  - MIG-2 and MIG-3 are one migration, **implemented on the test stack** (M11b-1b): identity and packaging, checked against the exact final key, and keeping legacy distinctions.
   - MIG-4 adds release identifiers.
   - MIG-5 adds fact-level source links that can support several releases.
   - MIG-2 to MIG-5 are revised designs, not written.
@@ -50,7 +50,7 @@ Read from the migrations as of `20261129100000`.
 
 **Development catalog, read-only on 2026-11-18:**
 - 19 games and 30 releases;
-- 17 SNES releases on `rom-cartridge` (published, under review, unverified, merged and excluded) and 4 published PlayStation releases on `cd-rom`;
+- 16 SNES releases on `rom-cartridge` (published, under review, unverified, merged and excluded) and 4 published PlayStation releases on `cd-rom`;
 - no NES releases;
 - no owned copies on these three platforms;
 - 27 releases with no packaging, 2 "Jewel case", 1 "Big box";
@@ -146,7 +146,7 @@ Evidence for the shells, checked 2026-11-18:
 - `nes` and `snes` remain one platform each, with Famicom and Super Famicom as regional names. No platform was added.
 - `rom-cartridge` stays linked to `nes` and `snes` for records whose shape hasn't been classified. The foreign key also prevents unlinking it while records use it.
 - **No release was changed.** The migration only inserts four formats and four platform links, then checks the four links exist.
-- An existing release moves to a shell only by an individual, verified editor correction (`update_release`, with a reason). The format is an identity field, so the correction ends an unpublished release's verification, and a published one needs recent MFA. The 17 development SNES releases are not touched (M11b-D12).
+- An existing release moves to a shell only by an individual, verified editor correction (`update_release`, with a reason). The format is an identity field, so the correction ends an unpublished release's verification, and a published one needs recent MFA. The 16 development SNES releases are not touched (M11b-D12). An earlier count of 17 was an arithmetic error.
 - **A shell is never derived from a region label.** The key allows an NES Game Pak classified `ntsc-j` if the item is one; the editor decides from the item.
 
 **How each required property is preserved:**
@@ -236,7 +236,7 @@ Evidence for the shells, checked 2026-11-18:
 | # | Migration | Detail |
 | --- | --- | --- |
 | MIG-1 | Cartridge-shell formats: four `media_formats` rows and four `platform_media_formats` rows. **Implemented in M11b-1a** | Section 4, and the importer behavior below |
-| MIG-2 and MIG-3 | **One migration**: media format, normalized names and codes, and a packaging key in **both** release identity rules and the submission duplicate check, checked against the exact final key before any index changes; a controlled packaging vocabulary with `unclassified` and `unknown` | [Identity and packaging](#mig-2-and-mig-3-together-release-identity-and-packaging-revised-after-review) |
+| MIG-2 and MIG-3 | **One migration**: media format, normalized names and codes, and a packaging key in **both** release identity rules and the submission duplicate check, checked against the exact final key before any index changes; a controlled packaging vocabulary with `unclassified` and `unknown` | [Identity and packaging](#mig-2-and-mig-3-together-release-identity-and-packaging-implemented-in-m11b-1b) |
 | MIG-4 | Release identifiers: further printed codes, disc serials, alternate identifiers and staff-only source aliases | [Identifiers](#mig-4-release-identifiers-approved-in-principle-clarified) |
 | MIG-5 | Fact-level links from a source record to one or more releases, by an editor | [Source evidence](#mig-5-source-evidence-for-editor-built-releases-revised-after-review) |
 
@@ -266,15 +266,17 @@ Single-format platforms, such as PlayStation with `cd-rom`, keep the automatic p
 - The importer still can call only its eight functions, and no editor, verification or publication function.
 - The M5b importer tests (17, 18, 19, 24) and the tool flow now run on `mega-drive`, a cartridge platform with one format, so the automatic candidate path keeps its full coverage.
 
-### MIG-2 and MIG-3 together: release identity and packaging (revised after review)
+### MIG-2 and MIG-3 together: release identity and packaging (implemented in M11b-1b)
 
-**Correction.** The first design gave every existing release `packaging_code = 'unclassified'` and then put only `packaging_code` in the identity key. Two published releases that differed only in their packaging text, such as "Jewel case" and "Big box", would then have the same identity. The guard it proposed checked normalized packaging *text*, which isn't the key the index would enforce. The revised design below replaces it.
+**Implemented on the test stack only:** migration `20261201100000_m11b1b_release_identity.sql`. Not applied to development.
 
-**Principle: one migration, one final key, checked exactly.** MIG-2 and MIG-3 ship as one migration, so the identity indexes change once. Its guard evaluates the **same expressions the new indexes will use**, through the same immutable functions, before any index is touched.
+**Why the design changed after review.** The first design gave every existing release `packaging_code = 'unclassified'` and then put only `packaging_code` in the identity key. Two published releases that differed only in their packaging text would then have collided. The implementation keeps the historical text in the key until an editor classifies the release, and its preflight evaluates the exact final key.
+
+**Principle: one migration, one final key, checked exactly.** The identity indexes change once. The preflight groups existing rows by the **same expressions the new indexes use**, through the same immutable functions, before any index is touched.
 
 #### The final key
 
-For both indexes. The pending one starts with `submitted_by` and keeps its partial condition.
+Used by both indexes. The pending one starts with `submitted_by` and keeps its partial condition, `status in ('unverified', 'under_review') and submitted_by is not null`. Both are `UNIQUE ... NULLS NOT DISTINCT`.
 
 ```text
 game_id, platform_id, media_format_code, region_code,
@@ -284,85 +286,94 @@ private.release_packaging_key(packaging_code, packaging),
 private.release_code_key(product_code)
 ```
 
-| Function (immutable SQL, null in, null out) | What it compares | What it never does |
+| Function (immutable SQL, `search_path = ''`, private) | What it compares | What it never does |
 | --- | --- | --- |
-| `release_label_key(text)` | `lower()` of the trimmed text, with runs of white space made one space, and typographic apostrophes, quotes and dashes made ASCII | Remove letters, digits or punctuation. "Players' Choice" and "Players Choice" stay different; review catches that, not the key |
-| `release_code_key(text)` | Upper case, trimmed, runs of white space made one space, Unicode dash variants made `-` | Remove hyphens, slashes, dots or spaces. `SNS-ZL-USA-1` and `SNS-ZLUSA-1` stay different |
-| `release_packaging_key(code, text)` | The code itself for a classified release. For `unclassified`, the code plus the **exact** legacy text: `'unclassified' \|\| chr(31) \|\| coalesce(text, '')` | Merge two unclassified releases whose recorded packaging text differs in any way |
+| `release_label_key(text)` | Unicode NFC, then typographic apostrophes, quotes and dashes made ASCII, other spaces made a space, runs of white space made one, trimmed, `lower()` | Remove letters, digits, accents or punctuation. "Players' Choice" and "Players Choice", or "Edition" and "Édition", stay different |
+| `release_code_key(text)` | Unicode NFC, surrounding white space removed, `upper()` | Remove or change hyphens, slashes, dots or inner spaces, or split a combined code. `SNS-ZL-USA` and `SNS ZL USA` stay different |
+| `release_packaging_key(code, text)` | The code for a classified release. For `unclassified`, the code plus the **exact** recorded text: `'unclassified' \|\| chr(31) \|\| coalesce(text, '')` | Merge two unclassified releases whose recorded text differs in any way |
 
-**Why the legacy text is exact.** The current index compares packaging text exactly. An unclassified release keeps exactly that component, so two existing rows that the current index keeps apart stay apart on packaging, and nothing previously distinct is merged by MIG-3. Only the other normalizations (labels, codes) can tighten the key, and the guard catches any collision they would cause.
+**Codes are stricter than designed.** The approved rule normalizes only case and surrounding white space. Dash variants and inner spaces are no longer unified.
 
-#### The guard, before any DDL
+**These functions are used by unique indexes.** They must never be replaced in place. A change needs new functions and new indexes.
 
-In one transaction:
+#### The preflight, before any index changes
 
-1. Create the three key functions and `packaging_types`. Add `releases.packaging_code` (not null, default `unclassified`, foreign key to `packaging_types`).
-2. Compute the final key for every **published** release, and for every **pending submission** (`status in ('unverified', 'under_review')` with a submitter). Group exactly as each index will.
-3. If any group has more than one row, raise an exception that lists the release ids, and stop. The whole migration rolls back, the old indexes are untouched, and **no data is changed to make an index fit**.
-4. Create each new index under a temporary name. Building it is a second, independent check.
-5. Drop the old index by its exact name, without `CASCADE`, and rename the new index to the old name.
+In the migration's transaction:
+1. Create `packaging_types`, `releases.packaging_code` (not null, default `unclassified`) and the three key functions.
+2. Group every **published** release, and every **pending submission**, by the exact final key.
+3. If any group has more than one row, raise an exception that lists the release ids. Everything rolls back, the old indexes stay, and **no data is changed to make an index fit**.
+4. Create each new index under a temporary name, drop the old one by exact name without `CASCADE`, and rename the new one to the old name.
 
-Development, read-only, 2026-11-18: no collisions among published releases, nor among published and open candidates, using normalized labels and codes and normalized packaging text. That is **stricter** than the final key, whose packaging component for unclassified rows is exact. M11b-1b repeats the check with the final functions, on the test stack and then on a restored copy of development.
+The index build holds a lock that blocks writes until commit, so no duplicate can be written in between.
 
 #### Transitional strategy for unclassified historical releases
 
 | Situation | Rule |
 | --- | --- |
-| Existing releases (published or not) | Start `unclassified`, with their packaging text kept as recorded. No classification is guessed. Their identity keeps the exact text, so earlier distinctions survive |
-| An editor classifies a legacy release | `update_release` sets `packaging_code` with a reason. The key changes from "unclassified plus text" to the code. If that collides with another published release, the update fails with the existing friendly duplicate message, and the editor merges or corrects instead. Classification never silently merges two releases |
+| Existing releases, published or not | Start `unclassified`, with their packaging text exactly as recorded. Nothing is classified. Their identity keeps the exact text, so every earlier distinction survives |
+| An editor classifies a legacy release | `update_release` sets `packaging_code`, with a reason and an audit row. The key changes to the code. If that collides with another published release, the update fails, and the app shows the existing "An identical release is already in the catalog" message. Classification never silently merges two releases |
 | A newly published release | Must be classified: an editor chooses a type, or `unknown` |
-| A new candidate whose packaging isn't known | Stays `unclassified` and visible as a gap in review. It can't be published until an editor chooses a type or `unknown` |
+| A new candidate whose packaging isn't known | Stays `unclassified`, visible as a gap, and can't be published until classified |
 
-**Duplicates between an unclassified legacy release and a classified new one** have different keys, so the index doesn't catch them. Review does: the release picker, `search_catalog_records` and the merge candidate list show the legacy release. This gap closes as legacy releases are classified, and the classification step is where a duplicate surfaces.
+**Duplicates between an unclassified legacy release and a classified new one** have different keys, so the index doesn't catch them. Review does: the release picker, staff search and the merge candidate list show the legacy release. The gap closes as legacy releases are classified, and classification is where such a duplicate surfaces.
 
 #### `unclassified` versus `unknown`
 
 | State | Meaning | Who sets it | Publishable |
 | --- | --- | --- | --- |
-| `unclassified` | Nobody has determined the packaging. The default, and every legacy row's starting value | Only the default. No function sets it, and nothing can return a release to it | **No**, for a release becoming published from MIG-3 onward. Legacy published releases stay published and readable |
-| `unknown` | An editor examined the evidence, and the packaging can't be established, for example when only a loose cartridge is documented | An editor, with a reason | Yes, shown as "Packaging unknown" |
-| A type | The packaging is established by evidence | An editor, with a reason citing it | Yes |
+| `unclassified` (shown as "Not yet classified", or "Not sure" to a collector) | Nobody has determined the packaging. The default | The default. A collector may choose "Not sure" on their own open submission | **No**, for a release becoming published from M11b-1b onward. Legacy published releases stay published, readable and editable |
+| `unknown` | An editor examined the evidence, and the packaging can't be established | **Only a catalog editor**, through `create_release` or `update_release`, which require a reason and record an audit row. Collectors can't choose it | Yes |
+| A type | The packaging is established by evidence | An editor, or a collector on a submission that an editor then reviews | Yes |
 
-**Enforcement:**
-- A trigger refuses a transition to `published` while `packaging_code = 'unclassified'`, whatever the path (`publish_release` or `approve_submission`). It also refuses setting `packaging_code` back to `unclassified`.
-- It is a trigger, not a `CHECK`, so legacy published rows stay valid.
-- Imports never set `packaging_code`, so imported candidates are `unclassified` until an editor acts (M5 decision 2).
+#### Publication rules, enforced in the database
 
-#### Packaging types, by construction
+A `before insert or update` trigger on `releases`, `guard_release_packaging_and_format`, applies to API sessions, including the `SECURITY DEFINER` functions they call. Maintenance sessions are exempt, as in the M7b-1 and M10c review guards.
 
-Types describe how the package is **built**, never how many discs it holds. Disc count is `media_count`; inner trays, slipcovers and spine cards are `release_components`. This removes the overlap between the earlier `double-jewel-case` and `multi-disc-jewel-case`, which both meant a thick multi-disc case.
+| Rule | Error | Path covered |
+| --- | --- | --- |
+| A release becoming published needs a classified packaging code | `packaging classification required` | `publish_release` and `approve_submission` |
+| It also needs a (platform, format) pair that accepts new publications. `platform_media_formats.accepts_new_publications` is false only for `nes`/`rom-cartridge` and `snes`/`rom-cartridge` | `physical format unverified` | Both |
+| Only a catalog editor may set `unknown` | `not permitted` | Every write. `submission_details` also refuses it |
+| Packaging never returns to `unclassified`, except on a collector's own open submission | `packaging already classified` | Every write, all sessions |
 
-| Code | Construction |
-| --- | --- |
-| `unclassified` | Not a type: not yet determined |
-| `unknown` | Not a type: determined to be unknowable |
-| `cardboard-box` | A folding paperboard carton, with or without an inner tray (the tray is a component) |
-| `jewel-case` | A standard-depth hinged polystyrene disc case (about 10 mm). It may hold a hinged flip tray for a second disc; disc count is `media_count` |
-| `double-depth-jewel-case` | A double-depth hinged disc case (about 24 mm) with internal hinged trays for several discs |
-| `big-box` | A large paperboard box with a separate inner holder, used by computer games. Kept for the existing development value |
+**The publication rules apply only to a new publication,** meaning a release published from `unverified` or `under_review`. Grandfathered published releases are never re-verified, changed or blocked from ordinary edits, and restoring an excluded release, which returns a release that was already published, is unaffected.
 
-Further types are added by forward migration when a release needs one. Names are open for approval (M11b-D5).
+**No exception for an unknown shell.** A new NES or SNES release whose shell isn't verified stays in review. An exception would need an explicit, audited editorial policy, which doesn't exist.
 
-#### What else the migration changes, and what it keeps
+#### Packaging types, by construction (approved)
+
+Types describe how the package is **built**, never how many discs it holds. Disc count is `media_count`. Inner trays, slipcovers and spine cards are `release_components`.
+
+| Code | Name | Construction |
+| --- | --- | --- |
+| `unclassified` | Not yet classified | Not a type |
+| `unknown` | Unknown | Not a type |
+| `cardboard-box` | Cardboard box | A folding paperboard carton. An inner tray, insert or sleeve is a component |
+| `jewel-case` | Jewel case | A standard-depth hinged plastic disc case, about 10 mm deep, which may hold a hinged tray for a second disc |
+| `double-depth-jewel-case` | Double-depth jewel case | A hinged plastic disc case about twice the standard depth, with internal hinged trays |
+| `plastic-case` | Plastic case | A moulded plastic case that isn't a jewel case, such as a clamshell or keep case |
+| `paper-sleeve` | Paper sleeve | A paper or card sleeve or envelope, with no rigid case |
+
+- **No multi-disc type.** There is no `multi-disc-jewel-case` type: disc count isn't construction.
+- **"Big box" stays text.** It isn't a type yet. The existing development value stays as recorded text on an unclassified release.
+- **The vocabulary is extensible.** A row is added by forward migration when a physical format needs one. The app's copy in `src/features/catalog/packaging.ts` is kept in step by a unit test.
+
+#### What else changed, and what was kept
 
 | Item | Change |
 | --- | --- |
-| Index names | **Kept**: `releases_published_identity_key` and `releases_pending_submission_key`. `submit_release`, `update_submission`, `approve_submission` and `publish_release` map these names to friendly duplicate messages, unchanged |
-| `submit_release` published-duplicate check | Replaced by exact signature with the same key functions, plus `media_format_code` and the packaging key, so it agrees with the index. Without that, a Famicom submission would be reported as a duplicate of an NES release |
-| `release_identity_fields()` | Gains `packaging_code`. A change ends an unpublished release's verification (M10c revision binding). Changing a published release still needs recent MFA |
-| Editor and submission functions | Accept `packaging_code` (validated against `packaging_types`). The packaging text becomes a note, kept on existing rows |
-| No-self-review | Unchanged. The creator still can't verify or publish |
-| Merge | Unchanged. It already requires the same platform and `media_format_code` |
-| App | The admin, submission and correction forms change from free text to a select. The app checks for these screens are updated |
+| Index names | **Kept**: `releases_published_identity_key` and `releases_pending_submission_key`. Functions keep mapping them to "already published" and "already submitted", and the app maps any `23505` from an edit to its duplicate message |
+| `submit_release` published-duplicate check | Uses the same key functions, the media format and the packaging key, so it agrees with the index. A "Not sure" submission isn't matched to a classified release; it goes to review |
+| `create_release`, `update_release` | Accept `packaging_code`, validated against the vocabulary |
+| `submission_details`, `create_submitted_release`, `update_my_submission` | Accept `packaging_code`, refusing `unknown`. Replacing a submission's details replaces it too |
+| `release_identity_fields()`, `lockable_field()` | Include `packaging_code`: a change ends an unpublished verification, and imports honour a lock |
+| Reads | `catalog_release_json` (release picker and staff record), `merge_fields`, `submission_snapshot`, `get_submission_review`, `get_my_collection_item` and `get_my_preserved_release` include `packaging_code` |
+| Grants | `select (packaging_code)` on `releases` for `anon` and `authenticated`. `packaging_types` is read-only for clients. No write grant was added |
+| No-self-review, recent MFA, revisions, field locks | Unchanged |
+| Merge | Unchanged. It already required the same platform and format, and now also compares `packaging_code` among the fields to acknowledge |
+| App | A packaging select in the admin create and edit forms, the review correction form and the collector submission form. The recorded text is kept as a separate note field. Public pages show the type, or only the recorded text for an unclassified release. Staff pages always say whether it is classified. The data export includes `packaging_code` |
 
-**Tests, in M11b-1b:**
-- pgTAP for each key function, including separators kept and dash variants unified.
-- The guard raising on a seeded collision, and nothing changed afterwards.
-- Both indexes refusing a normalized duplicate and allowing a different shell.
-- The submission duplicate check agreeing with the index.
-- The publication trigger on both paths, and that nothing returns a release to `unclassified`.
-- Classification of a legacy row that collides, surfacing the friendly message.
-- Mutations that drop each new index, weaken each key function, and remove the trigger.
+**Older tests.** Thirteen pgTAP files written before these rules publish fixtures through the API. Each now opens with a transaction-local block that gives its new releases a classified type, unless the test names one, and re-allows the legacy shell. The rules themselves are covered by `45_release_identity.test.sql`, `db-release-identity-checks.mjs` and the `m11b1b` mutations.
 
 ### MIG-4: release identifiers (approved in principle; clarified)
 
@@ -736,25 +747,21 @@ PSXDataCenter documents each disc by serial, with dates and languages. No packag
 | M11b-D2 | No-Intro metadata | **Conditionally approved**: metadata only, respecting its terms and permitted access (manual saved downloads). Still open: a person accepts the gate and confirms what an NES and SNES record holds |
 | M11b-D3 | Redump | **Held** pending clarification of rights and access conditions |
 | M11b-D4 | Explicit cartridge differences, one platform per family | **Approved** with the identifiers `famicom-cartridge`, `nes-game-pak`, `snes-cartridge-jp-pal`, `snes-game-pak-na`. Implemented in M11b-1a, test stack only |
-| M11b-D5 | Controlled packaging vocabulary | **Approved in direction.** Revised design in section 6: types by construction, `unclassified` and `unknown`, legacy text kept in the key. Open: the type names |
+| M11b-D5 | Controlled packaging vocabulary | **Approved and implemented** (M11b-1b) with `cardboard-box`, `jewel-case`, `double-depth-jewel-case`, `plastic-case`, `paper-sleeve`, `unclassified` and `unknown`; no `big-box` or multi-disc type |
 | M11b-D6 | Video standard column | **Approved: not now** |
 | M11b-D7 | Release identifiers (MIG-4) | **Approved in principle.** Clarifications in section 6, for review |
 | M11b-D8 | Source evidence links (MIG-5) | Revised design in section 6, for review. Not to be implemented before that review |
-| M11b-D9 | MIG-2 and MIG-3 as one collision-safe migration | Revised design in section 6, for review. Not to be implemented before that review |
+| M11b-D9 | MIG-2 and MIG-3 as one collision-safe migration | **Approved and implemented** (M11b-1b), test stack only |
 | M11b-D10 | The pilot list in section 8 | **Accepted as a review candidate, not an approved import.** The final selection is approved before any development import |
 | M11b-D11 | Who reviews on development | Open. No-self-review and every staff publication protection are kept (approved). No permanent Owner account is created for it |
-| M11b-D12 | The 17 existing development SNES releases | **Not modified without individual verification** (approved). No bulk reclassification |
+| M11b-D12 | The 16 existing development SNES releases | **Not modified without individual verification** (approved). No bulk reclassification |
 
 ## 11. Recommended implementation sequence
 
 Each step is a checkpoint, stopped for review.
 
 1. **M11b-1a, media formats.** MIG-1, importer behavior proof, test updates. **Done on the test stack** (2026-11-18). Not applied to development.
-2. **M11b-1b, identity and packaging.** MIG-2 and MIG-3 as one migration, after review of section 6:
-   - the final-key guard, run against the test stack and a restored copy of development;
-   - the publication trigger;
-   - the form changes from free text to a select;
-   - tests and focused mutations.
+2. **M11b-1b, identity and packaging.** **Done on the test stack** (2026-11-18): MIG-2 and MIG-3 as one migration, the exact-key preflight (proved through the CLI, and on a restored copy of development), the publication trigger, the packaging selects, tests and focused mutations. Not applied to development.
 3. **M11b-1c, identifiers and source links.** MIG-4, then MIG-5, after review. Also:
    - the importer's Wikidata platform ids;
    - an NES No-Intro parser test with a synthetic DAT.

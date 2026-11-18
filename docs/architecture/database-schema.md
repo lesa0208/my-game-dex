@@ -62,7 +62,7 @@ The private tables from M7 and M8 (exclusions, merges, the Owner, transfers, rec
 | Domain | Requested | Supporting |
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
-| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
+| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `packaging_types`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
@@ -77,6 +77,7 @@ Why each supporting table is needed:
 | `markets`, `release_markets` | One physical release can be distributed across several countries or territories, recorded independently of its region code |
 | `platform_names` | Regional names and common aliases, stored apart from a platform's stable identity |
 | `media_formats`, `platform_media_formats` | Separates a general media category from the specific physical format, and enforces valid platform and format pairs |
+| `packaging_types` | A controlled packaging vocabulary, so packaging in a release's identity can't vary by wording (M11b-1b) |
 | `hardware_requirements`, `release_hardware_requirements` | Some physical releases need, or don't work on, a particular revision or add-on, without creating platforms or a hardware catalog |
 | `release_components` | Inserts, maps, artwork and other original materials that came with an edition |
 | `collection_item_components` | Which of those materials a user's copy has, and their condition |
@@ -444,7 +445,7 @@ Later computer and PC batches add rows such as compact cassette and 3.5-inch flo
 
 ### `platform_media_formats`
 
-Which formats a platform's physical games use. M5 requires a Release's platform and format to appear here, through a composite foreign key.
+Which formats a platform's physical games use. M5 requires a Release's platform and format to appear here, through a composite foreign key. **`accepts_new_publications`** (boolean, default true, M11b-1b) is false for `nes` and `snes` with `rom-cartridge`: existing releases keep that format, but a release newly published on those platforms must name its cartridge shell.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -455,6 +456,21 @@ Which formats a platform's physical games use. M5 requires a Release's platform 
 - **Foreign keys:** `platform_id` → `platforms(id)` on delete cascade; `media_format_code` → `media_formats(code)` on delete restrict
 - **Indexes:** `media_format_code`
 - **Timestamps:** `created_at`
+
+### `packaging_types`
+
+The packaging vocabulary (M11b-1b): how a physical package is built, never how many discs it holds. Read-only for clients, like `media_formats`, and extended by forward migration.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `code` | `text` | No | Primary key. `unclassified`, `unknown`, `cardboard-box`, `jewel-case`, `double-depth-jewel-case`, `plastic-case`, `paper-sleeve` |
+| `name` | `text` | No | Unique |
+| `description` | `text` | No | The construction |
+| `is_type` | `boolean` | No | False for the two states, `unclassified` and `unknown` |
+| `position` | `smallint` | No | Display order |
+
+- **Timestamps:** `created_at`, `updated_at`
+- **Access:** RLS, `select` for `anon` and `authenticated`, no write grant
 
 ### `hardware_requirements`
 
@@ -580,7 +596,8 @@ One specific physical edition: platform, region code, physical format, packaging
 | `media_format_code` | `text` | No | The primary format. Required: a Release is always on a physical medium |
 | `media_count` | `smallint` | Yes | No default. Required to publish. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
 | `media_playability` | `media_playability` | No | Default `unknown`. Whether the game plays from the medium, subject to normal installation, or needs additional downloads for essential gameplay (Q8). `staff_only` once published |
-| `packaging` | `text` | Yes | "Big box", "Jewel case", "Steelbook" |
+| `packaging` | `text` | Yes | The packaging as originally recorded, such as "Big box". Kept exactly as recorded, as a note; part of the identity only while unclassified (M11b-1b) |
+| `packaging_code` | `text` | No | Default `unclassified`. → `packaging_types(code)`. How the package is built, not how many discs it holds. Only a catalog editor sets `unknown`. Never returns to `unclassified`, except on a collector's own open submission (M11b-1b) |
 | `languages` | `text[]` | Yes | BCP 47 tags, as printed on the package |
 | `rating_labels` | `text[]` | Yes | As printed, such as `USK 12` or `PEGI 16`. Often distinguishes packages |
 | `release_date` | `date` | Yes | |
@@ -602,8 +619,9 @@ One specific physical edition: platform, region code, physical format, packaging
   - `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:**
   - `(id, game_id)`, so other tables can use a composite foreign key that keeps game and release consistent
-  - Partial `NULLS NOT DISTINCT (game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status = 'published'`. Packaging is part of the identity under D6
-  - Partial `NULLS NOT DISTINCT (submitted_by, game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status IN ('unverified', 'under_review')` and `submitted_by` is set, so one user can't submit the same release twice. Imported and editor candidates have no submitter, and review deduplicates them
+  - `releases_published_identity_key`: partial unique index, `NULLS NOT DISTINCT`, where `status = 'published'`, on `(game_id, platform_id, media_format_code, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), private.release_packaging_key(packaging_code, packaging), private.release_code_key(product_code))` (M11b-1b). Packaging is part of the identity under D6
+  - `releases_pending_submission_key`: the same key preceded by `submitted_by`, where `status IN ('unverified', 'under_review')` and `submitted_by` is set, so one user can't submit the same release twice. Imported and editor candidates have no submitter, and review deduplicates them
+  - **The comparison keys** (private, immutable): labels compare after NFC, typographic marks made ASCII, white space collapsed and `lower()`, never dropping letters, accents or punctuation. Codes compare after NFC, trimming and `upper()`, keeping every separator. An unclassified release's packaging compares by its exact recorded text, so releases that were distinct before M11b-1b stay distinct until an editor classifies them. Design: [physical-catalog-m11b.md](physical-catalog-m11b.md#mig-2-and-mig-3-together-release-identity-and-packaging-implemented-in-m11b-1b)
 - **Indexes:**
   - `(game_id, platform_id, region_code)`
   - `(platform_id, region_code, release_date DESC)`
@@ -622,6 +640,7 @@ One specific physical edition: platform, region code, physical format, packaging
   - `CHECK (status <> 'published' OR verified_at IS NOT NULL)`
   - `CHECK (status <> 'published' OR (edition_name, edition_kind and media_count are set))`
   - `CHECK (status <> 'published' OR region_code <> 'unknown' OR region_unknown_confirmed)`
+  - The `guard_release_packaging_and_format` trigger (M11b-1b), for API sessions: a release becoming published needs `packaging_code <> 'unclassified'` and a platform format with `accepts_new_publications`. Grandfathered published releases are unaffected
   - A constraint trigger, checked at commit, rejects `published` unless its game and game-platform pairing are also `published`. The same trigger requires a published game to have a published physical release, and a published pairing to have one on that platform
   - A trigger refuses unpublishing
 
