@@ -62,6 +62,7 @@ const steps = {
   notifications: () => runNode("db-notification-checks.mjs"),
   catalog: () => runNode("db-catalog-checks.mjs"),
   imports: () => runNode("db-import-checks.mjs"),
+  releases: () => runNode("db-release-identity-checks.mjs"),
   search: () => runNode("db-search-checks.mjs"),
   collection: () => runNode("db-collection-checks.mjs"),
   submissions: () => runNode("db-submission-checks.mjs"),
@@ -98,8 +99,8 @@ async function main() {
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
+    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "releases", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
+    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "releases", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
   };
   if (!plans[command]) {
     console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");

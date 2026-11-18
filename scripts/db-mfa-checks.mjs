@@ -362,8 +362,8 @@ try {
     const game = (await rpc(creatorAal2.access_token, "create_game", { p_title: title, p_kind: "game", p_reason: "Editing checks" })).body;
     const snes = psql("select id from public.platforms where slug = 'snes';");
     const release = (await rpc(creatorAal2.access_token, "create_release", {
-      p_game: game, p_platform: snes, p_media_format_code: "rom-cartridge", p_region_code: "ntsc-uc",
-      p_details: { edition_name: "Standard", edition_kind: "standard", media_count: 1, product_code: `MF-${randomBytes(3).toString("hex")}` }, p_reason: "Editing checks",
+      p_game: game, p_platform: snes, p_media_format_code: "snes-game-pak-na", p_region_code: "ntsc-uc",
+      p_details: { packaging_code: "cardboard-box", edition_name: "Standard", edition_kind: "standard", media_count: 1, product_code: `MF-${randomBytes(3).toString("hex")}` }, p_reason: "Editing checks",
     })).body;
     check("an editor creates a game and a release over the API", /^[0-9a-f-]{36}$/.test(game ?? "") && /^[0-9a-f-]{36}$/.test(release ?? ""));
     const anonCreate = await fetch(`${api}/rest/v1/rpc/create_game`, { method: "POST", headers: { apikey: anonKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_title: "x", p_kind: "game", p_reason: "x" }) });

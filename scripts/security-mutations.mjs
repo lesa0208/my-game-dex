@@ -1063,4 +1063,30 @@ export const m11b1aMutations = [
     rewrite(APPLY_RELEASE, "where f.platform_id = p_run.platform_id having pg_catalog.count(*) = 1;", "where f.platform_id = p_run.platform_id;")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations };
+// M11b-1b: release identity and packaging. Each violation weakens one new protection.
+const M11B1B_GUARD = "private.guard_release_packaging_and_format()";
+const M11B1B_PUBLISHED_INDEX = (columns) => `drop index public.releases_published_identity_key;
+create unique index releases_published_identity_key on public.releases (${columns}) nulls not distinct where status = 'published';`;
+export const m11b1bMutations = [
+  sql("unclassified packaging can be newly published", "pgtap", rewrite(M11B1B_GUARD,
+    "    if new.packaging_code = 'unclassified' then\n      raise exception 'packaging classification required'",
+    "    if false then\n      raise exception 'packaging classification required'")),
+  sql("the generic cartridge can be newly published on NES and SNES", "pgtap", rewrite(M11B1B_GUARD,
+    "                     and f.accepts_new_publications) then", "                     ) then")),
+  sql("classified packaging can return to unclassified", "pgtap", rewrite(M11B1B_GUARD,
+    "  if tg_op = 'UPDATE' and old.packaging_code <> 'unclassified' and new.packaging_code = 'unclassified'",
+    "  if false and tg_op = 'UPDATE' and old.packaging_code <> 'unclassified' and new.packaging_code = 'unclassified'")),
+  sql("a collector can record Unknown", "pgtap", rewrite("private.submission_details(jsonb)",
+    "  if r.packaging_code = 'unknown' or not exists", "  if not exists")),
+  sql("the published identity ignores the cartridge shell", "pgtap", M11B1B_PUBLISHED_INDEX(
+    "game_id, platform_id, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), private.release_packaging_key(packaging_code, packaging), private.release_code_key(product_code)")),
+  sql("unclassified releases lose their historical packaging text", "pgtap", M11B1B_PUBLISHED_INDEX(
+    "game_id, platform_id, media_format_code, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), packaging_code, private.release_code_key(product_code)")),
+  sql("product codes compare without their separators", "pgtap", rewrite("private.release_code_key(text)",
+    "pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.normalize(p_code, 'NFC'), '^\\s+|\\s+$', '', 'g'))",
+    "pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.normalize(p_code, 'NFC'), '[\\s./-]+', '', 'g'))")),
+  sql("the submission duplicate check ignores the shell", "pgtap", rewrite("public.submit_release(uuid, text, text, text, jsonb, jsonb, text, boolean)",
+    "and r.media_format_code = p_media_format\n", "\n")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations };

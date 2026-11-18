@@ -6,6 +6,20 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(84);
 
+-- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
+-- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
+-- it creates without a packaging type gets 'cardboard-box', and the legacy rom-cartridge
+-- format may still be newly published, so its fixtures stay as they were.
+create function pg_temp.legacy_packaging() returns trigger language plpgsql as $lp$
+begin
+  if new.packaging_code = 'unclassified' then
+    new.packaging_code := 'cardboard-box';
+  end if;
+  return new;
+end $lp$;
+create trigger aa_legacy_packaging before insert on public.releases for each row execute function pg_temp.legacy_packaging();
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back.
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
@@ -241,7 +255,7 @@ select is(position(pg_temp.u('b8')::text in pg_temp.j('e4', format('select publi
   + position('rec_b8' in pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('sr')))::text), 0,
   'neither record of a submission names the submitter');
 select is(pg_temp.keys(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r')))),
-  'components,created_at,edition,evidence,exclusions,external_references,field_locks,format,game,id,identifiers,languages,local_title,markets,media_count,media_playability,merged_into,merged_publicly,merges,packaging,pairing_status,platform,publisher_name,rating_labels,region,region_unknown_confirmed,release_date,requirements,review,revision,status,submissions,updated_at,variant_name,verified_at',
+  'components,created_at,edition,evidence,exclusions,external_references,field_locks,format,game,id,identifiers,languages,local_title,markets,media_count,media_playability,merged_into,merged_publicly,merges,packaging,packaging_code,pairing_status,platform,publisher_name,rating_labels,region,region_unknown_confirmed,release_date,requirements,review,revision,status,submissions,updated_at,variant_name,verified_at',
   'a release record has exactly its fields');
 select is(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r'))) -> 'field_locks' -> 0 ->> 'field', 'edition_name', 'with its locked field');
 select is(pg_temp.keys(pg_temp.j('e4', format('select public.get_release_record(%L)::text', pg_temp.id('r'))) -> 'field_locks' -> 0), 'field,locked_at',

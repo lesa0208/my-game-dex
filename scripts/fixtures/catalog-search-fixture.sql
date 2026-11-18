@@ -13,6 +13,11 @@
 begin;
 \o /dev/null
 
+-- M11b-1b: this fixture models the catalog as it was before cartridge shells were
+-- recorded, so its SNES releases keep the generic cartridge. That format is reopened for
+-- new publication only inside this transaction, and closed again before it commits.
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 select exists (select 1 from auth.users where id = 'f1c5f1c5-0000-4000-8000-00000000c5c5') as installed \gset
 \if :installed
   \echo 'Catalog search fixture is already installed.'
@@ -87,7 +92,9 @@ returns uuid language plpgsql as $$
 declare v uuid;
 begin
   v := public.create_release(pg_temp.fx_id(p_game), (select id from public.platforms where slug = p_platform), p_format, p_region,
-    '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1}'::jsonb || p_details, 'Catalog search fixture');
+    -- M11b-1b: publication needs a packaging type; a disc is in a jewel case, anything else a box, unless the release says.
+    jsonb_build_object('edition_name', 'Standard', 'edition_kind', 'standard', 'media_count', 1,
+      'packaging_code', case when p_format = 'cd-rom' then 'jewel-case' else 'cardboard-box' end) || p_details, 'Catalog search fixture');
   if p_markets is not null then
     perform public.set_release_markets(v, p_markets, 'Catalog search fixture');
   end if;
@@ -228,6 +235,10 @@ update public.games set status = 'merged', merged_into_id = pg_temp.fx_id('hidde
 -- A published pairing needs a published release, so these pairings go too.
 update public.game_platforms set status = 'excluded'
   where game_id in (pg_temp.fx_id('orphan'), pg_temp.fx_id('typo'), pg_temp.fx_id('shadow'));
+
+-- The generic cartridge is closed to new NES and SNES publications again (M11b-1b).
+update public.platform_media_formats f set accepts_new_publications = false
+from public.platforms p where p.id = f.platform_id and p.slug in ('nes', 'snes') and f.media_format_code = 'rom-cartridge';
 
 select count(*) as fixture_records from fx \gset
 \echo 'Catalog search fixture installed:' :fixture_records 'records.'

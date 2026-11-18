@@ -77,7 +77,7 @@ const GAME_ITEM = "game,kind,match,matched,platforms";
 const RELEASE_ITEM = "game,kind,match,matched_identifier,release";
 const GAME = "first_release,id,kind,slug,title";
 const PICKER_RELEASE =
-  "components,edition,format,id,identifiers,languages,local_title,markets,media_count,media_playability,packaging,platform,publisher_name,rating_labels,region,release_date,requirements,variant_name";
+  "components,edition,format,id,identifiers,languages,local_title,markets,media_count,media_playability,packaging,packaging_code,platform,publisher_name,rating_labels,region,release_date,requirements,variant_name";
 const FORBIDDEN = /(verified|submitted)_(by|at)|revision|provider|evidence|audit|"(published|under_review|unverified|rejected|excluded|merged)"/;
 
 async function cleanup() {

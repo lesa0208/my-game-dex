@@ -196,14 +196,14 @@ let codes = 0;
 function makeRelease(game, region = "ntsc-uc") {
   codes += 1;
   const code = `EXX-${codes}-${randomBytes(2).toString("hex")}`;
-  sqlAs(maker.id, `select public.create_release('${game}', '${snes()}', 'rom-cartridge', '${region}', '{"edition_name": "${code}", "edition_kind": "standard", "media_count": 1, "product_code": "${code}"}', 'Exclusion checks');`);
+  sqlAs(maker.id, `select public.create_release('${game}', '${snes()}', 'snes-game-pak-na', '${region}', '{"edition_name": "${code}", "edition_kind": "standard", "media_count": 1, "product_code": "${code}", "packaging_code": "cardboard-box"}', 'Exclusion checks');`);
   return sqlAs(editor.id, `select public.verify_release(r.id, 'Exclusion checks', r.revision) from public.releases r where r.product_code = '${code}';
     select public.publish_release(r.id, 'Exclusion checks', r.revision) from public.releases r where r.product_code = '${code}';
     select id from public.releases where product_code = '${code}';`);
 }
 function submit(user, game, region) {
   codes += 1;
-  return JSON.parse(sqlAs(user.id, `select public.submit_release('${game}', 'snes', 'rom-cartridge', '${region}', '{"product_code": "EXX-S${codes}"}', '[]', null, true)::text;`));
+  return JSON.parse(sqlAs(user.id, `select public.submit_release('${game}', 'snes', 'snes-game-pak-na', '${region}', '{"product_code": "EXX-S${codes}"}', '[]', null, true)::text;`));
 }
 const addCopy = (user, release) => {
   const id = uuidv7();

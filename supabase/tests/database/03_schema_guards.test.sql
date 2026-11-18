@@ -10,7 +10,7 @@ select plan(18);
 create temp table approved_relation_grants (relation text, grantee text);
 -- M1: reference data is publicly readable. Test 07 confirms it's SELECT only.
 insert into approved_relation_grants
-  select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements']) as t
+  select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements', 'packaging_types']) as t
   cross join unnest(array['anon', 'authenticated', 'service_role']) as r;
 -- M2: test 08 asserts the exact columns. service_role has no table access here.
 insert into approved_relation_grants values
