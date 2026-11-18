@@ -4,6 +4,8 @@
 
 Corrections are forward migrations keyed by code or slug, so they never rewrite history. Uncertain facts stay null or go in `platforms.notes`, and are never invented.
 
+Source licensing for catalog games and releases, and the proposed cartridge-shell formats, are in [physical-catalog-m11b.md](physical-catalog-m11b.md) (M11b-0, proposed).
+
 ## How far to trust this
 
 Platform data was checked in November 2026 against the sources below, using a tool that returns extracts of each page rather than the raw page, and long articles were only partly read. **Most rows rest on English Wikipedia alone.** Sega Retro, NEC Retro, Nintendo Life, ConsoleMods and others blocked access. Treat the seed as checked rather than authoritative, and correct it through catalog review.

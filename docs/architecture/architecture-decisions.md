@@ -185,6 +185,8 @@ Approved by the product owner on 2026-11-08, separate from the global decisions 
 | Search | Language-neutral PostgreSQL search, with 100 ms as a non-blocking local target (M5c) |
 | Images | Deferred until D15 |
 
+**M11b-0 proposal (2026-11-18), not approved.** [physical-catalog-m11b.md](physical-catalog-m11b.md) proposes revising the Sources row: Wikidata cleared; No-Intro cleared for metadata only, from manual saved downloads; Redump held, rather than blocked until written permission, pending confirmation of its terms after the project split. It also proposes cartridge-shell media formats for NES/Famicom and SNES/Super Famicom. The rows above stay in force until the product owner decides.
+
 ### M8 decisions: the Superadmin Foundation
 
 Approved by the product owner on 2026-11-14, separate from the global decisions above. M8 migrations, tests and [security-rls.md](security-rls.md#the-owner-m8) cite them as D1 to D19, and the addendum's sections as A1 to A5. "Built" describes what was implemented, where it differs from the proposal.
