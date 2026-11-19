@@ -14,7 +14,7 @@ import { componentLabel, editionKindLabel, formatCatalogDate, languageName } fro
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { exclusionReasonLabel } from "@/features/exclusion/form";
-import { actorLabel, creationNote, recordFieldLabel, recordStatusLabel } from "@/features/records/form";
+import { creationNote, recordFieldLabel, recordStatusLabel } from "@/features/records/form";
 import { getRecordHistory, getReleaseRecord } from "@/features/records/queries";
 import type { ReleaseSummary } from "@/features/records/queries";
 import { requestStatusLabel } from "@/features/review/form";
@@ -204,7 +204,7 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
                   <>
                     <span className="break-words whitespace-pre-wrap">{note.reason}</span>
                     <span className="mt-1 block text-xs text-muted-foreground">
-                      Written by {actorLabel(note.actor)} when creating the release, {formatWhen(note.occurred_at)}. A note, not structured evidence: check it against the source
+                      Written when the release was created, {formatWhen(note.occurred_at)} (who wrote it is in the history). A note, not structured evidence: check it against the source
                       before verifying.
                     </span>
                   </>

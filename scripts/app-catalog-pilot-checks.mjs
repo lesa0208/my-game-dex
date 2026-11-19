@@ -41,6 +41,8 @@ const distinct = (values) => [...new Set(values)];
 const sameSet = (a, b) => a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
 const title = (r) => GAMES.find((g) => g.key === r.game).title;
 const users = [];
+/** Checks that couldn't run because what they need isn't published: reported, never passed. */
+const prerequisites = [];
 
 /** A pilot release's row on the stack: matched by game, platform, region, edition, variant, code and barcode. */
 function row(r) {
@@ -79,7 +81,8 @@ async function collector() {
 function catalogState() {
   section("The pilot in the catalog, as reviewed");
   check(`every pilot candidate is on the stack once (${RELEASES.length})`, RELEASES.every((r) => r.row.id && psql(`select count(*) from public.releases where id = ${lit(r.row.id)};`) === "1"));
-  check(`the ${HELD.length} held entries were never entered`, psql("select count(*) from public.releases;") === String(RELEASES.length));
+  // Editors' releases only: a collector's own submission (private to them and editors) isn't the pilot's.
+  check(`the ${HELD.length} held entries were never entered`, psql("select count(*) from public.releases where submitted_by is null;") === String(RELEASES.length));
   for (const g of GAMES) check(`${g.title}: one game, never a duplicate`, psql(`select count(*) from public.games where lower(title) = lower(${lit(g.title)});`) === "1");
   check("only class A releases are published", published.every((r) => r.class === "A"), published.filter((r) => r.class !== "A").map((r) => r.id).join(","));
   for (const r of published) {
@@ -113,9 +116,14 @@ async function gamePages() {
       check(`${g.title} ${region}: editions ${expected.join(", ")}`, sameSet(offered, expected), offered.join(","));
     }
   }
+  // The results are judged by the games they link to: the no-results page repeats the
+  // query, and a similar published title ("Super Mario World" for "Super Mario Bros.") may
+  // rightly appear. Only published games have a page to link to.
+  const publishedSlugs = new Set(psql("select coalesce(string_agg(slug, ',' order by slug), '') from public.games where status = 'published';").split(",").filter(Boolean));
   for (const g of GAMES.filter((x) => !liveGames.includes(x))) {
     const search = await visitor.get(`/explore?q=${encodeURIComponent(g.title)}`);
-    check(`${g.title}, still in review, isn't in search`, !plain(search.html).includes(g.title));
+    const linked = distinct([...search.html.matchAll(/href="\/games\/([a-z0-9-]+)"/g)].map((m) => m[1]));
+    check(`${g.title}, still in review, isn't in search`, linked.every((slug) => publishedSlugs.has(slug)), linked.join(","));
   }
 }
 
@@ -130,10 +138,10 @@ function pathTo(r) {
 async function collecting() {
   section("A collector adds copies");
   const user = await collector();
-  const two = published.filter((r) => r.platform === "snes").slice(0, 2);
   const ps = published.find((r) => r.platform === "playstation");
   const added = [];
-  for (const r of [...two, ps].filter(Boolean)) {
+  // Every published release, each as itself.
+  for (const r of published) {
     const path = pathTo(r);
     const page = await user.browser.get(path);
     const form = addForm(page.html);
@@ -145,7 +153,14 @@ async function collecting() {
   }
   const copies = psql(`select coalesce(string_agg(release_id::text, ',' order by release_id), '') from public.collection_items where owner_id = ${lit(user.id)};`).split(",").filter(Boolean);
   check("each release was added once, as itself, though its form was sent twice", sameSet(copies, added.map((r) => r.row.id)));
-  if (two.length === 2) check("two releases stay two copies of two separate releases", new Set(copies).size === copies.length && copies.includes(two[0].row.id) && copies.includes(two[1].row.id));
+  check(`${added.length} releases are ${added.length} copies of ${added.length} separate releases`, new Set(copies).size === copies.length && copies.length === added.length);
+  // Check 7 needs two published releases of one game. It's reported as unmet, never as passed.
+  const pair = liveGames.map((g) => added.filter((r) => r.game === g.key)).find((rs) => rs.length >= 2);
+  if (pair) check(`${title(pair[0])}: its releases ${pair.map((r) => r.id).join(" and ")} stay separate copies of separate releases`, pair.every((r) => copies.includes(r.row.id)) && new Set(pair.map((r) => r.row.id)).size === pair.length);
+  else {
+    prerequisites.push("check 7: no game has two published releases, so two releases of one game can't be added and compared");
+    console.log("SKIP two releases of one game: no game has two published releases (an unmet prerequisite, not a pass)");
+  }
 
   // A copy whose edition the collector doesn't know: kept unidentified, nothing invented.
   const base = ps ?? published[0];
@@ -202,5 +217,6 @@ try {
 const errorLines = appErrorLines();
 check("the app logged no errors", errorLines.length === 0, `${errorLines.length} lines`);
 for (const line of errorLines.slice(0, 10)) console.log(`  ${line}`);
+for (const p of prerequisites) console.log(`UNMET PREREQUISITE ${p}`);
 console.log(`\n${results.passed} passed, ${results.failed} failed`);
 process.exit(results.failed === 0 ? 0 : 1);

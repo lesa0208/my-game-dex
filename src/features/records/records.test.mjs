@@ -88,7 +88,8 @@ test("the creating editor's reason is the record's evidence note, and only the r
     { action: "catalog_record_created", details: { entity: "game_platform" }, reason: "Pairing", actor: staff, occurred_at: "2026-11-19T19:46:01Z" },
     { action: "catalog_record_created", details: { entity: "release" }, reason: "M12c-A S9: SNES Central 0164", actor: staff, occurred_at: "2026-11-19T19:46:00Z" },
   ];
-  assert.deepEqual(creationNote(items, "release"), { reason: "M12c-A S9: SNES Central 0164", actor: staff, occurred_at: "2026-11-19T19:46:00Z" });
+  // The note carries the reason and when, never who: the record names nobody above its history.
+  assert.deepEqual(creationNote(items, "release"), { reason: "M12c-A S9: SNES Central 0164", occurred_at: "2026-11-19T19:46:00Z" });
   assert.equal(creationNote(items, "game"), null);
   assert.equal(creationNote(items.slice(0, 2), "release"), null);
   assert.equal(creationNote([{ ...items[2], reason: null }], "release"), null);

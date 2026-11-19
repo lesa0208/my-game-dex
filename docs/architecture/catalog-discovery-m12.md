@@ -2,7 +2,7 @@
 
 **Written for:** the product owner, catalog editors and the engineers building M12b and M12c.
 
-**Status: requirement accepted on 2026-11-19. M12b (the fast add, internal search and the missing-game fallback) is merged into main by PR #16 (`1ac0eb8`, 2026-11-19) and applied to development, which has 72 migrations. M12c-A, the first real NES, SNES and PlayStation catalog, is staged on the isolated test stack ([catalog-pilot-m12c.md](catalog-pilot-m12c.md)). External discovery is M12c-B: a required launch feature, not built, with no provider approved.**
+**Status: requirement accepted on 2026-11-19. M12b (the fast add, internal search and the missing-game fallback) is merged into main by PR #16 (`1ac0eb8`, 2026-11-19) and applied to development, which has 72 migrations. M12c-A, the first real NES, SNES and PlayStation catalog, is staged on the isolated test stack, with three releases published after a human review and the collector checks passing against them ([catalog-pilot-m12c.md](catalog-pilot-m12c.md)). External discovery is M12c-B: a required launch feature, not built, with no provider approved.**
 
 Related: [database-schema.md § Collection system](database-schema.md#collection-system), [ADR-015: metadata providers are replaceable adapters](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters), [D14: metadata provider and budget](architecture-decisions.md#needed-before-catalog-work), [ADR-025: physical-only](architecture-decisions.md#adr-025-the-product-is-permanently-physical-only), [ADR-068](architecture-decisions.md#adr-068-collecting-never-waits-for-the-catalog), [physical-catalog-m11b.md](physical-catalog-m11b.md).
 
@@ -158,7 +158,7 @@ On a copy's own page, its owner can later set or correct an unidentified copy's 
 ## Roadmap
 
 - **M12b:** the fast add, internal search with ownership, the missing-game fallback with immediate tracking, and this document. *Merged (PR #16) and on development.*
-- **M12c-A:** the first real NES, SNES and PlayStation catalog, from the M11b-0 shortlist revalidated against current evidence, through the existing importer and review. *Staged on the test stack.*
+- **M12c-A:** the first real NES, SNES and PlayStation catalog, from the M11b-0 shortlist revalidated against current evidence, through the existing importer and review. *On the test stack: 29 candidates staged, 3 published after human review.*
 - **M12c-B: external API discovery.** A required part of the launch journey (step 2), not an optional extra. Requirements and the implementation plan are in [catalog-pilot-m12c.md § M12c-B](catalog-pilot-m12c.md#m12c-b-external-api-discovery). If no provider can be cleared, discovery stays the open launch requirement in section 2, with its dependency and the alternative plan.
 
 ## Review notes (M12b)

@@ -2,7 +2,7 @@
 
 **Written for:** the product owner, catalog editors and the reviewer who publishes the pilot, and the engineers planning M12c-B.
 
-**Status, 2026-11-19: staged on the isolated test stack, publication blocked on a second, human catalog editor.**
+**Status, 2026-11-19: on the isolated test stack, three releases are published after a human review by the product owner (editor B). The collector checks pass against them. The rest stays staged or held.**
 
 **Baseline:**
 - `main` at `1ac0eb8` (PR #16: M11b, M12a and M12b).
@@ -15,15 +15,68 @@ Related: [physical-catalog-m11b.md](physical-catalog-m11b.md) (the M11b-0 design
 
 | | Count | Where |
 | --- | --- | --- |
-| Games imported from Wikidata | 8 | In review, unpublished |
-| Release candidates, class A (item-level evidence) | 20 | Staged, waiting for a second editor's review |
-| Release candidates, class B (a gap to close first) | 9 | Staged, not to be verified until the gap is closed |
+| Games imported from Wikidata | 8 | 3 published with their reviewed release, 5 in review |
+| Releases published after human review | **3** | S4, P1 and P11 (below) |
+| Class A candidates still in review | 17 | Not reviewed yet |
+| Class B candidates (a gap to close first) | 9 | In review, not to be verified until the gap is closed |
 | Held entries (class H) | 9 | Not entered |
-| **Published** | **0** | Blocked: see [Publication](#publication-blocked-on-a-human-reviewer) |
 
 The pilot keeps M11b-0's scope: 8 games and 38 release candidates. Every candidate was revalidated against sources read and saved on 2026-11-19, and several moved class (see [Changes from the M11b-0 table](#changes-from-the-m11b-0-table)).
 
-**Nothing reached a collector.** With no release published, the games aren't in search, and the ten collector checks (search, game page, fast-add choices, adding, separate editions, unidentified copies, duplicates, ownership and summary) can't run yet. They're written as `scripts/app-catalog-pilot-checks.mjs`, with every expectation taken from the evidence table, and run once a reviewer publishes the A releases.
+## Human review result (2026-11-19)
+
+The product owner reviewed as editor B, signed in to their own test account (`@salebea`) with their own authenticator. They chose the releases to publish. The guide had proposed S1, S2 and P11; they published S4 instead of S1 and S2, and added P1.
+
+| # | Game | Platform, format | Region | Edition | Code or barcode | Release id |
+| --- | --- | --- | --- | --- | --- | --- |
+| S4 | Super Mario World | SNES, Super Famicom / PAL SNES Cartridge | PAL (sold in Germany) | Standard | SNSP-MW-NOE | `01a1f558-7072-77ed-b0f8-42fee81734c5` |
+| P1 | Final Fantasy VII | PlayStation, CD-ROM, 3 discs | NTSC-J | Standard | barcode 4961012967056 | `01a1f558-70f9-7c62-abe0-bf1d81c48a52` |
+| P11 | Crash Bandicoot | PlayStation, CD-ROM, 1 disc | NTSC-J | Standard | barcode 4948872100311 | `01a1f558-7114-7097-9eb6-c4c4a0c3cb25` |
+
+**Read from the database afterwards, without changing anything:**
+- Each game (Super Mario World, Final Fantasy VII, Crash Bandicoot) and its platform pairing is published.
+- Each release was created by editor A (`@m12c_a_298ed9`) and verified by editor B. Each game was verified by editor B.
+- The audit log has, by editor B, 3 game verifications, 3 release verifications and 3 publications of each.
+- No release was verified by its creator. The review guard and MFA were in force throughout. No script signed in as editor B, completed their MFA, or verified or published anything.
+
+**The review reasons were recorded as short placeholders** ("moze", "sdada" and similar), not as what was checked. The reasons are kept as recorded. A review on development should name the evidence checked (for example "SNES Central 0000: Germany, SNSP-MW-NOE, regular release"), so the audit log explains the decision.
+
+**Verified physical releases versus game metadata.**
+- **The three releases are verified physical releases:** a human checked them against item-level sources.
+- **The games' titles and first-release dates are Wikidata game metadata,** verified by the same reviewer as game identity. They are not evidence of any particular package.
+
+**The reviewer also used the collector side.** Their account submitted Super Mario World, PAL, edition not given, through the missing-game form, and added a copy. That submission is pending review and private to them and editors, and the copy is "Awaiting catalog approval". It is the 30th release on the stack and isn't part of the pilot. The no-self-review rule means another editor must review it. It shows finding 1 in practice: a collector's PAL copy, while a reviewed PAL release (S4) exists, goes to review rather than being matched to it, because a submission with the edition not given never matches a classified release.
+
+## Collector checks after review
+
+`MGD_STACK=test node scripts/app-catalog-pilot-checks.mjs` ran against the three published releases, in the built app over HTTP on the isolated test stack. The harness starts its own instance of the same build, on a private port, against the same stack as the 3002 preview.
+
+**Result: 62 passed, 0 failed, and one unmet prerequisite.**
+
+| # | Check | Result |
+| --- | --- | --- |
+| 1 | Internal search finds each published game; the five still in review link to no game page | Pass |
+| 2 | Each game page loads, titled | Pass |
+| 3 | Platform: only the published release's platform | Pass |
+| 4 | Region: only the published regions. PAL only for Super Mario World, though four other Super Mario World candidates are in review | Pass |
+| 5 | Edition: only the published editions | Pass |
+| 6 | Each published release is added as itself, once, though its form is sent twice | Pass |
+| 7 | Two published releases of one game stay separate | **Unmet prerequisite:** no game has two published releases. Three releases of three games stay three separate copies (pass). The same-game case needs, for example, S8 and S9 (A Link to the Past Standard and Player's Choice) published |
+| 8 | "Not sure" adds an unidentified copy, with the platform and region, and nothing in the catalog | Pass |
+| 9 | Ownership on the game page and in search (Final Fantasy VII "Owned: 2 copies", the others 1), and the summary ("4 copies", "2 platforms"); another collector sees none | Pass |
+| 10 | No duplicate games; the held entries were never entered; every published release has two different editors; every other collection, including the reviewer's own copy, is unchanged; the pilot is unchanged | Pass |
+
+**One check was wrong at first, and was fixed.** It looked for a game still in review by its title in the search page's text, but the no-results page repeats the query, and "Super Mario Bros." rightly finds the published Super Mario World. The check now judges results by the game pages they link to: every one must be a published game.
+
+## Outstanding evidence gaps and limitations
+
+- **17 A releases** still wait for a reviewer, including both A Link to the Past editions needed for check 7.
+- **Packaging is `unknown`** on every published release. **No SNES release date**, and no PlayStation package code.
+- **NES has nothing publishable** until a person re-reads the NesCartDB profiles.
+- **The four PAL Final Fantasy VII packages** need package codes.
+- **The `Player's Choice` spelling** is unconfirmed against the printed logo.
+- **pgTAP assumes an empty database.** On the staged stack, 22 assertions in 9 of the 47 files fail on what the stack already holds: 5 accounts where 3 are expected, the two pilot editors among staff and factors, audit rows, published records, Wikidata cleared. `30_owner` also stops at test 29, when a subquery meets the two extra accounts. They passed on the clean stack before staging (3,715 tests, 47 files), and M12c-A changes no migration or database function. Running pgTAP again needs a clean stack, which would remove the human-reviewed pilot, so it's left for review on a fresh stack or a copy of this one.
+- **Review reasons:** see the review result above.
 
 ## Sources and licensing
 
@@ -156,9 +209,9 @@ The data is in `scripts/catalog-pilot-m12c-data.mjs`.
 - "Player's Choice" is SNES Central's spelling. The printed logo's punctuation wasn't seen, so the reviewer checks it before publishing.
 - "PlayStation the Best for Family" is PSXDataCenter's title, with the brand's capitalisation.
 
-## Publication: blocked on a human reviewer
+## Publication: by a human reviewer only
 
-The pilot stops before review, deliberately. Each release needs a second catalog editor who re-reads its saved evidence and verifies it. A script acting as that editor would fabricate the verification the review guard exists to require.
+No script reviews. Each release needs a second catalog editor who re-reads its saved evidence and verifies it. A script acting as that editor would fabricate the verification the review guard exists to require.
 
 **On the test stack:**
 - Editor A's own attempt to verify was refused (`own record`).
@@ -254,6 +307,7 @@ Nothing new was built to stage the pilot:
 - **`scripts/app-catalog-pilot-checks.mjs`:** the ten collector checks, run against whatever a human has published and against nothing still in review. With nothing published they stop and report nothing as passed. They also compare every other collection on the stack before and after.
 - **Reviewer commands** in the runner (`reviewer-account`, `grant-reviewer`, `revoke-reviewer`), which the product owner runs. The password is typed at a hidden prompt. The role goes only to an account that isn't editor A, created no records, has a handle and has its own verified authenticator.
 - **Two admin fixes:** a **Releases in review** link, and the release record's *Editor's evidence note* beside *Structured source evidence* (findings 2 and 3).
+- **`scripts/lib/footprint.mjs`:** thirteen more suites (fast add, review, submission, collection, My Collection, merge, relink, exclusion, and the database review, search, submission, collection and relink checks) and the a11y suite end with a fingerprint of the tables they used, taken before they start and compared after. It replaces requiring those tables to be empty, so deliberate records on the stack are neither a failure nor at risk, and a suite that changed them would fail. On a clean stack it means empty, as before. The historical mutation runner is unchanged.
 - **`scripts/db-import-checks.mjs`** now leaves records that were on the stack before it exactly as they were, and never deletes them. It restores each provider's clearance as it found it, and compares the stack's runs, source records and games before and after, instead of requiring an empty catalog. With the pilot staged it passes 45 of 45, and the pilot's releases, games, markets and clearance hash the same before and after.
 
 **postgres** recorded the clearance, gave the disposable test editor its role (as the review checks do), and read. It wrote no catalog row.

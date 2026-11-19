@@ -144,9 +144,10 @@ export function actorLabel(actor: HistoryActor): string {
  * (release_evidence holds only what an import recorded), and nothing checks it. Null when
  * the creation isn't on this page of the history (it's then further down, in History).
  */
-export function creationNote(items: Pick<HistoryEvent, "action" | "details" | "reason" | "actor" | "occurred_at">[], entity: "game" | "release") {
+export function creationNote(items: Pick<HistoryEvent, "action" | "details" | "reason" | "occurred_at">[], entity: "game" | "release") {
   const created = items.find((e) => e.action === "catalog_record_created" && e.details.entity === entity);
-  return created?.reason ? { reason: created.reason, actor: created.actor, occurred_at: created.occurred_at } : null;
+  // Never who wrote it: a record names nobody above its history (M10b, D4).
+  return created?.reason ? { reason: created.reason, occurred_at: created.occurred_at } : null;
 }
 
 const ENTITY_WORDS: Record<string, string> = { game: "the game", release: "the release", game_platform: "a platform pairing", game_relation: "a related game" };

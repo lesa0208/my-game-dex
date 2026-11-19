@@ -34,6 +34,7 @@ import {
   stopApp,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 const plain = (html) => decode(html.replace(/<[^>]+>/g, ""));
 const users = [];
@@ -73,6 +74,11 @@ async function decide(editor, id, decision, values) {
   return { response: posted.response, form };
 }
 const releaseOf = (id) => psql(`select release_id from public.catalog_change_requests where id = '${id}';`);
+
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.catalog_change_requests","public.collection_items","public.games","public.releases","public.notifications"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
 
 try {
   installFixture();
@@ -233,7 +239,7 @@ commit;`);
   if (all) psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${all}) or target_profile_id in (${all}); commit;`);
   removeFixture();
   check("no submissions, copies, notifications or catalog data are left behind",
-    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from public.notifications);") === "0");
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
 const errorLines = appErrorLines();
