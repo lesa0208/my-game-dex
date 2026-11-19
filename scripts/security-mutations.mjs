@@ -1115,4 +1115,25 @@ create trigger check_copy_release_move before update of release_id on public.col
     "'owned', exists (select 1 from mine m where m.status <> 'invalid')", "'owned', exists (select 1 from mine m)")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations };
+/**
+ * M12b-0 and M12b: the three M12a review fixes, and get_my_owned_games (one owner-scoped
+ * read per results page, with the game page's counting rule). Checked by 46 and 47.
+ */
+const OWNED = "public.get_my_owned_games(uuid[])";
+export const m12bMutations = [
+  sql("the summary drops preserved claims from the platform counts", "pgtap", rewrite("public.get_my_collection_summary()",
+    "      coalesce(r.platform_id, c.claimed_platform_id) as platform_id",
+    "      case when c.record_status = 'invalid_preserved' then r.platform_id else coalesce(r.platform_id, c.claimed_platform_id) end as platform_id")),
+  sql("an exclusion's details miss a claim made active where it is", "pgtap", rewrite("public.get_exclusion(uuid)",
+    "                   or c.record_status <> 'invalid_preserved')),", "                   or false)),")),
+  sql("copies of a release say their pairing isn't the catalog's", "pgtap", rewrite("public.get_my_game_ownership(uuid)",
+    "        where gp.game_id = coalesce(r.game_id, c.claimed_game_id)", "        where c.claimed_game_id is not null and gp.game_id = coalesce(r.game_id, c.claimed_game_id)")),
+  sql("owned games reads every owner's copies", "pgtap", rewrite(OWNED, "c.owner_id = v_me", "true")),
+  sql("owned games counts preserved copies", "pgtap", rewrite(OWNED, "and c.record_status <> 'invalid_preserved'", "and true")),
+  sql("owned games answers for an ended session", "pgtap", rewrite(OWNED,
+    "  if v_me is null or not (select private.session_is_live()) then", "  if v_me is null then")),
+  sql("owned games is open to visitors", "pgtap", `grant execute on function ${OWNED} to anon;`),
+  sql("owned games takes any number of games", "pgtap", rewrite(OWNED, "pg_catalog.cardinality(p_games) > 50", "pg_catalog.cardinality(p_games) > 5000")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations, m12b: m12bMutations };

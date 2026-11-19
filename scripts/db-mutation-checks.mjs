@@ -876,5 +876,12 @@ try {
   process.exitCode = await main();
 } catch (error) {
   log(`FAIL mutation run stopped: ${error.message}`);
+  // M12b: a baseline that isn't clean keeps its output too, so the failure can be read.
+  const artifacts = argument("--artifacts");
+  if (artifacts) {
+    mkdirSync(artifacts, { recursive: true });
+    writeFileSync(join(artifacts, "stopped-run-output.txt"), `===== pgTAP =====\n${lastRaw.pgtap}\n===== API =====${lastRaw.api}\n`);
+    log(`The last pgTAP and API output is in ${join(artifacts, "stopped-run-output.txt")}`);
+  }
   process.exitCode = 1;
 }

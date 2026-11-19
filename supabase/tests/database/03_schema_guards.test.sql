@@ -141,7 +141,7 @@ insert into approved_function_grants values
   -- M12a: unidentified copies (an invoker add, like add_collection_item), the owner's
   -- identity changes and history, "Owned: Yes", and preserved claims.
   ('add_unidentified_copy(uuid,uuid,uuid,text,text,text,jsonb)', 'authenticated'), ('set_my_copy_identity(uuid,jsonb)', 'authenticated'),
-  ('get_my_copy_history(uuid)', 'authenticated'), ('get_my_game_ownership(uuid)', 'authenticated'), ('get_my_preserved_claim(uuid)', 'authenticated'),
+  ('get_my_copy_history(uuid)', 'authenticated'), ('get_my_game_ownership(uuid)', 'authenticated'), ('get_my_owned_games(uuid[])', 'authenticated'), ('get_my_preserved_claim(uuid)', 'authenticated'),
   -- M7b-2b: excluding (editors) and restoring (administrators); each function checks
   -- the caller's staff role. Owners read what their preserved copies are on.
   ('get_exclusion_preview(uuid)', 'authenticated'), ('exclude_release(uuid,text,text,text,text,boolean,boolean)', 'authenticated'),
