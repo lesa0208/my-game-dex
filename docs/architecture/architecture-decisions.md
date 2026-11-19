@@ -1204,6 +1204,9 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **A game the catalog doesn't have is submitted, and the copy goes in at once** on the submitter's own pending release, which M7a already allowed. No new ownership model: claims are for games the catalog has.
 - **External metadata is for discovery only,** through cleared providers (D14), into internal candidates that are reviewed like any submission. Generic metadata never yields a verified region or edition.
 - **Ownership on search results is one owner-scoped call per page** (`get_my_owned_games`, at most 50 games), with the same counting rule as the game page.
+- **"Not sure" is never resolved for the collector.** A release is added only when their own choices name it, or they choose it; a release in the address doesn't override a not-sure or different choice.
+- **A submission form makes one submission and one copy,** however often it's sent (`submit_game_once`, `submit_release_once`, keyed by the form's id). If the copy can't be added, the submission page says so and offers the add.
+- **A rejected new game isn't made claimable.** Its copy stays "Not approved" with everything recorded; the page offers only what the database allows: moving it to a release the catalog has, or removing it.
 
 **Consequences.** Collectors can always record what they own. The catalog stays moderated: nobody gains a way to publish. External discovery is an open launch requirement until a provider is cleared, with manual submission covering every game meanwhile. Details: [catalog-discovery-m12.md](catalog-discovery-m12.md).
 

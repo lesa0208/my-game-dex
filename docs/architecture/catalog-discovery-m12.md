@@ -34,7 +34,7 @@ Every results page, and the no-results page, ends with **"Can't find your game? 
 
 ## 2. External discovery, when available and licensed (M12c)
 
-When the internal search finds nothing suitable, an approved external provider may be searched to find the game. TheGamesDB and ScreenScraper have been considered; others may suit.
+When the internal search finds nothing suitable, an approved external provider may be searched to find the game. TheGamesDB and ScreenScraper are the pending candidate providers, not approved integrations; others may suit.
 
 **Not approved yet.** Before any provider is integrated, the product owner confirms, in writing where possible:
 
@@ -86,7 +86,15 @@ They confirm it's a physical game: a cartridge, disc or card with the game on it
 
 ## 6. Immediate tracking of a pending copy
 
-M12b reuses what M7a already provides: the submitter may add a copy of their own pending release (`can_use_release` allows it). The form adds it **at once by default** ("Add my copy to my collection now"), with the copy's id made when the form was rendered, so a retry can't add two. If adding fails, the submission stands and its page offers the add again.
+M12b reuses what M7a already provides: the submitter may add a copy of their own pending release (`can_use_release` allows it). The form adds it **at once by default** ("Add my copy to my collection now").
+
+**Sending the form again makes nothing twice.** The form carries an id made when it was rendered and kept on a failure. It names both the submission request and the copy:
+
+- `submit_game_once` and `submit_release_once` record which submission a request made. A double click, a retry after a lost response or a reload returns that submission, even with a field changed, instead of making a second game or release. Concurrent sends wait for each other. The submission functions themselves are unchanged and still check everything.
+- The copy is added under the same id, so `add_collection_item` adds it once. A retry adds it if the first send didn't.
+- Signed out or with an ended session, nothing is submitted. Another user sending the same form is refused.
+
+**If the submission is made but the copy can't be added,** the collector is taken to the submission, which says "Your copy couldn't be added to your collection: you can add it below" and offers the add, itself retry-safe. Sending the original form again still makes no second submission.
 
 The copy is in the collection straight away, labelled **Awaiting catalog approval**. It counts towards the collector's own "Owned" for the game, and never as a confirmed release.
 
@@ -102,7 +110,8 @@ Editors review submissions as before (M7b-1): staff only, a verified second fact
 | --- | --- |
 | **Approved and published** | Becomes a confirmed copy of a catalog release |
 | **Changes requested** | Stays, awaiting catalog approval; the collector can still edit the submission |
-| **Rejected** | Stays in the collection as "Not approved", with everything recorded; the collector can move it to another release, leave it unidentified, or remove it |
+| **Rejected: a release of a game the catalog has** | Stays in the collection as "Not approved", with everything recorded; the collector can keep it unidentified (with the region and edition they know), move it to another release, or remove it |
+| **Rejected: a new game** | The game is rejected with its release, so it isn't in the catalog, and an unidentified copy needs a published game (`can_claim` isn't loosened for this). The copy stays as "Not approved", with everything recorded and counted on the owner's own view. Its page doesn't offer to drop the release, says why, and offers to move it to a release the catalog has, if the game is there under another title, or to remove it |
 | **Merged into an existing release** | Moves to that release with everything recorded (M7b-2c), and is confirmed if that release is published |
 | **Withdrawn** | Not possible while the collector has copies of it: they're asked to remove them first, so no copy is left on a withdrawn release |
 | **Excluded** | Preserved privately with everything recorded, not counted (M7b-2b); restoring brings it back |
@@ -130,6 +139,7 @@ On a game's page, four steps, each driven by the address so it works without Jav
    - If the choices name exactly **one published release**, it's added through the ordinary add (`add_collection_item`).
    - If **several** match, the collector picks one, or adds the copy without one. One is never picked for them.
    - Otherwise (a region or edition not sure, or not in the catalog) the copy is added **unidentified** (`add_unidentified_copy`, M12a) with what they know.
+   - **"Not sure" stays not sure.** A region or edition left not sure is never filled in from the catalog, even when only one published release could match, and a release named in the address (a stale or edited link) isn't added over a not-sure or different choice: the page says it doesn't match and lists it to choose explicitly. The collector confirms an exact release only by choosing its region and edition, or the release itself, and pressing Add.
 
 Both adds are safe to retry: the copy's id is made when the page renders, so a double click gets the same copy back, and "Add another copy" gets a new id, so owning several copies works as before. Optional details (completeness, condition, purchase, notes) are collapsed.
 
@@ -149,3 +159,9 @@ On a copy's own page, its owner can later set or correct an unidentified copy's 
 
 - **M12b:** the fast add, internal search with ownership, the missing-game fallback with immediate tracking, and this document. *Implemented on the test stack.*
 - **M12c:** the initial real NES, SNES and PlayStation catalog (the M11b-0 pilot), and approved external discovery and import, as licensing and access permit. If no provider can be cleared, discovery stays the open launch requirement in section 2, with its dependency and the alternative plan.
+
+## Review notes (M12b)
+
+**Accessibility.** Every M12b page state passes the supported checks: Dark Mode axe (WCAG 2.0–2.2 A and AA, no critical or serious findings), one h1 and named fields, keyboard use and no sideways scrolling. The states covered are the fast-add steps (including a linked release that doesn't match), the claim and identity forms, a copy's history, ownership on the game page and search results, and the missing-game form. The Light Mode diagnostics list 186 findings, one per page state across the app, all `color-contrast`. With `A11Y_LIGHT_DETAIL=<file>`, which lists every failing element, none is particular to M12b: each M12b element in the list fails for the same reason as the rest of the app. The unused light token set leaves dark-theme colours on light surfaces, such as `#f5f5f7` text on white (about 1,000 elements app-wide) and dark cards (`#191b24`) on the light background. That is the pre-existing Light Mode gap recorded in ADR-056 (Dark Mode is the only supported appearance). Light Mode isn't offered, and making it supported is a release blocker of its own.
+
+**Pre-existing, separate cleanup.** The invitation app suite (`app-invitation-checks.mjs`) leaves 4 `released` handle holds (`ai_…`) in `private.handle_holds` after it runs. No check counts them and they block nothing, but the suite should remove them as the fast-add suite removes its own (`fa_…`). This predates M12b and isn't changed here.
