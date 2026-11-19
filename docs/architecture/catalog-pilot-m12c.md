@@ -2,7 +2,7 @@
 
 **Written for:** the product owner, catalog editors and the reviewer who publishes the pilot, and the engineers planning M12c-B.
 
-**Status, 2026-11-19: on the isolated test stack, three releases are published after a human review by the product owner (editor B). The collector checks pass against them. The rest stays staged or held.**
+**Status, 2026-11-19: on the isolated test stack, four releases are published after a human review by the product owner (editor B), two of them editions of one game. All ten collector checks pass against them (68 passed, 0 failed). The rest stays staged or held.**
 
 **Baseline:**
 - `main` at `1ac0eb8` (PR #16: M11b, M12a and M12b).
@@ -15,9 +15,9 @@ Related: [physical-catalog-m11b.md](physical-catalog-m11b.md) (the M11b-0 design
 
 | | Count | Where |
 | --- | --- | --- |
-| Games imported from Wikidata | 8 | 3 published with their reviewed release, 5 in review |
-| Releases published after human review | **3** | S4, P1 and P11 (below) |
-| Class A candidates still in review | 17 | Not reviewed yet |
+| Games imported from Wikidata | 8 | 3 published with their reviewed releases, 5 in review |
+| Releases published after human review | **4** | S2, S4, P1 and P11 (below) |
+| Class A candidates still in review | 16 | Not reviewed yet |
 | Class B candidates (a gap to close first) | 9 | In review, not to be verified until the gap is closed |
 | Held entries (class H) | 9 | Not entered |
 
@@ -25,52 +25,55 @@ The pilot keeps M11b-0's scope: 8 games and 38 release candidates. Every candida
 
 ## Human review result (2026-11-19)
 
-The product owner reviewed as editor B, signed in to their own test account (`@salebea`) with their own authenticator. They chose the releases to publish. The guide had proposed S1, S2 and P11; they published S4 instead of S1 and S2, and added P1.
+The product owner reviewed as editor B, signed in to their own test account (`@salebea`) with their own authenticator. They chose the releases to publish. The guide had proposed S1, S2 and P11. They first published S4, P1 and P11, then S2, so Super Mario World has two published releases: two regions and two cartridge shells under one game.
 
 | # | Game | Platform, format | Region | Edition | Code or barcode | Release id |
 | --- | --- | --- | --- | --- | --- | --- |
+| S2 | Super Mario World | SNES, North American SNES Game Pak | NTSC-U/C (sold in the United States) | Standard | SNS-MW-USA | `01a1f558-704c-76d9-95bf-38419a28679f` |
 | S4 | Super Mario World | SNES, Super Famicom / PAL SNES Cartridge | PAL (sold in Germany) | Standard | SNSP-MW-NOE | `01a1f558-7072-77ed-b0f8-42fee81734c5` |
 | P1 | Final Fantasy VII | PlayStation, CD-ROM, 3 discs | NTSC-J | Standard | barcode 4961012967056 | `01a1f558-70f9-7c62-abe0-bf1d81c48a52` |
 | P11 | Crash Bandicoot | PlayStation, CD-ROM, 1 disc | NTSC-J | Standard | barcode 4948872100311 | `01a1f558-7114-7097-9eb6-c4c4a0c3cb25` |
 
 **Read from the database afterwards, without changing anything:**
-- Each game (Super Mario World, Final Fantasy VII, Crash Bandicoot) and its platform pairing is published.
+- Each game (Super Mario World, Final Fantasy VII, Crash Bandicoot) and its platform pairing is published. S2 and S4 belong to the same Super Mario World game (`24f7b33f-…`); no second game was made.
 - Each release was created by editor A (`@m12c_a_298ed9`) and verified by editor B. Each game was verified by editor B.
-- The audit log has, by editor B, 3 game verifications, 3 release verifications and 3 publications of each.
+- The audit log has, by editor B, 3 game verifications, 4 release verifications, and a publication of each.
+- S2 was verified at 22:39:01 and published at 22:39:08 UTC.
+- An earlier attempt to confirm S2, before it was reviewed, found it unverified and stopped, rather than marking the check passed.
 - No release was verified by its creator. The review guard and MFA were in force throughout. No script signed in as editor B, completed their MFA, or verified or published anything.
 
-**The review reasons were recorded as short placeholders** ("moze", "sdada" and similar), not as what was checked. The reasons are kept as recorded. A review on development should name the evidence checked (for example "SNES Central 0000: Germany, SNSP-MW-NOE, regular release"), so the audit log explains the decision.
+**Most review reasons were recorded as short placeholders** ("moze", "sdada" and similar), not as what was checked. S2's are brief too: "Super Mario World" and "good game". The reasons are kept as recorded. A review on development should name the evidence checked (for example "SNES Central 0000: Germany, SNSP-MW-NOE, regular release"), so the audit log explains the decision.
 
 **Verified physical releases versus game metadata.**
-- **The three releases are verified physical releases:** a human checked them against item-level sources.
+- **The four releases are verified physical releases:** a human checked them against item-level sources.
 - **The games' titles and first-release dates are Wikidata game metadata,** verified by the same reviewer as game identity. They are not evidence of any particular package.
 
 **The reviewer also used the collector side.** Their account submitted Super Mario World, PAL, edition not given, through the missing-game form, and added a copy. That submission is pending review and private to them and editors, and the copy is "Awaiting catalog approval". It is the 30th release on the stack and isn't part of the pilot. The no-self-review rule means another editor must review it. It shows finding 1 in practice: a collector's PAL copy, while a reviewed PAL release (S4) exists, goes to review rather than being matched to it, because a submission with the edition not given never matches a classified release.
 
 ## Collector checks after review
 
-`MGD_STACK=test node scripts/app-catalog-pilot-checks.mjs` ran against the three published releases, in the built app over HTTP on the isolated test stack. The harness starts its own instance of the same build, on a private port, against the same stack as the 3002 preview.
+`MGD_STACK=test node scripts/app-catalog-pilot-checks.mjs` ran against the four published releases, in the built app over HTTP on the isolated test stack. The harness starts its own instance of the same build, on a private port, against the same stack as the 3002 preview.
 
-**Result: 62 passed, 0 failed, and one unmet prerequisite.**
+**Result: 68 passed, 0 failed**, all ten checks run. With three releases published it was 62 passed, check 7 waiting as an unmet prerequisite. It was never reported as passed until S2 was published.
 
 | # | Check | Result |
 | --- | --- | --- |
 | 1 | Internal search finds each published game; the five still in review link to no game page | Pass |
 | 2 | Each game page loads, titled | Pass |
 | 3 | Platform: only the published release's platform | Pass |
-| 4 | Region: only the published regions. PAL only for Super Mario World, though four other Super Mario World candidates are in review | Pass |
+| 4 | Region: only the published regions. Super Mario World offers NTSC-U/C and PAL, not the three other Super Mario World regions and labels still in review (S1, S3, S6) | Pass |
 | 5 | Edition: only the published editions | Pass |
 | 6 | Each published release is added as itself, once, though its form is sent twice | Pass |
-| 7 | Two published releases of one game stay separate | **Pending human review of S2** (NTSC-U/C, `SNS-MW-USA`), which the product owner intends to review. With S2 and S4 published, it compares two shells (North American Game Pak and Super Famicom / PAL) under one game. **Unmet prerequisite until then:** no game has two published releases. Three releases of three games stay three separate copies (pass). The same-game case needs, for example, S8 and S9 (A Link to the Past Standard and Player's Choice) published |
+| 7 | Two published releases of one game stay separate | **Pass.** Super Mario World offers S2 (NTSC-U/C) and S4 (PAL) as separate choices. Each is added as itself, once, though its form is sent twice. Each copy keeps its own release: `ntsc-uc` / `snes-game-pak-na` / `SNS-MW-USA` and `pal` / `snes-cartridge-jp-pal` / `SNSP-MW-NOE`. My Collection's search lists exactly the two copies, each with its region. The game page and search count "Owned: 2 copies" of the one game. No game or release is duplicated |
 | 8 | "Not sure" adds an unidentified copy, with the platform and region, and nothing in the catalog | Pass |
-| 9 | Ownership on the game page and in search (Final Fantasy VII "Owned: 2 copies", the others 1), and the summary ("4 copies", "2 platforms"); another collector sees none | Pass |
+| 9 | Ownership on the game page and in search (Super Mario World and Final Fantasy VII "Owned: 2 copies", Crash Bandicoot 1), and the summary ("5 copies", "2 platforms"); another collector sees none | Pass |
 | 10 | No duplicate games; the held entries were never entered; every published release has two different editors; every other collection, including the reviewer's own copy, is unchanged; the pilot is unchanged | Pass |
 
 **One check was wrong at first, and was fixed.** It looked for a game still in review by its title in the search page's text, but the no-results page repeats the query, and "Super Mario Bros." rightly finds the published Super Mario World. The check now judges results by the game pages they link to: every one must be a published game.
 
 ## Outstanding evidence gaps and limitations
 
-- **17 A releases** still wait for a reviewer, including both A Link to the Past editions needed for check 7.
+- **16 A releases** still wait for a reviewer.
 - **Packaging is `unknown`** on every published release. **No SNES release date**, and no PlayStation package code.
 - **NES has nothing publishable** until a person re-reads the NesCartDB profiles.
 - **The four PAL Final Fantasy VII packages** need package codes.

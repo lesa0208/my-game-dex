@@ -156,8 +156,19 @@ async function collecting() {
   check(`${added.length} releases are ${added.length} copies of ${added.length} separate releases`, new Set(copies).size === copies.length && copies.length === added.length);
   // Check 7 needs two published releases of one game. It's reported as unmet, never as passed.
   const pair = liveGames.map((g) => added.filter((r) => r.game === g.key)).find((rs) => rs.length >= 2);
-  if (pair) check(`${title(pair[0])}: its releases ${pair.map((r) => r.id).join(" and ")} stay separate copies of separate releases`, pair.every((r) => copies.includes(r.row.id)) && new Set(pair.map((r) => r.row.id)).size === pair.length);
-  else {
+  if (pair) {
+    check(`${title(pair[0])}: its releases ${pair.map((r) => r.id).join(" and ")} stay separate copies of separate releases`, pair.every((r) => copies.includes(r.row.id)) && new Set(pair.map((r) => r.row.id)).size === pair.length);
+    const kept = psql(`select string_agg(r.region_code || '/' || r.media_format_code || '/' || coalesce(r.product_code, ''), ',' order by 1) from public.collection_items c join public.releases r on r.id = c.release_id
+      where c.owner_id = ${lit(user.id)} and r.id in (${pair.map((r) => lit(r.row.id)).join(",")});`);
+    const expected = pair.map((r) => `${r.region}/${r.format}/${r.facts.product_code ?? ""}`).sort().join(",");
+    check("each copy keeps its own release: region, cartridge format and code", kept === expected, kept);
+    // The summary counts the whole collection; the rows are the search's.
+    const listHtml = (await user.browser.get(`/collection?q=${encodeURIComponent(title(pair[0]))}`)).html;
+    const rows = distinct([...listHtml.matchAll(/href="\/collection\/([0-9a-f-]{36})/g)].map((m) => m[1]));
+    const list = plain(listHtml);
+    const labels = { "ntsc-uc": "NTSC-U/C", pal: "PAL", "ntsc-j": "NTSC-J" };
+    check("My Collection lists both copies of the game, each with its region", rows.length === pair.length && pair.every((r) => list.includes(labels[r.region] ?? r.region)), `${rows.length} rows`);
+  } else {
     prerequisites.push("check 7: no game has two published releases, so two releases of one game can't be added and compared");
     console.log("SKIP two releases of one game: no game has two published releases (an unmet prerequisite, not a pass)");
   }
