@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { listCatalogPlatforms, searchCatalog } from "@/features/catalog/queries";
 import type { CatalogPlatform } from "@/features/catalog/types";
+import { getMyOwnedGames } from "@/features/collection/queries";
 
 export const metadata: Metadata = {
   title: "Explore",
@@ -36,6 +37,23 @@ function exploreHref({ query, platform, cursor }: ExploreParams) {
   if (cursor) params.set("after", cursor);
   const search = params.toString();
   return search ? `/explore?${search}` : "/explore";
+}
+
+/** M12b: the missing-game fallback, with what was searched for as the title to start from. */
+function submitHref(query: string) {
+  return query ? `/submit?title=${encodeURIComponent(query)}` : "/submit";
+}
+
+function MissingGame({ query }: { query: string }) {
+  return (
+    <p className="mt-4 rounded-lg border px-4 py-3 text-sm">
+      <span className="font-medium">Can&apos;t find your game?</span>{" "}
+      <Link href={submitHref(query)} className="text-primary-text underline underline-offset-4">
+        Add it to My Game Dex
+      </Link>
+      . Editors check it before it joins the catalog, and you can add your copy to your collection right away.
+    </p>
+  );
 }
 
 function Unavailable() {
@@ -103,18 +121,21 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
               </Button>
             ) : null}
             <Button asChild variant="secondary" size="lg">
-              <Link href="/submit">Submit a missing game</Link>
+              <Link href={submitHref(params.query)}>Add it to My Game Dex</Link>
             </Button>
           </div>
         }
       >
         {params.query
-          ? `Nothing in the catalog matches “${params.query}”${platformName ? ` on ${platformName}` : ""}. Check the spelling, or try another title the game is known by.`
+          ? `Nothing in the catalog matches “${params.query}”${platformName ? ` on ${platformName}` : ""}. Check the spelling, or try another title the game is known by. If it isn't in the catalog yet, add it, and add your copy right away.`
           : "The catalog has no published games for this platform so far."}
       </EmptyState>
     );
   }
 
+  // One read of the signed-in user's copies for the whole page, streamed into the
+  // results (M12b). Started here, not awaited, so the results don't wait for it.
+  const owned = getMyOwnedGames(data.items.map((item) => item.game.id));
   const summary = params.query
     ? `Games matching “${params.query}”${platformName ? ` on ${platformName}` : ""}`
     : `Games on ${platformName ?? "this platform"}, by title`;
@@ -123,7 +144,7 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
       <h2 id="explore-results" className="mb-3 text-sm font-medium text-muted-foreground">
         {summary}
       </h2>
-      <SearchResultList items={data.items} />
+      <SearchResultList items={data.items} owned={owned} />
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         {params.cursor ? (
           <Button asChild variant="ghost" size="lg">
@@ -138,6 +159,7 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
           </Button>
         ) : null}
       </div>
+      <MissingGame query={params.query} />
     </section>
   );
 }

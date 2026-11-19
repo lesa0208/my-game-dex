@@ -15,7 +15,7 @@ export const SORTS = [
 /** A copy's status (M6b): whether its release is still in the catalog. */
 export const STATUSES = [
   { value: "owned", label: "In the catalog" },
-  { value: "pending", label: "Awaiting review" },
+  { value: "pending", label: "Awaiting catalog approval" },
   { value: "not_approved", label: "Not approved" },
   { value: "invalid", label: "No longer in the catalog" },
   // M12a: copies that name no release, only the owner's claim.

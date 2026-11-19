@@ -727,6 +727,63 @@ try {
       await context.close();
     }
 
+    section(`${tag}: 2g. The fast add, ownership and a copy's identity (M12b)`);
+    {
+      const member = await person();
+      const { context, page } = await signIn(browser, viewport, member);
+      const game = "/games/starfall-odyssey";
+      for (const [name, path] of [
+        ["fast add, platform and region", game],
+        ["fast add, editions", `${game}?platform=snes&region=ntsc-uc`],
+        ["fast add, one release", `${game}?platform=snes&region=ntsc-uc&edition=${encodeURIComponent("collector~Collector's Edition")}`],
+        ["fast add, without a release", `${game}?platform=snes&region=pal&edition=unsure`],
+        ["fast add, naming the edition", `${game}?platform=snes&region=ntsc-uc&edition=other`],
+        ["fast add, another platform", `${game}?platform=other`],
+        ["fast add, another region", `${game}?platform=snes&region=other`],
+        ["submitting a missing game", "/submit?title=Ayb%20Lantern%20Moon"],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}${game}?platform=snes&region=pal&edition=unsure`, { waitUntil: "networkidle" });
+      await keyboard(page, "fast add, without a release", tag);
+
+      // With JavaScript: a double click adds one copy, and the page says it was added.
+      const add = page.locator("#add-claim ~ form button[type=submit], section[aria-labelledby=add-claim] button[type=submit]").first();
+      await add.dblclick();
+      await page.getByText("Added to your collection.").waitFor({ timeout: 15000 });
+      const copies = () => Number(psql(`select count(*) from public.collection_items where owner_id = '${member.id}';`));
+      ok(`${tag} a double click adds one copy without a release, and says so`, copies() === 1, `${copies()} copies`);
+      ok(`${tag} the button then offers another copy`, (await add.innerText()).includes("Add another copy"));
+      await add.click();
+      await page.getByText("You have 2 copies of this game").waitFor({ timeout: 15000 });
+      ok(`${tag} which adds a second copy on purpose`, copies() === 2);
+
+      // Ownership, on the game page and in search results.
+      await page.goto(`${origin}${game}`, { waitUntil: "networkidle" });
+      ok(`${tag} the game page says what the collector owns`, (await visibleText(page)).includes("Owned: 2 copies"));
+      await audit(page, "game page with ownership", tag);
+      await page.goto(`${origin}/explore?q=starfall`, { waitUntil: "networkidle" });
+      ok(`${tag} so do search results`, (await visibleText(page)).includes("Owned: 2 copies"));
+      await audit(page, "search results with ownership", tag);
+
+      // A copy's identity, changed with JavaScript, then its history.
+      const item = psql(`select id from public.collection_items where owner_id = '${member.id}' order by id limit 1;`);
+      await page.goto(`${origin}/collection/${item}`, { waitUntil: "networkidle" });
+      await audit(page, "copy without a release", tag);
+      await structure(page, "copy without a release", tag);
+      await page.locator("#identity summary").click();
+      await page.locator("#identity select[name=region]").selectOption("ntsc-j");
+      await page.locator("#identity input[name=edition_name]").fill("Platinum");
+      await page.locator("#identity button[type=submit]").click();
+      await page.getByText("Saved. Your copy's details are updated").waitFor({ timeout: 15000 });
+      ok(`${tag} the owner changes the region and edition`, psql(`select claimed_region_code || '/' || claimed_edition_name from public.collection_items where id = '${item}';`) === "ntsc-j/Platinum");
+      await audit(page, "copy with its history", tag);
+      await keyboard(page, "copy with its history", tag);
+      await context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);

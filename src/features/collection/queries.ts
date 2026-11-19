@@ -140,6 +140,24 @@ export async function getMyGameOwnership(gameId: string): Promise<GameOwnership 
   return data as GameOwnership;
 }
 
+/**
+ * M12b: how many copies the signed-in user has of each of these games (at most 50: one
+ * page of search results), in one call. Games they have no counted copy of are left
+ * out. Null when it can't be read; an empty map when signed out.
+ */
+export async function getMyOwnedGames(gameIds: string[]): Promise<Map<string, number> | null> {
+  const ids = [...new Set(gameIds.filter((id) => UUID.test(id)))];
+  if (!ids.length) return new Map();
+  if (ids.length > 50) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data: auth } = await supabase.auth.getClaims();
+  if (!auth?.claims?.sub) return new Map();
+  const { data, error } = await supabase.rpc("get_my_owned_games", { p_games: ids });
+  if (error || typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  return new Map(Object.entries(data as Record<string, unknown>).filter((e): e is [string, number] => typeof e[1] === "number" && e[1] > 0));
+}
+
 /** M12a: a copy's private identity history, newest first. Null when it can't be read. */
 export async function getMyCopyHistory(itemId: string): Promise<CopyHistoryEntry[] | null> {
   if (!UUID.test(itemId)) return null;

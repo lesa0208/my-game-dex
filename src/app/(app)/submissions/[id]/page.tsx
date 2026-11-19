@@ -33,6 +33,9 @@ const COPYABLE = new Set(["submitted", "in_review", "changes_requested", "reject
 
 const NOTICES: Record<string, string> = {
   submitted: "Submitted. Thank you: an editor will review it.",
+  // M12b: the copy added with the submission.
+  submitted_copy: "Submitted, and your copy is in your collection, awaiting catalog approval. An editor will review it.",
+  submitted_no_copy: "Submitted. Your copy couldn't be added to your collection: you can add it below.",
   withdrawn: "The submission was withdrawn.",
   resubmitted: "Sent for review. An editor will look at it again.",
 };

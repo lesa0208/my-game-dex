@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { EditCopyForm } from "@/components/collection/edit-copy-form";
+import { IdentityForm } from "@/components/collection/identity-form";
 import { MoveCopySection } from "@/components/collection/move-copy-section";
 import { RemoveCopyForm } from "@/components/collection/remove-copy-form";
 import { RemovePieceRecordForm } from "@/components/collection/remove-piece-record-form";
@@ -24,6 +25,8 @@ import {
   copyStatusLabel,
   formatDay,
   formatPrice,
+  historyIdentityText,
+  historySourceLabel,
   latestAcquisitionDate,
   mediumLabel,
   NOT_RECORDED,
@@ -32,9 +35,9 @@ import {
   priceInput,
   releaseLine,
 } from "@/features/collection/details";
-import { collectionHref, type CollectionParams, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
-import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyPreservedClaim, getMyReleaseCopies } from "@/features/collection/queries";
-import { getMySubmissionForRelease } from "@/features/submissions/queries";
+import { collectionHref, type CollectionParams, collectionQuery, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
+import { getMediaCategory, getMyCopy, getMyCopyHistory, getMyDefaultCurrency, getMyPreservedClaim, getMyReleaseCopies } from "@/features/collection/queries";
+import { getMySubmissionForRelease, getSubmissionOptions } from "@/features/submissions/queries";
 import { exclusionReasonLabel, withListedPieces } from "@/features/exclusion/form";
 import { getMyPreservedRelease } from "@/features/exclusion/queries";
 import type { CopyDetail } from "@/features/collection/types";
@@ -83,6 +86,9 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const back: CollectionParams = readCollectionParams(search);
   const move = readMoveParams(search);
   const moved = search.notice === "moved";
+  // M12b: after changing what the copy is (set_my_copy_identity).
+  const identityNotice =
+    search.notice === "identity" ? "Saved. Your copy's details are updated, and the change is in its history." : search.notice === "identity_same" ? "Nothing changed: your copy already says that." : null;
   const viewer = await requireViewerWithHandle(UUID.test(itemId) ? copyHref(itemId, back) : "/collection");
 
   const outcome = await getMyCopy(itemId);
@@ -106,11 +112,13 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const release = copy.release ?? excluded?.release ?? null;
   const { game } = copy;
 
-  const [category, siblings, defaultCurrency, submissionId] = await Promise.all([
+  const [category, siblings, defaultCurrency, submissionId, options, history] = await Promise.all([
     getMediaCategory(release?.format.code ?? null),
     release && copy.copies_of_release > 1 ? getMyReleaseCopies(release.id) : null,
     copy.price ? null : getMyDefaultCurrency(),
     release && copy.status !== "owned" ? getMySubmissionForRelease(release.id) : null,
+    getSubmissionOptions(),
+    getMyCopyHistory(copy.id),
   ]);
   const medium = mediumLabel(category);
   // The number and the total both come from get_my_release_copies, one read, so they
@@ -128,6 +136,16 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const listed = pieces.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
   const unlisted = pieces.filter((p) => !p.listed && p.recorded);
 
+  // M12b: what the owner can say the copy is. A claim's region and edition (not while
+  // it's preserved: its game is out of the catalog), or, for a copy of a release, the
+  // same without the release. Needs the game and the platform's id.
+  const identityPlatform = (claim?.platform ?? release?.platform)?.slug ?? null;
+  const platformId = identityPlatform ? (options?.platforms.find((p) => p.slug === identityPlatform)?.id ?? null) : null;
+  const regionChoices = options?.regions.filter((r) => r.code !== "unknown") ?? [];
+  const canIdentify = viewer.isActive && Boolean(game?.id) && Boolean(platformId) && !(claim && preserved);
+  const regionLabels = new Map(options?.regions.map((r) => [r.code, r.label]) ?? []);
+  const backFields = [...new URLSearchParams(collectionQuery(back)).entries()];
+
   return (
     <article aria-labelledby="copy-title" className="flex flex-col gap-4">
       <p>
@@ -136,6 +154,13 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           Back to your collection
         </Link>
       </p>
+
+      {identityNotice ? (
+        <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
+          <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
+          {identityNotice}
+        </p>
+      ) : null}
 
       {moved ? (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
@@ -293,6 +318,63 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             ]}
           />
         </Section>
+      ) : null}
+
+      {canIdentify ? (
+        <details id="identity" className="rounded-lg border bg-card">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
+            {claim ? "Change the region or edition" : "Not sure it's this release?"}
+          </summary>
+          <div className="flex flex-col gap-3 border-t p-4">
+            <p className="text-sm text-muted-foreground">
+              {claim
+                ? "Say what you know about your copy, and choose Not sure where you aren't."
+                : "Keep your copy without a release, with the region and edition you know, until you find the right one. It's your own record, not a release in the catalog."}
+            </p>
+            <IdentityForm
+              itemId={copy.id}
+              gameId={game!.id}
+              platformId={platformId!}
+              regions={regionChoices}
+              values={
+                claim
+                  ? { region: claim.region?.code ?? null, editionKind: claim.edition_kind, editionName: claim.edition_name }
+                  : { region: release && release.region.code !== "unknown" ? release.region.code : null, editionKind: null, editionName: release?.edition_name ?? null }
+              }
+              unlink={!claim}
+              back={backFields}
+            />
+            {claim ? (
+              <p className="text-sm">
+                Found it in the catalog?{" "}
+                <a href="#move" className="text-primary-text underline underline-offset-4">
+                  Link it to its release
+                </a>
+                .
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
+      {history && history.length ? (
+        <details id="history" className="rounded-lg border bg-card">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
+            <Lock aria-hidden="true" className="mr-2 size-4 text-muted-foreground" />
+            What this copy was ({history.length} {history.length === 1 ? "change" : "changes"})
+          </summary>
+          <ol aria-label="Changes, newest first" className="flex flex-col gap-3 border-t p-4 text-sm">
+            {history.map((entry, index) => (
+              <li key={`${entry.changed_at}-${index}`} className="flex flex-col gap-0.5">
+                <p className="font-medium">
+                  {formatDay(entry.changed_at)} · {historySourceLabel(entry.source)}
+                </p>
+                <p className="text-muted-foreground">From: {historyIdentityText(entry.previous, regionLabels)}</p>
+                <p className="text-muted-foreground">To: {historyIdentityText(entry.current, regionLabels)}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
       ) : null}
 
       {siblings && siblings.count > 1 ? (

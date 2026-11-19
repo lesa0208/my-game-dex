@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createSupabaseServerClient } from "@/features/auth/server";
-import { UUID } from "@/features/collection/uuid";
+import { UUID, UUID_V7 } from "@/features/collection/uuid";
 
 import { readSubmission, readSubmissionChanges, submissionErrorMessage } from "./form";
 import { getMySubmission } from "./queries";
@@ -73,8 +73,19 @@ export async function submitToCatalog(_state: SubmissionState, formData: FormDat
     };
   }
   if (outcome.outcome !== "submitted" || !outcome.submission_id) return { status: "error", message: submissionErrorMessage(null) };
+
+  // M12b: the submitter's copy goes into their collection at once, on their own pending
+  // release, through the ordinary add (M6b: can_use_release allows the submitter's own
+  // submission). The copy's id was made when the form was rendered, so a retry can't add
+  // a second one. If adding fails, the submission stands and its page offers the add.
+  let notice = "submitted";
+  const copyId = field(formData, "copy_item_id");
+  if (field(formData, "add_copy") === "on" && outcome.release_id && UUID_V7.test(copyId)) {
+    const { error: copyError } = await supabase.rpc("add_collection_item", { p_item_id: copyId, p_release: outcome.release_id, p_details: {} });
+    notice = copyError ? "submitted_no_copy" : "submitted_copy";
+  }
   refresh();
-  redirect(`/submissions/${outcome.submission_id}?notice=submitted`);
+  redirect(`/submissions/${outcome.submission_id}?notice=${notice}`);
 }
 
 /** The same action for a native form post. A submission still redirects to its page. */

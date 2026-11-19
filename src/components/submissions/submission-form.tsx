@@ -92,7 +92,9 @@ export function SubmissionForm({
   submissionId,
   createdGame = false,
   options,
-  values,
+  values: given,
+  copyItemId,
+  initialTitle,
 }: {
   mode: "release" | "game" | "edit";
   game: { id: string; title: string } | null;
@@ -100,7 +102,15 @@ export function SubmissionForm({
   createdGame?: boolean;
   options: SubmissionOptions;
   values: SubmissionValues;
+  /** M12b: for a new submission, the id of the copy to add with it, made at render, so a retry can't add two. */
+  copyItemId?: string;
+  /**
+   * M12b: a new game's title to start from (as searched for). Merged here, not by the
+   * server page, which only holds a reference to EMPTY_SUBMISSION from this client module.
+   */
+  initialTitle?: string;
 }) {
+  const values = initialTitle ? { ...given, title: initialTitle } : given;
   const editing = mode === "edit";
   const [state, action, pending] = useActionState(editing ? updateFromPage : submitFromPage, { status: "idle", message: null });
   const [platform, setPlatform] = useState(values.platform);
@@ -298,6 +308,16 @@ export function SubmissionForm({
       <Field id="note" label="Note for the editors (optional)" hint="Where you saw this release, or anything that helps check it.">
         <textarea id="note" name="note" maxLength={1000} rows={3} defaultValue={values.note} aria-describedby="note-hint" className={cn(selectClassName, "h-auto py-2")} />
       </Field>
+
+      {editing || !copyItemId ? null : (
+        <div className="flex gap-3 rounded-lg border p-3">
+          <input type="hidden" name="copy_item_id" value={copyItemId} />
+          <input id="add_copy" name="add_copy" type="checkbox" defaultChecked className="mt-0.5 size-5 shrink-0 accent-primary-solid" />
+          <label htmlFor="add_copy" className="text-sm">
+            Add my copy to my collection now. It shows as awaiting catalog approval until an editor checks the release.
+          </label>
+        </div>
+      )}
 
       {editing ? null : (
         <div className="flex gap-3 rounded-lg border bg-muted/40 p-3">

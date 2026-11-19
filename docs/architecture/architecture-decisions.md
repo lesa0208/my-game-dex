@@ -1195,6 +1195,18 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 
 **Consequences.** One migration (15 functions redefined with one condition each, 10 policies, one helper). A statement already running when a session ends completes; later ones are refused. The cost is tens of microseconds on small queries and within noise on large ones. The pages now say other devices are signed out, without the hour caveat. Storage and Realtime paths would need their own check if clients ever use them.
 
+### ADR-068: Collecting never waits for the catalog
+
+**Status:** accepted (M12b, 2026-11-19). **Context:** collectors own games the catalog doesn't have yet, or have a copy whose region or edition they don't know. If tracking waited for editorial approval, or for an exact release, they couldn't record their collection.
+
+**Decision.**
+- **The fast add is platform, region, edition, add,** each step offering the catalog's choices first, then another one or "Not sure". Exactly one published release is added as itself; several matching are never settled by picking one; anything else becomes an unidentified copy (M12a).
+- **A game the catalog doesn't have is submitted, and the copy goes in at once** on the submitter's own pending release, which M7a already allowed. No new ownership model: claims are for games the catalog has.
+- **External metadata is for discovery only,** through cleared providers (D14), into internal candidates that are reviewed like any submission. Generic metadata never yields a verified region or edition.
+- **Ownership on search results is one owner-scoped call per page** (`get_my_owned_games`, at most 50 games), with the same counting rule as the game page.
+
+**Consequences.** Collectors can always record what they own. The catalog stays moderated: nobody gains a way to publish. External discovery is an open launch requirement until a provider is cleared, with manual submission covering every game meanwhile. Details: [catalog-discovery-m12.md](catalog-discovery-m12.md).
+
 ## Risks to watch
 
 | Risk | Mitigation |

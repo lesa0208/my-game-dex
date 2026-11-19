@@ -4,12 +4,15 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { gameHref, ReleasePickerSkeleton, ReleasePickerView } from "@/components/catalog/release-picker";
-import { AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
+import { AddClaimToCollection, AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
+import { GameOwnership, GameOwnershipSkeleton } from "@/components/collection/game-ownership";
 import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link";
 import { PageLayout } from "@/components/layout/page-layout";
 import { MergeReleaseLink } from "@/components/merge/merge-release-link";
 import { EmptyState } from "@/components/shared/empty-state";
 import { getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
+import { type FastAddReference, fastAddHref, planFastAdd } from "@/features/collection/fast-add";
+import { getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
   title: "Game",
@@ -23,8 +26,11 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const { slug } = await params;
   const query = await searchParams;
   const selection = { platform: first(query.platform), region: first(query.region), release: first(query.release) };
+  const edition = first(query.edition);
 
-  const outcome = await getReleasePicker(slug, selection.platform, selection.region, selection.release);
+  // The picker is public and cached; it ignores a platform or region it doesn't have
+  // for the game ("not sure", another one), which the fast add then handles.
+  const [outcome, options] = await Promise.all([getReleasePicker(slug, selection.platform, selection.region, selection.release), getSubmissionOptions()]);
   if (!outcome.ok) {
     if (outcome.reason === "unavailable") {
       return (
@@ -47,18 +53,33 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
     if (merged) permanentRedirect(gameHref(merged.gameSlug, { platform: null, region: null, release: merged.releaseId }));
   }
   // A merged game, or a link by id, goes to the game's own address.
-  if (picker.game.slug !== slug) redirect(gameHref(picker.game.slug, selection));
+  if (picker.game.slug !== slug) redirect(fastAddHref(picker.game.slug, { ...selection, edition }));
 
-  // The catalog above is public and cached. Adding reads the session, so it streams in
-  // on its own, and returns here after signing in.
+  const reference: FastAddReference = {
+    platforms: options?.platforms.map((p) => ({ slug: p.slug, name: p.name })) ?? [],
+    regions: options?.regions.filter((r) => r.code !== "unknown") ?? [],
+  };
+  const plan = planFastAdd(picker, { ...selection, edition }, reference);
+  const here = fastAddHref(picker.game.slug, { ...selection, edition });
+  const platformIds = new Map(options?.platforms.map((p) => [p.slug, p.id]) ?? []);
+
+  // The catalog above is public and cached. Adding and ownership read the session, so
+  // they stream in on their own, and return here after signing in.
   return (
     <ReleasePickerView
       picker={picker}
+      plan={plan}
+      reference={reference}
       requestedRelease={selection.release !== null}
+      renderOwnership={
+        <Suspense fallback={<GameOwnershipSkeleton />}>
+          <GameOwnership gameId={picker.game.id} title={picker.game.title} />
+        </Suspense>
+      }
       renderAdd={(release) => (
         <>
           <Suspense fallback={<AddToCollectionSkeleton />}>
-            <AddToCollection release={release} returnPath={gameHref(picker.game.slug, { ...selection, release: release.id })} />
+            <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
           </Suspense>
           <Suspense fallback={null}>
             <ExcludeReleaseLink releaseId={release.id} />
@@ -68,6 +89,16 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
           </Suspense>
         </>
       )}
+      renderClaim={(claim) => {
+        const platformId = platformIds.get(claim.platform);
+        return platformId ? (
+          <Suspense fallback={<AddToCollectionSkeleton />}>
+            <AddClaimToCollection gameId={picker.game.id} platformId={platformId} claim={claim} returnPath={here} />
+          </Suspense>
+        ) : (
+          <p className="text-sm text-muted-foreground">Adding isn&apos;t available right now. Try again later.</p>
+        );
+      }}
     />
   );
 }

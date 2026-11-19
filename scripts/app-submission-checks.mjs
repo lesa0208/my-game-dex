@@ -87,7 +87,7 @@ async function signedOut() {
   const game = await visitor.get("/games/starfall-odyssey");
   check("a game page links to submitting a missing release", game.html.includes('href="/submit?game=starfall-odyssey"'));
   const nothing = await visitor.get("/explore?q=qzsnothinghere");
-  check("a search with no results links to submitting a game", nothing.html.includes('href="/submit"'));
+  check("a search with no results links to submitting a game, starting from the search", nothing.html.includes('href="/submit?title=qzsnothinghere"'));
 }
 
 async function newGame() {
@@ -145,7 +145,7 @@ async function copyOfPending({ owner, id }) {
   const release = psql(`select release_id from public.catalog_change_requests where id = '${id}';`);
   check("the copy is added", count(`select count(*) from public.collection_items where owner_id = '${owner.id}' and release_id = '${release}';`) === 1);
   const list = await owner.browser.get("/collection");
-  check("My Collection shows it as awaiting review", plain(list.html).includes("Qzs Comet Rally") && plain(list.html).includes("Awaiting review"));
+  check("My Collection shows it as awaiting catalog approval", plain(list.html).includes("Qzs Comet Rally") && plain(list.html).includes("Awaiting catalog approval"));
   const copy = psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${release}';`);
   check("its page links back to the submission", (await owner.browser.get(`/collection/${copy}`)).html.includes(`href="/submissions/${id}"`));
   const after = await owner.browser.get(`/submissions/${id}`);

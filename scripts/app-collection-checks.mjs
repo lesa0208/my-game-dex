@@ -217,7 +217,7 @@ async function catalog() {
   check("search still works signed out", search.response.status === 200 && search.html.includes("Starfall Odyssey"));
   const game = await visitor.get(`/games/${SLUG}`);
   check("the release picker still lists the releases", game.response.status === 200 && (game.html.match(/aria-current="true"/g) ?? []).length === 0 && game.html.includes("SNS-ZSFE-USA"));
-  check("and asks for a release before adding", game.html.includes("Choose the release you have to add it to your collection."));
+  check("and asks for the platform, region and edition, or a release, before adding", game.html.includes("Choose the platform, region and edition you have, or pick your release below."));
 }
 
 try {

@@ -273,7 +273,7 @@ export function pieceFieldValue(piece: Pick<CopyPiece, "recorded" | "condition">
 
 const STATUS_LABELS: Record<CopyStatus, string | null> = {
   owned: null,
-  pending: "Awaiting review",
+  pending: "Awaiting catalog approval",
   not_approved: "Not approved",
   invalid: "No longer in the catalog",
   unidentified: "Not linked to a release",
@@ -300,12 +300,98 @@ const EDITION_KINDS: Record<string, string> = {
   other: "Other edition",
 };
 
+/** M12b: the edition types an owner can choose for an unidentified copy, in the database's order. */
+export const EDITION_KIND_OPTIONS: { value: string; label: string }[] = Object.entries(EDITION_KINDS).map(([value, label]) => ({ value, label }));
+
+/**
+ * M12b: names collectors often use for an edition, offered as suggestions while typing.
+ * Only suggestions: what the owner types is kept as their own words, and nothing here is
+ * a catalog edition or says that one exists for a game.
+ */
+export const EDITION_NAME_SUGGESTIONS = [
+  "Standard",
+  "Black Label",
+  "Platinum",
+  "Greatest Hits",
+  "Player's Choice",
+  "PlayStation the Best",
+  "Nintendo Selects",
+  "Collector's Edition",
+  "Limited Edition",
+] as const;
+
 /**
  * M12a: "PS1 · PAL · Platinum" for an unidentified copy: what the owner says, and "not
  * sure" where they didn't. The edition is the name they gave, or else its kind.
  */
 export function claimLine(claim: Pick<CopyClaim, "platform" | "region" | "edition_kind" | "edition_name">) {
   return [claim.platform.short_name, claim.region?.label ?? "Region not sure", claimEdition(claim) ?? "Edition not sure"].join(" · ");
+}
+
+/**
+ * M12b: the five standings of a copy in "what you own", each named, so a confirmed
+ * release is never confused with a copy that isn't one.
+ */
+const OWNERSHIP_STATUS: Record<CopyStatus, string> = {
+  owned: "Confirmed",
+  pending: "Awaiting catalog approval",
+  not_approved: "Not approved",
+  unidentified: "Not linked to a release",
+  invalid: "Preserved, not counted",
+};
+
+export function ownershipStatusLabel(status: CopyStatus) {
+  return OWNERSHIP_STATUS[status] ?? "Not counted";
+}
+
+/** "Owned: 3 copies", "Owned: Yes" (one copy), or "Not in your collection" for no counted copy. */
+export function ownershipHeadline(copies: number) {
+  if (copies <= 0) return "Not in your collection";
+  return copies === 1 ? "Owned: Yes" : `Owned: ${copies.toLocaleString("en")} copies`;
+}
+
+/**
+ * M12b: one line of what the owner has of a game, "SNES · PAL · Platinum": the release's
+ * or the claim's platform, region and edition. A claim says "not sure" where its owner
+ * did; a release leaves out an edition the catalog doesn't name.
+ */
+export function ownershipEntryLine(entry: {
+  status: CopyStatus;
+  release_id: string | null;
+  platform: { short_name: string };
+  region: { code: string; label: string | null } | null;
+  edition_kind: string | null;
+  edition_name: string | null;
+}) {
+  const claim = entry.release_id === null;
+  const region = entry.region ? (entry.region.code === "unknown" ? "Region unknown" : (entry.region.label ?? entry.region.code)) : claim ? "Region not sure" : null;
+  const edition = entry.edition_name ?? (entry.edition_kind ? (EDITION_KINDS[entry.edition_kind] ?? null) : null) ?? (claim ? "Edition not sure" : null);
+  return [entry.platform.short_name, region, edition].filter(Boolean).join(" · ");
+}
+
+/**
+ * M12b: one side of a change in a copy's private history: a release, or what the owner
+ * said ("PAL · Platinum", "Region not sure · Edition not sure"). The platform never
+ * changes, so it isn't repeated.
+ */
+export function historyIdentityText(identity: Record<string, string | null> | null, regionLabels: Map<string, string>) {
+  if (!identity) return "Not recorded";
+  if (identity.release_id) return "Linked to a release in the catalog";
+  const region = identity.region_code ? (regionLabels.get(identity.region_code) ?? identity.region_code) : "Region not sure";
+  const edition = identity.edition_name ?? (identity.edition_kind ? (EDITION_KINDS[identity.edition_kind] ?? identity.edition_kind) : null) ?? "Edition not sure";
+  return `Not linked to a release: ${region} · ${edition}`;
+}
+
+/** M12b: who made a change in a copy's history. */
+export function historySourceLabel(source: string) {
+  switch (source) {
+    case "owner":
+      return "You";
+    case "catalog":
+      return "The catalog, when it merged a duplicate release";
+    default:
+      return "Site maintenance";
+  }
 }
 
 /** M12a: a claim's edition as its owner gave it: the name, or else its kind. Null: not sure. */

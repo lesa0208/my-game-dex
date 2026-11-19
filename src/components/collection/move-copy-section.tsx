@@ -57,7 +57,7 @@ export async function MoveCopySection({
   return (
     <details id="move" open={open} className="rounded-lg border bg-card">
       <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
-        Move to another release
+        {copy.identity === "claim" ? "Link to a release in the catalog" : "Move to another release"}
       </summary>
       <div className="flex flex-col gap-4 border-t p-4">
         <p className="text-sm">

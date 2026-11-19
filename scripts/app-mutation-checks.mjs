@@ -5,7 +5,7 @@
  * For each violation: change one source file, build, run its suite (which must fail),
  * restore the file, and check it's byte-for-byte the original.
  *
- *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3|m11a4a] [--log file] [--only name,...]
+ *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3|m11a4a|m12b] [--log file] [--only name,...]
  *   node scripts/app-mutation-checks.mjs --recover
  *
  * Opens and closes with a clean baseline (a build and a passing suite). About four
@@ -178,7 +178,50 @@ const m11a2 = [
   },
 ].map((m) => ({ ...m, set: "m11a2", suite: "app-password-checks.mjs" }));
 
-export const mutations = [...m11a2, ...m11a3, ...m11a4a];
+/**
+ * M12b: the fast add and the missing-game fallback, in the app's code. Checked by
+ * app:fast-add-checks. Picking one of several matching releases is checked by the unit
+ * tests (collection.test.mjs), as the fixture has no two releases that only a variant
+ * tells apart.
+ */
+const m12b = [
+  {
+    name: "a claim ignores the region the owner chose",
+    file: "src/features/collection/claim-actions.ts",
+    from: `    regionCode: field(formData, "region") || null,`,
+    to: `    regionCode: null,`,
+  },
+  {
+    name: "a claim gets a new id on every submission",
+    file: "src/features/collection/claim-actions.ts",
+    from: `    itemId,
+    gameId,
+    platformId,`,
+    to: `    itemId: uuidv7(),
+    gameId,
+    platformId,`,
+  },
+  {
+    name: "a platform the catalog doesn't list passes as the catalog's",
+    file: "src/features/collection/fast-add.ts",
+    from: `plan.platform = { slug: asked, inCatalog: false };`,
+    to: `plan.platform = { slug: asked, inCatalog: true };`,
+  },
+  {
+    name: "the submitted game's copy isn't added",
+    file: "src/features/submissions/actions.ts",
+    from: `  if (field(formData, "add_copy") === "on" && outcome.release_id && UUID_V7.test(copyId)) {`,
+    to: `  if (field(formData, "add_copy_ignored") === "on" && outcome.release_id && UUID_V7.test(copyId)) {`,
+  },
+  {
+    name: "the submitted game's copy gets a new id on a retry",
+    file: "src/features/submissions/actions.ts",
+    from: `  const copyId = field(formData, "copy_item_id");`,
+    to: `  const copyId = crypto.randomUUID().replace(/^(.{14})./, (_, head) => head + "7");`,
+  },
+].map((m) => ({ ...m, set: "m12b", suite: "app-fast-add-checks.mjs" }));
+
+export const mutations = [...m11a2, ...m11a3, ...m11a4a, ...m12b];
 
 function run(command, args, label) {
   const started = Date.now();
