@@ -81,11 +81,11 @@ The product owner reviewed as editor B, signed in to their own test account (`@s
 - **pgTAP assumes an empty database.** On the staged test stack, 22 assertions in 9 files fail on what that stack already holds (the pilot editors among staff and factors, Wikidata cleared, extra audit rows).
   - **Clean run:** on a disposable clean stack (`MGD_STACK=scratch`, project `my-game-dex-scratch`, built from this branch's migrations, 2026-11-19), **pgTAP passed 3,715 of 3,715 tests in 47 files**, and all 22 database check suites passed (1,460 checks, 0 failed).
   - **Cleanup:** the scratch stack's containers and its two volumes were then removed. The test stack's releases and collections hash the same before and after.
-- **Review reasons:** placeholders on the three test publications. See [Review reasons](#review-reasons-a-test-pilot-limitation).
+- **Review reasons:** placeholders on the four test publications. See [Review reasons](#review-reasons-a-test-pilot-limitation).
 
 ## Review reasons: a test-pilot limitation
 
-**The three test publications carry placeholder reasons.** The verify and publish reasons for S4, P1 and P11 are short placeholder words, not what was checked. They stay as recorded: audit records are never edited or deleted. This doesn't weaken the publications as a test of the workflow, but they aren't a model for a real review.
+**The four test publications carry placeholder reasons.** The verify and publish reasons for S2, S4, P1 and P11 are short placeholder words, not what was checked. They stay as recorded: audit records are never edited or deleted. This doesn't weaken the publications as a test of the workflow, but they aren't a model for a real review.
 
 **Use this format for every future review**, and always on development. A reason is at most 500 characters.
 
@@ -101,7 +101,7 @@ The product owner reviewed as editor B, signed in to their own test account (`@s
 
 ## Test data is not Git data
 
-**Where the pilot lives.** The eight games, the 29 release candidates, the three human-reviewed publications and the review's audit history exist **only in the isolated test database** (project `my-game-dex-test`, port 55321). So do editor A, the reviewer's account and the reviewer's own copy.
+**Where the pilot lives.** The eight games, the 29 release candidates, the four human-reviewed publications and the review's audit history exist **only in the isolated test database** (project `my-game-dex-test`, port 55321). So do editor A, the reviewer's account and the reviewer's own copy.
 
 **What Git carries:**
 - the code;

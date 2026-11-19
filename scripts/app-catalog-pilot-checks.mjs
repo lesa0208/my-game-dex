@@ -41,6 +41,8 @@ const distinct = (values) => [...new Set(values)];
 const sameSet = (a, b) => a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
 const title = (r) => GAMES.find((g) => g.key === r.game).title;
 const users = [];
+/** The handles this run's collectors chose: only their holds are removed at the end. */
+const handles = [];
 /** Checks that couldn't run because what they need isn't published: reported, never passed. */
 const prerequisites = [];
 
@@ -74,7 +76,9 @@ async function collector() {
   const browser = new Browser();
   await signInAs(browser, user, "/home");
   const welcome = await browser.get("/welcome");
-  await browser.submit("/welcome", formWith(welcome.html, "handle"), { handle: `pl_${randomBytes(5).toString("hex")}` });
+  const handle = `pl_${randomBytes(5).toString("hex")}`;
+  handles.push(handle);
+  await browser.submit("/welcome", formWith(welcome.html, "handle"), { handle });
   return { ...user, browser };
 }
 
@@ -158,9 +162,17 @@ async function collecting() {
   const pair = liveGames.map((g) => added.filter((r) => r.game === g.key)).find((rs) => rs.length >= 2);
   if (pair) {
     check(`${title(pair[0])}: its releases ${pair.map((r) => r.id).join(" and ")} stay separate copies of separate releases`, pair.every((r) => copies.includes(r.row.id)) && new Set(pair.map((r) => r.row.id)).size === pair.length);
-    const kept = psql(`select string_agg(r.region_code || '/' || r.media_format_code || '/' || coalesce(r.product_code, ''), ',' order by 1) from public.collection_items c join public.releases r on r.id = c.release_id
+    // Ordered by region, then format, then code, each compared byte by byte ("C"), as below.
+    const kept = psql(`select string_agg(r.region_code || '/' || r.media_format_code || '/' || coalesce(r.product_code, ''), ','
+        order by r.region_code collate "C", r.media_format_code collate "C", coalesce(r.product_code, '') collate "C")
+      from public.collection_items c join public.releases r on r.id = c.release_id
       where c.owner_id = ${lit(user.id)} and r.id in (${pair.map((r) => lit(r.row.id)).join(",")});`);
-    const expected = pair.map((r) => `${r.region}/${r.format}/${r.facts.product_code ?? ""}`).sort().join(",");
+    const byte = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    const expected = pair
+      .map((r) => [r.region, r.format, r.facts.product_code ?? ""])
+      .sort((a, b) => byte(a[0], b[0]) || byte(a[1], b[1]) || byte(a[2], b[2]))
+      .map((f) => f.join("/"))
+      .join(",");
     check("each copy keeps its own release: region, cartridge format and code", kept === expected, kept);
     // The summary counts the whole collection; the rows are the search's.
     const listHtml = (await user.browser.get(`/collection?q=${encodeURIComponent(title(pair[0]))}`)).html;
@@ -219,7 +231,8 @@ try {
   const ids = users.map((id) => lit(id)).join(",") || "null";
   psql(`delete from public.collection_items where owner_id in (${ids});`);
   const deleted = await deleteUsers();
-  psql("delete from private.handle_holds where kind = 'released' and handle like 'pl\\_%';");
+  // Only the holds on this run's own handles, released when their accounts were deleted.
+  if (handles.length) psql(`delete from private.handle_holds where kind = 'released' and handle in (${handles.map(lit).join(",")});`);
   if (deleted.length) psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${deleted.map(lit).join(",")}) or target_profile_id in (${deleted.map(lit).join(",")}); commit;`);
   check("every other collection on the stack is exactly as it was", psql("select count(*) || ':' || coalesce(md5(string_agg(c::text, '|' order by c.id)), '') from public.collection_items c;") === collectionsBefore);
   check("and the pilot is unchanged", RELEASES.every((r) => row(r).status === r.row.status));
