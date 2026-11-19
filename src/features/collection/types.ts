@@ -48,7 +48,7 @@ export type CollectionEntry = {
   conditions: Conditions;
   /** 0 for an unidentified copy. */
   copies_of_release: number;
-  game: { id: string; slug: string; title: string } | null;
+  game: { id: string; /** Null while the game is a pending submission. */ slug: string | null; title: string } | null;
   release: CopyRelease | null;
   /** M12a: "release" when the copy names one, "claim" when it's unidentified. */
   identity: "release" | "claim";

@@ -92,8 +92,18 @@ const claimRegion = (code: string) => (code === "unknown" ? null : code);
 export function planFastAdd<R extends FastAddRelease>(picker: FastAddPicker<R>, selection: FastAddSelection, reference: FastAddReference): FastAddPlan<R> {
   const plan: FastAddPlan<R> = { platform: null, choosingPlatform: false, region: null, choosingRegion: false, editions: [], edition: null, outcome: null };
 
-  // A release named in the address (a search result, a shared link) is what's added.
-  const named = picker.selection.releaseId ? picker.releases.find((r) => r.id === picker.selection.releaseId) ?? null : null;
+  // A release named in the address (a search result, a shared link) is what's added, but
+  // only when every step also in the address agrees with it: a "not sure", "another" or
+  // different choice is the owner's word, and a release is never added over it.
+  const found = picker.selection.releaseId ? picker.releases.find((r) => r.id === picker.selection.releaseId) ?? null : null;
+  const agrees = (given: string | null, value: string) => given === null || given === value;
+  const named =
+    found &&
+    agrees(selection.platform, found.platform.slug) &&
+    agrees(selection.region, found.region.code) &&
+    agrees(selection.edition, editionKey(found.edition))
+      ? found
+      : null;
   if (named) {
     plan.platform = { slug: named.platform.slug, inCatalog: true };
     plan.region = { code: named.region.code, inCatalog: true };

@@ -390,7 +390,9 @@ export function ReleasePickerView({
         {requestedRelease && !target ? (
           <p className="flex gap-2 rounded-lg border p-3 text-sm text-muted-foreground">
             <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            That release isn&apos;t available. Choose one of the releases below.
+            {picker.selection.releaseId
+              ? "That release doesn't match what you chose, so it isn't added. Choose it below to add your copy as that release."
+              : "That release isn't available. Choose one of the releases below."}
           </p>
         ) : null}
 

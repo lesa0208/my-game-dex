@@ -387,6 +387,35 @@ test("anything that isn't one published release is added unidentified, with what
   assert.deepEqual(nes.editions, [], "with no catalog editions, since the catalog has no releases there");
 });
 
+test("'not sure' stays not sure: no release is inferred, even when only one could match (M12b)", () => {
+  const STANDARD = editionKey({ kind: "standard", name: "Standard" });
+  // A game with one published release, on one platform.
+  const lone = picker({ regions: [{ code: "pal", label: "PAL", releaseCount: 1 }], releases: [rel("eu", "pal", "standard", "Standard")] });
+  const lonePlan = (s) => planFastAdd(lone, s, REFERENCE);
+  // Known region, known edition: the one release, shown for the owner to add.
+  assert.equal(lonePlan(sel("snes", "pal", STANDARD)).outcome.release.id, "eu");
+  // Known region, edition not sure.
+  assert.deepEqual(lonePlan(sel("snes", "pal", "unsure")).outcome, { kind: "claim", claim: { platform: "snes", region: "pal", edition: null } });
+  // Region not sure, known edition.
+  assert.deepEqual(lonePlan(sel("snes", "unsure", STANDARD)).outcome, {
+    kind: "claim",
+    claim: { platform: "snes", region: null, edition: { kind: "standard", name: "Standard" } },
+  });
+  // Both not sure.
+  assert.deepEqual(lonePlan(sel("snes", "unsure", "unsure")).outcome, { kind: "claim", claim: { platform: "snes", region: null, edition: null } });
+  // The release named in the address too: a "not sure" or "another" choice still wins.
+  const named = (s) => planFastAdd({ ...lone, selection: { platform: "snes", region: "pal", releaseId: "eu" } }, { ...s, release: "eu" }, REFERENCE).outcome;
+  assert.equal(named(sel("snes", "pal", "unsure")).kind, "claim", "edition not sure");
+  assert.equal(named(sel("snes", "unsure", STANDARD)).kind, "claim", "region not sure");
+  assert.equal(named(sel("snes", "unsure", "unsure")).kind, "claim", "both not sure");
+  assert.deepEqual(named(sel("snes", "pal", OTHER)), { kind: "claim", claim: { platform: "snes", region: "pal", edition: "other" } }, "another edition: the form asks for it");
+  assert.equal(named(sel("snes", "pal", STANDARD)).release.id, "eu", "choices that agree add it");
+  assert.equal(named(sel(null)).release.id, "eu", "as does a link with no choices");
+  // Several releases of one region and edition: the owner picks; none is chosen for them.
+  assert.equal(plan(sel("snes", "pal", PLATINUM)).outcome.kind, "choose");
+  assert.equal(plan(sel("snes", "unsure", PLATINUM)).outcome.kind, "claim", "and with the region not sure, it's unidentified");
+});
+
 test("a release named in the address is added as itself (M12b)", () => {
   const p = plan(sel(null, null, null, "us-gh"), picker({ selection: { platform: "snes", region: "ntsc-uc", releaseId: "us-gh" } }));
   assert.equal(p.outcome.kind, "release");
