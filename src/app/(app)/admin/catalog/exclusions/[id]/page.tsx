@@ -119,7 +119,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
               {ex.cascade.length ? ", with everything excluded alongside it" : ""}.
             </li>
             <li>{copies(ex.copies.still_preserved)} still preserved by this exclusion will count again. Nothing else about them changes.</li>
-            {ex.copies.moved ? <li>{copies(ex.copies.moved)} their owners have since moved to another release stay where they are.</li> : null}
+            {ex.copies.moved ? <li>{copies(ex.copies.moved)} their owners have since moved or changed stay as they are.</li> : null}
             {ex.copies.removed ? <li>{copies(ex.copies.removed)} their owners have removed stay removed.</li> : null}
           </ul>
           {cannot ? (

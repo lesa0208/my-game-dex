@@ -5,7 +5,7 @@
 -- Races between claims and exclusions are in db-ownership-claim-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(153);
+select plan(160);
 
 -- Staff sessions are live aal2 sessions with a verified TOTP factor, as in 27.
 create function pg_temp.claims(p_user uuid, p_session uuid default null) returns jsonb language plpgsql as $mfa$
@@ -367,6 +367,11 @@ select is((select string_agg((e ->> 'status') || ':' || coalesce(e -> 'region' -
            from jsonb_array_elements(pg_temp.owns('c1', 'g') -> 'entries') e where e -> 'platform' ->> 'slug' = 'snes' and e ->> 'status' = 'unidentified' and e -> 'region' ->> 'code' = 'pal'),
           'unidentified:pal:Platinum:2,unidentified:pal:?:1', 'and what they own by region and edition, with copies of the same claim counted together');
 select is(pg_temp.owns('c1', 'k') ->> 'owned', 'false', 'a game they have no copy of isn''t owned');
+-- M12b-0: the pairing is the catalog's, for a copy of a release as for a claim.
+select is((select string_agg(distinct e ->> 'catalog_pairing', ',') from jsonb_array_elements(pg_temp.owns('c1', 'g') -> 'entries') e where e ->> 'release_id' is not null), 'true',
+          'a copy of a release is on a pairing the catalog publishes');
+select is((select string_agg(distinct (e -> 'platform' ->> 'slug') || ':' || (e ->> 'catalog_pairing'), ',') from jsonb_array_elements(pg_temp.owns('c1', 'g') -> 'entries') e
+           where e ->> 'release_id' is null), 'nes:false,snes:true', 'and a claim says whether its pairing is published');
 
 -- ---------------------------------------------------------------------------
 -- 9. Exclusions preserve claims on the game they exclude
@@ -391,9 +396,9 @@ select is((select string_agg(pg_temp.status(n), ',' order by n) from unnest(arra
 select is((select count(*)::int from before b where b.copy = (select to_jsonb(c) - array['record_status', 'invalidated_at', 'updated_at'] from public.collection_items c where c.id = pg_temp.id(b.name))
            and b.details is not distinct from (select to_jsonb(p) from public.collection_item_private p where p.item_id = pg_temp.id(b.name))), 4,
           'nothing about them changes: game, platform, region, edition and private details stay');
-select is((select string_agg(coalesce(ec.claimed_game_id = pg_temp.id('k'), false)::text, ',' order by c.created_at)
-           from private.catalog_exclusion_copies ec join public.collection_items c on c.id = ec.item_id where ec.exclusion_id = pg_temp.id('x-lone')),
-          'true,true,true,false', 'the exclusion records each claim it preserved, and for which game');
+select is((select string_agg(i.name || ':' || coalesce(ec.claimed_game_id = pg_temp.id('k'), false)::text, ',' order by i.name)
+           from private.catalog_exclusion_copies ec join ids i on i.id = ec.item_id where ec.exclusion_id = pg_temp.id('x-lone')),
+          'k1:true,k2:true,k3:true,kl:false', 'the exclusion records each claim it preserved, and for which game');
 select is((select copies_preserved || '/' || owners_affected from private.catalog_exclusions where id = pg_temp.id('x-lone')), '4/2', 'and counts them');
 select is((select count(*)::int from public.notifications where type = 'catalog_exclusion' and recipient_id = pg_temp.u('c2')), 1, 'the claim''s owner is told once');
 select is((select count(*)::int from private.collection_item_identity_events e where e.item_id in (pg_temp.id('k1'), pg_temp.id('kl'))), 0,
@@ -410,6 +415,9 @@ select is((select string_agg(v -> 'platform' ->> 'slug', ',' order by v -> 'plat
 select is(pg_temp.owns('c1', 'k') ->> 'owned', 'false', 'a preserved copy doesn''t count as owned');
 select is(jsonb_array_length(pg_temp.owns('c1', 'k') -> 'entries'), 2, 'but is still listed, claim and release copy');
 select is(pg_temp.summary('c2') ->> 'invalid', '2', 'and counted as preserved');
+-- M12b-0: preserved claims keep their claimed platform in the counts.
+select is((select string_agg((e ->> 'slug') || ':' || (e ->> 'count'), ',' order by e ->> 'slug') from jsonb_array_elements(pg_temp.summary('c2') -> 'platforms') e), 'nes:1,snes:1',
+          'preserved claims are counted on their claimed platforms');
 select is(pg_temp.claim('c2', 'kx', 'k', 'snes'), 'error: game unavailable', 'no new claim can be made on the excluded game');
 select is(pg_temp.ident('c2', 'k2', pg_temp.to_claim('k', 'snes', 'pal')) ->> 'error', 'error: game unavailable', 'nor can a preserved claim be changed on it');
 select is(pg_temp.as_user('c2', format($$select public.update_collection_item(%L, '{"completeness": "loose"}')::text$$, pg_temp.id('k2'))), 'error: item preserved',
@@ -420,7 +428,18 @@ select is((select e.previous ->> 'game_id' from private.collection_item_identity
           'and the history keeps what it was claimed as');
 select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies') - 'removed', '{"moved": 1, "still_preserved": 3}',
           'the exclusion shows one copy moved and three still preserved');
-select is(pg_temp.j(pg_temp.restore('a7', 'lone')) ->> 'copies', '3', 'restoring brings back only the copies still preserved by it');
+-- M12b-0: a preserved claim made active where it is is no longer preserved, so it's
+-- counted as moved. The owner can change a claim only while its game is published, so
+-- the game is published again for this by maintenance, then excluded again.
+update public.games set status = 'published' where id = pg_temp.id('k');
+select is(pg_temp.ident('c2', 'k2', pg_temp.to_claim('k', 'snes', 'pal')) ->> 'record_status', 'active',
+          'the owner gives a preserved claim a region, on the same game, which makes it active');
+update public.games set status = 'excluded' where id = pg_temp.id('k');
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 2, "removed": 0, "still_preserved": 2}',
+          'and the exclusion counts it as moved, not as still preserved');
+select is((select count(*)::int from private.catalog_exclusion_copies where exclusion_id = pg_temp.id('x-lone')), 4, 'the exclusion''s record is unchanged');
+select is(pg_temp.j(pg_temp.restore('a7', 'lone')) ->> 'copies', '2', 'restoring brings back only the copies still preserved by it');
+select is(pg_temp.claim_of('k2'), '-/snes/pal/-/-', 'and leaves the changed claim as it is');
 select is((select string_agg(pg_temp.status(n), ',' order by n) from unnest(array['k2', 'k3', 'kl']) n), 'active,active,active', 'they''re active again');
 select is((select release_id = pg_temp.id('j1') from public.collection_items where id = pg_temp.id('k1')), true, 'the copy the owner moved stays where they put it');
 select is(pg_temp.claim_of('k3'), '-/nes/-/collector/Collector''s Edition', 'and the restored claim is as it was');
