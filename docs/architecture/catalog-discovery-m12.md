@@ -2,7 +2,7 @@
 
 **Written for:** the product owner, catalog editors and the engineers building M12b and M12c.
 
-**Status: requirement accepted on 2026-11-19. M12b (the fast add, internal search and the missing-game fallback) is implemented on the test stack and not applied to development. External discovery (M12c) is not built, and no provider is approved.**
+**Status: requirement accepted on 2026-11-19. M12b (the fast add, internal search and the missing-game fallback) is merged into main by PR #16 (`1ac0eb8`, 2026-11-19) and applied to development, which has 72 migrations. M12c-A, the first real NES, SNES and PlayStation catalog, is staged on the isolated test stack ([catalog-pilot-m12c.md](catalog-pilot-m12c.md)). External discovery is M12c-B: a required launch feature, not built, with no provider approved.**
 
 Related: [database-schema.md § Collection system](database-schema.md#collection-system), [ADR-015: metadata providers are replaceable adapters](architecture-decisions.md#adr-015-metadata-providers-are-replaceable-adapters), [D14: metadata provider and budget](architecture-decisions.md#needed-before-catalog-work), [ADR-025: physical-only](architecture-decisions.md#adr-025-the-product-is-permanently-physical-only), [ADR-068](architecture-decisions.md#adr-068-collecting-never-waits-for-the-catalog), [physical-catalog-m11b.md](physical-catalog-m11b.md).
 
@@ -24,7 +24,7 @@ The workflow, end to end:
 8. **Editorial review**, as for every catalog change.
 9. **Approval, rejection and merge** keep the copy.
 
-Steps 1, 3 and 5 to 9 work today. Steps 2 and 4 from external sources are M12c, and wait on licensing.
+Steps 1, 3 and 5 to 9 work today. Steps 2 and 4 from external sources are **M12c-B**, and wait on licensing.
 
 ## 1. Internal search
 
@@ -32,7 +32,7 @@ Explore searches the published catalog: titles, other known titles and product c
 
 Every results page, and the no-results page, ends with **"Can't find your game? Add it to My Game Dex."** It opens the submission form with the search as the title to start from.
 
-## 2. External discovery, when available and licensed (M12c)
+## 2. External discovery, when available and licensed (M12c-B)
 
 When the internal search finds nothing suitable, an approved external provider may be searched to find the game. TheGamesDB and ScreenScraper are the pending candidate providers, not approved integrations; others may suit.
 
@@ -48,7 +48,7 @@ A provider is used only once its row in `private.external_providers` has `commer
 
 **External data is for discovery and enrichment only.** My Game Dex keeps its own normalized catalog. What a provider returns becomes an internal candidate, so no catalog page depends on a live request to a provider, and losing one removes nothing.
 
-**If no provider can be cleared for M12c,** discovery stays an explicit, unresolved launch requirement, not a dropped one:
+**If no provider can be cleared for M12c-B,** discovery stays an explicit, unresolved launch requirement, not a dropped one:
 
 - **Dependency:** a cleared provider (D14).
 - **Meanwhile:** internal search plus the manual submission (section 5), which covers every game with or without a provider. Collectors still track their copies immediately (section 6).
@@ -157,8 +157,9 @@ On a copy's own page, its owner can later set or correct an unidentified copy's 
 
 ## Roadmap
 
-- **M12b:** the fast add, internal search with ownership, the missing-game fallback with immediate tracking, and this document. *Implemented on the test stack.*
-- **M12c:** the initial real NES, SNES and PlayStation catalog (the M11b-0 pilot), and approved external discovery and import, as licensing and access permit. If no provider can be cleared, discovery stays the open launch requirement in section 2, with its dependency and the alternative plan.
+- **M12b:** the fast add, internal search with ownership, the missing-game fallback with immediate tracking, and this document. *Merged (PR #16) and on development.*
+- **M12c-A:** the first real NES, SNES and PlayStation catalog, from the M11b-0 shortlist revalidated against current evidence, through the existing importer and review. *Staged on the test stack.*
+- **M12c-B: external API discovery.** A required part of the launch journey (step 2), not an optional extra. Requirements and the implementation plan are in [catalog-pilot-m12c.md § M12c-B](catalog-pilot-m12c.md#m12c-b-external-api-discovery). If no provider can be cleared, discovery stays the open launch requirement in section 2, with its dependency and the alternative plan.
 
 ## Review notes (M12b)
 
