@@ -242,6 +242,8 @@ export function submissionErrorMessage(message: unknown): string {
       return "This submission is being reviewed, so it can't change any more.";
     case "submission in use":
       return "Remove your copies of this release from your collection first. Then you can withdraw it.";
+    case "request conflict":
+      return "This form can't be sent again. Reload the page and submit again.";
     case "invalid submission":
       return "Some details aren't valid. Check them and try again.";
     default:

@@ -1120,6 +1120,8 @@ create trigger check_copy_release_move before update of release_id on public.col
  * read per results page, with the game page's counting rule). Checked by 46 and 47.
  */
 const OWNED = "public.get_my_owned_games(uuid[])";
+const REPEATED = "private.repeated_submission(uuid)";
+const RECORD = "private.record_submission_request(uuid, jsonb)";
 export const m12bMutations = [
   sql("the summary drops preserved claims from the platform counts", "pgtap", rewrite("public.get_my_collection_summary()",
     "      coalesce(r.platform_id, c.claimed_platform_id) as platform_id",
@@ -1134,6 +1136,10 @@ export const m12bMutations = [
     "  if v_me is null or not (select private.session_is_live()) then", "  if v_me is null then")),
   sql("owned games is open to visitors", "pgtap", `grant execute on function ${OWNED} to anon;`),
   sql("owned games takes any number of games", "pgtap", rewrite(OWNED, "pg_catalog.cardinality(p_games) > 50", "pg_catalog.cardinality(p_games) > 5000")),
+  // A submission form sent again (submit_game_once, submit_release_once)
+  sql("a resent submission makes another", "pgtap", rewrite(REPEATED, "  where q.request_id = p_request;", "  where false;")),
+  sql("another user's request is answered", "pgtap", rewrite(REPEATED, "  if v_row.submitted_by is distinct from v_me then", "  if false then")),
+  sql("a request isn't recorded", "pgtap", rewrite(RECORD, "  if p_outcome ->> 'outcome' = 'submitted' and p_outcome ? 'submission_id' then", "  if false then")),
 ];
 
 export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations, m12b: m12bMutations };

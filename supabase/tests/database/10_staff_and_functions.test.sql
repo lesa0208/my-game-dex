@@ -109,7 +109,7 @@ select is(
     'revoke_staff_role(uuid,staff_role,text)', 'search_accounts(text,integer)', 'search_catalog(text,text[],integer,text)', 'search_catalog_records(text,text,text,text,integer,text)', 'set_account_status(uuid,account_status,text)',
     'set_avatar_path(uuid,text)', 'set_catalog_field_lock(text,uuid,text,boolean,text)', 'set_game_platform(uuid,uuid,text)', 'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_my_copy_identity(uuid,jsonb)',
     'set_owner_successor(uuid,text)', 'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)', 'start_ownership_transfer(uuid,text)',
-    'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'take_request_slot(text)',
+    'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'take_request_slot(text)',
     'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)', 'verify_game(uuid,text,bigint)', 'verify_release(uuid,text,bigint)',
     'withdraw_my_submission(uuid)'
   ],

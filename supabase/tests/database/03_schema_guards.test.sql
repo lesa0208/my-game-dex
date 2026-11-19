@@ -125,6 +125,9 @@ insert into approved_function_grants values
   -- catalog tables have no client write grants.
   ('submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
   ('submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  -- M12b: the same, made once per request.
+  ('submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  ('submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
   ('update_my_submission(uuid,jsonb)', 'authenticated'), ('withdraw_my_submission(uuid)', 'authenticated'),
   ('my_catalog_submissions(uuid,integer)', 'authenticated'), ('get_my_submission(uuid)', 'authenticated'),
   ('my_submission_for_release(uuid)', 'authenticated'),

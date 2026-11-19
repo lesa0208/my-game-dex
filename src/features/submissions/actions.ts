@@ -25,6 +25,7 @@ export type SubmissionState = {
 
 const UNAVAILABLE: SubmissionState = { status: "error", message: "The catalog isn't available right now. Try again later." };
 const SIGNED_OUT: SubmissionState = { status: "error", message: "Sign in to submit to the catalog." };
+const EXPIRED: SubmissionState = { status: "error", message: "This form is out of date. Reload the page and submit again." };
 
 function field(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -40,12 +41,20 @@ export async function submitToCatalog(_state: SubmissionState, formData: FormDat
   if ("error" in read) return { status: "error", message: read.error };
   const input = read.value;
 
+  // M12b: the id made when the form was rendered, kept on a failure. It names the
+  // submission request, so sending the form again (a double click, a retry after a lost
+  // response) returns the submission it made instead of making another (submit_*_once),
+  // and it names the copy added with it, which add_collection_item adds once.
+  const requestId = field(formData, "copy_item_id");
+  if (!UUID_V7.test(requestId)) return EXPIRED;
+
   const supabase = await createSupabaseServerClient();
   if (!supabase) return UNAVAILABLE;
   const { data: auth } = await supabase.auth.getClaims();
   if (!auth?.claims?.sub) return SIGNED_OUT;
 
   const shared = {
+    p_request: requestId,
     p_platform: input.platform,
     p_media_format: input.mediaFormat,
     p_region: input.region,
@@ -56,8 +65,8 @@ export async function submitToCatalog(_state: SubmissionState, formData: FormDat
   };
   const { data, error } =
     mode === "game"
-      ? await supabase.rpc("submit_game", { p_title: input.title, p_kind: input.gameKind, p_first_release_year: input.firstReleaseYear, ...shared })
-      : await supabase.rpc("submit_release", { p_game: gameId, ...shared });
+      ? await supabase.rpc("submit_game_once", { p_title: input.title, p_kind: input.gameKind, p_first_release_year: input.firstReleaseYear, ...shared })
+      : await supabase.rpc("submit_release_once", { p_game: gameId, ...shared });
   if (error) return { status: "error", message: submissionErrorMessage(error.message) };
 
   const outcome = data as { outcome?: string; submission_id?: string; release_id?: string };
@@ -76,11 +85,12 @@ export async function submitToCatalog(_state: SubmissionState, formData: FormDat
 
   // M12b: the submitter's copy goes into their collection at once, on their own pending
   // release, through the ordinary add (M6b: can_use_release allows the submitter's own
-  // submission). The copy's id was made when the form was rendered, so a retry can't add
-  // a second one. If adding fails, the submission stands and its page offers the add.
+  // submission). Its id is the request's, so a retry adds it if the first send didn't,
+  // and never a second one. If adding fails, the submission stands and its page says so
+  // and offers the add.
   let notice = "submitted";
-  const copyId = field(formData, "copy_item_id");
-  if (field(formData, "add_copy") === "on" && outcome.release_id && UUID_V7.test(copyId)) {
+  const copyId = requestId;
+  if (field(formData, "add_copy") === "on" && outcome.release_id) {
     const { error: copyError } = await supabase.rpc("add_collection_item", { p_item_id: copyId, p_release: outcome.release_id, p_details: {} });
     notice = copyError ? "submitted_no_copy" : "submitted_copy";
   }
