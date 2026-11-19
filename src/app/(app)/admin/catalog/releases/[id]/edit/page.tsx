@@ -114,6 +114,7 @@ async function EditReleaseView({ params, searchParams }: { params: PageProps<"/a
                     publisher_name: r.publisher_name,
                     media_count: r.media_count,
                     packaging: r.packaging,
+                    packaging_code: r.packaging_code ?? "unclassified",
                     region_code: r.region?.code ?? "unknown",
                     region_unknown_confirmed: r.region_unknown_confirmed,
                     release_date: r.release_date?.value ?? null,

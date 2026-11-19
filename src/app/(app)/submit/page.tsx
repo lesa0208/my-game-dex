@@ -9,6 +9,7 @@ import { EMPTY_SUBMISSION, SubmissionForm } from "@/components/submissions/submi
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
+import { uuidv7 } from "@/features/collection/uuid";
 import { formatWhen } from "@/features/submissions/display";
 import { getMyPendingGame, getMySubmissions, getPublishedGame, getSubmissionOptions } from "@/features/submissions/queries";
 
@@ -24,6 +25,8 @@ async function SubmitView({ searchParams }: { searchParams: PageProps<"/submit">
   const search = await searchParams;
   const slug = first(search.game);
   const pending = first(search.pending);
+  // M12b: a title to start from, as searched for in Explore. Only a starting value.
+  const title = first(search.title).slice(0, 200);
   const path = slug ? `/submit?game=${encodeURIComponent(slug)}` : pending ? `/submit?pending=${encodeURIComponent(pending)}` : "/submit";
   const viewer = await requireViewerWithHandle(path);
   if (!viewer.isActive) {
@@ -96,7 +99,14 @@ async function SubmitView({ searchParams }: { searchParams: PageProps<"/submit">
       <p className="text-xs text-muted-foreground">
         You can make {remaining} more {remaining === 1 ? "submission" : "submissions"} today.
       </p>
-      <SubmissionForm mode={game ? "release" : "game"} game={game ? { id: game.id, title: game.title } : null} options={options} values={EMPTY_SUBMISSION} />
+      <SubmissionForm
+        mode={game ? "release" : "game"}
+        game={game ? { id: game.id, title: game.title } : null}
+        options={options}
+        values={EMPTY_SUBMISSION}
+        initialTitle={game ? undefined : title}
+        copyItemId={uuidv7()}
+      />
     </div>
   );
 }

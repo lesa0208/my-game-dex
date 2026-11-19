@@ -80,6 +80,8 @@ export type PickerRelease = {
   mediaCount: number | null;
   mediaPlayability: "playable_from_media" | "download_required" | null;
   packaging: string | null;
+  /** M11b-1b: the packaging classification; `packaging` is the text as originally recorded. */
+  packagingCode: string;
   identifiers: { productCode: string | null; barcode: string | null };
   languages: string[] | null;
   ratingLabels: string[] | null;

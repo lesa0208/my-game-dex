@@ -70,7 +70,26 @@ test("copies on releases the catalog no longer shows keep what the person may st
   assert.equal(unknown.game, null);
 });
 
+test("an unidentified copy carries its claim, its game and no release (M12a)", () => {
+  const l = lookups();
+  const claim = shapeCopy(item("c5", { release_id: null, claimed_game_id: "g1", claimed_platform_id: "p1", claimed_region_code: "PAL", claimed_edition_kind: "reprint", claimed_edition_name: "Platinum" }), undefined, [], l);
+  assert.equal(claim.status, "unidentified");
+  assert.equal(claim.release, null);
+  assert.equal(claim.game.title, "A Game");
+  assert.deepEqual(claim.claim, { platform: { slug: "ps2", name: "PlayStation 2", short_name: "PS2" }, region: { code: "PAL", label: "PAL" }, edition_kind: "reprint", edition_name: "Platinum" });
+  const unsure = shapeCopy(item("c6", { release_id: null, claimed_game_id: "g1", claimed_platform_id: "p1" }), undefined, [], l);
+  assert.equal(unsure.claim.region, null, "an unknown region stays unknown");
+  assert.equal(unsure.claim.edition_name, null, "and so does an unknown edition");
+  l.preserved.set("c7", { title: "Gone Game", platform: { slug: "ps2" }, region: null, edition_name: "Platinum" });
+  const preserved = shapeCopy(item("c7", { release_id: null, claimed_game_id: "gone", claimed_platform_id: "p1", record_status: "invalid_preserved" }), undefined, [], l);
+  assert.equal(preserved.status, "invalid");
+  assert.equal(preserved.game.title, "Gone Game", "a preserved claim keeps its game's title");
+  assert.equal(shapeCopy(item("c1"), undefined, [], l).claim, null, "an identified copy has no claim");
+});
+
 test("statuses match the collection pages", () => {
+  assert.equal(copyStatus("active", undefined, true), "unidentified");
+  assert.equal(copyStatus("invalid_preserved", undefined, true), "invalid");
   assert.equal(copyStatus("active", "published"), "owned");
   assert.equal(copyStatus("active", "unverified"), "pending");
   assert.equal(copyStatus("active", "rejected"), "not_approved");
@@ -100,7 +119,8 @@ test("never a secret, a token, another account or an internal field", () => {
 
 test("the file names the format, says what it isn't, and is named safely", () => {
   assert.equal(EXPORT_FORMAT, "my-game-dex-export");
-  assert.equal(EXPORT_VERSION, 1);
+  // M12a: version 2, as a copy may now be unidentified.
+  assert.equal(EXPORT_VERSION, 2);
   assert.match(EXPORT_NOTICE, /not a complete answer to a legal request/);
   assert.ok(NOT_INCLUDED.some((x) => /Notifications/.test(x)) && NOT_INCLUDED.some((x) => /never exported/.test(x)));
   const now = new Date("2026-11-18T23:59:00Z");

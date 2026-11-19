@@ -10,7 +10,7 @@ select plan(18);
 create temp table approved_relation_grants (relation text, grantee text);
 -- M1: reference data is publicly readable. Test 07 confirms it's SELECT only.
 insert into approved_relation_grants
-  select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements']) as t
+  select t, r from unnest(array['region_codes', 'markets', 'platforms', 'platform_names', 'media_formats', 'platform_media_formats', 'hardware_requirements', 'packaging_types']) as t
   cross join unnest(array['anon', 'authenticated', 'service_role']) as r;
 -- M2: test 08 asserts the exact columns. service_role has no table access here.
 insert into approved_relation_grants values
@@ -125,6 +125,9 @@ insert into approved_function_grants values
   -- catalog tables have no client write grants.
   ('submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
   ('submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  -- M12b: the same, made once per request.
+  ('submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
+  ('submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'authenticated'),
   ('update_my_submission(uuid,jsonb)', 'authenticated'), ('withdraw_my_submission(uuid)', 'authenticated'),
   ('my_catalog_submissions(uuid,integer)', 'authenticated'), ('get_my_submission(uuid)', 'authenticated'),
   ('my_submission_for_release(uuid)', 'authenticated'),
@@ -138,6 +141,10 @@ insert into approved_function_grants values
   ('get_submission_review(uuid)', 'authenticated'),
   -- M7b-2a: an owner moves their own copy. SECURITY DEFINER, because clients can't change a copy's release.
   ('relink_my_copy(uuid,uuid)', 'authenticated'),
+  -- M12a: unidentified copies (an invoker add, like add_collection_item), the owner's
+  -- identity changes and history, "Owned: Yes", and preserved claims.
+  ('add_unidentified_copy(uuid,uuid,uuid,text,text,text,jsonb)', 'authenticated'), ('set_my_copy_identity(uuid,jsonb)', 'authenticated'),
+  ('get_my_copy_history(uuid)', 'authenticated'), ('get_my_game_ownership(uuid)', 'authenticated'), ('get_my_owned_games(uuid[])', 'authenticated'), ('get_my_preserved_claim(uuid)', 'authenticated'),
   -- M7b-2b: excluding (editors) and restoring (administrators); each function checks
   -- the caller's staff role. Owners read what their preserved copies are on.
   ('get_exclusion_preview(uuid)', 'authenticated'), ('exclude_release(uuid,text,text,text,text,boolean,boolean)', 'authenticated'),
@@ -154,6 +161,8 @@ insert into approved_function_grants values
   ('private.is_catalog_editor()', 'authenticated'),
   ('private.can_read_release(uuid)', 'anon'), ('private.can_read_release(uuid)', 'authenticated'),
   ('private.can_use_release(uuid)', 'authenticated'),
+  -- M12a: called by the copy policies for a claim.
+  ('private.can_claim(uuid,uuid)', 'authenticated'),
   -- M3: called by policies during reads. No role has USAGE on private.
   ('private.block_peers()', 'authenticated'),
   ('private.is_blocked_between(uuid)', 'anon'), ('private.is_blocked_between(uuid)', 'authenticated'),

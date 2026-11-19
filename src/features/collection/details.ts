@@ -6,7 +6,7 @@
  * the owner chooses one. Pure, so it can be tested alone.
  */
 
-import type { CopyPiece, CopyRelease, CopyStatus } from "./types";
+import type { CopyPiece, CopyRelease, CopyStatus, CopyClaim } from "./types";
 
 export const COMPLETENESS = [
   { value: "loose", label: "Loose (medium only)" },
@@ -273,9 +273,10 @@ export function pieceFieldValue(piece: Pick<CopyPiece, "recorded" | "condition">
 
 const STATUS_LABELS: Record<CopyStatus, string | null> = {
   owned: null,
-  pending: "Awaiting review",
+  pending: "Awaiting catalog approval",
   not_approved: "Not approved",
   invalid: "No longer in the catalog",
+  unidentified: "Not linked to a release",
 };
 
 /** Null for an ordinary copy, which needs no label. */
@@ -287,6 +288,146 @@ export function copyStatusLabel(status: CopyStatus) {
 export function releaseLine(release: Pick<CopyRelease, "platform" | "region" | "edition_name" | "variant_name">) {
   const region = release.region.code === "unknown" ? "Region unknown" : release.region.label;
   return [release.platform.short_name, region, release.edition_name, release.variant_name].filter(Boolean).join(" · ");
+}
+
+const EDITION_KINDS: Record<string, string> = {
+  standard: "Standard",
+  limited: "Limited edition",
+  collector: "Collector's edition",
+  reprint: "Reprint",
+  bundle: "Bundle",
+  promotional: "Promotional",
+  other: "Other edition",
+};
+
+/** M12b: the edition types an owner can choose for an unidentified copy, in the database's order. */
+export const EDITION_KIND_OPTIONS: { value: string; label: string }[] = Object.entries(EDITION_KINDS).map(([value, label]) => ({ value, label }));
+
+/**
+ * M12b: names collectors often use for an edition, offered as suggestions while typing.
+ * Only suggestions: what the owner types is kept as their own words, and nothing here is
+ * a catalog edition or says that one exists for a game.
+ */
+export const EDITION_NAME_SUGGESTIONS = [
+  "Standard",
+  "Black Label",
+  "Platinum",
+  "Greatest Hits",
+  "Player's Choice",
+  "PlayStation the Best",
+  "Nintendo Selects",
+  "Collector's Edition",
+  "Limited Edition",
+] as const;
+
+/**
+ * M12a: "PS1 · PAL · Platinum" for an unidentified copy: what the owner says, and "not
+ * sure" where they didn't. The edition is the name they gave, or else its kind.
+ */
+export function claimLine(claim: Pick<CopyClaim, "platform" | "region" | "edition_kind" | "edition_name">) {
+  return [claim.platform.short_name, claim.region?.label ?? "Region not sure", claimEdition(claim) ?? "Edition not sure"].join(" · ");
+}
+
+/**
+ * M12b: the five standings of a copy in "what you own", each named, so a confirmed
+ * release is never confused with a copy that isn't one.
+ */
+const OWNERSHIP_STATUS: Record<CopyStatus, string> = {
+  owned: "Confirmed",
+  pending: "Awaiting catalog approval",
+  not_approved: "Not approved",
+  unidentified: "Not linked to a release",
+  invalid: "Preserved, not counted",
+};
+
+export function ownershipStatusLabel(status: CopyStatus) {
+  return OWNERSHIP_STATUS[status] ?? "Not counted";
+}
+
+/** "Owned: 3 copies", "Owned: Yes" (one copy), or "Not in your collection" for no counted copy. */
+export function ownershipHeadline(copies: number) {
+  if (copies <= 0) return "Not in your collection";
+  return copies === 1 ? "Owned: Yes" : `Owned: ${copies.toLocaleString("en")} copies`;
+}
+
+/**
+ * M12b: one line of what the owner has of a game, "SNES · PAL · Platinum": the release's
+ * or the claim's platform, region and edition. A claim says "not sure" where its owner
+ * did; a release leaves out an edition the catalog doesn't name.
+ */
+export function ownershipEntryLine(entry: {
+  status: CopyStatus;
+  release_id: string | null;
+  platform: { short_name: string };
+  region: { code: string; label: string | null } | null;
+  edition_kind: string | null;
+  edition_name: string | null;
+}) {
+  const claim = entry.release_id === null;
+  const region = entry.region ? (entry.region.code === "unknown" ? "Region unknown" : (entry.region.label ?? entry.region.code)) : claim ? "Region not sure" : null;
+  const edition = entry.edition_name ?? (entry.edition_kind ? (EDITION_KINDS[entry.edition_kind] ?? null) : null) ?? (claim ? "Edition not sure" : null);
+  return [entry.platform.short_name, region, edition].filter(Boolean).join(" · ");
+}
+
+/**
+ * M12b: one side of a change in a copy's private history: a release, or what the owner
+ * said ("PAL · Platinum", "Region not sure · Edition not sure"). The platform never
+ * changes, so it isn't repeated.
+ */
+export function historyIdentityText(identity: Record<string, string | null> | null, regionLabels: Map<string, string>) {
+  if (!identity) return "Not recorded";
+  if (identity.release_id) return "Linked to a release in the catalog";
+  const region = identity.region_code ? (regionLabels.get(identity.region_code) ?? identity.region_code) : "Region not sure";
+  const edition = identity.edition_name ?? (identity.edition_kind ? (EDITION_KINDS[identity.edition_kind] ?? identity.edition_kind) : null) ?? "Edition not sure";
+  return `Not linked to a release: ${region} · ${edition}`;
+}
+
+/** M12b: who made a change in a copy's history. */
+export function historySourceLabel(source: string) {
+  switch (source) {
+    case "owner":
+      return "You";
+    case "catalog":
+      return "The catalog, when it merged a duplicate release";
+    default:
+      return "Site maintenance";
+  }
+}
+
+/** M12a: a claim's edition as its owner gave it: the name, or else its kind. Null: not sure. */
+export function claimEdition(claim: Pick<CopyClaim, "edition_kind" | "edition_name">) {
+  return claim.edition_name ?? (claim.edition_kind ? (EDITION_KINDS[claim.edition_kind] ?? null) : null);
+}
+
+/** M12a: the fixed errors from add_unidentified_copy and set_my_copy_identity, as messages for the owner. */
+export function claimErrorMessage(message: unknown): { text: string; renewId: boolean } {
+  switch (message) {
+    case "account not active":
+      return { text: "Your account can't change copies right now.", renewId: false };
+    case "game unavailable":
+      return { text: "This game can't be added to a collection right now.", renewId: false };
+    case "platform unavailable":
+      return { text: "Choose a platform from the list.", renewId: false };
+    case "invalid region":
+      return { text: "Choose a region from the list, or Not sure.", renewId: false };
+    case "invalid edition":
+      return { text: "The edition name is too long or has characters that can't be used.", renewId: false };
+    case "item unavailable":
+      return { text: "This copy isn't in your collection any more.", renewId: false };
+    case "release unavailable":
+      return { text: "That release can't hold copies. Choose another one.", renewId: false };
+    case "other platform":
+      return { text: "A copy stays on its platform. For another platform, add it as a new copy.", renewId: false };
+    case "collection limit reached":
+      return { text: "Your collection has reached its limit of 100,000 copies.", renewId: false };
+    case "invalid details":
+      return { text: "Some details don't fit together. Check them and try again.", renewId: false };
+    case "invalid item id":
+    case "request conflict":
+      return { text: "This page was open too long. Try again.", renewId: true };
+    default:
+      return { text: "The copy couldn't be saved. Try again.", renewId: false };
+  }
 }
 
 /** The medium's name for its condition field, from the format's category. */

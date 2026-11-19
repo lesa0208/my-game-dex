@@ -147,7 +147,8 @@ async function createGame(editor, title) {
   return result.body;
 }
 async function createRelease(editor, game, details = complete, region = "ntsc-uc") {
-  const result = await call(editor, "create_release", { p_game: game, p_platform: snes(), p_media_format_code: "rom-cartridge", p_region_code: region, p_details: details });
+  // M11b-1b: a recorded shell and a packaging type, which publication needs.
+  const result = await call(editor, "create_release", { p_game: game, p_platform: snes(), p_media_format_code: "snes-game-pak-na", p_region_code: region, p_details: { packaging_code: "cardboard-box", ...details } });
   if (!result.ok) throw new Error(`could not create a release: ${result.message}`);
   return result.body;
 }

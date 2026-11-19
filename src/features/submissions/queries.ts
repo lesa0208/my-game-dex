@@ -12,7 +12,8 @@ import { UUID } from "@/features/collection/uuid";
  */
 
 export type SubmissionOptions = {
-  platforms: { slug: string; name: string; shortName: string; family: string }[];
+  /** M12b: with its id, which an unidentified copy names. */
+  platforms: { id: string; slug: string; name: string; shortName: string; family: string }[];
   formats: { platform: string; code: string; name: string; category: string }[];
   regions: { code: string; label: string }[];
 };
@@ -50,6 +51,8 @@ export type SubmissionDetails = {
   publisher_name: string | null;
   media_count: number | null;
   packaging: string | null;
+  /** Absent from snapshots taken before M11b-1b. */
+  packaging_code?: string;
   release_date: string | null;
   release_date_precision: string;
   components: { kind: string; label: string; quantity: number }[];
@@ -92,13 +95,13 @@ export async function getSubmissionOptions(): Promise<SubmissionOptions | null> 
   "use cache";
   cacheLife("hours");
   const [platforms, formats, regions] = await Promise.all([
-    publicGet("platforms?select=slug,name,short_name,family&order=name"),
+    publicGet("platforms?select=id,slug,name,short_name,family&order=name"),
     publicGet("platform_media_formats?select=platform:platforms(slug),format:media_formats(code,name,category,position)"),
     publicGet("region_codes?select=code,label,position&order=position"),
   ]);
   if (!Array.isArray(platforms) || !Array.isArray(formats) || !Array.isArray(regions)) return null;
   return {
-    platforms: platforms.map((p: { slug: string; name: string; short_name: string; family: string }) => ({ slug: p.slug, name: p.name, shortName: p.short_name, family: p.family })),
+    platforms: platforms.map((p: { id: string; slug: string; name: string; short_name: string; family: string }) => ({ id: p.id, slug: p.slug, name: p.name, shortName: p.short_name, family: p.family })),
     formats: (formats as { platform: { slug: string }; format: { code: string; name: string; category: string; position: number } }[])
       .sort((a, b) => a.format.position - b.format.position)
       .map((f) => ({ platform: f.platform.slug, code: f.format.code, name: f.format.name, category: f.format.category })),

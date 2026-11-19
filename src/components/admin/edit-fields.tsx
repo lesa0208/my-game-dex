@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
+import { EDITOR_PACKAGING_CHOICES } from "@/features/catalog/packaging";
 import { REQUIREMENT_LEVELS, REQUIREMENT_LIMIT, type GameFields } from "@/features/editing/form";
 import { PIECE_LIMIT, pieceRows, type Piece, type ReleaseRecord as ReleaseFieldValues } from "@/features/review/form";
 import { EDITION_KINDS, GAME_KINDS, PIECE_KINDS } from "@/features/submissions/form";
@@ -157,8 +158,17 @@ export function ReleaseInputs({ id, release, regions }: { id: string; release: R
         <Field id={`${id}-variant_name`} label="Variant (optional)">
           <Input id={`${id}-variant_name`} name="variant_name" maxLength={120} defaultValue={text("variant_name")} autoComplete="off" className={adminControl} />
         </Field>
-        <Field id={`${id}-packaging`} label="Packaging (optional)">
-          <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={text("packaging")} autoComplete="off" className={adminControl} />
+        <Field id={`${id}-packaging_code`} label="Packaging" hint="How the package is built, not how many discs it holds. Choose Unknown only when the evidence can't establish it.">
+          <select id={`${id}-packaging_code`} name="packaging_code" defaultValue={release?.packaging_code ?? "unclassified"} aria-describedby={`${id}-packaging_code-hint`} className={adminSelect}>
+            {EDITOR_PACKAGING_CHOICES.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field id={`${id}-packaging`} label="Packaging as recorded (optional)" hint="The original wording, kept as a note.">
+          <Input id={`${id}-packaging`} name="packaging" maxLength={80} defaultValue={text("packaging")} autoComplete="off" aria-describedby={`${id}-packaging-hint`} className={adminControl} />
         </Field>
         <Field id={`${id}-product_code`} label="Product code (optional)">
           <Input id={`${id}-product_code`} name="product_code" maxLength={40} defaultValue={text("product_code")} autoComplete="off" className={adminControl} />

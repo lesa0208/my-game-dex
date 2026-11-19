@@ -42,7 +42,8 @@ test("the lists match the database's enums and review's lists", () => {
 });
 
 test("the lockable fields are the database's", () => {
-  const body = /create function private\.lockable_field[\s\S]*?\$\$;/.exec(sql)[0];
+  // The latest definition: M11b-1b replaced it (CREATE OR REPLACE, $function$ quoting).
+  const body = [...sql.matchAll(/create (?:or replace )?function private\.lockable_field[\s\S]*?\$(?:function)?\$;/gi)].at(-1)[0];
   const game = [.../when 'game' then p_field = any \(array\[([^\]]*)\]/.exec(body)[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   const release = [.../when 'release' then p_field = any \(array\[([^\]]*)\]/.exec(body)[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   assert.deepEqual([...LOCKABLE_FIELDS.game], game);

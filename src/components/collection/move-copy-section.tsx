@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getReleasePicker, searchCatalog } from "@/features/catalog/queries";
 import type { PickerRelease } from "@/features/catalog/types";
-import { releaseLine } from "@/features/collection/details";
+import { claimLine, releaseLine } from "@/features/collection/details";
 import { type CollectionParams, collectionQuery, type MoveParams, moveHref } from "@/features/collection/list-params";
 import type { CopyDetail } from "@/features/collection/types";
 
@@ -35,9 +35,14 @@ export async function MoveCopySection({
   move: MoveParams;
   open: boolean;
 }) {
-  const platform = copy.release?.platform ?? null;
+  // M12a: an unidentified copy stays on the platform it claims.
+  const platform = copy.release?.platform ?? (copy.identity === "claim" ? copy.claim?.platform : null) ?? null;
   const gameSlug = move.game ?? copy.game?.slug ?? known?.slug ?? null;
-  const current = copy.release ? `${copy.game?.title ?? known?.title ?? "This game"} (${releaseLine(copy.release)})` : "A release that's no longer shown in the catalog";
+  const current = copy.release
+    ? `${copy.game?.title ?? known?.title ?? "This game"} (${releaseLine(copy.release)})`
+    : copy.identity === "claim" && copy.claim
+      ? `${copy.game?.title ?? known?.title ?? "This game"} (${claimLine(copy.claim)}, not linked to a release)`
+      : "A release that's no longer shown in the catalog";
 
   const [picker, search] = await Promise.all([
     gameSlug ? getReleasePicker(gameSlug, platform?.slug ?? null, null, null).catch(() => null) : null,
@@ -52,7 +57,7 @@ export async function MoveCopySection({
   return (
     <details id="move" open={open} className="rounded-lg border bg-card">
       <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
-        Move to another release
+        {copy.identity === "claim" ? "Link to a release in the catalog" : "Move to another release"}
       </summary>
       <div className="flex flex-col gap-4 border-t p-4">
         <p className="text-sm">

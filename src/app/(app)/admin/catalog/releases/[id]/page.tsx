@@ -1,6 +1,7 @@
 import { PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { packagingStaffLabel } from "@/features/catalog/packaging";
 import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
@@ -135,7 +136,7 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
               { label: "Physical format", value: r.format?.name ?? null },
               { label: "Discs or cartridges", value: r.media_count ? String(r.media_count) : "Not recorded" },
               { label: "Playability", value: r.media_playability ? (PLAYABILITY[r.media_playability] ?? r.media_playability) : null },
-              { label: "Packaging", value: r.packaging },
+              { label: "Packaging", value: packagingStaffLabel(r.packaging_code, r.packaging) },
               { label: "Product code", value: r.identifiers.product_code },
               { label: "Barcode", value: r.identifiers.barcode },
               { label: "Title on the package", value: r.local_title },

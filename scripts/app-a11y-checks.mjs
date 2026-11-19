@@ -45,6 +45,10 @@ const WIDTHS = [
 const SCHEMES = ["dark", "light"];
 // Light Mode is unsupported: its results are diagnostics, not checks, unless asked.
 const ENFORCE_LIGHT = process.env.A11Y_LIGHT === "enforce";
+// A11Y_LIGHT_DETAIL=file writes every failing element of each light-mode finding, as JSON
+// lines, for triage (which controls fail, and on which pages). Diagnostic only.
+const LIGHT_DETAIL = process.env.A11Y_LIGHT_DETAIL ?? null;
+const lightDetail = [];
 const lightFindings = [];
 let lightStates = 0;
 const NOT_AVAILABLE = "This page isn't available";
@@ -127,7 +131,7 @@ async function audit(page, name, tag) {
     await applyScheme(page, scheme);
     const found = await page.evaluate(async () => {
       const run = await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, resultTypes: ["violations"] });
-      return run.violations.map((v) => ({ id: v.id, impact: v.impact, count: v.nodes.length, target: String(v.nodes[0]?.target ?? ""), message: v.nodes[0]?.any?.[0]?.message ?? v.nodes[0]?.all?.[0]?.message ?? "" }));
+      return run.violations.map((v) => ({ id: v.id, impact: v.impact, count: v.nodes.length, target: String(v.nodes[0]?.target ?? ""), nodes: v.nodes.map((n) => ({ target: String(n.target), html: n.html.slice(0, 160), message: n.any?.[0]?.message ?? n.all?.[0]?.message ?? "" })), message: v.nodes[0]?.any?.[0]?.message ?? v.nodes[0]?.all?.[0]?.message ?? "" }));
     });
     const blocking = found.filter((v) => v.impact === "critical" || v.impact === "serious");
     const minor = found.filter((v) => !blocking.includes(v));
@@ -138,6 +142,7 @@ async function audit(page, name, tag) {
       // A diagnostic: listed and summarized at the end, never counted as a pass.
       lightStates += 1;
       for (const v of blocking) lightFindings.push(redact(`${tag} ${name}: ${describe(v)}`));
+      if (LIGHT_DETAIL) for (const v of blocking) for (const n of v.nodes) lightDetail.push(JSON.stringify({ tag, page: name, rule: v.id, target: redact(n.target), html: redact(n.html), message: redact(n.message) }));
       if (overflow.scroll > overflow.view) lightFindings.push(`${tag} ${name}: sideways scrolling ${overflow.scroll} > ${overflow.view}`);
       continue;
     }
@@ -365,7 +370,7 @@ try {
   const snes = psql("select id from public.platforms where slug = 'snes';");
   const dup = as(editor, `select public.create_release('${gameId}', '${snes}', 'rom-cartridge', 'ntsc-uc', '{"edition_name": "Standard", "edition_kind": "standard", "media_count": 1, "product_code": "AYB-DUP"}', 'Browser checks: a duplicate')`);
   as(admin, `select public.verify_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
-  as(admin, `select public.publish_release(r.id, 'Browser checks', r.revision) from public.releases r where r.id = '${dup}'`);
+  // M11b-1b: not published, since a new release can't be published on the generic cartridge; a merge doesn't need it.
   const merged = as(admin, `select public.merge_release('${dup}', '${releaseUs}', p ->> 'token', 'Browser checks: the same release', null,
     array(select d ->> 'field' from jsonb_array_elements(p -> 'differences') d), true)::text from (select public.get_merge_preview('${dup}', '${releaseUs}') as p) x`);
   const mergeId = psql(`select id from private.catalog_merges where source_release_id = '${dup}';`);
@@ -727,6 +732,64 @@ try {
       await context.close();
     }
 
+    section(`${tag}: 2g. The fast add, ownership and a copy's identity (M12b)`);
+    {
+      const member = await person();
+      const { context, page } = await signIn(browser, viewport, member);
+      const game = "/games/starfall-odyssey";
+      for (const [name, path] of [
+        ["fast add, platform and region", game],
+        ["fast add, editions", `${game}?platform=snes&region=ntsc-uc`],
+        ["fast add, one release", `${game}?platform=snes&region=ntsc-uc&edition=${encodeURIComponent("collector~Collector's Edition")}`],
+        ["fast add, without a release", `${game}?platform=snes&region=pal&edition=unsure`],
+        ["fast add, naming the edition", `${game}?platform=snes&region=ntsc-uc&edition=other`],
+        ["fast add, another platform", `${game}?platform=other`],
+        ["fast add, another region", `${game}?platform=snes&region=other`],
+        ["submitting a missing game", "/submit?title=Ayb%20Lantern%20Moon"],
+        ["fast add, a linked release that doesn't match", `${game}?platform=snes&region=ntsc-uc&edition=unsure&release=${psql("select id from public.releases where product_code = 'SNS-ZSFE-USA-CE';")}`],
+      ]) {
+        await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
+        await audit(page, name, tag);
+        await structure(page, name, tag);
+      }
+      await page.goto(`${origin}${game}?platform=snes&region=pal&edition=unsure`, { waitUntil: "networkidle" });
+      await keyboard(page, "fast add, without a release", tag);
+
+      // With JavaScript: a double click adds one copy, and the page says it was added.
+      const add = page.locator("#add-claim ~ form button[type=submit], section[aria-labelledby=add-claim] button[type=submit]").first();
+      await add.dblclick();
+      await page.getByText("Added to your collection.").waitFor({ timeout: 15000 });
+      const copies = () => Number(psql(`select count(*) from public.collection_items where owner_id = '${member.id}';`));
+      ok(`${tag} a double click adds one copy without a release, and says so`, copies() === 1, `${copies()} copies`);
+      ok(`${tag} the button then offers another copy`, (await add.innerText()).includes("Add another copy"));
+      await add.click();
+      await page.getByText("You have 2 copies of this game").waitFor({ timeout: 15000 });
+      ok(`${tag} which adds a second copy on purpose`, copies() === 2);
+
+      // Ownership, on the game page and in search results.
+      await page.goto(`${origin}${game}`, { waitUntil: "networkidle" });
+      ok(`${tag} the game page says what the collector owns`, (await visibleText(page)).includes("Owned: 2 copies"));
+      await audit(page, "game page with ownership", tag);
+      await page.goto(`${origin}/explore?q=starfall`, { waitUntil: "networkidle" });
+      ok(`${tag} so do search results`, (await visibleText(page)).includes("Owned: 2 copies"));
+      await audit(page, "search results with ownership", tag);
+
+      // A copy's identity, changed with JavaScript, then its history.
+      const item = psql(`select id from public.collection_items where owner_id = '${member.id}' order by id limit 1;`);
+      await page.goto(`${origin}/collection/${item}`, { waitUntil: "networkidle" });
+      await audit(page, "copy without a release", tag);
+      await structure(page, "copy without a release", tag);
+      await page.locator("#identity summary").click();
+      await page.locator("#identity select[name=region]").selectOption("ntsc-j");
+      await page.locator("#identity input[name=edition_name]").fill("Platinum");
+      await page.locator("#identity button[type=submit]").click();
+      await page.getByText("Saved. Your copy's details are updated").waitFor({ timeout: 15000 });
+      ok(`${tag} the owner changes the region and edition`, psql(`select claimed_region_code || '/' || claimed_edition_name from public.collection_items where id = '${item}';`) === "ntsc-j/Platinum");
+      await audit(page, "copy with its history", tag);
+      await keyboard(page, "copy with its history", tag);
+      await context.close();
+    }
+
     section(`${tag}: 3. The admin's pages`);
     {
       const a = await signIn(browser, viewport, admin);
@@ -955,4 +1018,5 @@ if (lightStates) {
   for (const line of lightFindings) console.log(`  light ${line}`);
 }
 console.log(`\n${results.passed} passed, ${results.failed} failed`);
+if (LIGHT_DETAIL) (await import("node:fs")).writeFileSync(LIGHT_DETAIL, lightDetail.join("\n") + "\n");
 process.exit(results.failed === 0 ? 0 : 1);

@@ -19,7 +19,19 @@ import {
   readCopyDetails,
   relinkErrorMessage,
   releaseLine,
+  claimEdition,
+  claimErrorMessage,
+  claimLine,
+  copyStatusLabel,
+  EDITION_KIND_OPTIONS,
+  EDITION_NAME_SUGGESTIONS,
+  historyIdentityText,
+  historySourceLabel,
+  ownershipEntryLine,
+  ownershipHeadline,
+  ownershipStatusLabel,
 } from "./details.ts";
+import { editionKey, fastAddHref, OTHER, planFastAdd, UNSURE } from "./fast-add.ts";
 import { collectionHref, copyHref, DEFAULT_PARAMS, moveHref, readCollectionParams, readMoveParams, readNotice } from "./list-params.ts";
 import { keepingIdOnFailure, UNCONFIRMED } from "./retry.ts";
 import { UUID_V7, uuidv7 } from "./uuid.ts";
@@ -248,4 +260,225 @@ test("relinking errors become fixed messages, and nothing else gets through", ()
   assert.equal(relinkErrorMessage("other platform"), "A copy can only move to a release for the same platform. For another platform, add it as a new copy.");
   assert.equal(relinkErrorMessage("release unavailable"), "That release can't hold copies. Choose another one.");
   assert.equal(relinkErrorMessage('new row violates row-level security policy for table "x"'), "The copy couldn't be moved. Try again.");
+});
+
+test("an unidentified copy reads as what its owner claims, and 'not sure' where they didn't (M12a)", () => {
+  const platform = { slug: "ps1", name: "PlayStation", short_name: "PS1" };
+  assert.equal(claimLine({ platform, region: { code: "pal", label: "PAL" }, edition_kind: "reprint", edition_name: "Platinum" }), "PS1 · PAL · Platinum");
+  assert.equal(claimLine({ platform, region: null, edition_kind: "reprint", edition_name: "Platinum" }), "PS1 · Region not sure · Platinum");
+  assert.equal(claimLine({ platform, region: { code: "pal", label: "PAL" }, edition_kind: null, edition_name: null }), "PS1 · PAL · Edition not sure");
+  assert.equal(claimLine({ platform, region: null, edition_kind: null, edition_name: null }), "PS1 · Region not sure · Edition not sure");
+  assert.equal(claimEdition({ edition_kind: "collector", edition_name: null }), "Collector's edition", "a kind alone names the edition");
+  assert.equal(claimEdition({ edition_kind: "nonsense", edition_name: null }), null, "an unknown kind isn't invented into a name");
+  assert.equal(copyStatusLabel("unidentified"), "Not linked to a release");
+});
+
+test("claim errors become fixed messages, and nothing else gets through (M12a)", () => {
+  assert.equal(claimErrorMessage("game unavailable").text, "This game can't be added to a collection right now.");
+  assert.equal(claimErrorMessage("other platform").text, "A copy stays on its platform. For another platform, add it as a new copy.");
+  assert.equal(claimErrorMessage("request conflict").renewId, true);
+  assert.equal(claimErrorMessage('new row violates row-level security policy for table "x"').text, "The copy couldn't be saved. Try again.");
+});
+
+test("the list accepts the unidentified filter (M12a)", () => {
+  assert.equal(readCollectionParams(new URLSearchParams("status=unidentified")).status, "unidentified");
+});
+
+// ---------------------------------------------------------------------------
+// M12b: the fast add's steps, and the ownership wording
+// ---------------------------------------------------------------------------
+
+const rel = (id, region, kind, name, platform = "snes") => ({
+  id,
+  platform: { slug: platform },
+  region: { code: region, label: region.toUpperCase() },
+  edition: kind || name ? { kind, name } : null,
+});
+// A game on SNES: NTSC-U/C Standard and Greatest Hits, PAL Standard, and two PAL
+// Platinum releases that only a variant tells apart.
+const RELEASES = [
+  rel("us", "ntsc-uc", "standard", "Standard"),
+  rel("us-gh", "ntsc-uc", "reprint", "Greatest Hits"),
+  rel("eu", "pal", "standard", "Standard"),
+  rel("eu-p1", "pal", "reprint", "Platinum"),
+  rel("eu-p2", "pal", "reprint", "Platinum"),
+];
+const REFERENCE = {
+  platforms: [
+    { slug: "snes", name: "Super Nintendo" },
+    { slug: "nes", name: "NES" },
+  ],
+  regions: [
+    { code: "ntsc-uc", label: "NTSC-U/C" },
+    { code: "pal", label: "PAL" },
+    { code: "ntsc-j", label: "NTSC-J" },
+  ],
+};
+const picker = (over = {}) => ({
+  platforms: [{ slug: "snes", name: "Super Nintendo", releaseCount: 5 }],
+  regions: [
+    { code: "ntsc-uc", label: "NTSC-U/C", releaseCount: 2 },
+    { code: "pal", label: "PAL", releaseCount: 3 },
+  ],
+  selection: { platform: "snes", region: null, releaseId: null },
+  releases: RELEASES,
+  ...over,
+});
+const sel = (platform, region = null, edition = null, release = null) => ({ platform, region, edition, release });
+const plan = (s, p = picker()) => planFastAdd(p, s, REFERENCE);
+const PLATINUM = editionKey({ kind: "reprint", name: "Platinum" });
+
+test("the fast add picks one published release only when the choices name exactly one (M12b)", () => {
+  const p = plan(sel("snes", "pal", editionKey({ kind: "standard", name: "Standard" })));
+  assert.equal(p.outcome.kind, "release");
+  assert.equal(p.outcome.release.id, "eu");
+  // Two PAL Platinum releases: the owner chooses; one is never picked for them.
+  const two = plan(sel("snes", "pal", PLATINUM));
+  assert.equal(two.outcome.kind, "choose");
+  assert.deepEqual(
+    two.outcome.releases.map((r) => r.id),
+    ["eu-p1", "eu-p2"],
+  );
+  assert.equal(plan(sel("snes", "pal", PLATINUM, "eu-p2")).outcome.release.id, "eu-p2");
+  // A release that doesn't match the choices isn't taken from the address.
+  assert.equal(plan(sel("snes", "pal", PLATINUM, "us")).outcome.kind, "choose");
+});
+
+test("each step offers the catalog's choices for what's chosen so far (M12b)", () => {
+  assert.equal(plan(sel(null)).platform.slug, "snes", "a game on one platform has it chosen");
+  const pal = plan(sel("snes", "pal"));
+  assert.deepEqual(
+    pal.editions.map((e) => [e.name, e.count]),
+    [
+      ["Standard", 1],
+      ["Platinum", 2],
+    ],
+    "the editions of PAL releases, with counts",
+  );
+  assert.equal(pal.outcome, null, "and nothing is added before the edition is chosen");
+  assert.deepEqual(
+    plan(sel("snes", "unsure")).editions.map((e) => e.name),
+    ["Standard", "Greatest Hits", "Platinum"],
+    "with the region not sure, every edition on the platform",
+  );
+  assert.equal(plan(sel("snes", "ntsc-j")).region.inCatalog, false, "a region the catalog lacks for the game is the owner's own");
+  assert.deepEqual(plan(sel("snes", "ntsc-j")).editions, [], "with no catalog editions to offer");
+  assert.equal(plan(sel("other")).choosingPlatform, true);
+  assert.equal(plan(sel("snes", "other")).choosingRegion, true);
+  assert.equal(plan(sel("psx")).platform, null, "an unknown platform is ignored");
+  assert.equal(plan(sel("snes", "atlantis")).region, null, "and so is an unknown region");
+});
+
+test("anything that isn't one published release is added unidentified, with what the owner knows (M12b)", () => {
+  const claim = (s) => {
+    const p = plan(s);
+    assert.equal(p.outcome.kind, "claim", JSON.stringify(s));
+    return p.outcome.claim;
+  };
+  // The four combinations of region and edition, known or not.
+  assert.deepEqual(claim(sel("snes", "ntsc-j", "other")), { platform: "snes", region: "ntsc-j", edition: "other" });
+  assert.deepEqual(claim(sel("snes", "pal", "unsure")), { platform: "snes", region: "pal", edition: null });
+  assert.deepEqual(claim(sel("snes", "unsure", PLATINUM)), { platform: "snes", region: null, edition: { kind: "reprint", name: "Platinum" } });
+  assert.deepEqual(claim(sel("snes", "unsure", "unsure")), { platform: "snes", region: null, edition: null });
+  // A platform the catalog doesn't list for the game: the owner's own pairing.
+  const nes = plan(sel("nes", "pal", "unsure"));
+  assert.equal(nes.platform.inCatalog, false);
+  assert.deepEqual(nes.outcome.claim, { platform: "nes", region: "pal", edition: null });
+  assert.deepEqual(nes.editions, [], "with no catalog editions, since the catalog has no releases there");
+});
+
+test("'not sure' stays not sure: no release is inferred, even when only one could match (M12b)", () => {
+  const STANDARD = editionKey({ kind: "standard", name: "Standard" });
+  // A game with one published release, on one platform.
+  const lone = picker({ regions: [{ code: "pal", label: "PAL", releaseCount: 1 }], releases: [rel("eu", "pal", "standard", "Standard")] });
+  const lonePlan = (s) => planFastAdd(lone, s, REFERENCE);
+  // Known region, known edition: the one release, shown for the owner to add.
+  assert.equal(lonePlan(sel("snes", "pal", STANDARD)).outcome.release.id, "eu");
+  // Known region, edition not sure.
+  assert.deepEqual(lonePlan(sel("snes", "pal", "unsure")).outcome, { kind: "claim", claim: { platform: "snes", region: "pal", edition: null } });
+  // Region not sure, known edition.
+  assert.deepEqual(lonePlan(sel("snes", "unsure", STANDARD)).outcome, {
+    kind: "claim",
+    claim: { platform: "snes", region: null, edition: { kind: "standard", name: "Standard" } },
+  });
+  // Both not sure.
+  assert.deepEqual(lonePlan(sel("snes", "unsure", "unsure")).outcome, { kind: "claim", claim: { platform: "snes", region: null, edition: null } });
+  // The release named in the address too: a "not sure" or "another" choice still wins.
+  const named = (s) => planFastAdd({ ...lone, selection: { platform: "snes", region: "pal", releaseId: "eu" } }, { ...s, release: "eu" }, REFERENCE).outcome;
+  assert.equal(named(sel("snes", "pal", "unsure")).kind, "claim", "edition not sure");
+  assert.equal(named(sel("snes", "unsure", STANDARD)).kind, "claim", "region not sure");
+  assert.equal(named(sel("snes", "unsure", "unsure")).kind, "claim", "both not sure");
+  assert.deepEqual(named(sel("snes", "pal", OTHER)), { kind: "claim", claim: { platform: "snes", region: "pal", edition: "other" } }, "another edition: the form asks for it");
+  assert.equal(named(sel("snes", "pal", STANDARD)).release.id, "eu", "choices that agree add it");
+  assert.equal(named(sel(null)).release.id, "eu", "as does a link with no choices");
+  // Several releases of one region and edition: the owner picks; none is chosen for them.
+  assert.equal(plan(sel("snes", "pal", PLATINUM)).outcome.kind, "choose");
+  assert.equal(plan(sel("snes", "unsure", PLATINUM)).outcome.kind, "claim", "and with the region not sure, it's unidentified");
+});
+
+test("a release named in the address is added as itself (M12b)", () => {
+  const p = plan(sel(null, null, null, "us-gh"), picker({ selection: { platform: "snes", region: "ntsc-uc", releaseId: "us-gh" } }));
+  assert.equal(p.outcome.kind, "release");
+  assert.equal(p.outcome.release.id, "us-gh");
+  assert.equal(p.edition.name, "Greatest Hits", "with its steps shown as chosen");
+});
+
+test("the catalog's unknown region is never a claim's region (M12b)", () => {
+  const p = picker({ regions: [{ code: "unknown", label: "UNKNOWN", releaseCount: 1 }], releases: [rel("u", "unknown", null, null)] });
+  assert.deepEqual(planFastAdd(p, sel("snes", "unknown", "unsure"), REFERENCE).outcome.claim, { platform: "snes", region: null, edition: null });
+  assert.equal(planFastAdd(p, sel("snes", "unknown", editionKey(null)), REFERENCE).outcome.release.id, "u", "but its release can be added as itself");
+});
+
+test("the fast add's addresses keep each step (M12b)", () => {
+  assert.equal(fastAddHref("crash", {}), "/games/crash");
+  assert.equal(fastAddHref("crash", { platform: "snes", region: "pal", edition: "reprint~Platinum" }), "/games/crash?platform=snes&region=pal&edition=reprint%7EPlatinum");
+  assert.equal(editionKey(null), "~");
+  assert.equal(UNSURE, "unsure");
+  assert.equal(OTHER, "other");
+});
+
+test("ownership is worded per copy's standing, and preserved copies aren't counted (M12b)", () => {
+  assert.equal(ownershipHeadline(0), "Not in your collection");
+  assert.equal(ownershipHeadline(1), "Owned: Yes");
+  assert.equal(ownershipHeadline(3), "Owned: 3 copies");
+  assert.deepEqual(
+    ["owned", "pending", "not_approved", "unidentified", "invalid"].map(ownershipStatusLabel),
+    ["Confirmed", "Awaiting catalog approval", "Not approved", "Not linked to a release", "Preserved, not counted"],
+  );
+  const platform = { short_name: "PS1" };
+  const pal = { code: "pal", label: "PAL" };
+  assert.equal(ownershipEntryLine({ status: "owned", release_id: "r", platform, region: pal, edition_kind: "reprint", edition_name: "Platinum" }), "PS1 · PAL · Platinum");
+  assert.equal(ownershipEntryLine({ status: "owned", release_id: "r", platform, region: pal, edition_kind: null, edition_name: null }), "PS1 · PAL");
+  assert.equal(
+    ownershipEntryLine({ status: "unidentified", release_id: null, platform, region: { code: "ntsc-uc", label: "NTSC-U/C" }, edition_kind: null, edition_name: null }),
+    "PS1 · NTSC-U/C · Edition not sure",
+  );
+  assert.equal(
+    ownershipEntryLine({ status: "unidentified", release_id: null, platform, region: null, edition_kind: "collector", edition_name: null }),
+    "PS1 · Region not sure · Collector's edition",
+  );
+  assert.equal(copyStatusLabel("pending"), "Awaiting catalog approval", "a pending copy says what it's waiting for");
+});
+
+test("a copy's history says what it was and who changed it (M12b)", () => {
+  const regions = new Map([["pal", "PAL"]]);
+  assert.equal(historyIdentityText({ release_id: "r" }, regions), "Linked to a release in the catalog");
+  assert.equal(
+    historyIdentityText({ game_id: "g", platform_id: "p", region_code: "pal", edition_kind: "reprint", edition_name: null }, regions),
+    "Not linked to a release: PAL · Reprint",
+  );
+  assert.equal(
+    historyIdentityText({ game_id: "g", platform_id: "p", region_code: null, edition_kind: null, edition_name: null }, regions),
+    "Not linked to a release: Region not sure · Edition not sure",
+  );
+  assert.equal(historyIdentityText(null, regions), "Not recorded");
+  assert.deepEqual(["owner", "catalog", "maintenance"].map(historySourceLabel), ["You", "The catalog, when it merged a duplicate release", "Site maintenance"]);
+});
+
+test("edition choices are the database's types, and suggested names are only suggestions (M12b)", () => {
+  assert.deepEqual(
+    EDITION_KIND_OPTIONS.map((k) => k.value),
+    ["standard", "limited", "collector", "reprint", "bundle", "promotional", "other"],
+  );
+  assert.ok(EDITION_NAME_SUGGESTIONS.includes("Platinum") && EDITION_NAME_SUGGESTIONS.includes("Greatest Hits"));
 });

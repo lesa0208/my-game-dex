@@ -159,7 +159,9 @@ try {
   const restored = await admin.browser.submit(`/admin/catalog/exclusions/${exclusion}`, restoreForm, { reason: "Excluded by mistake" });
   check("restoring brings it back", restored.response.status === 303 && location(restored.response) === `/admin/catalog/exclusions/${exclusion}?notice=restored`
     && psql(`select status from public.releases where id = '${eu}';`) === "published" && status(copy) === "active");
-  check("which the page says", plain((await admin.browser.get(location(restored.response))).html).includes("Restored. 1 copy came back"));
+  const restoredPage = plain((await admin.browser.get(location(restored.response))).html);
+  check("which the page says", restoredPage.includes("Restored. 1 copy came back"));
+  check("listing the copy as restored, not as moved by its owner (M12b)", restoredPage.includes("1 copy restored by the restoration") && !restoredPage.includes("moved or changed"));
   check("the copy is exactly as it was", keep() === before);
   const after = await owner.browser.get("/collection");
   check("and My Collection no longer shows the banner", !plain(after.html).includes("kept privately because"));

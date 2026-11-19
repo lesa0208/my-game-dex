@@ -1,6 +1,8 @@
 import { LogIn, UserRoundX } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
+import { AddClaimForm } from "@/components/collection/add-claim-form";
 import { AddCopyForm } from "@/components/collection/add-copy-form";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,17 +11,16 @@ import { signInHref, welcomeHref } from "@/features/auth/redirect";
 import type { PickerRelease } from "@/features/catalog/types";
 import { CURRENCIES } from "@/features/collection/currencies";
 import { latestAcquisitionDate, mediumLabel } from "@/features/collection/details";
-import { getMyDefaultCurrency, getMyReleaseCopyCount } from "@/features/collection/queries";
+import type { ClaimChoice } from "@/features/collection/fast-add";
+import { getMyDefaultCurrency, getMyGameOwnership, getMyReleaseCopyCount } from "@/features/collection/queries";
 import { uuidv7 } from "@/features/collection/uuid";
 
 /**
- * "Add to collection" for the selected release. Reads the session, so it renders per
- * request inside its own Suspense boundary, apart from the cached public catalog.
- * Signed-out visitors are sent to sign in and back to this release.
+ * What a visitor who can't add yet sees instead of the form: signed out, without a
+ * handle, or with an account that can't add. Null when they can add.
  */
-export async function AddToCollection({ release, returnPath }: { release: PickerRelease; returnPath: string }) {
+async function notReady(returnPath: string): Promise<ReactNode | null> {
   const viewer = await getCurrentViewer().catch(() => null);
-
   if (!viewer) {
     return (
       <div className="flex flex-wrap items-center gap-3">
@@ -50,6 +51,17 @@ export async function AddToCollection({ release, returnPath }: { release: Picker
       </p>
     );
   }
+  return null;
+}
+
+/**
+ * "Add to collection" for the selected release. Reads the session, so it renders per
+ * request inside its own Suspense boundary, apart from the cached public catalog.
+ * Signed-out visitors are sent to sign in and back to this release.
+ */
+export async function AddToCollection({ release, returnPath }: { release: PickerRelease; returnPath: string }) {
+  const blocked = await notReady(returnPath);
+  if (blocked) return blocked;
 
   const [count, currency] = await Promise.all([getMyReleaseCopyCount(release.id), getMyDefaultCurrency()]);
   return (
@@ -63,6 +75,42 @@ export async function AddToCollection({ release, returnPath }: { release: Picker
       maxDate={latestAcquisitionDate()}
       mediumLabel={mediumLabel(release.format?.category)}
       components={release.components.filter((c): c is typeof c & { label: string } => c.label !== null).map((c) => ({ kind: c.kind, label: c.label, quantity: c.quantity }))}
+    />
+  );
+}
+
+/**
+ * M12b: "Add to collection" for a choice that isn't one published release: an
+ * unidentified copy (M12a) with the platform, region and edition chosen. As above, it
+ * reads the session and returns here after signing in.
+ */
+export async function AddClaimToCollection({
+  gameId,
+  platformId,
+  claim,
+  returnPath,
+}: {
+  gameId: string;
+  platformId: string;
+  claim: ClaimChoice;
+  returnPath: string;
+}) {
+  const blocked = await notReady(returnPath);
+  if (blocked) return blocked;
+
+  const [ownership, currency] = await Promise.all([getMyGameOwnership(gameId), getMyDefaultCurrency()]);
+  return (
+    <AddClaimForm
+      key={returnPath}
+      gameId={gameId}
+      platformId={platformId}
+      region={claim.region}
+      edition={claim.edition}
+      initialItemId={uuidv7()}
+      initialCount={ownership ? ownership.copies : null}
+      defaultCurrency={currency}
+      currencies={CURRENCIES}
+      maxDate={latestAcquisitionDate()}
     />
   );
 }

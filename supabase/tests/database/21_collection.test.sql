@@ -6,6 +6,20 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(174);
 
+-- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
+-- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
+-- it creates without a packaging type gets 'cardboard-box', and the legacy rom-cartridge
+-- format may still be newly published, so its fixtures stay as they were.
+create function pg_temp.legacy_packaging() returns trigger language plpgsql as $lp$
+begin
+  if new.packaging_code = 'unclassified' then
+    new.packaging_code := 'cardboard-box';
+  end if;
+  return new;
+end $lp$;
+create trigger aa_legacy_packaging before insert on public.releases for each row execute function pg_temp.legacy_packaging();
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
 -- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
@@ -427,9 +441,9 @@ select is((select string_agg(e ->> 'id', ',' order by o) from jsonb_array_elemen
           concat_ws(',', pg_temp.id('h1'), pg_temp.id('rej'), pg_temp.id('sub'), pg_temp.id('a2'), pg_temp.id('a1')), 'copies are listed newest first');
 select is(pg_temp.mine('c1') ->> 'next_cursor', null, 'one page has no cursor');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.mine('c1') -> 'items' -> 0) k),
-          'acquired_on,added_at,completeness,conditions,copies_of_release,game,has_notes,id,price,release,status,storage_location,updated_at', 'a listed copy has exactly the expected fields');
+          'acquired_on,added_at,claim,completeness,conditions,copies_of_release,game,has_notes,id,identity,price,release,status,storage_location,updated_at', 'a listed copy has exactly the expected fields');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.item('c1', 'a1')) k),
-          'acquired_on,added_at,completeness,components,conditions,copies_of_release,game,id,notes,price,release,status,storage_location,updated_at', 'a full copy has exactly the expected fields');
+          'acquired_on,added_at,claim,completeness,components,conditions,copies_of_release,game,id,identity,notes,price,release,status,storage_location,updated_at', 'a full copy has exactly the expected fields');
 select is((select string_agg(e ->> 'id', ',') from jsonb_array_elements(pg_temp.mine('c2') -> 'items') e), pg_temp.id('o2a')::text, 'each user lists only their own copies');
 select is((select e -> 'copies_of_release' from jsonb_array_elements(pg_temp.mine('c1') -> 'items') e where e ->> 'id' = pg_temp.id('a1')::text), '2'::jsonb, 'a copy says how many of its release the owner has');
 select is((select e -> 'price' from jsonb_array_elements(pg_temp.mine('c1') -> 'items') e where e ->> 'id' = pg_temp.id('a1')::text), '{"amount": "49.9900", "currency": "EUR"}'::jsonb, 'a price keeps its exact amount and currency');
@@ -456,7 +470,7 @@ select is(jsonb_array_length(pg_temp.mine('c1', 'p_query => ''lanterne''') -> 'i
 select is(pg_temp.as_user('c1', format('select public.get_my_release_copies(%L) ->> ''count''', pg_temp.id('pub'))), '2', 'the owner sees how many copies of a release they have');
 select is(pg_temp.as_user('c2', format('select public.get_my_release_copies(%L) ->> ''count''', pg_temp.id('nes'))), '0', 'another user''s copies aren''t counted');
 select is(pg_temp.as_user('c1', 'select public.get_my_collection_summary()::text')::jsonb - 'platforms',
-          '{"total": 5, "owned": 3, "pending": 1, "not_approved": 1, "invalid": 0, "limit": 100000}'::jsonb, 'the summary counts copies by status');
+          '{"total": 5, "owned": 3, "pending": 1, "not_approved": 1, "invalid": 0, "unidentified": 0, "limit": 100000}'::jsonb, 'the summary counts copies by status');
 select is(pg_temp.as_user('c1', 'select public.get_my_collection_summary()::text')::jsonb -> 'platforms',
           '[{"slug": "nes", "name": "Nintendo Entertainment System", "short_name": "NES", "count": 1}, {"slug": "snes", "name": "Super Nintendo Entertainment System", "short_name": "SNES", "count": 4}]'::jsonb, 'the summary counts copies by platform');
 

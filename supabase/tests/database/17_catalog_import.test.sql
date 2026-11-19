@@ -1,4 +1,7 @@
 -- M5b: the catalog importer's role, gates, staging, matching and candidates.
+-- Since M11b-1a this runs on mega-drive, a cartridge platform with one format, so the automatic
+-- candidate path is still covered: snes now has several cartridge formats, and its release
+-- entries are held for an editor (44_physical_media_formats.test.sql).
 -- This file calls the importer functions as their owner, so it covers their rules.
 -- Logging in as catalog_importer, and concurrent runs, are in db-import-checks.mjs.
 begin;
@@ -65,17 +68,17 @@ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'serv
 -- ---------------------------------------------------------------------------
 select is((select string_agg(code || '/' || commercial_use_cleared, ',' order by code) from private.external_providers where code in ('wikidata', 'no-intro')),
   'no-intro/false,wikidata/false', 'the pilot sources exist, not cleared');
-select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w.json', %L, now(), %L, 'Pilot', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))),
+select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w.json', %L, now(), %L, 'Pilot', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))),
   'error: provider not cleared', 'an uncleared source can''t be imported');
 select is(pg_temp.try($$select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', repeat('1', 64), '')::text$$),
   'error: reason required', 'clearance needs a note');
 select lives_ok($$select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', repeat('1', 64), 'CC0 data, terms reviewed')$$, 'an operator clears a source');
 select is((select count(*)::int from private.audit_events where action = 'catalog_provider_cleared' and metadata ->> 'provider' = 'wikidata' and actor_id is null), 1, 'which is audited');
-select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w.json', %L, now(), %L, 'Pilot', %L)::text$$, repeat('a', 64), repeat('9', 64), pg_temp.u('f1'))),
+select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w.json', %L, now(), %L, 'Pilot', %L)::text$$, repeat('a', 64), repeat('9', 64), pg_temp.u('f1'))),
   'error: terms not cleared', 'a run must cite the terms that were reviewed');
-select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w.json', %L, now(), %L, '', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))),
+select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w.json', %L, now(), %L, '', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))),
   'error: reason required', 'a run needs the operator''s reason');
-select ok(pg_temp.keep('w1', pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w.json', %L, now(), %L, 'SNES pilot', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))))
+select ok(pg_temp.keep('w1', pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w.json', %L, now(), %L, 'SNES pilot', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f1'))))
   not like 'error%', 'a cleared source can be imported');
 select is((select count(*)::int from private.audit_events where action = 'catalog_import_run' and metadata ->> 'event' = 'started' and metadata ->> 'run_id' = pg_temp.id('w1')::text and reason = 'SNES pilot'),
   1, 'the start is audited with the operator''s reason');
@@ -83,9 +86,9 @@ select is((select count(*)::int from private.audit_events where action = 'catalo
 -- ---------------------------------------------------------------------------
 -- One run per snapshot, one process per run (gate 3)
 -- ---------------------------------------------------------------------------
-select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w.json', %L, now(), %L, 'Again', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f2'))),
+select is(pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w.json', %L, now(), %L, 'Again', %L)::text$$, repeat('a', 64), repeat('1', 64), pg_temp.u('f2'))),
   'error: snapshot already running', 'the same snapshot can''t be run twice at once');
-select throws_ok(format($$insert into private.import_runs (provider_code, platform_id, source_name, source_sha256, source_fetched_at) values ('wikidata', %L, 'x', %L, now())$$, pg_temp.platform('snes'), repeat('a', 64)),
+select throws_ok(format($$insert into private.import_runs (provider_code, platform_id, source_name, source_sha256, source_fetched_at) values ('wikidata', %L, 'x', %L, now())$$, pg_temp.platform('mega-drive'), repeat('a', 64)),
   '23505', null, 'even past the function, by a unique index');
 select is(pg_temp.try(format($$select catalog_import.stage_records(%L, %L, '[]', null)::text$$, pg_temp.id('w1'), pg_temp.u('f2'))), 'error: run in use', 'another process can''t work on a run it doesn''t hold');
 select is(pg_temp.try(format($$select catalog_import.claim_run(%L, %L, %L)::text$$, pg_temp.id('w1'), pg_temp.u('f2'), repeat('a', 64))), 'error: run in use', 'or take it over while the lease is live');
@@ -119,12 +122,12 @@ select is((select string_agg(record_position::text, ',') from catalog_import.pen
 -- ---------------------------------------------------------------------------
 -- An editor's game, on the platform, without a source id.
 insert into public.games (id, title, sort_title, kind, status) values (pg_temp.u('a4'), 'Axelay', 'Axelay', 'game', 'under_review');
-insert into public.game_platforms (game_id, platform_id, status) values (pg_temp.u('a4'), pg_temp.platform('snes'), 'under_review');
+insert into public.game_platforms (game_id, platform_id, status) values (pg_temp.u('a4'), pg_temp.platform('mega-drive'), 'under_review');
 
 select is(pg_temp.outcome(pg_temp.apply('w1', 'f2', 'wikidata', 'Q1')), 'created', 'a new source entry creates a game candidate');
 select ok(pg_temp.keep('g1', (select matched_game_id::text from private.provider_records where id = pg_temp.rec('wikidata', 'Q1'))) not like 'error%', 'linked to its record');
 select is((select status || '/' || coalesce(verified_at::text, 'unverified') || '/' || kind from public.games where id = pg_temp.id('g1')), 'under_review/unverified/game', 'under review and unverified');
-select is((select status::text from public.game_platforms where game_id = pg_temp.id('g1') and platform_id = pg_temp.platform('snes')), 'under_review', 'with an unpublished pairing');
+select is((select status::text from public.game_platforms where game_id = pg_temp.id('g1') and platform_id = pg_temp.platform('mega-drive')), 'under_review', 'with an unpublished pairing');
 select is((select count(*)::int from private.external_references where provider_code = 'wikidata' and external_id = 'Q1' and game_id = pg_temp.id('g1')), 1, 'and its source id');
 select is((select count(*)::int from private.audit_events where action = 'catalog_record_created' and actor_id is null and reason = 'SNES pilot'
   and metadata ->> 'id' = pg_temp.id('g1')::text and metadata ->> 'import_run_id' = pg_temp.id('w1')::text), 1, 'the creation is audited, naming the run');
@@ -139,7 +142,7 @@ select lives_ok(format($$select catalog_import.finish_run(%L, %L, 'completed')$$
 select is(pg_temp.try(format($$select catalog_import.stage_records(%L, %L, '[]', null)::text$$, pg_temp.id('w1'), pg_temp.u('f2'))), 'error: run unavailable', 'and takes no more entries');
 
 -- A later snapshot: changed entries fill only empty, unlocked, unverified fields (gates 4 and 6).
-select ok(pg_temp.keep('w2', pg_temp.try(format($$select catalog_import.start_run('wikidata', 'snes', 'w2.json', %L, now(), %L, 'SNES pilot, second snapshot', %L)::text$$, repeat('b', 64), repeat('1', 64), pg_temp.u('f3'))))
+select ok(pg_temp.keep('w2', pg_temp.try(format($$select catalog_import.start_run('wikidata', 'mega-drive', 'w2.json', %L, now(), %L, 'SNES pilot, second snapshot', %L)::text$$, repeat('b', 64), repeat('1', 64), pg_temp.u('f3'))))
   not like 'error%', 'a later snapshot starts');
 insert into private.catalog_field_locks (game_id, field_name) values ((select game_id from private.external_references where external_id = 'Q2'), 'first_release_date');
 update public.games set verified_at = now() where id = (select game_id from private.external_references where external_id = 'Q3');
@@ -164,7 +167,7 @@ select lives_ok(format($$select catalog_import.finish_run(%L, %L, 'completed')$$
 -- Release candidates
 -- ---------------------------------------------------------------------------
 select lives_ok($$select private.record_provider_clearance('no-intro', true, 'https://datomatic.no-intro.org/', repeat('2', 64), 'Metadata use reviewed')$$, 'an operator clears the release source');
-select ok(pg_temp.keep('n1', pg_temp.try(format($$select catalog_import.start_run('no-intro', 'snes', 'snes.dat', %L, now(), %L, 'SNES release pilot', %L)::text$$, repeat('c', 64), repeat('2', 64), pg_temp.u('f4'))))
+select ok(pg_temp.keep('n1', pg_temp.try(format($$select catalog_import.start_run('no-intro', 'mega-drive', 'snes.dat', %L, now(), %L, 'SNES release pilot', %L)::text$$, repeat('c', 64), repeat('2', 64), pg_temp.u('f4'))))
   not like 'error%', 'a release snapshot starts');
 select is(pg_temp.try(format($$select catalog_import.stage_records(%L, %L, %L, null)::text$$, pg_temp.id('n1'), pg_temp.u('f4'), '[
   {"entity_type": "release", "external_id": "Super Metroid (USA)", "payload": {"title": "Super Metroid", "region_codes": ["ntsc-uc"], "languages": ["en"], "serial": "SNS-RI-USA"}},
@@ -213,7 +216,7 @@ select throws_ok(format($$update private.provider_records set matched_release_id
 
 -- Locks and verification on releases (gate 4), and resolving source ids (gate 6)
 select lives_ok(format($$select catalog_import.finish_run(%L, %L, 'completed')$$, pg_temp.id('n1'), pg_temp.u('f4')), 'the release run finishes');
-select ok(pg_temp.keep('n2', pg_temp.try(format($$select catalog_import.start_run('no-intro', 'snes', 'snes2.dat', %L, now(), %L, 'SNES release pilot, second snapshot', %L)::text$$, repeat('d', 64), repeat('2', 64), pg_temp.u('f5'))))
+select ok(pg_temp.keep('n2', pg_temp.try(format($$select catalog_import.start_run('no-intro', 'mega-drive', 'snes2.dat', %L, now(), %L, 'SNES release pilot, second snapshot', %L)::text$$, repeat('d', 64), repeat('2', 64), pg_temp.u('f5'))))
   not like 'error%', 'a later release snapshot starts');
 insert into private.catalog_field_locks (release_id, field_name)
 values ((select matched_release_id from private.provider_records where id = pg_temp.rec('no-intro', 'Super Metroid (Japan, USA)')), 'product_code');

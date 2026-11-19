@@ -27,6 +27,7 @@ export function formValues(details: SubmissionDetails, note: string | null): Sub
     publisherName: details.publisher_name ?? "",
     mediaCount: details.media_count ? String(details.media_count) : "",
     packaging: details.packaging ?? "",
+    packagingCode: details.packaging_code ?? "unclassified",
     releaseYear: details.release_date ? details.release_date.slice(0, 4) : "",
     pieces: details.components.map((c) => ({ kind: c.kind, label: c.label, quantity: String(c.quantity) })),
     note: note ?? "",

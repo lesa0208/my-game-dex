@@ -46,7 +46,7 @@ select is((select count(*)::int from public.region_codes), 11, 'anon reads regio
 select is((select count(*)::int from public.markets), 249, 'anon reads markets');
 select is((select count(*)::int from public.platforms), 59, 'anon reads platforms');
 select cmp_ok((select count(*)::int from public.platform_names), '>', 0, 'anon reads platform names');
-select is((select count(*)::int from public.media_formats), 25, 'anon reads media formats');
+select is((select count(*)::int from public.media_formats), 29, 'anon reads media formats');
 select cmp_ok((select count(*)::int from public.platform_media_formats), '>=', 58, 'anon reads platform formats');
 select is((select count(*)::int from public.hardware_requirements), 11, 'anon reads hardware requirements');
 select throws_ok($$insert into public.region_codes (code, label, description, position) values ('x', 'X', 'x', 99)$$, '42501', null, 'anon can''t insert a region code');

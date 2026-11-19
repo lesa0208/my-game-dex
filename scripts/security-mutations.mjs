@@ -1056,4 +1056,95 @@ export const m11a2InvitationMutations = [
   sql("the revocation reads the handle without the lock", "api", rewrite(M11A2_REVOKE, "select * into i from private.account_invitations where id = p_id for update;", "select * into i from private.account_invitations where id = p_id;")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations };
+// M11b-1a: nes and snes have several cartridge formats, so their release entries must be
+// held for an editor. The importer may choose a format only when a platform has exactly one.
+export const m11b1aMutations = [
+  sql("the importer picks a format when a platform has several", "both",
+    rewrite(APPLY_RELEASE, "where f.platform_id = p_run.platform_id having pg_catalog.count(*) = 1;", "where f.platform_id = p_run.platform_id;")),
+];
+
+// M11b-1b: release identity and packaging. Each violation weakens one new protection.
+const M11B1B_GUARD = "private.guard_release_packaging_and_format()";
+const M11B1B_PUBLISHED_INDEX = (columns) => `drop index public.releases_published_identity_key;
+create unique index releases_published_identity_key on public.releases (${columns}) nulls not distinct where status = 'published';`;
+export const m11b1bMutations = [
+  sql("unclassified packaging can be newly published", "pgtap", rewrite(M11B1B_GUARD,
+    "    if new.packaging_code = 'unclassified' then\n      raise exception 'packaging classification required'",
+    "    if false then\n      raise exception 'packaging classification required'")),
+  sql("the generic cartridge can be newly published on NES and SNES", "pgtap", rewrite(M11B1B_GUARD,
+    "                     and f.accepts_new_publications) then", "                     ) then")),
+  sql("classified packaging can return to unclassified", "pgtap", rewrite(M11B1B_GUARD,
+    "  if tg_op = 'UPDATE' and old.packaging_code <> 'unclassified' and new.packaging_code = 'unclassified'",
+    "  if false and tg_op = 'UPDATE' and old.packaging_code <> 'unclassified' and new.packaging_code = 'unclassified'")),
+  sql("a collector can record Unknown", "pgtap", rewrite("private.submission_details(jsonb)",
+    "  if r.packaging_code = 'unknown' or not exists", "  if not exists")),
+  sql("the published identity ignores the cartridge shell", "pgtap", M11B1B_PUBLISHED_INDEX(
+    "game_id, platform_id, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), private.release_packaging_key(packaging_code, packaging), private.release_code_key(product_code)")),
+  sql("unclassified releases lose their historical packaging text", "pgtap", M11B1B_PUBLISHED_INDEX(
+    "game_id, platform_id, media_format_code, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), packaging_code, private.release_code_key(product_code)")),
+  sql("product codes compare without their separators", "pgtap", rewrite("private.release_code_key(text)",
+    "pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.normalize(p_code, 'NFC'), '^\\s+|\\s+$', '', 'g'))",
+    "pg_catalog.upper(pg_catalog.regexp_replace(pg_catalog.normalize(p_code, 'NFC'), '[\\s./-]+', '', 'g'))")),
+  sql("the submission duplicate check ignores the shell", "pgtap", rewrite("public.submit_release(uuid, text, text, text, jsonb, jsonb, text, boolean)",
+    "and r.media_format_code = p_media_format\n", "\n")),
+];
+
+// M12a: flexible ownership. Each violation weakens one protection of unidentified copies.
+const M12A_LOCK = "private.lock_claimable_game(uuid, uuid)";
+export const m12aMutations = [
+  sql("a claim's trigger accepts an unpublished game", "pgtap", rewrite(M12A_LOCK,
+    "  if not found or v_status <> 'published' then", "  if not found then")),
+  sql("the policy check accepts an unpublished game", "pgtap", rewrite("private.can_claim(uuid, uuid)",
+    "where g.id = p_game and g.status = 'published')", "where g.id = p_game)")),
+  sql("a claim locks its game FOR KEY SHARE", "api", rewrite(M12A_LOCK,
+    "where g.id = p_game for share;", "where g.id = p_game for key share;")),
+  sql("clients may change a claim directly", "pgtap",
+    "grant update (claimed_region_code, release_id) on public.collection_items to authenticated;"),
+  sql("a copy may name both a release and a claim", "pgtap",
+    "alter table public.collection_items drop constraint collection_items_identity;"),
+  sql("the identity trigger watches only the release", "pgtap", `drop trigger check_copy_release_move on public.collection_items;
+create trigger check_copy_release_move before update of release_id on public.collection_items
+  for each row when (new.release_id is distinct from old.release_id) execute function private.check_moved_copy_release();`),
+  sql("the owner's identity changes go unrecorded", "pgtap",
+    "drop trigger record_copy_identity_change on public.collection_items;"),
+  sql("an exclusion skips the claims on the game it excludes", "both", rewrite("public.exclude_release(uuid, text, text, text, text, boolean, boolean)",
+    "           or (c.release_id is null and c.claimed_game_id in (", "           or (false and c.claimed_game_id in (")),
+  sql("restoring takes back copies the owner has changed", "pgtap", rewrite("public.restore_exclusion(uuid, integer, text)",
+    "      and c.record_status = 'invalid_preserved' and c.invalidated_at = ex.excluded_at", "      or true")),
+  sql("a preserved copy counts as owned", "pgtap", rewrite("public.get_my_game_ownership(uuid)",
+    "'owned', exists (select 1 from mine m where m.status <> 'invalid')", "'owned', exists (select 1 from mine m)")),
+];
+
+/**
+ * M12b-0 and M12b: the three M12a review fixes, and get_my_owned_games (one owner-scoped
+ * read per results page, with the game page's counting rule). Checked by 46 and 47.
+ */
+const OWNED = "public.get_my_owned_games(uuid[])";
+const REPEATED = "private.repeated_submission(uuid)";
+const RECORD = "private.record_submission_request(uuid, jsonb)";
+export const m12bMutations = [
+  sql("the summary drops preserved claims from the platform counts", "pgtap", rewrite("public.get_my_collection_summary()",
+    "      coalesce(r.platform_id, c.claimed_platform_id) as platform_id",
+    "      case when c.record_status = 'invalid_preserved' then r.platform_id else coalesce(r.platform_id, c.claimed_platform_id) end as platform_id")),
+  sql("an exclusion's details miss a claim made active where it is", "pgtap", rewrite("public.get_exclusion(uuid)",
+    "                   or c.record_status <> 'invalid_preserved')),", "                   or false)),")),
+  // M12b review: restored copies told apart from moved ones.
+  sql("an exclusion's details count restored copies as moved", "pgtap", rewrite("public.get_exclusion(uuid)",
+    "                where ec.exclusion_id = ex.id and ec.restored_at is null", "                where ec.exclusion_id = ex.id")),
+  sql("a restoration doesn't record which copies it restored", "pgtap", rewrite("public.restore_exclusion(uuid, integer, text)",
+    "  where ec.exclusion_id = ex.id and ec.item_id = any (v_items);", "  where false;")),
+  sql("copies of a release say their pairing isn't the catalog's", "pgtap", rewrite("public.get_my_game_ownership(uuid)",
+    "        where gp.game_id = coalesce(r.game_id, c.claimed_game_id)", "        where c.claimed_game_id is not null and gp.game_id = coalesce(r.game_id, c.claimed_game_id)")),
+  sql("owned games reads every owner's copies", "pgtap", rewrite(OWNED, "c.owner_id = v_me", "true")),
+  sql("owned games counts preserved copies", "pgtap", rewrite(OWNED, "and c.record_status <> 'invalid_preserved'", "and true")),
+  sql("owned games answers for an ended session", "pgtap", rewrite(OWNED,
+    "  if v_me is null or not (select private.session_is_live()) then", "  if v_me is null then")),
+  sql("owned games is open to visitors", "pgtap", `grant execute on function ${OWNED} to anon;`),
+  sql("owned games takes any number of games", "pgtap", rewrite(OWNED, "pg_catalog.cardinality(p_games) > 50", "pg_catalog.cardinality(p_games) > 5000")),
+  // A submission form sent again (submit_game_once, submit_release_once)
+  sql("a resent submission makes another", "pgtap", rewrite(REPEATED, "  where q.request_id = p_request;", "  where false;")),
+  sql("another user's request is answered", "pgtap", rewrite(REPEATED, "  if v_row.submitted_by is distinct from v_me then", "  if false then")),
+  sql("a request isn't recorded", "pgtap", rewrite(RECORD, "  if p_outcome ->> 'outcome' = 'submitted' and p_outcome ? 'submission_id' then", "  if false then")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations, m12b: m12bMutations };

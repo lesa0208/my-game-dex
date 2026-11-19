@@ -98,6 +98,7 @@ test("no public game is null, and unknown release details stay null", () => {
   assert.ok(picker);
   const release = picker.releases[0];
   assert.equal(release.packaging, null);
+  assert.equal(release.packagingCode, "unclassified", "a release without a packaging code reads as unclassified");
   assert.equal(release.releaseDate, null);
   assert.equal(release.languages, null);
   assert.equal(release.identifiers.barcode, null);

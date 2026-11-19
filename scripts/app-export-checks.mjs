@@ -149,7 +149,9 @@ commit;`);
   check("as JSON, an attachment named for the handle and date", h("content-type") === "application/json; charset=utf-8" && h("content-disposition") === `attachment; filename="my-game-dex-${a.handle}-${new Date().toISOString().slice(0, 10)}.json"`, h("content-disposition"));
   check("never stored or indexed", /no-store/.test(h("cache-control")) && /private/.test(h("cache-control")) && /noindex/.test(h("x-robots-tag")) && h("x-content-type-options") === "nosniff" && h("referrer-policy") === "no-referrer");
   const d = ex.data ?? {};
-  check("it names its format and ends complete", d.format === "my-game-dex-export" && d.version === 1 && d.complete === true && ex.text.trimEnd().endsWith('"complete":true}'));
+  // M12a: version 2, as a copy may be unidentified; every copy carries a "claim" (null when it names a release).
+  check("it names its format and ends complete", d.format === "my-game-dex-export" && d.version === 2 && d.complete === true && ex.text.trimEnd().endsWith('"complete":true}'));
+  check("every copy says whether it's a claim", Array.isArray(d.collection) && d.collection.every((c) => "claim" in c && (c.claim === null) === (c.release !== null)));
   check("it says it isn't a complete legal answer, and what's left out", /not a complete answer to a legal request/.test(d.notice ?? "") && Array.isArray(d.not_included) && d.not_included.length >= 4);
   check("the account is the signed-in person", d.account?.id === a.id && d.account?.email === a.email);
   check("the profile and handle", d.profile?.handle === a.handle && d.profile?.collection_visibility === "private" && d.profile?.account_status === "active");

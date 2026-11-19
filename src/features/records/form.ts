@@ -90,6 +90,7 @@ export const FIELD_LABELS: Record<string, string> = {
   media_count: "number of media",
   media_playability: "playability",
   packaging: "packaging",
+  packaging_code: "packaging type",
   languages: "languages",
   rating_labels: "rating labels",
   release_date: "release date",

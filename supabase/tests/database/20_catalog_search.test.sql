@@ -5,6 +5,20 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(130);
 
+-- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
+-- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
+-- it creates without a packaging type gets 'cardboard-box', and the legacy rom-cartridge
+-- format may still be newly published, so its fixtures stay as they were.
+create function pg_temp.legacy_packaging() returns trigger language plpgsql as $lp$
+begin
+  if new.packaging_code = 'unclassified' then
+    new.packaging_code := 'cardboard-box';
+  end if;
+  return new;
+end $lp$;
+create trigger aa_legacy_packaging before insert on public.releases for each row execute function pg_temp.legacy_packaging();
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
 -- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
@@ -320,7 +334,7 @@ select is(pg_temp.keys(pg_temp.search(null, 'qzv-1001') -> 'items' -> 0 -> 'rele
 select is(pg_temp.keys(pg_temp.picker(null, (select slug from public.games where id = pg_temp.id('star')))), 'game,platforms,regions,releases,selection', 'a picker response has only its fields');
 select is(pg_temp.keys(pg_temp.picker(null, (select slug from public.games where id = pg_temp.id('star'))) -> 'game'), 'aliases,first_release,id,kind,slug,title', 'and so does its game');
 select is(pg_temp.keys(pg_temp.picker(null, (select slug from public.games where id = pg_temp.id('star'))) -> 'releases' -> 0),
-  'components,edition,format,id,identifiers,languages,local_title,markets,media_count,media_playability,packaging,platform,publisher_name,rating_labels,region,release_date,requirements,variant_name',
+  'components,edition,format,id,identifiers,languages,local_title,markets,media_count,media_playability,packaging,packaging_code,platform,publisher_name,rating_labels,region,release_date,requirements,variant_name',
   'and each of its releases');
 select is((select count(*)::int from (values (pg_temp.search(null, 'qzv starlight')::text), (pg_temp.search(null, 'qzv-1001')::text),
     (pg_temp.picker(null, (select slug from public.games where id = pg_temp.id('star')))::text), (public.list_catalog_platforms()::text)) v(t)

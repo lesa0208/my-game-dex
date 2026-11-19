@@ -185,6 +185,8 @@ Approved by the product owner on 2026-11-08, separate from the global decisions 
 | Search | Language-neutral PostgreSQL search, with 100 ms as a non-blocking local target (M5c) |
 | Images | Deferred until D15 |
 
+**M11b-0 design (2026-11-18), provisionally accepted; see its section 10 for what is approved.** [physical-catalog-m11b.md](physical-catalog-m11b.md) proposes revising the Sources row: Wikidata cleared; No-Intro cleared for metadata only, from manual saved downloads; Redump held, rather than blocked until written permission, pending confirmation of its terms after the project split. It also proposes cartridge-shell media formats for NES/Famicom and SNES/Super Famicom. The rows above stay in force until the product owner decides.
+
 ### M8 decisions: the Superadmin Foundation
 
 Approved by the product owner on 2026-11-14, separate from the global decisions above. M8 migrations, tests and [security-rls.md](security-rls.md#the-owner-m8) cite them as D1 to D19, and the addendum's sections as A1 to A5. "Built" describes what was implemented, where it differs from the proposal.
@@ -1192,6 +1194,21 @@ The full audit log (`get_audit_events`, now `get_audit_log`) stays administrator
 - **The signed-in password change passes `current_password` to Auth,** ready for hosted "require current password", which was verified on GoTrue v2.197 (recovery sessions exempt, aal2 still required).
 
 **Consequences.** One migration (15 functions redefined with one condition each, 10 policies, one helper). A statement already running when a session ends completes; later ones are refused. The cost is tens of microseconds on small queries and within noise on large ones. The pages now say other devices are signed out, without the hour caveat. Storage and Realtime paths would need their own check if clients ever use them.
+
+### ADR-068: Collecting never waits for the catalog
+
+**Status:** accepted (M12b, 2026-11-19). **Context:** collectors own games the catalog doesn't have yet, or have a copy whose region or edition they don't know. If tracking waited for editorial approval, or for an exact release, they couldn't record their collection.
+
+**Decision.**
+- **The fast add is platform, region, edition, add,** each step offering the catalog's choices first, then another one or "Not sure". Exactly one published release is added as itself; several matching are never settled by picking one; anything else becomes an unidentified copy (M12a).
+- **A game the catalog doesn't have is submitted, and the copy goes in at once** on the submitter's own pending release, which M7a already allowed. No new ownership model: claims are for games the catalog has.
+- **External metadata is for discovery only,** through cleared providers (D14), into internal candidates that are reviewed like any submission. Generic metadata never yields a verified region or edition.
+- **Ownership on search results is one owner-scoped call per page** (`get_my_owned_games`, at most 50 games), with the same counting rule as the game page.
+- **"Not sure" is never resolved for the collector.** A release is added only when their own choices name it, or they choose it; a release in the address doesn't override a not-sure or different choice.
+- **A submission form makes one submission and one copy,** however often it's sent (`submit_game_once`, `submit_release_once`, keyed by the form's id). If the copy can't be added, the submission page says so and offers the add.
+- **A rejected new game isn't made claimable.** Its copy stays "Not approved" with everything recorded; the page offers only what the database allows: moving it to a release the catalog has, or removing it.
+
+**Consequences.** Collectors can always record what they own. The catalog stays moderated: nobody gains a way to publish. External discovery is an open launch requirement until a provider is cleared, with manual submission covering every game meanwhile. Details: [catalog-discovery-m12.md](catalog-discovery-m12.md).
 
 ## Risks to watch
 

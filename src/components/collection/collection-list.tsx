@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { CatalogCover } from "@/components/games/catalog-cover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { completenessLabel, conditionLabel, copyStatusLabel, formatDay, releaseLine } from "@/features/collection/details";
+import { claimLine, completenessLabel, conditionLabel, copyStatusLabel, formatDay, releaseLine } from "@/features/collection/details";
 import { type CollectionParams, copyHref } from "@/features/collection/list-params";
 import type { CopyNumber } from "@/features/collection/queries";
 import type { CollectionEntry } from "@/features/collection/types";
@@ -26,14 +26,17 @@ function copyFacts(item: CollectionEntry, number: CopyNumber | undefined, sort: 
 
 function CopyRow({ item, number, preserved, params }: { item: CollectionEntry; number: CopyNumber | undefined; preserved: PreservedTitle | undefined; params: CollectionParams }) {
   const status = copyStatusLabel(item.status);
+  // M12a: an unidentified copy names no release, only what its owner claims.
+  const claim = item.identity === "claim" ? item.claim : null;
   // A preserved copy's excluded release, as its owner may read it (M7b-2b).
-  const release = item.release ?? preserved ?? null;
+  const release = claim ? null : (item.release ?? preserved ?? null);
   return (
     <Link href={copyHref(item.id, params)} className={cardClassName}>
       <CatalogCover className="w-12" />
       <div className="min-w-0 flex-1">
         <p className="font-medium text-pretty">{item.game?.title ?? preserved?.title ?? "Release no longer available"}</p>
         {release ? <p className="text-sm text-muted-foreground">{releaseLine(release)}</p> : null}
+        {claim ? <p className="text-sm text-muted-foreground">{claimLine(claim)}</p> : null}
         {release?.local_title ? <p className="text-xs text-muted-foreground">{release.local_title}</p> : null}
         <p className="mt-1.5 text-xs text-muted-foreground">{copyFacts(item, number, params.sort).join(" · ")}</p>
         {status ? <p className="mt-1.5 inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{status}</p> : null}

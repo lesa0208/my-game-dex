@@ -1,6 +1,7 @@
 import { ArrowLeft, CircleCheck, PlugZap, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { packagingStaffLabel } from "@/features/catalog/packaging";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -164,7 +165,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
               { label: "Edition", value: details.edition_name },
               { label: "Edition type", value: details.edition_kind ? editionKindLabel(details.edition_kind) : null },
               { label: "Variant", value: details.variant_name },
-              { label: "Packaging", value: details.packaging },
+              { label: "Packaging", value: packagingStaffLabel(details.packaging_code, details.packaging) },
               { label: "Product code", value: details.product_code },
               { label: "Barcode", value: details.barcode },
               { label: "Title on the package", value: details.local_title },
@@ -189,7 +190,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
                 { label: "Discs or cartridges", value: release.media_count ? String(release.media_count) : "Not recorded" },
                 { label: "Region", value: regionText(release.region_code, release.region_unknown_confirmed) },
                 { label: "Variant", value: release.variant_name },
-                { label: "Packaging", value: release.packaging },
+                { label: "Packaging", value: packagingStaffLabel(release.packaging_code, release.packaging) },
                 { label: "Product code", value: release.product_code },
                 { label: "Barcode", value: release.barcode },
                 { label: "Title on the package", value: release.local_title },

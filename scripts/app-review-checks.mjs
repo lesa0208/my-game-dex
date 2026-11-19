@@ -59,7 +59,7 @@ async function submitRelease(owner, extra = {}) {
   serial += 1;
   const page = await owner.browser.get("/submit?game=starfall-odyssey");
   const posted = await owner.browser.submit("/submit?game=starfall-odyssey", formById(page.html, "new-submission"), {
-    platform: "snes", media_format: "rom-cartridge", region: "pal", product_code: `QZW-${process.pid}-${serial}`, physical: "on", ...extra,
+    platform: "snes", media_format: "snes-cartridge-jp-pal", region: "pal", packaging_code: "cardboard-box", product_code: `QZW-${process.pid}-${serial}`, physical: "on", ...extra,
   });
   const id = location(posted.response).split("/")[2]?.split("?")[0];
   requests.push(id);

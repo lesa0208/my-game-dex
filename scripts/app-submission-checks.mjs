@@ -37,6 +37,14 @@ import {
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 
+// M12b: a rendered form makes one submission (its id names the request), so a check that
+// sends a form again as a new submission gives it a new id, as a fresh page would.
+const freshRequest = () => {
+  const time = Date.now().toString(16).padStart(12, "0");
+  const r = randomBytes(10).toString("hex");
+  return { copy_item_id: `${time.slice(0, 8)}-${time.slice(8)}-7${r.slice(0, 3)}-${"89ab"[parseInt(r[3], 16) & 3]}${r.slice(4, 7)}-${r.slice(7, 19)}` };
+};
+
 /**
  * Calls a Server Action the way the page's JavaScript does (the React action protocol),
  * for a result only the enhanced form shows. The action is found by its export name in
@@ -87,7 +95,7 @@ async function signedOut() {
   const game = await visitor.get("/games/starfall-odyssey");
   check("a game page links to submitting a missing release", game.html.includes('href="/submit?game=starfall-odyssey"'));
   const nothing = await visitor.get("/explore?q=qzsnothinghere");
-  check("a search with no results links to submitting a game", nothing.html.includes('href="/submit"'));
+  check("a search with no results links to submitting a game, starting from the search", nothing.html.includes('href="/submit?title=qzsnothinghere"'));
 }
 
 async function newGame() {
@@ -97,6 +105,11 @@ async function newGame() {
   const form = formById(page.html, "new-submission");
   check("the form is for a new game, with the required fields", form?.hidden.mode === "game" && ["title", "platform", "media_format", "region", "physical"].every((n) => form.names.includes(n)));
   check("unknown region is a choice", page.html.includes('value="unknown"'));
+  // M11b-1b: packaging is a choice from the vocabulary; only an editor can record Unknown.
+  const packagingSelect = /<select[^>]*name="packaging_code"[^>]*>([\s\S]*?)<\/select>/.exec(page.html)?.[1] ?? "";
+  check("packaging is chosen from the vocabulary, with Not sure and never Unknown",
+    [...packagingSelect.matchAll(/value="([^"]+)"/g)].map((m) => m[1]).join(",") === "unclassified,cardboard-box,jewel-case,double-depth-jewel-case,plastic-case,paper-sleeve"
+      && plain(packagingSelect).includes("Not sure"));
   check("it says who will see it", plain(page.html).includes("Only you and catalog editors can see it until it's published"));
   const posted = await owner.browser.submit("/submit", form, NEW_GAME);
   const target = location(posted.response);
@@ -140,7 +153,7 @@ async function copyOfPending({ owner, id }) {
   const release = psql(`select release_id from public.catalog_change_requests where id = '${id}';`);
   check("the copy is added", count(`select count(*) from public.collection_items where owner_id = '${owner.id}' and release_id = '${release}';`) === 1);
   const list = await owner.browser.get("/collection");
-  check("My Collection shows it as awaiting review", plain(list.html).includes("Qzs Comet Rally") && plain(list.html).includes("Awaiting review"));
+  check("My Collection shows it as awaiting catalog approval", plain(list.html).includes("Qzs Comet Rally") && plain(list.html).includes("Awaiting catalog approval"));
   const copy = psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${release}';`);
   check("its page links back to the submission", (await owner.browser.get(`/collection/${copy}`)).html.includes(`href="/submissions/${id}"`));
   const after = await owner.browser.get(`/submissions/${id}`);
@@ -168,19 +181,20 @@ async function missingRelease() {
 
   const before = count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`);
   const edition = psql("select edition_name from public.releases where product_code = 'SNS-ZSFE-USA';");
-  await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on" });
+  await owner.browser.submit("/submit?game=starfall-odyssey", form, { ...freshRequest(), platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", packaging_code: "cardboard-box", physical: "on" });
   check("a release that's already published isn't submitted again", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
   // The enhanced form names the published release and links to it, through the
   // release's pairing (a direct releases-to-games embed failed with PGRST200).
   const published = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
   const duplicate = await callAction(owner.browser, "/submit?game=starfall-odyssey", "submitToCatalog", { status: "idle", message: null }, {
-    ...form.hidden, platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", physical: "on",
+    // M11b-1b: identical includes the packaging type, which the fixture's release has.
+    ...form.hidden, ...freshRequest(), platform: "snes", media_format: "rom-cartridge", region: "ntsc-uc", edition_name: edition, product_code: "SNS-ZSFE-USA", packaging_code: "cardboard-box", physical: "on",
   });
   check("the form links a duplicate to the published release on its game's page",
     duplicate.response.status === 200 && duplicate.text.includes('"status":"duplicate"') && duplicate.text.includes(`"/games/starfall-odyssey?release=${published}"`),
     `${duplicate.response.status} ${/"status":"(\w+)"/.exec(duplicate.text)?.[1] ?? "no state"}`);
   check("and still submits nothing", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
-  await owner.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "pal" });
+  await owner.browser.submit("/submit?game=starfall-odyssey", form, { ...freshRequest(), platform: "snes", media_format: "rom-cartridge", region: "pal" });
   check("without the physical confirmation, nothing is submitted", count(`select count(*) from public.catalog_change_requests where submitted_by = '${owner.id}';`) === before);
 
   const page2 = await owner.browser.get(`/submissions/${id}`);
@@ -209,7 +223,7 @@ async function hiddenAndLimits({ form }) {
   psql(`update public.profiles set account_status = 'suspended' where id = '${user.id}';`);
   const suspended = await user.browser.get("/submit");
   check("a suspended account is told it can't submit", plain(suspended.html).includes("You can't submit right now") && !formById(suspended.html, "new-submission"));
-  await user.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "pal", edition_name: "Forged", physical: "on" });
+  await user.browser.submit("/submit?game=starfall-odyssey", form, { ...freshRequest(), platform: "snes", media_format: "rom-cartridge", region: "pal", edition_name: "Forged", physical: "on" });
   check("and a submission from an earlier page is refused", count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 0);
   psql(`update public.profiles set account_status = 'active' where id = '${user.id}';`);
 
@@ -224,7 +238,7 @@ async function hiddenAndLimits({ form }) {
   const limited = await user.browser.get("/submit");
   check("after ten in a day, the form says when they can submit again", plain(limited.html).includes("You've reached today's limit") && plain(limited.html).includes("You can submit again after") && !formById(limited.html, "new-submission"));
   check("and so does their list", plain((await user.browser.get("/submissions")).html).includes("You've reached today's limit of 10"));
-  await user.browser.submit("/submit?game=starfall-odyssey", form, { platform: "snes", media_format: "rom-cartridge", region: "pal", edition_name: "Eleventh", physical: "on" });
+  await user.browser.submit("/submit?game=starfall-odyssey", form, { ...freshRequest(), platform: "snes", media_format: "rom-cartridge", region: "pal", edition_name: "Eleventh", physical: "on" });
   check("an eleventh from an earlier page is refused", count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 10);
 }
 

@@ -62,7 +62,7 @@ The private tables from M7 and M8 (exclusions, merges, the Owner, transfers, rec
 | Domain | Requested | Supporting |
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
-| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
+| Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `packaging_types`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
 | Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
@@ -77,6 +77,7 @@ Why each supporting table is needed:
 | `markets`, `release_markets` | One physical release can be distributed across several countries or territories, recorded independently of its region code |
 | `platform_names` | Regional names and common aliases, stored apart from a platform's stable identity |
 | `media_formats`, `platform_media_formats` | Separates a general media category from the specific physical format, and enforces valid platform and format pairs |
+| `packaging_types` | A controlled packaging vocabulary, so packaging in a release's identity can't vary by wording (M11b-1b) |
 | `hardware_requirements`, `release_hardware_requirements` | Some physical releases need, or don't work on, a particular revision or add-on, without creating platforms or a hardware catalog |
 | `release_components` | Inserts, maps, artwork and other original materials that came with an edition |
 | `collection_item_components` | Which of those materials a user's copy has, and their condition |
@@ -411,7 +412,7 @@ Official regional names and common collector aliases. Clones, codenames and unre
 
 ### `media_formats`
 
-The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24, and M5a adds the Neo Geo MVS cartridge.
+The controlled list of genuine physical game media. A category is general, and a format is specific. **A specific row exists only when collectors or manufacturers name that format.** Otherwise the generic row applies, and the platform says the rest. Staff can add a format without a schema change. M1 seeds 24, M5a adds the Neo Geo MVS cartridge, and M11b-1a adds four NES and SNES cartridge shells.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -429,9 +430,22 @@ The controlled list of genuine physical game media. A category is general, and a
 
 Later computer and PC batches add rows such as compact cassette and 3.5-inch floppy disk, with no schema change. Tests confirm this.
 
+**Format codes are stable catalog identifiers.** Once a release uses a code, it is never renamed, reused or removed. A name or description can be corrected.
+
+**NES and SNES cartridge shells (M11b-1a).** Famicom and Super Famicom stay names of the `nes` and `snes` platforms (ADR-031). Their physical differences are formats, so a release's shell is enforced by the platform key and compared by merge and verification. Design: [physical-catalog-m11b.md](physical-catalog-m11b.md#recommendation-d-implemented-in-m11b-1a).
+
+| Code | Name | Platform |
+| --- | --- | --- |
+| `famicom-cartridge` | Famicom Cartridge | `nes` |
+| `nes-game-pak` | NES Game Pak | `nes` |
+| `snes-cartridge-jp-pal` | Super Famicom / PAL SNES Cartridge | `snes` |
+| `snes-game-pak-na` | North American SNES Game Pak | `snes` |
+
+`rom-cartridge` stays valid on both platforms for records whose shape hasn't been classified. Because each platform now has several formats, the importer holds their release entries for an editor instead of choosing one.
+
 ### `platform_media_formats`
 
-Which formats a platform's physical games use. M5 requires a Release's platform and format to appear here, through a composite foreign key.
+Which formats a platform's physical games use. M5 requires a Release's platform and format to appear here, through a composite foreign key. **`accepts_new_publications`** (boolean, default true, M11b-1b) is false for `nes` and `snes` with `rom-cartridge`: existing releases keep that format, but a release newly published on those platforms must name its cartridge shell.
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
@@ -442,6 +456,21 @@ Which formats a platform's physical games use. M5 requires a Release's platform 
 - **Foreign keys:** `platform_id` → `platforms(id)` on delete cascade; `media_format_code` → `media_formats(code)` on delete restrict
 - **Indexes:** `media_format_code`
 - **Timestamps:** `created_at`
+
+### `packaging_types`
+
+The packaging vocabulary (M11b-1b): how a physical package is built, never how many discs it holds. Read-only for clients, like `media_formats`, and extended by forward migration.
+
+| Column | Type | Null | Notes |
+| --- | --- | --- | --- |
+| `code` | `text` | No | Primary key. `unclassified`, `unknown`, `cardboard-box`, `jewel-case`, `double-depth-jewel-case`, `plastic-case`, `paper-sleeve` |
+| `name` | `text` | No | Unique |
+| `description` | `text` | No | The construction |
+| `is_type` | `boolean` | No | False for the two states, `unclassified` and `unknown` |
+| `position` | `smallint` | No | Display order |
+
+- **Timestamps:** `created_at`, `updated_at`
+- **Access:** RLS, `select` for `anon` and `authenticated`, no write grant
 
 ### `hardware_requirements`
 
@@ -567,7 +596,8 @@ One specific physical edition: platform, region code, physical format, packaging
 | `media_format_code` | `text` | No | The primary format. Required: a Release is always on a physical medium |
 | `media_count` | `smallint` | Yes | No default. Required to publish. Number of pieces of the primary format, such as 3 discs. Additional formats go in `release_components` |
 | `media_playability` | `media_playability` | No | Default `unknown`. Whether the game plays from the medium, subject to normal installation, or needs additional downloads for essential gameplay (Q8). `staff_only` once published |
-| `packaging` | `text` | Yes | "Big box", "Jewel case", "Steelbook" |
+| `packaging` | `text` | Yes | The packaging as originally recorded, such as "Big box". Kept exactly as recorded, as a note; part of the identity only while unclassified (M11b-1b) |
+| `packaging_code` | `text` | No | Default `unclassified`. → `packaging_types(code)`. How the package is built, not how many discs it holds. Only a catalog editor sets `unknown`. Never returns to `unclassified`, except on a collector's own open submission (M11b-1b) |
 | `languages` | `text[]` | Yes | BCP 47 tags, as printed on the package |
 | `rating_labels` | `text[]` | Yes | As printed, such as `USK 12` or `PEGI 16`. Often distinguishes packages |
 | `release_date` | `date` | Yes | |
@@ -589,8 +619,9 @@ One specific physical edition: platform, region code, physical format, packaging
   - `submitted_by` and `verified_by` → `profiles(id)` on delete set null
 - **Unique:**
   - `(id, game_id)`, so other tables can use a composite foreign key that keeps game and release consistent
-  - Partial `NULLS NOT DISTINCT (game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status = 'published'`. Packaging is part of the identity under D6
-  - Partial `NULLS NOT DISTINCT (submitted_by, game_id, platform_id, region_code, edition_name, variant_name, packaging, product_code)` where `status IN ('unverified', 'under_review')` and `submitted_by` is set, so one user can't submit the same release twice. Imported and editor candidates have no submitter, and review deduplicates them
+  - `releases_published_identity_key`: partial unique index, `NULLS NOT DISTINCT`, where `status = 'published'`, on `(game_id, platform_id, media_format_code, region_code, private.release_label_key(edition_name), private.release_label_key(variant_name), private.release_packaging_key(packaging_code, packaging), private.release_code_key(product_code))` (M11b-1b). Packaging is part of the identity under D6
+  - `releases_pending_submission_key`: the same key preceded by `submitted_by`, where `status IN ('unverified', 'under_review')` and `submitted_by` is set, so one user can't submit the same release twice. Imported and editor candidates have no submitter, and review deduplicates them
+  - **The comparison keys** (private, immutable): labels compare after NFC, typographic marks made ASCII, white space collapsed and `lower()`, never dropping letters, accents or punctuation. Codes compare after NFC, trimming and `upper()`, keeping every separator. An unclassified release's packaging compares by its exact recorded text, so releases that were distinct before M11b-1b stay distinct until an editor classifies them. Design: [physical-catalog-m11b.md](physical-catalog-m11b.md#mig-2-and-mig-3-together-release-identity-and-packaging-implemented-in-m11b-1b)
 - **Indexes:**
   - `(game_id, platform_id, region_code)`
   - `(platform_id, region_code, release_date DESC)`
@@ -609,6 +640,7 @@ One specific physical edition: platform, region code, physical format, packaging
   - `CHECK (status <> 'published' OR verified_at IS NOT NULL)`
   - `CHECK (status <> 'published' OR (edition_name, edition_kind and media_count are set))`
   - `CHECK (status <> 'published' OR region_code <> 'unknown' OR region_unknown_confirmed)`
+  - The `guard_release_packaging_and_format` trigger (M11b-1b), for API sessions: a release becoming published needs `packaging_code <> 'unclassified'` and a platform format with `accepts_new_publications`. Grandfathered published releases are unaffected
   - A constraint trigger, checked at commit, rejects `published` unless its game and game-platform pairing are also `published`. The same trigger requires a published game to have a published physical release, and a published pairing to have one on that platform
   - A trigger refuses unpublishing
 
@@ -783,6 +815,8 @@ The moderation queue and permanent record for submissions and corrections. It ho
 
 **M7b-1** (`20261112200100_m7b1_review.sql`) adds `version` (raised by any change, for stale-page checks), `previous_request_id` (the rejected request a resubmission follows, set null on delete) and a unique index allowing one open, in-review or changes-requested request per release. Editors still have no grant: they read through `get_submission_queue()` and `get_submission_review()`.
 
+**M12b** (`20261205100000_m12b_submission_requests.sql`) makes a submission once per form. `submit_game_once(request, …)` and `submit_release_once(request, …)` take the arguments of `submit_game` and `submit_release`, plus a request id the form makes when it's rendered. `private.submission_requests (request_id primary key, submission_id unique → catalog_change_requests on delete cascade, created_at)` records which submission a request made. Sending the same request again returns that submission (`repeated: true`) instead of making another, before the M7a functions run, so a repeat neither counts toward the daily limit nor is refused by it. Concurrent sends are serialised by a transaction advisory lock on the request id. A request is its submitter's own: anyone else sending it gets `request conflict`, and only a live session is answered. Outcomes that make no submission (`published_duplicate`, errors) record nothing. Both are definers with an empty search path and EXECUTE for authenticated only. Their private helpers (`private.repeated_submission`, `private.record_submission_request`) run with the caller's rights, executable by no API role, and the table is readable by none. `submit_game` and `submit_release` are unchanged.
+
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
 | `id` | `uuid` | No | |
@@ -819,7 +853,12 @@ One actual physical game owned by one user. Owning two copies of a release means
 | --- | --- | --- | --- |
 | `id` | `uuid` (v7) | No | **Chosen by the client** for each copy it means to add, which makes adding idempotent. No default. A trigger requires a UUIDv7 made within the last 24 hours, or up to 5 minutes ahead |
 | `owner_id` | `uuid` | No | |
-| `release_id` | `uuid` | No | On creation, a `published` release or the owner's own submission. Never an `excluded` or `merged` one. Clients can't change it |
+| `release_id` | `uuid` | Yes | On creation, a `published` release or the owner's own submission. Never an `excluded` or `merged` one. Clients can't change it. **M12a:** null for an unidentified copy |
+| `claimed_game_id` | `uuid` | Yes | M12a. An unidentified copy's game: published when the claim is made or changed. Null for an identified copy |
+| `claimed_platform_id` | `uuid` | Yes | M12a. Its platform: any platform, whether or not the catalog lists it for the game. Never changes |
+| `claimed_region_code` | `text` | Yes | M12a. Null: the owner isn't sure. Never the catalog's `unknown` code |
+| `claimed_edition_kind` | `edition_kind` | Yes | M12a. Null: not sure. Independent of the region |
+| `claimed_edition_name` | `text` | Yes | M12a. The owner's own words, 1–80 characters, stored NFC with single ASCII spaces and no control characters. Never creates a catalog edition |
 | `completeness` | `completeness` | Yes | Null means not recorded. Nothing is assumed (M6 decision B1) |
 | `overall_condition` | `condition_grade` | Yes | Null means not assessed |
 | `box_condition` | `condition_grade` | Yes | `not_included` means there's no box |
@@ -830,12 +869,13 @@ One actual physical game owned by one user. Owning two copies of a release means
 | `invalidated_at` | `timestamptz` | Yes | `system`. Set with `invalid_preserved` |
 
 - **Primary key:** `id`
-- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)` on delete restrict
-- **Unique:** `(id, owner_id)`, the target for composite foreign keys. There's deliberately no unique `(owner_id, release_id)`
+- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)` on delete restrict; M12a: `claimed_game_id` → `games(id)`, `claimed_platform_id` → `platforms(id)`, `claimed_region_code` → `region_codes(code)`, all on delete restrict
+- **Unique:** `(id, owner_id)`, the target for composite foreign keys. There's deliberately no unique `(owner_id, release_id)`, nor on a claim: owning two copies of the same claim means two rows
 - **Indexes:**
   - `(owner_id, created_at DESC, id DESC)` for browsing, newest first
   - `(owner_id, release_id)` for "how many copies of this release do I have?" and statistics
   - `(release_id)` for merging and excluding a release (M7)
+  - M12a, partial on `release_id IS NULL`: `(owner_id, claimed_game_id)` for "Owned: Yes", `(claimed_game_id)` for an exclusion finding a game's claims, `(claimed_platform_id)`
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK (media_condition IS DISTINCT FROM 'not_included')`. A Collection Item is a physical game, so it always includes the medium
@@ -844,10 +884,19 @@ One actual physical game owned by one user. Owning two copies of a release means
   - `completeness = 'complete'` requires `box_condition` to not be `not_included`
   - `completeness = 'sealed'` requires `media_condition` and `manual_condition` to be null, because they can't be assessed without opening it
   - `CHECK ((record_status = 'invalid_preserved') = (invalidated_at IS NOT NULL))`
-  - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission
+  - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission. M12a: a copy without a release is checked with `can_claim(game, platform)` instead: a published game and an existing platform. It never reads pairings or releases, so a claim reveals nothing about anyone's submissions
+  - M12a, `collection_items_identity`: **identified** (`release_id` set, every claim column null) or **unidentified** (`release_id` null, game and platform set); nothing in between. `claimed_region_code IS DISTINCT FROM 'unknown'`. The edition name's tidiness, as above
+- **Grants (M12a):** clients may insert the claim columns. No client may update `release_id` or any claim column: identity changes only through `set_my_copy_identity()` (and `relink_my_copy()`, now a wrapper of it), merges and maintenance
 - **Triggers** (all run with the caller's rights):
   - On insert: the id check, then the owner's limit of 100,000 copies, under a per-owner advisory lock so concurrent additions can't pass it together
-  - On update: a preserved copy can't be edited, except by moving it to another release, which clears the flag. Moving a copy keeps every recorded piece; those its new release doesn't list show as no longer listed (M7b-2a). Two triggers lock the target release `FOR SHARE` and refuse one its owner can't use
+  - On update: a preserved copy can't be edited, except by giving it a new identity, which clears the flag. Moving a copy keeps every recorded piece; those its new release doesn't list show as no longer listed (M7b-2a). Two triggers lock the target release `FOR SHARE` and refuse one its owner can't use. M12a: both watch every identity column, not only `release_id`, and for a claim lock its game `FOR SHARE` and refuse one that isn't published. `FOR SHARE` (not `FOR KEY SHARE`) conflicts with any status update of the game, so a claim can't be made or moved onto a game while it's being excluded
+  - M12a: after any identity change, a row in the owner's private history (below)
+
+**Unidentified copies (M12a).** A copy may name only a game and platform, with region and edition each optional, so all four combinations are possible: both known, region only, edition only, neither. It creates no release, pairing or edition, and nothing about it is public. It isn't a verified release: reads return it with `identity = 'claim'` and a `claim` object, whose `catalog_pairing` says whether the catalog lists that platform for the game. The owner identifies it later (claim to release), corrects it (claim to claim) or leaves an identified copy unidentified (release to claim) through `set_my_copy_identity(item, identity)`. The platform never changes. Pieces can't be recorded on an unidentified copy, since there's no release to list them; completeness, conditions and private details can.
+
+`private.collection_item_identity_events` holds each change: `item_id`, `owner_id` (composite key → `collection_items`, on delete cascade, so it goes with the copy and the account), `changed_at` (the change's own time), `source` (`owner`, `catalog` for a merge, `maintenance`), and the identity `previous` and `current`. Who on the staff acted is never recorded there. The owner reads it with `get_my_copy_history(item)`.
+
+**Exclusions and claims (M12a).** When an exclusion excludes a game (its last published release), it preserves the active claims on that game with the release's copies: `invalid_preserved`, nothing else changed, each recorded in `private.catalog_exclusion_copies` with `claimed_game_id`. A claim on an excluded *pairing* whose game stays published stays active: a claim never depended on the pairing. Restoring brings back only copies still as the exclusion preserved them (same claim, still preserved at the exclusion's time); one the owner has since moved is left alone. M12b-0: an exclusion's details count a copy as moved when it has another identity or is active again where it is (a claim the owner changed on the same game), as well as still preserved and removed. M12b (`20261206100000_m12b_exclusion_restored_copies.sql`): `catalog_exclusion_copies.restored_at` records which copies the restoration brought back, set by `restore_exclusion` for exactly those. The details' `copies` are four disjoint counts of `copies_preserved`: `still_preserved`, `moved` (the owner changed it; never a restored copy), `restored` (it stays restored if its owner changes it afterwards) and `removed` (deleted since). For exclusions restored before this migration, a copy still active on the excluded release is marked restored; a restored claim can't be told from one its owner edited in place, so it stays counted as moved. `copies_restored`, notifications and audit rows are unchanged. An identified copy on an excluded release is never turned into a claim; its owner may do that. `get_my_preserved_claim(item)` shows a preserved claim to its owner. A merge's plan is blocked (`claimed_copy`) if it would retire a game someone claims; only unpublished games are retired, so this is a safeguard.
 
 What each `completeness` value means, with details in [relationships.md](relationships.md#collection-item-completeness-and-components):
 
@@ -867,8 +916,13 @@ What each `completeness` value means, with details in [relationships.md](relatio
 | **Pending** | `active`, release `unverified`, `under_review` or (briefly, during M7's merge) `merged` | No | The owner |
 | **Not approved** | `active`, release `rejected` | No | The owner |
 | **Invalid preserved** | `invalid_preserved`, or a release the owner can no longer read | No | The owner |
+| **Unidentified** (M12a) | `active`, no release | No | The owner |
 
-`get_my_collection_summary()` returns the categories separately and only ever describes the caller. A shared counting function for other viewers comes with public collections.
+`get_my_collection_summary()` returns the categories separately and only ever describes the caller. M12a adds `unidentified`; `owned` is unchanged, still confirmed releases only, so the approved-release accounting doesn't change. Platform counts take a copy's platform from its release or, for a claim, its claimed platform, preserved or not (M12b-0). A preserved copy of a release the owner can no longer read has no platform there, as in the list. A shared counting function for other viewers comes with public collections.
+
+**Owned games for search results (M12b).** `get_my_owned_games(games uuid[])` returns the signed-in owner's counted copies per game, `{game_id: copies}`, for up to 50 games (one results page), in one call: the same rule as `get_my_game_ownership` (any copy that isn't invalid). More than 50 is refused (`too many games`), never cut short. Signed out or with an ended session it returns `{}`. A definer that reads only the caller's own copies and the releases they name, bounded by the page: the games' releases (`releases (game_id, …)`), the owner's copies of each (`(owner_id, release_id)`), and their claims on those games (`(owner_id, claimed_game_id)`). EXECUTE for authenticated only.
+
+**Personal ownership (M12a).** `get_my_game_ownership(game)` answers "Owned: Yes" for the signed-in owner only: true when any copy of the game is active, whatever its catalog standing (owned, pending, not approved or unidentified). Preserved copies are listed with their status but don't count. It groups copies by status, platform, region and edition. Each group's `catalog_pairing` says whether the catalog publishes its game and platform, for copies of a release as for claims (M12b-0). This is the owner's own view, never a catalog statistic.
 
 Disposal history (sold, traded) is deferred. For now, deleting a row means the copy is gone.
 
@@ -1038,7 +1092,7 @@ Built in M7b-2b. Written only by `exclude_release` and `restore_exclusion`; no c
 - **Unique:** `release_id` where `restored_at IS NULL`: a release is excluded at most once at a time
 - **Indexes:** `((restored_at IS NULL), id DESC)` for the administrators' list
 
-`private.catalog_exclusion_copies`: `exclusion_id` (→ exclusions, cascade), `item_id` (→ `collection_items(id)`, cascade, so an owner's removal is never undone) and `owner_id` (plain). Primary key `(exclusion_id, item_id)`, index on `item_id`.
+`private.catalog_exclusion_copies`: `exclusion_id` (→ exclusions, cascade), `item_id` (→ `collection_items(id)`, cascade, so an owner's removal is never undone) and `owner_id` (plain). Primary key `(exclusion_id, item_id)`, index on `item_id`. M12a: `claimed_game_id` (→ `games`, restrict), set for a claim preserved because its game was excluded, null for a copy on the release itself.
 
 ## Social system
 
@@ -1675,7 +1729,7 @@ No frontend code changes in this phase. These are the changes to expect when the
 | --- | --- | --- |
 | `ReleaseRegion`: `NA`, `EU`, `JP` | `regions.code` | Becomes a wider set of codes. Maps to `ntsc-uc`, `pal`, `ntsc-j` |
 | `Release` has one `region` | `region_code` plus `release_markets` | Display composes the classification and the countries |
-| A `Release` is always present on an item | `collection_items.release_id` may be unreadable to others | Queries must left-join and show an "Unverified release" placeholder |
+| A `Release` is always present on an item | `collection_items.release_id` may be unreadable to others, and since M12a may be null (an unidentified copy) | Queries must left-join, take game and platform from the claim when there's no release, and show an "Unverified release" placeholder or the owner's claim |
 | `ItemCompleteness`: 3 values | `completeness`: 4 values | Add `incomplete` |
 | `Release.year` | `release_date` + precision | Derive the year |
 | `Release.edition` | `edition_name`, `edition_kind`, `variant_name` | Display composes them |

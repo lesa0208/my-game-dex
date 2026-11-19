@@ -60,8 +60,9 @@ async function allRows(build: (from: number, to: number) => PromiseLike<{ data: 
 const byKey = (rows: Row[], key: string) => new Map(rows.map((r) => [String(r[key]), r]));
 
 const RELEASE_COLUMNS =
-  "id,game_id,platform_id,region_code,edition_name,edition_kind,variant_name,product_code,barcode,local_title,publisher_name,media_format_code,media_count,packaging,languages,release_date,release_date_precision,status";
-const ITEM_COLUMNS = "id,release_id,completeness,overall_condition,box_condition,media_condition,manual_condition,visibility,record_status,invalidated_at,created_at,updated_at";
+  "id,game_id,platform_id,region_code,edition_name,edition_kind,variant_name,product_code,barcode,local_title,publisher_name,media_format_code,media_count,packaging,packaging_code,languages,release_date,release_date_precision,status";
+const ITEM_COLUMNS =
+  "id,release_id,claimed_game_id,claimed_platform_id,claimed_region_code,claimed_edition_kind,claimed_edition_name,completeness,overall_condition,box_condition,media_condition,manual_condition,visibility,record_status,invalidated_at,created_at,updated_at";
 
 export async function* exportChunks(supabase: Client, account: { id: string; email: string | null }, now: Date): AsyncGenerator<string> {
   const me = account.id;
@@ -97,15 +98,16 @@ export async function* exportChunks(supabase: Client, account: { id: string; ema
     count += items.length;
     if (count > EXPORT_MAX_COPIES) throw new ExportTooLarge();
     const ids = items.map((i) => String(i.id));
-    const releaseIds = [...new Set(items.map((i) => String(i.release_id)))];
+    // M12a: an unidentified copy names no release, only a claimed game.
+    const releaseIds = [...new Set(items.filter((i) => i.release_id != null).map((i) => String(i.release_id)))];
 
     const [priv, pieces, releases] = await Promise.all([
       allRows((a, b) => supabase.from("collection_item_private").select("item_id,acquired_on,purchase_price,currency,notes,storage_location").eq("owner_id", me).in("item_id", ids).order("item_id").range(a, b)),
       allRows((a, b) => supabase.from("collection_item_components").select("item_id,kind,label,condition").eq("owner_id", me).in("item_id", ids).order("item_id").order("kind").order("label").range(a, b)),
-      allRows((a, b) => supabase.from("releases").select(RELEASE_COLUMNS).in("id", releaseIds).order("id").range(a, b)),
+      releaseIds.length ? allRows((a, b) => supabase.from("releases").select(RELEASE_COLUMNS).in("id", releaseIds).order("id").range(a, b)) : Promise.resolve([] as Row[]),
     ]);
     const releaseMap = byKey(releases, "id");
-    const gameIds = [...new Set(releases.map((r) => String(r.game_id)))];
+    const gameIds = [...new Set([...releases.map((r) => String(r.game_id)), ...items.filter((i) => i.release_id == null).map((i) => String(i.claimed_game_id))])];
     const games = gameIds.length ? await allRows((a, b) => supabase.from("games").select("id,slug,title,kind,status").in("id", gameIds).order("id").range(a, b)) : [];
 
     // Copies whose release the catalog no longer shows them: excluded ones keep a title.

@@ -111,7 +111,16 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
         />
       </Section>
 
-      {restored ? null : (
+      {restored ? (
+        <Section id="exclusion-copies" title="Its copies now">
+          <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm">
+            <li>{copies(ex.copies.restored)} restored by the restoration.</li>
+            {ex.copies.moved ? <li>{copies(ex.copies.moved)} their owners moved or changed before it, left as they were.</li> : null}
+            {ex.copies.still_preserved ? <li>{copies(ex.copies.still_preserved)} still preserved.</li> : null}
+            {ex.copies.removed ? <li>{copies(ex.copies.removed)} their owners have removed.</li> : null}
+          </ul>
+        </Section>
+      ) : (
         <Section id="exclusion-restore" title="Restore">
           <ul className="mb-3 flex list-disc flex-col gap-1.5 pl-5 text-sm">
             <li>
@@ -119,7 +128,7 @@ async function ExclusionView({ params, searchParams }: { params: PageProps<"/adm
               {ex.cascade.length ? ", with everything excluded alongside it" : ""}.
             </li>
             <li>{copies(ex.copies.still_preserved)} still preserved by this exclusion will count again. Nothing else about them changes.</li>
-            {ex.copies.moved ? <li>{copies(ex.copies.moved)} their owners have since moved to another release stay where they are.</li> : null}
+            {ex.copies.moved ? <li>{copies(ex.copies.moved)} their owners have since moved or changed stay as they are.</li> : null}
             {ex.copies.removed ? <li>{copies(ex.copies.removed)} their owners have removed stay removed.</li> : null}
           </ul>
           {cannot ? (

@@ -107,13 +107,18 @@ try {
   const newRelease = await creator.browser.get(`/admin/catalog/releases/new?game=${g}`);
   const releaseForm = formById(newRelease.html, "new-release");
   check("the new-release form names its game", Boolean(releaseForm) && plain(newRelease.html).includes(`New release of ${TAG} Lantern Path`));
-  const details = { platform: "snes", format: "rom-cartridge", region_code: "ntsc-uc", edition_name: "Standard", edition_kind: "standard", media_count: "1", reason: "From the box" };
+  // M11b-1b: a new SNES release names its cartridge shell and its packaging, which publication needs.
+  check("the form offers the packaging vocabulary as a select, defaulting to Not yet classified",
+    /<select[^>]*name="packaging_code"/.test(newRelease.html) && ["unclassified", "unknown", "cardboard-box", "jewel-case", "double-depth-jewel-case", "plastic-case", "paper-sleeve"].every((c) => newRelease.html.includes(`value="${c}"`))
+      && /<option[^>]*value="unclassified"[^>]*selected|<option selected=""[^>]*value="unclassified"/.test(newRelease.html));
+  const details = { platform: "snes", format: "snes-game-pak-na", region_code: "ntsc-uc", edition_name: "Standard", edition_kind: "standard", media_count: "1", packaging_code: "cardboard-box", reason: "From the box" };
   const badFormat = await creator.browser.submit(`/admin/catalog/releases/new?game=${g}`, releaseForm, { ...details, format: "umd", product_code: `${TAG}-BAD` });
   check("a format the platform doesn't use is refused", badFormat.response.status !== 303 && release(`${TAG}-BAD`) === "");
   const addRelease = await creator.browser.submit(`/admin/catalog/releases/new?game=${g}`, releaseForm, { ...details, product_code: `${TAG}-1`, publisher_name: "Lumen Works" });
   const r = release(`${TAG}-1`);
   check("an editor adds a physical release, and lands on its record", addRelease.response.status === 303 && location(addRelease.response) === `/admin/catalog/releases/${r}?notice=created`);
   check("in review, recorded as theirs", status("releases", r) === "under_review" && origin("release_id", r) === `staff/${creator.id}`);
+  check("with the shell and packaging chosen", psql(`select media_format_code || '/' || packaging_code from public.releases where id = '${r}';`) === "snes-game-pak-na/cardboard-box");
 
   section("Verifying and publishing, never by the creator (D2)");
   const gamePage = await reviewer.browser.get(`/admin/catalog/games/${g}`);

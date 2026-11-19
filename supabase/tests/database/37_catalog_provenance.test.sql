@@ -5,6 +5,20 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(141);
 
+-- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
+-- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
+-- it creates without a packaging type gets 'cardboard-box', and the legacy rom-cartridge
+-- format may still be newly published, so its fixtures stay as they were.
+create function pg_temp.legacy_packaging() returns trigger language plpgsql as $lp$
+begin
+  if new.packaging_code = 'unclassified' then
+    new.packaging_code := 'cardboard-box';
+  end if;
+  return new;
+end $lp$;
+create trigger aa_legacy_packaging before insert on public.releases for each row execute function pg_temp.legacy_packaging();
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 -- Staff need a live aal2 session with a verified TOTP factor (M8b). claims() makes one
 -- whose TOTP verification is fresh; stale() one verified 11 minutes ago.
 create function pg_temp.session(p_user uuid, p_verified timestamptz) returns jsonb language plpgsql as $mfa$

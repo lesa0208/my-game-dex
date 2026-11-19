@@ -174,7 +174,9 @@ try {
   check("an unpublished game reads exactly like a missing one", error(hidden, "game unavailable") && error(missing, "game unavailable") && hidden.text === missing.text);
   const theirs = await submit(other, starfall, { p_details: { edition_name: "Players Choice", product_code: "SNSP-QZ" } });
   check("someone else's identical submission isn't revealed", theirs.body?.outcome === "submitted", theirs.text);
-  const published = await submit(other, starfall, { p_region: "ntsc-uc", p_details: { product_code: "SNS-ZSFE-USA", edition_name: psql(`select edition_name from public.releases where product_code = 'SNS-ZSFE-USA';`) } });
+  const published = await submit(other, starfall, { p_region: "ntsc-uc", p_details: { product_code: "SNS-ZSFE-USA", edition_name: psql(`select edition_name from public.releases where product_code = 'SNS-ZSFE-USA';`),
+    // M11b-1b: an identical release has the same packaging type too.
+    packaging_code: psql(`select packaging_code from public.releases where product_code = 'SNS-ZSFE-USA';`) } });
   check("a published release is pointed to, since it's public", published.body?.outcome === "published_duplicate" && published.body?.release_id === psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';"));
   // The fixture's Starfall Odyssey has no Game Boy pairing. The first submission makes
   // one, hidden from everyone else; the second reuses it and must get the same answer.

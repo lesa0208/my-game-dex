@@ -6,6 +6,20 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(92);
 
+-- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
+-- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
+-- it creates without a packaging type gets 'cardboard-box', and the legacy rom-cartridge
+-- format may still be newly published, so its fixtures stay as they were.
+create function pg_temp.legacy_packaging() returns trigger language plpgsql as $lp$
+begin
+  if new.packaging_code = 'unclassified' then
+    new.packaging_code := 'cardboard-box';
+  end if;
+  return new;
+end $lp$;
+create trigger aa_legacy_packaging before insert on public.releases for each row execute function pg_temp.legacy_packaging();
+update public.platform_media_formats set accepts_new_publications = true where media_format_code = 'rom-cartridge';
+
 -- M8b: staff privileges need a live aal2 session with a verified TOTP factor. These
 -- rows have the shape GoTrue writes (31_auth_contract pins it down) and roll back with
 -- the test; the check scripts and HTTP suites use real sessions from local GoTrue.
@@ -398,7 +412,7 @@ select is((select row(v -> 'game' ->> 'title', v -> 'game' ->> 'slug', v -> 'rel
           'the owner reads the release, its game, platform and pieces, and why it was excluded');
 select is((select string_agg(k, ',' order by k) from mine, jsonb_object_keys(v) k) || ' | ' || (select string_agg(k, ',' order by k) from mine, jsonb_object_keys(v -> 'release') k)
           || ' | ' || (select string_agg(k, ',' order by k) from mine, jsonb_object_keys(v -> 'exclusion') k),
-          'components,exclusion,game,release | edition_name,format,id,identifiers,local_title,media_count,packaging,platform,region,variant_name | excluded_at,note,reason_code',
+          'components,exclusion,game,release | edition_name,format,id,identifiers,local_title,media_count,packaging,packaging_code,platform,region,variant_name | excluded_at,note,reason_code',
           'and only the approved fields: no submitter, verifier, staff, evidence or staff reason');
 select is(pg_temp.as_user('c2', format('select coalesce(public.get_my_preserved_release(%L)::text, ''none'')', pg_temp.id('a'))), 'none', 'another owner of the same release can''t read through someone else''s copy');
 select is(pg_temp.as_user('e5', format('select coalesce(public.get_my_preserved_release(%L)::text, ''none'')', pg_temp.id('a'))), 'none', 'nor can an editor, through this function');

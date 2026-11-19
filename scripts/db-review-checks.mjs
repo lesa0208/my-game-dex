@@ -86,8 +86,9 @@ let serial = 0;
 async function submit(user, game) {
   serial += 1;
   const r = await rpc(user.headers, "submit_release", {
-    p_game: game, p_platform: "snes", p_media_format: "rom-cartridge", p_region: "pal",
-    p_details: { product_code: `QZR-${process.pid}-${serial}` }, p_components: [], p_physical: true,
+    // M11b-1b: approval publishes, which needs a recorded shell and a packaging type.
+    p_game: game, p_platform: "snes", p_media_format: "snes-cartridge-jp-pal", p_region: "pal",
+    p_details: { product_code: `QZR-${process.pid}-${serial}`, packaging_code: "cardboard-box" }, p_components: [], p_physical: true,
   });
   if (r.body?.outcome !== "submitted") throw new Error(`submission refused: ${r.text}`);
   submissions.add(r.body.submission_id);

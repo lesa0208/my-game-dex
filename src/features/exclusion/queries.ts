@@ -62,7 +62,8 @@ export type ExclusionDetail = Omit<ExclusionSummary, "release"> & {
   request_id: string | null;
   release: ReleaseLabel;
   cascade: CascadeEntry[];
-  copies: { still_preserved: number; moved: number; removed: number };
+  /** Disjoint counts of the copies it preserved (M12b: restored ones are never "moved"). */
+  copies: { still_preserved: number; moved: number; restored: number; removed: number };
   restore_reason: string | null;
   own_exclusion: boolean;
   own_submission: boolean;
@@ -81,6 +82,7 @@ export type PreservedRelease = {
     format: { code: string | null; name: string | null };
     media_count: number | null;
     packaging: string | null;
+    packaging_code?: string;
     identifiers: { product_code: string | null; barcode: string | null };
   };
   game: { title: string; slug: string | null };

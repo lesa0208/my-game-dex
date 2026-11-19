@@ -1,11 +1,13 @@
-import { ArrowLeft, CircleCheck, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
+import { ArrowLeft, CircleCheck, Info, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { packagingLabel } from "@/features/catalog/packaging";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Suspense } from "react";
 
 import { EditCopyForm } from "@/components/collection/edit-copy-form";
+import { IdentityForm } from "@/components/collection/identity-form";
 import { MoveCopySection } from "@/components/collection/move-copy-section";
 import { RemoveCopyForm } from "@/components/collection/remove-copy-form";
 import { RemovePieceRecordForm } from "@/components/collection/remove-piece-record-form";
@@ -16,11 +18,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
 import { CURRENCIES } from "@/features/collection/currencies";
 import {
+  claimEdition,
+  claimLine,
   completenessLabel,
   conditionLabel,
   copyStatusLabel,
   formatDay,
   formatPrice,
+  historyIdentityText,
+  historySourceLabel,
   latestAcquisitionDate,
   mediumLabel,
   NOT_RECORDED,
@@ -29,9 +35,9 @@ import {
   priceInput,
   releaseLine,
 } from "@/features/collection/details";
-import { collectionHref, type CollectionParams, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
-import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyReleaseCopies } from "@/features/collection/queries";
-import { getMySubmissionForRelease } from "@/features/submissions/queries";
+import { collectionHref, type CollectionParams, collectionQuery, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
+import { getMediaCategory, getMyCopy, getMyCopyHistory, getMyDefaultCurrency, getMyPreservedClaim, getMyReleaseCopies } from "@/features/collection/queries";
+import { getMySubmissionForRelease, getPublishedGame, getSubmissionOptions } from "@/features/submissions/queries";
 import { exclusionReasonLabel, withListedPieces } from "@/features/exclusion/form";
 import { getMyPreservedRelease } from "@/features/exclusion/queries";
 import type { CopyDetail } from "@/features/collection/types";
@@ -80,6 +86,9 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const back: CollectionParams = readCollectionParams(search);
   const move = readMoveParams(search);
   const moved = search.notice === "moved";
+  // M12b: after changing what the copy is (set_my_copy_identity).
+  const identityNotice =
+    search.notice === "identity" ? "Saved. Your copy's details are updated, and the change is in its history." : search.notice === "identity_same" ? "Nothing changed: your copy already says that." : null;
   const viewer = await requireViewerWithHandle(UUID.test(itemId) ? copyHref(itemId, back) : "/collection");
 
   const outcome = await getMyCopy(itemId);
@@ -95,23 +104,35 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const copy: CopyDetail = outcome.data;
   // A preserved copy's excluded release isn't readable through the catalog; its owner
   // reads a fixed set of its fields through get_my_preserved_release (M7b-2b, D3).
-  const excluded = copy.status === "invalid" && !copy.release ? await getMyPreservedRelease(copy.id) : null;
+  // M12a: an unidentified copy names no release. One preserved by an exclusion of its
+  // game is read the same way, through get_my_preserved_claim.
+  const claim = copy.identity === "claim" ? copy.claim : null;
+  const excluded = copy.status === "invalid" && !copy.release && !claim ? await getMyPreservedRelease(copy.id) : null;
+  const preservedClaim = copy.status === "invalid" && claim ? await getMyPreservedClaim(copy.id) : null;
   const release = copy.release ?? excluded?.release ?? null;
   const { game } = copy;
 
-  const [category, siblings, defaultCurrency, submissionId] = await Promise.all([
+  // M12b: a copy awaiting approval, or not approved, may be of a game the catalog doesn't
+  // publish (a submitted new game). Only a published game can have copies without a
+  // release (private.can_claim), so its identity can't be changed until it's moved.
+  const awaiting = copy.status === "pending" || copy.status === "not_approved";
+  const [category, siblings, defaultCurrency, submissionId, options, history, publishedGame] = await Promise.all([
     getMediaCategory(release?.format.code ?? null),
     release && copy.copies_of_release > 1 ? getMyReleaseCopies(release.id) : null,
     copy.price ? null : getMyDefaultCurrency(),
     release && copy.status !== "owned" ? getMySubmissionForRelease(release.id) : null,
+    getSubmissionOptions(),
+    getMyCopyHistory(copy.id),
+    awaiting && game?.slug ? getPublishedGame(game.slug) : null,
   ]);
+  const gameInCatalog = !awaiting || publishedGame?.id === game?.id;
   const medium = mediumLabel(category);
   // The number and the total both come from get_my_release_copies, one read, so they
   // agree. A copy older than the newest 100 isn't in it and gets no number.
   const number = siblings?.copies.find((c) => c.id === copy.id)?.number ?? null;
   const status = copyStatusLabel(copy.status);
-  const title = game?.title ?? excluded?.game.title ?? "A release no longer in the catalog";
-  const line = release ? releaseLine(release) : null;
+  const title = game?.title ?? excluded?.game.title ?? preservedClaim?.game.title ?? "A release no longer in the catalog";
+  const line = release ? releaseLine(release) : claim ? claimLine(claim) : null;
   const copyName = `${number ? `copy ${number} of ` : "this copy of "}${title}${line ? ` (${line})` : ""}`;
 
   // A preserved copy can't be changed (the M6 guards refuse it), only moved or removed.
@@ -121,6 +142,16 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const listed = pieces.filter((p): p is typeof p & { label: string } => p.listed && p.label !== null);
   const unlisted = pieces.filter((p) => !p.listed && p.recorded);
 
+  // M12b: what the owner can say the copy is. A claim's region and edition (not while
+  // it's preserved: its game is out of the catalog), or, for a copy of a release, the
+  // same without the release. Needs the game and the platform's id.
+  const identityPlatform = (claim?.platform ?? release?.platform)?.slug ?? null;
+  const platformId = identityPlatform ? (options?.platforms.find((p) => p.slug === identityPlatform)?.id ?? null) : null;
+  const regionChoices = options?.regions.filter((r) => r.code !== "unknown") ?? [];
+  const canIdentify = viewer.isActive && gameInCatalog && Boolean(game?.id) && Boolean(platformId) && !(claim && preserved);
+  const regionLabels = new Map(options?.regions.map((r) => [r.code, r.label]) ?? []);
+  const backFields = [...new URLSearchParams(collectionQuery(back)).entries()];
+
   return (
     <article aria-labelledby="copy-title" className="flex flex-col gap-4">
       <p>
@@ -129,6 +160,13 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           Back to your collection
         </Link>
       </p>
+
+      {identityNotice ? (
+        <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
+          <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
+          {identityNotice}
+        </p>
+      ) : null}
 
       {moved ? (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
@@ -146,7 +184,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           {line ? <p className="text-sm text-muted-foreground">{line}</p> : null}
           {release?.local_title ? <p className="text-sm text-muted-foreground">{release.local_title}</p> : null}
           <p className="mt-1.5 text-sm">
-            {number && siblings ? `Copy ${number} of ${siblings.count} of this release` : "Your copy of this release"} · Added {formatDay(copy.added_at)}
+            {number && siblings ? `Copy ${number} of ${siblings.count} of this release` : claim ? "Your copy" : "Your copy of this release"} · Added {formatDay(copy.added_at)}
           </p>
           {status ? <p className="mt-1.5 inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{status}</p> : null}
           {submissionId ? (
@@ -172,14 +210,16 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             <TriangleAlert aria-hidden="true" className="size-4" />
             This copy is kept privately
           </h2>
-          {excluded?.exclusion ? (
+          {(excluded ?? preservedClaim)?.exclusion ? (
             <p className="mb-2 text-sm">
-              <span className="font-medium">Removed from the catalog:</span> {exclusionReasonLabel(excluded.exclusion.reason_code)}.
-              {excluded.exclusion.note ? <span className="mt-1 block break-words whitespace-pre-wrap">“{excluded.exclusion.note}”</span> : null}
+              <span className="font-medium">Removed from the catalog:</span> {exclusionReasonLabel((excluded ?? preservedClaim)!.exclusion!.reason_code)}.
+              {(excluded ?? preservedClaim)!.exclusion!.note ? (
+                <span className="mt-1 block break-words whitespace-pre-wrap">“{(excluded ?? preservedClaim)!.exclusion!.note}”</span>
+              ) : null}
             </p>
           ) : null}
           <p className="text-sm">
-            Its release is no longer in the catalog, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
+            {claim ? "Its game is no longer in the catalog" : "Its release is no longer in the catalog"}, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
             it&apos;s on a release in the catalog.
             {viewer.isActive ? (
               <>
@@ -262,12 +302,94 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
                 label: "Format",
                 value: release.format.name ? `${release.format.name}${release.media_count && release.media_count > 1 ? ` · ${release.media_count} ${plural(medium, release.media_count)}` : ""}` : null,
               },
-              { label: "Packaging", value: release.packaging },
+              { label: "Packaging", value: packagingLabel(release.packaging_code, release.packaging) },
               { label: "Product code", value: release.identifiers.product_code },
               { label: "Barcode", value: release.identifiers.barcode },
             ]}
           />
         </Section>
+      ) : null}
+
+      {claim ? (
+        <Section id="copy-claim" title="What you own">
+          <p className="mb-2 text-sm text-muted-foreground">
+            This copy isn&apos;t linked to a release in the catalog. These are the details you recorded, not a verified release.
+            {claim.catalog_pairing ? null : ` The catalog doesn't list this game on ${claim.platform.name}.`}
+          </p>
+          <Facts
+            rows={[
+              { label: "Platform", value: claim.platform.name },
+              { label: "Region", value: claim.region?.label ?? "Not sure", always: true },
+              { label: "Edition", value: claimEdition(claim) ?? "Not sure", always: true },
+            ]}
+          />
+        </Section>
+      ) : null}
+
+      {canIdentify ? (
+        <details id="identity" className="rounded-lg border bg-card">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
+            {claim ? "Change the region or edition" : "Not sure it's this release?"}
+          </summary>
+          <div className="flex flex-col gap-3 border-t p-4">
+            <p className="text-sm text-muted-foreground">
+              {claim
+                ? "Say what you know about your copy, and choose Not sure where you aren't."
+                : "Keep your copy without a release, with the region and edition you know, until you find the right one. It's your own record, not a release in the catalog."}
+            </p>
+            <IdentityForm
+              itemId={copy.id}
+              gameId={game!.id}
+              platformId={platformId!}
+              regions={regionChoices}
+              values={
+                claim
+                  ? { region: claim.region?.code ?? null, editionKind: claim.edition_kind, editionName: claim.edition_name }
+                  : { region: release && release.region.code !== "unknown" ? release.region.code : null, editionKind: null, editionName: release?.edition_name ?? null }
+              }
+              unlink={!claim}
+              back={backFields}
+            />
+            {claim ? (
+              <p className="text-sm">
+                Found it in the catalog?{" "}
+                <a href="#move" className="text-primary-text underline underline-offset-4">
+                  Link it to its release
+                </a>
+                .
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
+      {viewer.isActive && !gameInCatalog && release ? (
+        <p id="identity" className="flex gap-2 rounded-lg border p-3 text-sm text-muted-foreground">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {copy.status === "not_approved"
+            ? "This game wasn't approved for the catalog, so your copy stays here as not approved. It can't be kept without a release of a game the catalog doesn't have. If the catalog has your game under another title, move your copy to that release below."
+            : "This game is waiting for catalog approval, so your copy stays with your submission while it's reviewed. If the catalog already has your game, move your copy to that release below."}
+        </p>
+      ) : null}
+
+      {history && history.length ? (
+        <details id="history" className="rounded-lg border bg-card">
+          <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
+            <Lock aria-hidden="true" className="mr-2 size-4 text-muted-foreground" />
+            What this copy was ({history.length} {history.length === 1 ? "change" : "changes"})
+          </summary>
+          <ol aria-label="Changes, newest first" className="flex flex-col gap-3 border-t p-4 text-sm">
+            {history.map((entry, index) => (
+              <li key={`${entry.changed_at}-${index}`} className="flex flex-col gap-0.5">
+                <p className="font-medium">
+                  {formatDay(entry.changed_at)} · {historySourceLabel(entry.source)}
+                </p>
+                <p className="text-muted-foreground">From: {historyIdentityText(entry.previous, regionLabels)}</p>
+                <p className="text-muted-foreground">To: {historyIdentityText(entry.current, regionLabels)}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
       ) : null}
 
       {siblings && siblings.count > 1 ? (

@@ -92,6 +92,48 @@ function editFields(form, values) {
   return { ...blank, ...values };
 }
 
+/** M12a: adds an unidentified copy as the user, through add_unidentified_copy and their own session. */
+async function addClaim(owner, gameId, platformSlug, region = null, kind = null, name = null) {
+  const { session } = readSession(owner.browser);
+  const platform = psql(`select id from public.platforms where slug = '${platformSlug}';`);
+  const response = await fetch(`${api}/rest/v1/rpc/add_unidentified_copy`, {
+    method: "POST",
+    headers: { apikey: publishableKey, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_item_id: uuidv7(), p_game: gameId, p_platform: platform, p_region: region, p_edition_kind: kind, p_edition_name: name }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`claim failed: ${body.message}`);
+  return body.item_id;
+}
+
+async function claims() {
+  section("Unidentified copies (M12a)");
+  const user = await collector("myq");
+  const game = psql("select id from public.games where title = 'Starfall Odyssey';");
+  const platinum = await addClaim(user, game, "snes", "pal", "reprint", "Platinum");
+  const unsure = await addClaim(user, game, "nes");
+  await add(user, starfall);
+  const list = await user.browser.get("/collection");
+  const page = plain(list.html);
+  check("the list shows a claim under its game, with what the owner said", list.response.status === 200 && page.includes("Starfall Odyssey") && page.includes("SNES · PAL · Platinum"));
+  check("and not sure where they didn't say", page.includes("NES · Region not sure · Edition not sure"));
+  check("a claim is labelled as not linked to a release", page.includes("Not linked to a release"));
+  check("every copy is listed", rowIds(list.html).length === 3);
+  const only = await user.browser.get("/collection?status=unidentified");
+  check("the unidentified filter lists only claims", new Set(rowIds(only.html)).size === 2 && rowIds(only.html).includes(platinum) && rowIds(only.html).includes(unsure));
+  const detail = await user.browser.get(`/collection/${platinum}`);
+  const shown = text(detail.html);
+  check("a claim's page shows what the owner owns, not a verified release", detail.response.status === 200 && shown.includes("What you own") && shown.includes("not a verified release"));
+  check("with its region and edition", shown.includes("Region</dt><dd class=\"break-words\">PAL") && shown.includes("Edition</dt><dd class=\"break-words\">Platinum"));
+  check("and no catalog release facts or link", !shown.includes("Product code") && !shown.includes("See this release in the catalog"));
+  const other = text((await user.browser.get(`/collection/${unsure}`)).html);
+  check("a claim on a platform the catalog doesn't list says so", plain(other).includes("The catalog doesn't list this game on"));
+  check("and its unknowns say Not sure", other.includes("Region</dt><dd class=\"break-words\">Not sure") && other.includes("Edition</dt><dd class=\"break-words\">Not sure"));
+  const stranger = await collector("myr");
+  const theirs = text((await stranger.browser.get(`/collection/${platinum}`)).html);
+  check("another collector's view is the same as a copy that doesn't exist", theirs.includes("This copy isn't available") && !theirs.includes("Starfall Odyssey"));
+}
+
 let starfall;
 let starfallCe;
 let sequel;
@@ -228,9 +270,10 @@ async function details({ owner, detailed, second }) {
   check("the release's listed pieces, as recorded", page.includes("Instruction manual</dt><dd class=\"break-words\">Included") && page.includes("World map poster</dt><dd class=\"break-words\">Not recorded"));
   check("the owner's private details", page.includes("March 4, 2021") && page.includes("€37.42") && page.includes("Shelf A") && page.includes("Signed by the artist"));
   check("the release's catalog facts", page.includes("SNS-ZSFE-USA") && page.includes("0451234500017") && page.includes("ROM cartridge"));
-  check("and no packaging the catalog doesn't record", !page.includes("Packaging"));
+  // M11b-1b: the fixture's releases are classified, and a classified release shows its type.
+  check("and the packaging type the catalog records", text(page).includes("Packaging</dt><dd class=\"break-words\">Cardboard box"));
   const ce = await owner.browser.get(`/collection/${psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${starfallCe}';`)}`);
-  check("a release that records packaging shows it", text(ce.html).includes("Packaging</dt><dd class=\"break-words\">Big box") && text(ce.html).includes("Art book"));
+  check("a classified release shows its type, not the wording it was recorded with", text(ce.html).includes("Packaging</dt><dd class=\"break-words\">Cardboard box") && !text(ce.html).includes("Big box") && text(ce.html).includes("Art book"));
   const bare = await owner.browser.get(`/collection/${psql(`select id from public.collection_items where owner_id = '${owner.id}' and release_id = '${warden}';`)}`);
   check("a release without listed pieces shows none", !text(bare.html).includes("Pieces listed for this release"));
   check("the other copies of the release are listed, to tell them apart", page.includes("Your 3 copies of this release") && html.includes(`href="/collection/${second}"`));
@@ -464,6 +507,7 @@ try {
   await privacy(state);
   await unlistedPieces();
   await numbering();
+  await claims();
   await regressions();
 } catch (error) {
   check("the checks ran to the end", false, error.message);

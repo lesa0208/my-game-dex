@@ -7,6 +7,7 @@ import { startTransition, useActionState, useState } from "react";
 import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SUBMITTER_PACKAGING_CHOICES } from "@/features/catalog/packaging";
 import {
   type SubmissionState,
   submitToCatalog,
@@ -34,6 +35,7 @@ export type SubmissionValues = {
   publisherName: string;
   mediaCount: string;
   packaging: string;
+  packagingCode: string;
   releaseYear: string;
   pieces: { kind: string; label: string; quantity: string }[];
   note: string;
@@ -55,6 +57,7 @@ export const EMPTY_SUBMISSION: SubmissionValues = {
   publisherName: "",
   mediaCount: "",
   packaging: "",
+  packagingCode: "unclassified",
   releaseYear: "",
   pieces: [],
   note: "",
@@ -89,7 +92,9 @@ export function SubmissionForm({
   submissionId,
   createdGame = false,
   options,
-  values,
+  values: given,
+  copyItemId,
+  initialTitle,
 }: {
   mode: "release" | "game" | "edit";
   game: { id: string; title: string } | null;
@@ -97,7 +102,15 @@ export function SubmissionForm({
   createdGame?: boolean;
   options: SubmissionOptions;
   values: SubmissionValues;
+  /** M12b: for a new submission, the id of the copy to add with it, made at render, so a retry can't add two. */
+  copyItemId?: string;
+  /**
+   * M12b: a new game's title to start from (as searched for). Merged here, not by the
+   * server page, which only holds a reference to EMPTY_SUBMISSION from this client module.
+   */
+  initialTitle?: string;
 }) {
+  const values = initialTitle ? { ...given, title: initialTitle } : given;
   const editing = mode === "edit";
   const [state, action, pending] = useActionState(editing ? updateFromPage : submitFromPage, { status: "idle", message: null });
   const [platform, setPlatform] = useState(values.platform);
@@ -234,8 +247,17 @@ export function SubmissionForm({
             <Field id="variant_name" label="Variant">
               <Input id="variant_name" name="variant_name" maxLength={120} defaultValue={values.variantName} autoComplete="off" className="h-10" />
             </Field>
-            <Field id="packaging" label="Packaging">
-              <Input id="packaging" name="packaging" maxLength={80} defaultValue={values.packaging} placeholder="Jewel case, big box…" autoComplete="off" className="h-10" />
+            <Field id="packaging_code" label="Packaging">
+              <select id="packaging_code" name="packaging_code" defaultValue={values.packagingCode} className={selectClassName}>
+                {SUBMITTER_PACKAGING_CHOICES.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field id="packaging" label="Packaging details">
+              <Input id="packaging" name="packaging" maxLength={80} defaultValue={values.packaging} placeholder="As printed or described" autoComplete="off" className="h-10" />
             </Field>
             <Field id="product_code" label="Product code">
               <Input id="product_code" name="product_code" maxLength={40} defaultValue={values.productCode} autoComplete="off" className="h-10" />
@@ -286,6 +308,16 @@ export function SubmissionForm({
       <Field id="note" label="Note for the editors (optional)" hint="Where you saw this release, or anything that helps check it.">
         <textarea id="note" name="note" maxLength={1000} rows={3} defaultValue={values.note} aria-describedby="note-hint" className={cn(selectClassName, "h-auto py-2")} />
       </Field>
+
+      {editing || !copyItemId ? null : (
+        <div className="flex gap-3 rounded-lg border p-3">
+          <input type="hidden" name="copy_item_id" value={copyItemId} />
+          <input id="add_copy" name="add_copy" type="checkbox" defaultChecked className="mt-0.5 size-5 shrink-0 accent-primary-solid" />
+          <label htmlFor="add_copy" className="text-sm">
+            Add my copy to my collection now. It shows as awaiting catalog approval until an editor checks the release.
+          </label>
+        </div>
+      )}
 
       {editing ? null : (
         <div className="flex gap-3 rounded-lg border bg-muted/40 p-3">
