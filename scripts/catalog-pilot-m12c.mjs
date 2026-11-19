@@ -30,6 +30,7 @@
  * their own terminal, only when they decide to; nothing runs them automatically:
  *
  *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs reviewer-account --email <name>@example.test
+ *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs reviewer-password --email <name>@example.test
  *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs grant-reviewer --email <name>@example.test
  *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs revoke-reviewer --email <name>@example.test
  *
@@ -306,6 +307,45 @@ Next, on http://127.0.0.1:3002:
   3. Then grant the role: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs grant-reviewer --email ${email}`);
 }
 
+/**
+ * Sets a new password for the reviewer's own test account, at the same hidden prompt, and
+ * confirms at once that it signs in. It says how many characters arrived (never which),
+ * so a paste or keyboard problem in the terminal shows up here and not at sign-in.
+ */
+async function reviewerPassword(o) {
+  const email = reviewerEmail(o);
+  if (!process.stdin.isTTY || !process.stdout.isTTY) fail("Run this yourself in an interactive terminal: the password is typed at a hidden prompt.");
+  const id = reviewerId(email);
+  if (editorIds().includes(id)) fail("Refusing: that is editor A.");
+  const password = await hidden("New password for the reviewer account (12+ characters, not shown): ");
+  console.log(`${[...password].length} characters received.`);
+  if (password.length < 12 || Buffer.byteLength(password, "utf8") > 72) fail("The password must be at least 12 characters and at most 72 bytes. Nothing was changed.");
+  if ((await hidden("Type it again: ")) !== password) fail("The two passwords differ. Nothing was changed.");
+  const updated = await fetch(`${api}/auth/v1/admin/users/${id}`, {
+    method: "PUT",
+    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!updated.ok) fail(`The test Auth server refused the change (status ${updated.status}). Nothing was changed.`);
+  const signIn = await fetch(`${api}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: publishable, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!signIn.ok) fail(`The password was set, but signing in with it failed (status ${signIn.status}).`);
+  const session = await signIn.json();
+  await fetch(`${api}/auth/v1/logout`, { method: "POST", headers: { apikey: publishable, Authorization: `Bearer ${session.access_token}` } });
+  console.log(`Password set, and it signs in. Sign in on http://127.0.0.1:3002 with ${email}.`);
+}
+
+function editorIds() {
+  try {
+    return JSON.parse(readFileSync(EDITORS, "utf8")).map((e) => e.id);
+  } catch {
+    return [];
+  }
+}
+
 function reviewerId(email) {
   const id = psql(`select id from auth.users where lower(email) = ${lit(email)};`);
   if (!id) fail("No account with that address on the test stack. Create it with reviewer-account first.");
@@ -342,9 +382,9 @@ function revokeReviewer(o) {
 }
 
 const o = args(process.argv.slice(2));
-const commands = { "clear-wikidata": clearWikidata, import: importGames, stage, report, "reviewer-account": reviewerAccount, "grant-reviewer": grantReviewer, "revoke-reviewer": revokeReviewer };
+const commands = { "clear-wikidata": clearWikidata, import: importGames, stage, report, "reviewer-account": reviewerAccount, "reviewer-password": reviewerPassword, "grant-reviewer": grantReviewer, "revoke-reviewer": revokeReviewer };
 const command = commands[o._[0]];
-if (!command) fail("Usage: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs clear-wikidata|import|stage|report|reviewer-account|grant-reviewer|revoke-reviewer. See the header of this file.");
+if (!command) fail("Usage: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs clear-wikidata|import|stage|report|reviewer-account|reviewer-password|grant-reviewer|revoke-reviewer. See the header of this file.");
 try {
   await command(o);
 } catch (error) {
