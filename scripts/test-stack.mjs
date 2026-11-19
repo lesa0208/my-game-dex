@@ -20,6 +20,11 @@
  * --workdir .supabase-test, and the generated config is checked to name the test project
  * before anything runs.
  *
+ * MGD_TEST_STACK=scratch selects a third, disposable stack instead (M12c-A): project
+ * "my-game-dex-scratch" in .supabase-scratch/, every port moved up by 2000, and run sets
+ * MGD_STACK=scratch. It's for running every suite on a clean database while the test
+ * stack keeps records worth keeping; destroy removes its containers and volumes.
+ *
  * MGD_TEST_SIGNUP=off at start or reset makes the test stack invite-only, as a hosted
  * project will be: [auth] enable_signup = false, with the email provider left on (turning
  * that off also blocks password sign-in and recovery; M11a-0).
@@ -33,9 +38,12 @@ import { redact } from "./lib/redact.mjs";
 
 const root = join(import.meta.dirname, "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const TEST_PROJECT_ID = "my-game-dex-test";
-const OFFSET = 1000;
-const dir = join(root, ".supabase-test");
+const SCRATCH = process.env.MGD_TEST_STACK === "scratch";
+if (process.env.MGD_TEST_STACK && !SCRATCH) throw new Error('MGD_TEST_STACK may only be "scratch".');
+const TEST_PROJECT_ID = SCRATCH ? "my-game-dex-scratch" : "my-game-dex-test";
+const OFFSET = SCRATCH ? 2000 : 1000;
+const STACK = SCRATCH ? "scratch" : "test";
+const dir = join(root, SCRATCH ? ".supabase-scratch" : ".supabase-test");
 const target = join(dir, "supabase");
 const PORT_KEYS = new Set(["port", "shadow_port", "inspector_port"]);
 const DISABLED = new Set(["studio", "analytics", "edge_runtime"]);
@@ -78,7 +86,7 @@ function prepare() {
 
 function assertTestProject() {
   const config = readFileSync(join(target, "config.toml"), "utf8");
-  if (/project_id\s*=\s*"([^"]+)"/.exec(config)?.[1] !== TEST_PROJECT_ID) throw new Error("Refusing: .supabase-test doesn't name the test project.");
+  if (/project_id\s*=\s*"([^"]+)"/.exec(config)?.[1] !== TEST_PROJECT_ID) throw new Error(`Refusing: ${dir} doesn't name the ${STACK} project.`);
 }
 
 function supabase(args) {
@@ -97,7 +105,7 @@ function runNpm(script, extra) {
   if (extra.some((a) => !/^[\w.:=/@-]+$/.test(a))) throw new Error("Only plain arguments can be passed through.");
   return new Promise((resolve) => {
     // The script name is checked against package.json, so the shell sees only known words.
-    const child = spawn(`npm run ${script}${extra.length ? ` -- ${extra.join(" ")}` : ""}`, { cwd: root, shell: true, stdio: "inherit", env: { ...process.env, MGD_STACK: "test" } });
+    const child = spawn(`npm run ${script}${extra.length ? ` -- ${extra.join(" ")}` : ""}`, { cwd: root, shell: true, stdio: "inherit", env: { ...process.env, MGD_STACK: STACK } });
     child.on("close", (code) => resolve(code ?? 1));
   });
 }

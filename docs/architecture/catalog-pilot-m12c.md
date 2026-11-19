@@ -61,7 +61,7 @@ The product owner reviewed as editor B, signed in to their own test account (`@s
 | 4 | Region: only the published regions. PAL only for Super Mario World, though four other Super Mario World candidates are in review | Pass |
 | 5 | Edition: only the published editions | Pass |
 | 6 | Each published release is added as itself, once, though its form is sent twice | Pass |
-| 7 | Two published releases of one game stay separate | **Unmet prerequisite:** no game has two published releases. Three releases of three games stay three separate copies (pass). The same-game case needs, for example, S8 and S9 (A Link to the Past Standard and Player's Choice) published |
+| 7 | Two published releases of one game stay separate | **Pending human review of S2** (NTSC-U/C, `SNS-MW-USA`), which the product owner intends to review. With S2 and S4 published, it compares two shells (North American Game Pak and Super Famicom / PAL) under one game. **Unmet prerequisite until then:** no game has two published releases. Three releases of three games stay three separate copies (pass). The same-game case needs, for example, S8 and S9 (A Link to the Past Standard and Player's Choice) published |
 | 8 | "Not sure" adds an unidentified copy, with the platform and region, and nothing in the catalog | Pass |
 | 9 | Ownership on the game page and in search (Final Fantasy VII "Owned: 2 copies", the others 1), and the summary ("4 copies", "2 platforms"); another collector sees none | Pass |
 | 10 | No duplicate games; the held entries were never entered; every published release has two different editors; every other collection, including the reviewer's own copy, is unchanged; the pilot is unchanged | Pass |
@@ -75,8 +75,62 @@ The product owner reviewed as editor B, signed in to their own test account (`@s
 - **NES has nothing publishable** until a person re-reads the NesCartDB profiles.
 - **The four PAL Final Fantasy VII packages** need package codes.
 - **The `Player's Choice` spelling** is unconfirmed against the printed logo.
-- **pgTAP assumes an empty database.** On the staged stack, 22 assertions in 9 of the 47 files fail on what the stack already holds: 5 accounts where 3 are expected, the two pilot editors among staff and factors, audit rows, published records, Wikidata cleared. `30_owner` also stops at test 29, when a subquery meets the two extra accounts. They passed on the clean stack before staging (3,715 tests, 47 files), and M12c-A changes no migration or database function. Running pgTAP again needs a clean stack, which would remove the human-reviewed pilot, so it's left for review on a fresh stack or a copy of this one.
-- **Review reasons:** see the review result above.
+- **pgTAP assumes an empty database.** On the staged test stack, 22 assertions in 9 files fail on what that stack already holds (the pilot editors among staff and factors, Wikidata cleared, extra audit rows).
+  - **Clean run:** on a disposable clean stack (`MGD_STACK=scratch`, project `my-game-dex-scratch`, built from this branch's migrations, 2026-11-19), **pgTAP passed 3,715 of 3,715 tests in 47 files**, and all 22 database check suites passed (1,460 checks, 0 failed).
+  - **Cleanup:** the scratch stack's containers and its two volumes were then removed. The test stack's releases and collections hash the same before and after.
+- **Review reasons:** placeholders on the three test publications. See [Review reasons](#review-reasons-a-test-pilot-limitation).
+
+## Review reasons: a test-pilot limitation
+
+**The three test publications carry placeholder reasons.** The verify and publish reasons for S4, P1 and P11 are short placeholder words, not what was checked. They stay as recorded: audit records are never edited or deleted. This doesn't weaken the publications as a test of the workflow, but they aren't a model for a real review.
+
+**Use this format for every future review**, and always on development. A reason is at most 500 characters.
+
+```text
+<verify | publish> <pilot id>: <source URL> read <date>. Checked <the physical-release facts, as the source states them>. Unresolved: <gaps, or "none">.
+```
+
+| Action | Example |
+| --- | --- |
+| Verify a release | `Verify S2: https://snescentral.com/article.php?id=0000 read 2026-11-20. Checked USA, SNS-MW-USA, regular release, label scan; NA Game Pak (Wikipedia SNES shapes); Standard; 1 cartridge. Unresolved: packaging unknown, no release date.` |
+| Verify a game | `Verify game: Wikidata Q853143, title "Super Mario World", first release 1990-11-21 (day), matches Wikipedia. Game identity only.` |
+| Publish | `Publish S2: verified above against SNES Central 0000; no open questions beyond packaging.` |
+
+## Test data is not Git data
+
+**Where the pilot lives.** The eight games, the 29 release candidates, the three human-reviewed publications and the review's audit history exist **only in the isolated test database** (project `my-game-dex-test`, port 55321). So do editor A, the reviewer's account and the reviewer's own copy.
+
+**What Git carries:**
+- the code;
+- the pilot's evidence and candidates as data (`scripts/catalog-pilot-m12c-data.mjs`);
+- the runner;
+- the checks;
+- this document.
+
+**Merging to `main` moves no catalog record to development,** and nothing should. Records are never copied from the test database to development, by any route:
+- no catalog rows;
+- no authentication records, editor identities or staff roles;
+- no collections or private data;
+- no audit history;
+- no verification or publication events.
+
+A test record is never promoted, and no verification is recreated or forged.
+
+## Populating development (a plan, not yet approved)
+
+The catalog reaches development only through the same approved steps, repeated there by real people, after the product owner approves the reviewed pilot (M11b-D10).
+
+1. **Approvals first.**
+   - The product owner approves the final selection.
+   - Decide who reviews on development (M11b-D11). The reviewer is a real editor B, a different person from editor A.
+   - No permanent Owner account is created for this.
+2. **Backup and restore check.** Back up the development database and storage volumes, verify a restore into a probe container, and record the fingerprints, as for every development migration.
+3. **Clearance.** An operator records the Wikidata clearance on development with `record_provider_clearance`, against a freshly saved copy of the licence page and its hash. No other provider is cleared.
+4. **Snapshots.** Fresh Wikidata snapshots, fetched with the importer and kept outside the repository, within the Query Service's limits.
+5. **Import.** The importer, as `catalog_importer`, with the fixed list of the pilot's items (the runner's `import` step, pointed at development behind its protections). Games arrive unpublished. The runner's other steps are test-stack-only by design. Development gets an equivalent operator procedure, reviewed separately, never a script that writes as postgres.
+6. **Editor A builds the candidates** in the admin pages, or through the same functions, with each creation reason citing the saved evidence. The evidence is re-read on the day, since sources change.
+7. **Editor B reviews** each release in the admin pages with their own account and authenticator, writes reasons in the format above, and publishes only what holds up. Nothing is published in bulk or by script.
+8. **Check.** The collector checks' expectations are re-run against development read-only, or as a manual walk-through: they create accounts and copies, so they don't run there. A report goes to the product owner.
 
 ## Sources and licensing
 
