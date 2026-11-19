@@ -1128,6 +1128,11 @@ export const m12bMutations = [
     "      case when c.record_status = 'invalid_preserved' then r.platform_id else coalesce(r.platform_id, c.claimed_platform_id) end as platform_id")),
   sql("an exclusion's details miss a claim made active where it is", "pgtap", rewrite("public.get_exclusion(uuid)",
     "                   or c.record_status <> 'invalid_preserved')),", "                   or false)),")),
+  // M12b review: restored copies told apart from moved ones.
+  sql("an exclusion's details count restored copies as moved", "pgtap", rewrite("public.get_exclusion(uuid)",
+    "                where ec.exclusion_id = ex.id and ec.restored_at is null", "                where ec.exclusion_id = ex.id")),
+  sql("a restoration doesn't record which copies it restored", "pgtap", rewrite("public.restore_exclusion(uuid, integer, text)",
+    "  where ec.exclusion_id = ex.id and ec.item_id = any (v_items);", "  where false;")),
   sql("copies of a release say their pairing isn't the catalog's", "pgtap", rewrite("public.get_my_game_ownership(uuid)",
     "        where gp.game_id = coalesce(r.game_id, c.claimed_game_id)", "        where c.claimed_game_id is not null and gp.game_id = coalesce(r.game_id, c.claimed_game_id)")),
   sql("owned games reads every owner's copies", "pgtap", rewrite(OWNED, "c.owner_id = v_me", "true")),

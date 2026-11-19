@@ -5,7 +5,7 @@
 -- Races between claims and exclusions are in db-ownership-claim-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(160);
+select plan(166);
 
 -- Staff sessions are live aal2 sessions with a verified TOTP factor, as in 27.
 create function pg_temp.claims(p_user uuid, p_session uuid default null) returns jsonb language plpgsql as $mfa$
@@ -400,6 +400,9 @@ select is((select string_agg(i.name || ':' || coalesce(ec.claimed_game_id = pg_t
            from private.catalog_exclusion_copies ec join ids i on i.id = ec.item_id where ec.exclusion_id = pg_temp.id('x-lone')),
           'k1:true,k2:true,k3:true,kl:false', 'the exclusion records each claim it preserved, and for which game');
 select is((select copies_preserved || '/' || owners_affected from private.catalog_exclusions where id = pg_temp.id('x-lone')), '4/2', 'and counts them');
+-- M12b review: the exclusion's details, at each step below.
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 0, "removed": 0, "restored": 0, "still_preserved": 4}',
+          'right after the exclusion, all four copies are still preserved by it');
 select is((select count(*)::int from public.notifications where type = 'catalog_exclusion' and recipient_id = pg_temp.u('c2')), 1, 'the claim''s owner is told once');
 select is((select count(*)::int from private.collection_item_identity_events e where e.item_id in (pg_temp.id('k1'), pg_temp.id('kl'))), 0,
           'preserving isn''t an identity change: the copies are what they were');
@@ -426,7 +429,7 @@ select is(pg_temp.as_user('c2', format($$select public.update_collection_item(%L
 select is(pg_temp.ident('c1', 'k1', pg_temp.to_release('j1')) ->> 'record_status', 'active', 'the owner can identify a preserved claim as another release, which makes it active');
 select is((select e.previous ->> 'game_id' from private.collection_item_identity_events e where e.item_id = pg_temp.id('k1')), pg_temp.id('k')::text,
           'and the history keeps what it was claimed as');
-select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies') - 'removed', '{"moved": 1, "still_preserved": 3}',
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 1, "removed": 0, "restored": 0, "still_preserved": 3}',
           'the exclusion shows one copy moved and three still preserved');
 -- M12b-0: a preserved claim made active where it is is no longer preserved, so it's
 -- counted as moved. The owner can change a claim only while its game is published, so
@@ -435,7 +438,7 @@ update public.games set status = 'published' where id = pg_temp.id('k');
 select is(pg_temp.ident('c2', 'k2', pg_temp.to_claim('k', 'snes', 'pal')) ->> 'record_status', 'active',
           'the owner gives a preserved claim a region, on the same game, which makes it active');
 update public.games set status = 'excluded' where id = pg_temp.id('k');
-select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 2, "removed": 0, "still_preserved": 2}',
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 2, "removed": 0, "restored": 0, "still_preserved": 2}',
           'and the exclusion counts it as moved, not as still preserved');
 select is((select count(*)::int from private.catalog_exclusion_copies where exclusion_id = pg_temp.id('x-lone')), 4, 'the exclusion''s record is unchanged');
 select is(pg_temp.j(pg_temp.restore('a7', 'lone')) ->> 'copies', '2', 'restoring brings back only the copies still preserved by it');
@@ -443,6 +446,20 @@ select is(pg_temp.claim_of('k2'), '-/snes/pal/-/-', 'and leaves the changed clai
 select is((select string_agg(pg_temp.status(n), ',' order by n) from unnest(array['k2', 'k3', 'kl']) n), 'active,active,active', 'they''re active again');
 select is((select release_id = pg_temp.id('j1') from public.collection_items where id = pg_temp.id('k1')), true, 'the copy the owner moved stays where they put it');
 select is(pg_temp.claim_of('k3'), '-/nes/-/collector/Collector''s Edition', 'and the restored claim is as it was');
+-- M12b review: restored copies are told apart from moved ones.
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 2, "removed": 0, "restored": 2, "still_preserved": 0}',
+          'after restoring, the two copies the administrator restored aren''t counted as moved by their owners');
+select is((select string_agg(right(ec.item_id::text, 12) || ':' || (ec.restored_at is not null), ',' order by ec.item_id) from private.catalog_exclusion_copies ec
+           where ec.exclusion_id = pg_temp.id('x-lone')) = (select string_agg(right(i::text, 12) || ':' || (i in (pg_temp.id('k3'), pg_temp.id('kl'))), ',' order by i)
+           from unnest(array[pg_temp.id('k1'), pg_temp.id('k2'), pg_temp.id('k3'), pg_temp.id('kl')]) i), true,
+          'exactly the copies it restored are recorded as restored');
+select is((select copies_restored from private.catalog_exclusions where id = pg_temp.id('x-lone')), 2, 'which copies_restored still counts');
+savepoint removed_copies;
+delete from public.collection_items where id in (pg_temp.id('kl'), pg_temp.id('k2'));
+select is((pg_temp.j(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-lone')))) -> 'copies'), '{"moved": 1, "removed": 2, "restored": 1, "still_preserved": 0}',
+          'a restored copy and a moved copy deleted since are counted as removed, and nothing else');
+select is((select copies_restored || '/' || copies_preserved from private.catalog_exclusions where id = pg_temp.id('x-lone')), '2/4', 'the exclusion''s history is unchanged');
+rollback to savepoint removed_copies;
 select is(pg_temp.owns('c2', 'k') ->> 'owned', 'true', 'the claim''s owner owns the game again');
 
 -- An identified copy on an excluded release is never turned into a claim, but the owner may.

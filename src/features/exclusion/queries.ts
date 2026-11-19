@@ -62,7 +62,8 @@ export type ExclusionDetail = Omit<ExclusionSummary, "release"> & {
   request_id: string | null;
   release: ReleaseLabel;
   cascade: CascadeEntry[];
-  copies: { still_preserved: number; moved: number; removed: number };
+  /** Disjoint counts of the copies it preserved (M12b: restored ones are never "moved"). */
+  copies: { still_preserved: number; moved: number; restored: number; removed: number };
   restore_reason: string | null;
   own_exclusion: boolean;
   own_submission: boolean;

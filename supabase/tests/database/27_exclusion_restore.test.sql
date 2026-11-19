@@ -5,7 +5,7 @@
 -- scripts/db-exclusion-checks.mjs.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(54);
+select plan(55);
 
 -- M11b-1b: this file predates the packaging and cartridge-shell publication rules, which
 -- 45_release_identity.test.sql covers. Within this rolled-back transaction only: a release
@@ -252,6 +252,9 @@ select is((select string_agg(format('%s:%s', right(recipient_id::text, 2), data 
           'c1:1', 'only the owner whose copy came back is notified, once');
 select is((select row(restored_by = pg_temp.u('a7'), restore_reason, copies_restored, version)::text from private.catalog_exclusions where id = pg_temp.id('x-us')),
           '(t,"Excluded by mistake",1,2)', 'the exclusion is kept as history, restored');
+-- M12b review: a restored copy isn't reported as moved.
+select is(pg_temp.as_user('a7', format('select public.get_exclusion(%L)::text', pg_temp.id('x-us')))::jsonb -> 'copies',
+          '{"moved": 1, "removed": 1, "restored": 1, "still_preserved": 0}', 'its details: one restored, one moved by its owner, one removed');
 select is((select count(*) from private.audit_events where action = 'catalog_exclusion_restored' and actor_id = pg_temp.u('a7') and metadata ->> 'exclusion_id' = pg_temp.id('x-us')::text),
           1::bigint, 'with an audit row');
 select is(pg_temp.restore('a8', 'us'), 'error: exclusion unavailable', 'it can''t be restored twice');
