@@ -210,14 +210,26 @@ const m12b = [
   {
     name: "the submitted game's copy isn't added",
     file: "src/features/submissions/actions.ts",
-    from: `  if (field(formData, "add_copy") === "on" && outcome.release_id && UUID_V7.test(copyId)) {`,
-    to: `  if (field(formData, "add_copy_ignored") === "on" && outcome.release_id && UUID_V7.test(copyId)) {`,
+    from: `  if (field(formData, "add_copy") === "on" && outcome.release_id) {`,
+    to: `  if (field(formData, "add_copy_ignored") === "on" && outcome.release_id) {`,
   },
   {
     name: "the submitted game's copy gets a new id on a retry",
     file: "src/features/submissions/actions.ts",
-    from: `  const copyId = field(formData, "copy_item_id");`,
+    from: `  const copyId = requestId;`,
     to: `  const copyId = crypto.randomUUID().replace(/^(.{14})./, (_, head) => head + "7");`,
+  },
+  {
+    name: "a resent submission form makes a second submission",
+    file: "src/features/submissions/actions.ts",
+    from: `    p_request: requestId,`,
+    to: `    p_request: crypto.randomUUID().replace(/^(.{14})./, (_, head) => head + "7"),`,
+  },
+  {
+    name: "the submission page says the copy was added when it wasn't",
+    file: "src/features/submissions/actions.ts",
+    from: `notice = copyError ? "submitted_no_copy" : "submitted_copy";`,
+    to: `notice = copyError ? "submitted_copy" : "submitted_copy";`,
   },
 ].map((m) => ({ ...m, set: "m12b", suite: "app-fast-add-checks.mjs" }));
 

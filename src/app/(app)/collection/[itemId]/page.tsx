@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleCheck, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
+import { ArrowLeft, CircleCheck, Info, Lock, PlugZap, TriangleAlert, UserRoundX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { packagingLabel } from "@/features/catalog/packaging";
@@ -37,7 +37,7 @@ import {
 } from "@/features/collection/details";
 import { collectionHref, type CollectionParams, collectionQuery, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
 import { getMediaCategory, getMyCopy, getMyCopyHistory, getMyDefaultCurrency, getMyPreservedClaim, getMyReleaseCopies } from "@/features/collection/queries";
-import { getMySubmissionForRelease, getSubmissionOptions } from "@/features/submissions/queries";
+import { getMySubmissionForRelease, getPublishedGame, getSubmissionOptions } from "@/features/submissions/queries";
 import { exclusionReasonLabel, withListedPieces } from "@/features/exclusion/form";
 import { getMyPreservedRelease } from "@/features/exclusion/queries";
 import type { CopyDetail } from "@/features/collection/types";
@@ -112,14 +112,20 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const release = copy.release ?? excluded?.release ?? null;
   const { game } = copy;
 
-  const [category, siblings, defaultCurrency, submissionId, options, history] = await Promise.all([
+  // M12b: a copy awaiting approval, or not approved, may be of a game the catalog doesn't
+  // publish (a submitted new game). Only a published game can have copies without a
+  // release (private.can_claim), so its identity can't be changed until it's moved.
+  const awaiting = copy.status === "pending" || copy.status === "not_approved";
+  const [category, siblings, defaultCurrency, submissionId, options, history, publishedGame] = await Promise.all([
     getMediaCategory(release?.format.code ?? null),
     release && copy.copies_of_release > 1 ? getMyReleaseCopies(release.id) : null,
     copy.price ? null : getMyDefaultCurrency(),
     release && copy.status !== "owned" ? getMySubmissionForRelease(release.id) : null,
     getSubmissionOptions(),
     getMyCopyHistory(copy.id),
+    awaiting && game?.slug ? getPublishedGame(game.slug) : null,
   ]);
+  const gameInCatalog = !awaiting || publishedGame?.id === game?.id;
   const medium = mediumLabel(category);
   // The number and the total both come from get_my_release_copies, one read, so they
   // agree. A copy older than the newest 100 isn't in it and gets no number.
@@ -142,7 +148,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const identityPlatform = (claim?.platform ?? release?.platform)?.slug ?? null;
   const platformId = identityPlatform ? (options?.platforms.find((p) => p.slug === identityPlatform)?.id ?? null) : null;
   const regionChoices = options?.regions.filter((r) => r.code !== "unknown") ?? [];
-  const canIdentify = viewer.isActive && Boolean(game?.id) && Boolean(platformId) && !(claim && preserved);
+  const canIdentify = viewer.isActive && gameInCatalog && Boolean(game?.id) && Boolean(platformId) && !(claim && preserved);
   const regionLabels = new Map(options?.regions.map((r) => [r.code, r.label]) ?? []);
   const backFields = [...new URLSearchParams(collectionQuery(back)).entries()];
 
@@ -355,6 +361,15 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             ) : null}
           </div>
         </details>
+      ) : null}
+
+      {viewer.isActive && !gameInCatalog && release ? (
+        <p id="identity" className="flex gap-2 rounded-lg border p-3 text-sm text-muted-foreground">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {copy.status === "not_approved"
+            ? "This game wasn't approved for the catalog, so your copy stays here as not approved. It can't be kept without a release of a game the catalog doesn't have. If the catalog has your game under another title, move your copy to that release below."
+            : "This game is waiting for catalog approval, so your copy stays with your submission while it's reviewed. If the catalog already has your game, move your copy to that release below."}
+        </p>
       ) : null}
 
       {history && history.length ? (

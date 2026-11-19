@@ -45,6 +45,10 @@ const WIDTHS = [
 const SCHEMES = ["dark", "light"];
 // Light Mode is unsupported: its results are diagnostics, not checks, unless asked.
 const ENFORCE_LIGHT = process.env.A11Y_LIGHT === "enforce";
+// A11Y_LIGHT_DETAIL=file writes every failing element of each light-mode finding, as JSON
+// lines, for triage (which controls fail, and on which pages). Diagnostic only.
+const LIGHT_DETAIL = process.env.A11Y_LIGHT_DETAIL ?? null;
+const lightDetail = [];
 const lightFindings = [];
 let lightStates = 0;
 const NOT_AVAILABLE = "This page isn't available";
@@ -127,7 +131,7 @@ async function audit(page, name, tag) {
     await applyScheme(page, scheme);
     const found = await page.evaluate(async () => {
       const run = await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, resultTypes: ["violations"] });
-      return run.violations.map((v) => ({ id: v.id, impact: v.impact, count: v.nodes.length, target: String(v.nodes[0]?.target ?? ""), message: v.nodes[0]?.any?.[0]?.message ?? v.nodes[0]?.all?.[0]?.message ?? "" }));
+      return run.violations.map((v) => ({ id: v.id, impact: v.impact, count: v.nodes.length, target: String(v.nodes[0]?.target ?? ""), nodes: v.nodes.map((n) => ({ target: String(n.target), html: n.html.slice(0, 160), message: n.any?.[0]?.message ?? n.all?.[0]?.message ?? "" })), message: v.nodes[0]?.any?.[0]?.message ?? v.nodes[0]?.all?.[0]?.message ?? "" }));
     });
     const blocking = found.filter((v) => v.impact === "critical" || v.impact === "serious");
     const minor = found.filter((v) => !blocking.includes(v));
@@ -138,6 +142,7 @@ async function audit(page, name, tag) {
       // A diagnostic: listed and summarized at the end, never counted as a pass.
       lightStates += 1;
       for (const v of blocking) lightFindings.push(redact(`${tag} ${name}: ${describe(v)}`));
+      if (LIGHT_DETAIL) for (const v of blocking) for (const n of v.nodes) lightDetail.push(JSON.stringify({ tag, page: name, rule: v.id, target: redact(n.target), html: redact(n.html), message: redact(n.message) }));
       if (overflow.scroll > overflow.view) lightFindings.push(`${tag} ${name}: sideways scrolling ${overflow.scroll} > ${overflow.view}`);
       continue;
     }
@@ -741,6 +746,7 @@ try {
         ["fast add, another platform", `${game}?platform=other`],
         ["fast add, another region", `${game}?platform=snes&region=other`],
         ["submitting a missing game", "/submit?title=Ayb%20Lantern%20Moon"],
+        ["fast add, a linked release that doesn't match", `${game}?platform=snes&region=ntsc-uc&edition=unsure&release=${psql("select id from public.releases where product_code = 'SNS-ZSFE-USA-CE';")}`],
       ]) {
         await page.goto(`${origin}${path}`, { waitUntil: "networkidle" });
         await audit(page, name, tag);
@@ -1012,4 +1018,5 @@ if (lightStates) {
   for (const line of lightFindings) console.log(`  light ${line}`);
 }
 console.log(`\n${results.passed} passed, ${results.failed} failed`);
+if (LIGHT_DETAIL) (await import("node:fs")).writeFileSync(LIGHT_DETAIL, lightDetail.join("\n") + "\n");
 process.exit(results.failed === 0 ? 0 : 1);

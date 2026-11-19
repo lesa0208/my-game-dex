@@ -6,7 +6,7 @@
 -- ownership says through them.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(84);
 
 -- Staff sessions are live aal2 sessions with a verified TOTP factor, as in 46.
 create function pg_temp.claims(p_user uuid, p_session uuid default null) returns jsonb language plpgsql as $mfa$
@@ -280,6 +280,78 @@ select is(pg_temp.as_user('c1', format('select public.set_my_copy_identity(%L, %
             jsonb_build_object('game_id', pg_temp.id('g'), 'platform_id', (select id from public.platforms where slug = 'snes'), 'region_code', 'pal', 'edition_name', 'Player''s Choice')))::jsonb ->> 'identity',
           'claim', 'the collector can keep it as an unidentified copy with what they know');
 select is(pg_temp.owned_count('c1', 'g'), 6, 'which counts the same');
+
+-- A missing game, rejected. Its game isn't published, so the copy can't be kept without
+-- a release of it (can_claim takes published games only, and isn't loosened for this):
+-- it stays, not approved, until its owner moves it to a release the catalog has.
+select is(pg_temp.subgame('n', 'c1', 'Fcs Never Was'), 'submitted', 'the collector submits a game the catalog doesn''t have');
+select is(pg_temp.j(pg_temp.add('c1', 'ncc', 'n-r', '{"notes": "Boxed, from a fair"}')) ->> 'created', 'true', 'and adds their copy of it');
+select ok(pg_temp.start('e5', 'n') ~ '^[0-9]+$', 'an editor reviews it');
+select ok(pg_temp.reject('e5', 'n') ~ '^[0-9]+$', 'and rejects it');
+select is((select status::text from public.games where id = pg_temp.id('n-g')), 'rejected', 'the game is rejected with its release');
+select is((select record_status::text || '/' || release_id::text from public.collection_items where id = pg_temp.id('ncc')), 'active/' || pg_temp.id('n-r'),
+          'the copy stays in the collection, on the rejected release');
+select is(pg_temp.standings('c1', 'n-g'), 'not_approved:1', 'shown as not approved on the owner''s view of the game');
+select is(pg_temp.owned_count('c1', 'n-g'), 1, 'and counted, as a copy the collector has');
+select is(pg_temp.as_user('c1', format('select public.set_my_copy_identity(%L, %L)::text', pg_temp.id('ncc'),
+            jsonb_build_object('game_id', pg_temp.id('n-g'), 'platform_id', (select id from public.platforms where slug = 'snes'), 'region_code', 'pal'))),
+          'error: game unavailable', 'it can''t become an unidentified copy of the rejected game');
+select is(pg_temp.as_user('c1', format('select public.add_unidentified_copy(%L, %L, %L, %L)::text', gen_random_uuid(), pg_temp.id('n-g'),
+            (select id from public.platforms where slug = 'snes'), 'pal')),
+          'error: game unavailable', 'nor can a new one be added to it');
+select is((select release_id from public.collection_items where id = pg_temp.id('ncc')), pg_temp.id('n-r'), 'and the copy is unchanged by either refusal');
+select is(pg_temp.j(pg_temp.as_user('c1', format('select public.relink_my_copy(%L, %L)::text', pg_temp.id('ncc'), pg_temp.id('us')))) ->> 'release_id',
+          pg_temp.id('us')::text, 'the owner moves it to a published release of the game it really is');
+select is((select c.release_id::text || '/' || p.notes from public.collection_items c join public.collection_item_private p on p.item_id = c.id where c.id = pg_temp.id('ncc')),
+          pg_temp.id('us')::text || '/Boxed, from a fair', 'keeping what they recorded');
+select is(pg_temp.owned_count('c1', 'n-g'), 0, 'and the rejected game no longer counts it');
+
+-- ---------------------------------------------------------------------------
+-- 3. A submission form sent again makes no second submission (submit_*_once)
+-- ---------------------------------------------------------------------------
+create function pg_temp.once_game(p_actor text, p_request text, p_title text) returns text language sql as $$
+  select pg_temp.as_user(p_actor, format('select public.submit_game_once(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    pg_temp.id(p_request), p_title, 'game', null, 'snes', 'snes-cartridge-jp-pal', 'pal', '{"packaging_code": "cardboard-box"}', '[]', null, true))
+$$;
+create function pg_temp.once_release(p_actor text, p_request text, p_game text) returns text language sql as $$
+  select pg_temp.as_user(p_actor, format('select public.submit_release_once(%L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    pg_temp.id(p_request), pg_temp.id(p_game), 'snes', 'snes-cartridge-jp-pal', 'pal',
+    '{"packaging_code": "cardboard-box", "edition_name": "Classics", "edition_kind": "reprint"}', '[]', null, true))
+$$;
+create function pg_temp.subs(p_actor text) returns int language sql as $$
+  select count(*)::int from public.catalog_change_requests where submitted_by = pg_temp.u(p_actor)
+$$;
+
+select is(has_function_privilege('anon', 'public.submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'execute')
+          or has_function_privilege('anon', 'public.submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'execute'), false, 'visitors can''t submit once either');
+select is(has_function_privilege('authenticated', 'public.submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'execute')
+          and has_function_privilege('authenticated', 'public.submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'execute'), true, 'signed-in users can');
+select is(has_function_privilege('authenticated', 'private.repeated_submission(uuid)', 'execute')
+          or has_function_privilege('authenticated', 'private.record_submission_request(uuid,jsonb)', 'execute'), false, 'but not the private helpers');
+select is(has_table_privilege('authenticated', 'private.submission_requests', 'select'), false, 'nor read the requests');
+
+select pg_temp.new_id('rq1');
+select is(pg_temp.subs('c2'), 0, 'the second collector has submitted nothing yet');
+select is(pg_temp.j(pg_temp.once_game('c2', 'rq1', 'Fcs Only Once')) ->> 'outcome', 'submitted', 'a new game is submitted');
+select is(pg_temp.subs('c2'), 1, 'once');
+select is(pg_temp.j(pg_temp.once_game('c2', 'rq1', 'Fcs Only Once')) ->> 'repeated', 'true', 'sent again, the request is answered with what it made');
+select is(pg_temp.j(pg_temp.once_game('c2', 'rq1', 'Fcs Only Twice')) ->> 'submission_id',
+          (select id::text from public.catalog_change_requests where submitted_by = pg_temp.u('c2')), 'even with a field changed: the same submission');
+select is(pg_temp.subs('c2') || '/' || (select count(*) from public.games where title like 'Fcs Only %'), '1/1', 'and no second submission or game');
+select is(pg_temp.once_game('c1', 'rq1', 'Fcs Only Once'), 'error: request conflict', 'another user can''t send it as theirs');
+select is(pg_temp.as_ended('c2', format('select public.submit_game_once(%L, %L, %L, %L, %L, %L, %L)::text', pg_temp.id('rq1'), 'Fcs Only Once', 'game', null, 'snes', 'snes-cartridge-jp-pal', 'pal')),
+          'error: not permitted', 'nor can an ended session');
+select is(pg_temp.as_user('c2', 'select public.submit_game_once(null, ''Fcs Nothing'', ''game'', null, ''snes'', ''snes-cartridge-jp-pal'', ''pal'')::text'),
+          'error: invalid submission', 'a request needs an id');
+select pg_temp.new_id('rq2');
+select is(pg_temp.j(pg_temp.once_release('c2', 'rq2', 'g')) ->> 'outcome', 'submitted', 'a release of a catalog game is submitted');
+select is(pg_temp.j(pg_temp.once_release('c2', 'rq2', 'g')) ->> 'repeated', 'true', 'and sent again, answered as made, not refused as already submitted');
+select is(pg_temp.subs('c2'), 2, 'still one submission each');
+select pg_temp.new_id('rq3');
+select is(pg_temp.once_release('c2', 'rq3', 'g'), 'error: already submitted', 'a new request for the same release is still refused, as before');
+select is((select count(*)::int from private.submission_requests where request_id = pg_temp.id('rq3')), 0, 'and records nothing');
+delete from public.catalog_change_requests where submitted_by = pg_temp.u('c2') and request_type = 'new_release';
+select is((select count(*)::int from private.submission_requests where request_id = pg_temp.id('rq2')), 0, 'a request goes with its submission');
 
 select * from finish();
 rollback;

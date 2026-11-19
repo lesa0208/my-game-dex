@@ -23,6 +23,7 @@ import {
   deleteUsers,
   forms,
   formWith,
+  location,
   psql,
   results,
   section,
@@ -124,6 +125,19 @@ async function adding() {
   check("it's added once, with what the owner knows", copiesOf(user.id).filter((c) => c.startsWith("claim:")).join() === "claim:snes:pal:?:?");
   check("and the details they gave", psql(`select p.notes || '/' || c.completeness from public.collection_items c join public.collection_item_private p on p.item_id = c.id where c.owner_id = '${user.id}' and c.release_id is null;`) === "From a car boot sale/complete");
 
+  // A release in the address doesn't override "not sure": a stale or edited link still
+  // adds the copy without a release, and says why.
+  for (const [label, choice] of [
+    ["the edition", { region: "ntsc-uc", edition: "unsure" }],
+    ["the region", { region: "unsure", edition: "collector~Collector's Edition" }],
+    ["both", { region: "unsure", edition: "unsure" }],
+  ]) {
+    const page = await user.browser.get(q({ platform: "snes", ...choice, release: starfallCe }));
+    check(
+      `with ${label} not sure, a release named in the address isn't added`,
+      !addForm(page.html) && Boolean(claimForm(page.html)) && plain(page.html).includes("That release doesn't match what you chose, so it isn't added"),
+    );
+  }
   // Region not sure, an edition from the catalog's names.
   const unsureRegion = await user.browser.get(q({ platform: "snes", region: "unsure", edition: "collector~Collector's Edition" }));
   await user.browser.submit(q({ platform: "snes", region: "unsure", edition: "collector~Collector's Edition" }), claimForm(unsureRegion.html), {});
@@ -220,13 +234,78 @@ async function missingGame() {
   check("the submission's page says so", plain((await user.browser.get(`/submissions/${submissionId}?notice=submitted_copy`)).html).includes("your copy is in your collection, awaiting catalog approval"));
   const list = plain((await user.browser.get("/collection")).html);
   check("My Collection shows it as awaiting catalog approval", list.includes("Zqx Lantern Moon") && list.includes("Awaiting catalog approval"));
-  await user.browser.submit("/submit", form, { title: "Zqx Lantern Moon", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "pal", physical: "on", add_copy: "on" });
+  const LANTERN = { title: "Zqx Lantern Moon", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "unknown", physical: "on", add_copy: "on" };
+  // The same form sent again, as after a lost response, even with a field changed.
+  const again = await user.browser.submit("/submit", form, { ...LANTERN, region: "pal" });
   check("a retry of the same form can't add a second copy", count(`select count(*) from public.collection_items where owner_id = '${user.id}';`) === 1);
+  check("nor make a second submission", count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 1);
+  check("and goes to the submission it made", location(again.response).startsWith(`/submissions/${submissionId}?notice=submitted_copy`), location(again.response));
+  // A double click: two sends of the same fresh form at once.
+  const twice = formWith((await user.browser.get("/submit")).html, "title");
+  await Promise.all([1, 2].map(() => user.browser.submit("/submit", twice, { ...LANTERN, title: "Zqx Twin Lantern" })));
+  check(
+    "a double click makes one submission and one copy",
+    count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 2 && count(`select count(*) from public.collection_items where owner_id = '${user.id}';`) === 2,
+  );
   const fresh = formWith((await user.browser.get("/submit")).html, "title");
   await user.browser.submit("/submit", fresh, { title: "Zqx Ember Gate", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "pal", physical: "on" });
-  check("unchecked, the submission is made without a copy", count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 3 && count(`select count(*) from public.collection_items where owner_id = '${user.id}';`) === 1);
+  check("unchecked, the submission is made without a copy", count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 3 && count(`select count(*) from public.collection_items where owner_id = '${user.id}';`) === 2);
   const stranger = await collector("fe");
   check("nobody else sees the pending game", !plain((await stranger.browser.get("/explore?q=Zqx Lantern")).html).includes("Zqx Lantern Moon"));
+  check("nor can they send the submitter's form as their own", (await stranger.browser.submit("/submit", form, LANTERN)).response.status < 500 && count(`select count(*) from public.catalog_change_requests where submitted_by = '${stranger.id}';`) === 0);
+  // Signed out, or with the session ended, nothing is submitted.
+  const signedOutForm = formWith((await user.browser.get("/submit")).html, "title");
+  const signedOut = await new Browser().submit("/submit", signedOutForm, { ...LANTERN, title: "Zqx Lost Session" });
+  check("a form sent without a session submits nothing", signedOut.response.status < 500 && count(`select count(*) from public.catalog_change_requests where submitted_by = '${user.id}';`) === 3);
+  return { user, stranger };
+}
+
+async function copyNotAdded({ user, stranger }) {
+  section("The submission is made but its copy can't be added");
+  // The copy's id is already someone else's, so the add is refused after the submission.
+  const page = await user.browser.get("/submit");
+  const form = formWith(page.html, "title");
+  psql(`insert into public.collection_items (id, owner_id, release_id) values ('${form.hidden.copy_item_id}', '${stranger.id}', '${starfallUs}');`);
+  const sent = await user.browser.submit("/submit", form, { title: "Zqx Broken Bell", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "pal", physical: "on", add_copy: "on" });
+  const submissionId = psql(`select s.id from public.catalog_change_requests s join public.games g on g.id = s.game_id where g.title = 'Zqx Broken Bell';`);
+  check("the submission stands", /^[0-9a-f-]{36}$/.test(submissionId));
+  check("the owner goes to it, told the copy wasn't added", location(sent.response).startsWith(`/submissions/${submissionId}?notice=submitted_no_copy`), location(sent.response));
+  const there = await user.browser.get(location(sent.response));
+  check("the page says so, and offers the add", plain(there.html).includes("Your copy couldn't be added to your collection: you can add it below") && Boolean(formWith(there.html, "item_id")));
+  const releaseId = psql(`select release_id from public.catalog_change_requests where id = '${submissionId}';`);
+  const mine = () => count(`select count(*) from public.collection_items where owner_id = '${user.id}' and release_id = '${releaseId}';`);
+  check("and no copy was added", mine() === 0);
+  const resent = await user.browser.submit("/submit", form, { title: "Zqx Broken Bell", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "pal", physical: "on", add_copy: "on" });
+  check("sending the form again makes no second submission", location(resent.response).startsWith(`/submissions/${submissionId}?`) && count(`select count(*) from public.catalog_change_requests s join public.games g on g.id = s.game_id where g.title = 'Zqx Broken Bell';`) === 1);
+  const addForm = formWith(there.html, "item_id");
+  await user.browser.submit(`/submissions/${submissionId}`, addForm, {});
+  check("the add on the submission's page adds the copy", mine() === 1);
+  await user.browser.submit(`/submissions/${submissionId}`, addForm, {});
+  check("once, however often it's sent", mine() === 1);
+  check("the other collector's copy is untouched", psql(`select owner_id from public.collection_items where id = '${form.hidden.copy_item_id}';`) === stranger.id);
+}
+
+async function rejectedGame({ user }) {
+  section("A submitted game that isn't approved: the copy stays, with what can be done");
+  const page = await user.browser.get("/submit");
+  const form = formWith(page.html, "title");
+  await user.browser.submit("/submit", form, { title: "Zqx Never Was", game_kind: "game", platform: "snes", media_format: "rom-cartridge", region: "pal", physical: "on", add_copy: "on" });
+  const copyId = form.hidden.copy_item_id;
+  const pending = plain((await user.browser.get(`/collection/${copyId}`)).html);
+  check("while it's reviewed, the copy's page doesn't offer to drop the release", !pending.includes("Not sure it's this release?") && pending.includes("This game is waiting for catalog approval"), pending.slice(0, 400));
+  // As reject_submission leaves it (pgTAP 47 rejects it through the function itself).
+  psql(`begin; set local session_replication_role = replica;
+update public.catalog_change_requests set status = 'rejected', reviewed_at = now() where game_id = (select id from public.games where title = 'Zqx Never Was');
+update public.releases set status = 'rejected' where id = (select release_id from public.collection_items where id = '${copyId}');
+update public.games set status = 'rejected' where title = 'Zqx Never Was';
+commit;`);
+  const rejected = plain((await user.browser.get(`/collection/${copyId}`)).html);
+  check("rejected, the copy is still in the collection, not approved", count(`select count(*) from public.collection_items where id = '${copyId}' and record_status = 'active';`) === 1 && rejected.includes("Not approved"), rejected.slice(0, 300));
+  check("its page doesn't offer an identity change the database refuses", !rejected.includes("Not sure it's this release?") && !rejected.includes("Keep it without a release"));
+  check("and says why, and what can be done", rejected.includes("This game wasn't approved for the catalog") && rejected.includes("move your copy to that release below"));
+  check("which it can: the move is offered", rejected.includes("Link to a release in the catalog") || rejected.includes("Move to another release"));
+  const list = plain((await user.browser.get("/collection")).html);
+  check("My Collection lists it as not approved", list.includes("Zqx Never Was") && list.includes("Not approved"));
 }
 
 try {
@@ -239,7 +318,9 @@ try {
   const user = await adding();
   await ownership(user);
   await identity(user);
-  await missingGame();
+  const missing = await missingGame();
+  await copyNotAdded(missing);
+  await rejectedGame(missing);
 } catch (error) {
   check("the checks ran to the end", false, error.message);
 } finally {
@@ -260,8 +341,8 @@ commit;`);
   }
   removeFixture();
   check(
-    "no submissions, copies, history or catalog data are left behind",
-    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from private.collection_item_identity_events);") === "0",
+    "no submissions, requests, copies, history or catalog data are left behind",
+    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from private.collection_item_identity_events) + (select count(*) from private.submission_requests);") === "0",
   );
 }
 
