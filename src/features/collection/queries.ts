@@ -3,7 +3,7 @@ import "server-only";
 import { createSupabaseServerClient } from "@/features/auth/server";
 
 import type { CollectionParams } from "./list-params";
-import type { CollectionPage, CollectionSummary, CopyDetail, SiblingCopy } from "./types";
+import type { CollectionPage, CollectionSummary, CopyDetail, CopyHistoryEntry, GameOwnership, PreservedClaim, SiblingCopy } from "./types";
 import { UUID } from "./uuid";
 
 /**
@@ -125,6 +125,39 @@ export async function getMyReleaseCopies(releaseId: string): Promise<{ count: nu
   if (error || typeof data !== "object" || data === null) return null;
   const { count, copies } = data as { count: number; copies: SiblingCopy[] };
   return { count, copies: copies.map((copy, index) => ({ ...copy, number: count - index })) };
+}
+
+/**
+ * M12a: the signed-in user's copies of one game, for "Owned: Yes" and what they own by
+ * platform, region and edition. Null when it can't be read (signed out, or an error).
+ */
+export async function getMyGameOwnership(gameId: string): Promise<GameOwnership | null> {
+  if (!UUID.test(gameId)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_my_game_ownership", { p_game: gameId });
+  if (error || typeof data !== "object" || data === null || !Array.isArray((data as GameOwnership).entries)) return null;
+  return data as GameOwnership;
+}
+
+/** M12a: a copy's private identity history, newest first. Null when it can't be read. */
+export async function getMyCopyHistory(itemId: string): Promise<CopyHistoryEntry[] | null> {
+  if (!UUID.test(itemId)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_my_copy_history", { p_item: itemId });
+  if (error || !Array.isArray(data)) return null;
+  return data as CopyHistoryEntry[];
+}
+
+/** M12a: what a claim preserved by an exclusion of its game claimed, for its owner. */
+export async function getMyPreservedClaim(itemId: string): Promise<PreservedClaim | null> {
+  if (!UUID.test(itemId)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_my_preserved_claim", { p_item: itemId });
+  if (error || typeof data !== "object" || data === null) return null;
+  return data as PreservedClaim;
 }
 
 /** The category of a media format ("cartridge", "optical_disc"), from the public reference data. */

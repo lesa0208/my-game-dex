@@ -382,7 +382,7 @@ async function runApi(timeout) {
   let elapsed = 0;
   const stages = {};
   lastRaw.api = "";
-  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs", "scripts/db-mfa-checks.mjs", "scripts/db-ownership-checks.mjs", "scripts/db-invitation-checks.mjs"]) {
+  for (const script of ["scripts/db-identity-checks.mjs", "scripts/db-authorization-checks.mjs", "scripts/db-audit-checks.mjs", "scripts/db-notification-checks.mjs", "scripts/db-catalog-checks.mjs", "scripts/db-import-checks.mjs", "scripts/db-search-checks.mjs", "scripts/db-collection-checks.mjs", "scripts/db-submission-checks.mjs", "scripts/db-review-checks.mjs", "scripts/db-relink-checks.mjs", "scripts/db-exclusion-checks.mjs", "scripts/db-merge-checks.mjs", "scripts/db-owner-checks.mjs", "scripts/db-mfa-checks.mjs", "scripts/db-ownership-checks.mjs", "scripts/db-invitation-checks.mjs", "scripts/db-ownership-claim-checks.mjs"]) {
     const run = await runProcess(script, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", script], timeout);
     elapsed += run.elapsed;
     stages[script] = run.elapsed;

@@ -19,6 +19,10 @@ import {
   readCopyDetails,
   relinkErrorMessage,
   releaseLine,
+  claimEdition,
+  claimErrorMessage,
+  claimLine,
+  copyStatusLabel,
 } from "./details.ts";
 import { collectionHref, copyHref, DEFAULT_PARAMS, moveHref, readCollectionParams, readMoveParams, readNotice } from "./list-params.ts";
 import { keepingIdOnFailure, UNCONFIRMED } from "./retry.ts";
@@ -248,4 +252,26 @@ test("relinking errors become fixed messages, and nothing else gets through", ()
   assert.equal(relinkErrorMessage("other platform"), "A copy can only move to a release for the same platform. For another platform, add it as a new copy.");
   assert.equal(relinkErrorMessage("release unavailable"), "That release can't hold copies. Choose another one.");
   assert.equal(relinkErrorMessage('new row violates row-level security policy for table "x"'), "The copy couldn't be moved. Try again.");
+});
+
+test("an unidentified copy reads as what its owner claims, and 'not sure' where they didn't (M12a)", () => {
+  const platform = { slug: "ps1", name: "PlayStation", short_name: "PS1" };
+  assert.equal(claimLine({ platform, region: { code: "pal", label: "PAL" }, edition_kind: "reprint", edition_name: "Platinum" }), "PS1 · PAL · Platinum");
+  assert.equal(claimLine({ platform, region: null, edition_kind: "reprint", edition_name: "Platinum" }), "PS1 · Region not sure · Platinum");
+  assert.equal(claimLine({ platform, region: { code: "pal", label: "PAL" }, edition_kind: null, edition_name: null }), "PS1 · PAL · Edition not sure");
+  assert.equal(claimLine({ platform, region: null, edition_kind: null, edition_name: null }), "PS1 · Region not sure · Edition not sure");
+  assert.equal(claimEdition({ edition_kind: "collector", edition_name: null }), "Collector's edition", "a kind alone names the edition");
+  assert.equal(claimEdition({ edition_kind: "nonsense", edition_name: null }), null, "an unknown kind isn't invented into a name");
+  assert.equal(copyStatusLabel("unidentified"), "Not linked to a release");
+});
+
+test("claim errors become fixed messages, and nothing else gets through (M12a)", () => {
+  assert.equal(claimErrorMessage("game unavailable").text, "This game can't be added to a collection right now.");
+  assert.equal(claimErrorMessage("other platform").text, "A copy stays on its platform. For another platform, add it as a new copy.");
+  assert.equal(claimErrorMessage("request conflict").renewId, true);
+  assert.equal(claimErrorMessage('new row violates row-level security policy for table "x"').text, "The copy couldn't be saved. Try again.");
+});
+
+test("the list accepts the unidentified filter (M12a)", () => {
+  assert.equal(readCollectionParams(new URLSearchParams("status=unidentified")).status, "unidentified");
 });

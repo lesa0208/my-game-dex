@@ -851,7 +851,12 @@ One actual physical game owned by one user. Owning two copies of a release means
 | --- | --- | --- | --- |
 | `id` | `uuid` (v7) | No | **Chosen by the client** for each copy it means to add, which makes adding idempotent. No default. A trigger requires a UUIDv7 made within the last 24 hours, or up to 5 minutes ahead |
 | `owner_id` | `uuid` | No | |
-| `release_id` | `uuid` | No | On creation, a `published` release or the owner's own submission. Never an `excluded` or `merged` one. Clients can't change it |
+| `release_id` | `uuid` | Yes | On creation, a `published` release or the owner's own submission. Never an `excluded` or `merged` one. Clients can't change it. **M12a:** null for an unidentified copy |
+| `claimed_game_id` | `uuid` | Yes | M12a. An unidentified copy's game: published when the claim is made or changed. Null for an identified copy |
+| `claimed_platform_id` | `uuid` | Yes | M12a. Its platform: any platform, whether or not the catalog lists it for the game. Never changes |
+| `claimed_region_code` | `text` | Yes | M12a. Null: the owner isn't sure. Never the catalog's `unknown` code |
+| `claimed_edition_kind` | `edition_kind` | Yes | M12a. Null: not sure. Independent of the region |
+| `claimed_edition_name` | `text` | Yes | M12a. The owner's own words, 1–80 characters, stored NFC with single ASCII spaces and no control characters. Never creates a catalog edition |
 | `completeness` | `completeness` | Yes | Null means not recorded. Nothing is assumed (M6 decision B1) |
 | `overall_condition` | `condition_grade` | Yes | Null means not assessed |
 | `box_condition` | `condition_grade` | Yes | `not_included` means there's no box |
@@ -862,12 +867,13 @@ One actual physical game owned by one user. Owning two copies of a release means
 | `invalidated_at` | `timestamptz` | Yes | `system`. Set with `invalid_preserved` |
 
 - **Primary key:** `id`
-- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)` on delete restrict
-- **Unique:** `(id, owner_id)`, the target for composite foreign keys. There's deliberately no unique `(owner_id, release_id)`
+- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)` on delete restrict; M12a: `claimed_game_id` → `games(id)`, `claimed_platform_id` → `platforms(id)`, `claimed_region_code` → `region_codes(code)`, all on delete restrict
+- **Unique:** `(id, owner_id)`, the target for composite foreign keys. There's deliberately no unique `(owner_id, release_id)`, nor on a claim: owning two copies of the same claim means two rows
 - **Indexes:**
   - `(owner_id, created_at DESC, id DESC)` for browsing, newest first
   - `(owner_id, release_id)` for "how many copies of this release do I have?" and statistics
   - `(release_id)` for merging and excluding a release (M7)
+  - M12a, partial on `release_id IS NULL`: `(owner_id, claimed_game_id)` for "Owned: Yes", `(claimed_game_id)` for an exclusion finding a game's claims, `(claimed_platform_id)`
 - **Timestamps:** `created_at`, `updated_at`
 - **Constraints:**
   - `CHECK (media_condition IS DISTINCT FROM 'not_included')`. A Collection Item is a physical game, so it always includes the medium
@@ -876,10 +882,19 @@ One actual physical game owned by one user. Owning two copies of a release means
   - `completeness = 'complete'` requires `box_condition` to not be `not_included`
   - `completeness = 'sealed'` requires `media_condition` and `manual_condition` to be null, because they can't be assessed without opening it
   - `CHECK ((record_status = 'invalid_preserved') = (invalidated_at IS NOT NULL))`
-  - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission
+  - The insert and update policies check `release_id` with `can_use_release()`, because foreign keys ignore RLS and could otherwise attach an item to another user's submission. M12a: a copy without a release is checked with `can_claim(game, platform)` instead: a published game and an existing platform. It never reads pairings or releases, so a claim reveals nothing about anyone's submissions
+  - M12a, `collection_items_identity`: **identified** (`release_id` set, every claim column null) or **unidentified** (`release_id` null, game and platform set); nothing in between. `claimed_region_code IS DISTINCT FROM 'unknown'`. The edition name's tidiness, as above
+- **Grants (M12a):** clients may insert the claim columns. No client may update `release_id` or any claim column: identity changes only through `set_my_copy_identity()` (and `relink_my_copy()`, now a wrapper of it), merges and maintenance
 - **Triggers** (all run with the caller's rights):
   - On insert: the id check, then the owner's limit of 100,000 copies, under a per-owner advisory lock so concurrent additions can't pass it together
-  - On update: a preserved copy can't be edited, except by moving it to another release, which clears the flag. Moving a copy keeps every recorded piece; those its new release doesn't list show as no longer listed (M7b-2a). Two triggers lock the target release `FOR SHARE` and refuse one its owner can't use
+  - On update: a preserved copy can't be edited, except by giving it a new identity, which clears the flag. Moving a copy keeps every recorded piece; those its new release doesn't list show as no longer listed (M7b-2a). Two triggers lock the target release `FOR SHARE` and refuse one its owner can't use. M12a: both watch every identity column, not only `release_id`, and for a claim lock its game `FOR SHARE` and refuse one that isn't published. `FOR SHARE` (not `FOR KEY SHARE`) conflicts with any status update of the game, so a claim can't be made or moved onto a game while it's being excluded
+  - M12a: after any identity change, a row in the owner's private history (below)
+
+**Unidentified copies (M12a).** A copy may name only a game and platform, with region and edition each optional, so all four combinations are possible: both known, region only, edition only, neither. It creates no release, pairing or edition, and nothing about it is public. It isn't a verified release: reads return it with `identity = 'claim'` and a `claim` object, whose `catalog_pairing` says whether the catalog lists that platform for the game. The owner identifies it later (claim to release), corrects it (claim to claim) or leaves an identified copy unidentified (release to claim) through `set_my_copy_identity(item, identity)`. The platform never changes. Pieces can't be recorded on an unidentified copy, since there's no release to list them; completeness, conditions and private details can.
+
+`private.collection_item_identity_events` holds each change: `item_id`, `owner_id` (composite key → `collection_items`, on delete cascade, so it goes with the copy and the account), `changed_at` (the change's own time), `source` (`owner`, `catalog` for a merge, `maintenance`), and the identity `previous` and `current`. Who on the staff acted is never recorded there. The owner reads it with `get_my_copy_history(item)`.
+
+**Exclusions and claims (M12a).** When an exclusion excludes a game (its last published release), it preserves the active claims on that game with the release's copies: `invalid_preserved`, nothing else changed, each recorded in `private.catalog_exclusion_copies` with `claimed_game_id`. A claim on an excluded *pairing* whose game stays published stays active: a claim never depended on the pairing. Restoring brings back only copies still as the exclusion preserved them (same claim, still preserved at the exclusion's time); one the owner has since moved is left alone. An identified copy on an excluded release is never turned into a claim; its owner may do that. `get_my_preserved_claim(item)` shows a preserved claim to its owner. A merge's plan is blocked (`claimed_copy`) if it would retire a game someone claims; only unpublished games are retired, so this is a safeguard.
 
 What each `completeness` value means, with details in [relationships.md](relationships.md#collection-item-completeness-and-components):
 
@@ -899,8 +914,11 @@ What each `completeness` value means, with details in [relationships.md](relatio
 | **Pending** | `active`, release `unverified`, `under_review` or (briefly, during M7's merge) `merged` | No | The owner |
 | **Not approved** | `active`, release `rejected` | No | The owner |
 | **Invalid preserved** | `invalid_preserved`, or a release the owner can no longer read | No | The owner |
+| **Unidentified** (M12a) | `active`, no release | No | The owner |
 
-`get_my_collection_summary()` returns the categories separately and only ever describes the caller. A shared counting function for other viewers comes with public collections.
+`get_my_collection_summary()` returns the categories separately and only ever describes the caller. M12a adds `unidentified`; `owned` is unchanged, still confirmed releases only, so the approved-release accounting doesn't change. A shared counting function for other viewers comes with public collections.
+
+**Personal ownership (M12a).** `get_my_game_ownership(game)` answers "Owned: Yes" for the signed-in owner only: true when any copy of the game is active, whatever its catalog standing (owned, pending, not approved or unidentified). Preserved copies are listed with their status but don't count. It groups copies by status, platform, region and edition. This is the owner's own view, never a catalog statistic.
 
 Disposal history (sold, traded) is deferred. For now, deleting a row means the copy is gone.
 
@@ -1070,7 +1088,7 @@ Built in M7b-2b. Written only by `exclude_release` and `restore_exclusion`; no c
 - **Unique:** `release_id` where `restored_at IS NULL`: a release is excluded at most once at a time
 - **Indexes:** `((restored_at IS NULL), id DESC)` for the administrators' list
 
-`private.catalog_exclusion_copies`: `exclusion_id` (→ exclusions, cascade), `item_id` (→ `collection_items(id)`, cascade, so an owner's removal is never undone) and `owner_id` (plain). Primary key `(exclusion_id, item_id)`, index on `item_id`.
+`private.catalog_exclusion_copies`: `exclusion_id` (→ exclusions, cascade), `item_id` (→ `collection_items(id)`, cascade, so an owner's removal is never undone) and `owner_id` (plain). Primary key `(exclusion_id, item_id)`, index on `item_id`. M12a: `claimed_game_id` (→ `games`, restrict), set for a claim preserved because its game was excluded, null for a copy on the release itself.
 
 ## Social system
 
@@ -1707,7 +1725,7 @@ No frontend code changes in this phase. These are the changes to expect when the
 | --- | --- | --- |
 | `ReleaseRegion`: `NA`, `EU`, `JP` | `regions.code` | Becomes a wider set of codes. Maps to `ntsc-uc`, `pal`, `ntsc-j` |
 | `Release` has one `region` | `region_code` plus `release_markets` | Display composes the classification and the countries |
-| A `Release` is always present on an item | `collection_items.release_id` may be unreadable to others | Queries must left-join and show an "Unverified release" placeholder |
+| A `Release` is always present on an item | `collection_items.release_id` may be unreadable to others, and since M12a may be null (an unidentified copy) | Queries must left-join, take game and platform from the claim when there's no release, and show an "Unverified release" placeholder or the owner's claim |
 | `ItemCompleteness`: 3 values | `completeness`: 4 values | Add `incomplete` |
 | `Release.year` | `release_date` + precision | Derive the year |
 | `Release.edition` | `edition_name`, `edition_kind`, `variant_name` | Display composes them |

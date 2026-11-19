@@ -18,6 +18,8 @@ export const STATUSES = [
   { value: "pending", label: "Awaiting review" },
   { value: "not_approved", label: "Not approved" },
   { value: "invalid", label: "No longer in the catalog" },
+  // M12a: copies that name no release, only the owner's claim.
+  { value: "unidentified", label: "Not linked to a release" },
 ] as const;
 
 export const COMPLETENESS_FILTERS = [

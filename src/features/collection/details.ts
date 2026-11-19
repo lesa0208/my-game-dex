@@ -6,7 +6,7 @@
  * the owner chooses one. Pure, so it can be tested alone.
  */
 
-import type { CopyPiece, CopyRelease, CopyStatus } from "./types";
+import type { CopyPiece, CopyRelease, CopyStatus, CopyClaim } from "./types";
 
 export const COMPLETENESS = [
   { value: "loose", label: "Loose (medium only)" },
@@ -276,6 +276,7 @@ const STATUS_LABELS: Record<CopyStatus, string | null> = {
   pending: "Awaiting review",
   not_approved: "Not approved",
   invalid: "No longer in the catalog",
+  unidentified: "Not linked to a release",
 };
 
 /** Null for an ordinary copy, which needs no label. */
@@ -287,6 +288,60 @@ export function copyStatusLabel(status: CopyStatus) {
 export function releaseLine(release: Pick<CopyRelease, "platform" | "region" | "edition_name" | "variant_name">) {
   const region = release.region.code === "unknown" ? "Region unknown" : release.region.label;
   return [release.platform.short_name, region, release.edition_name, release.variant_name].filter(Boolean).join(" · ");
+}
+
+const EDITION_KINDS: Record<string, string> = {
+  standard: "Standard",
+  limited: "Limited edition",
+  collector: "Collector's edition",
+  reprint: "Reprint",
+  bundle: "Bundle",
+  promotional: "Promotional",
+  other: "Other edition",
+};
+
+/**
+ * M12a: "PS1 · PAL · Platinum" for an unidentified copy: what the owner says, and "not
+ * sure" where they didn't. The edition is the name they gave, or else its kind.
+ */
+export function claimLine(claim: Pick<CopyClaim, "platform" | "region" | "edition_kind" | "edition_name">) {
+  return [claim.platform.short_name, claim.region?.label ?? "Region not sure", claimEdition(claim) ?? "Edition not sure"].join(" · ");
+}
+
+/** M12a: a claim's edition as its owner gave it: the name, or else its kind. Null: not sure. */
+export function claimEdition(claim: Pick<CopyClaim, "edition_kind" | "edition_name">) {
+  return claim.edition_name ?? (claim.edition_kind ? (EDITION_KINDS[claim.edition_kind] ?? null) : null);
+}
+
+/** M12a: the fixed errors from add_unidentified_copy and set_my_copy_identity, as messages for the owner. */
+export function claimErrorMessage(message: unknown): { text: string; renewId: boolean } {
+  switch (message) {
+    case "account not active":
+      return { text: "Your account can't change copies right now.", renewId: false };
+    case "game unavailable":
+      return { text: "This game can't be added to a collection right now.", renewId: false };
+    case "platform unavailable":
+      return { text: "Choose a platform from the list.", renewId: false };
+    case "invalid region":
+      return { text: "Choose a region from the list, or Not sure.", renewId: false };
+    case "invalid edition":
+      return { text: "The edition name is too long or has characters that can't be used.", renewId: false };
+    case "item unavailable":
+      return { text: "This copy isn't in your collection any more.", renewId: false };
+    case "release unavailable":
+      return { text: "That release can't hold copies. Choose another one.", renewId: false };
+    case "other platform":
+      return { text: "A copy stays on its platform. For another platform, add it as a new copy.", renewId: false };
+    case "collection limit reached":
+      return { text: "Your collection has reached its limit of 100,000 copies.", renewId: false };
+    case "invalid details":
+      return { text: "Some details don't fit together. Check them and try again.", renewId: false };
+    case "invalid item id":
+    case "request conflict":
+      return { text: "This page was open too long. Try again.", renewId: true };
+    default:
+      return { text: "The copy couldn't be saved. Try again.", renewId: false };
+  }
 }
 
 /** The medium's name for its condition field, from the format's category. */

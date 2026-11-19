@@ -1089,4 +1089,30 @@ export const m11b1bMutations = [
     "and r.media_format_code = p_media_format\n", "\n")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations };
+// M12a: flexible ownership. Each violation weakens one protection of unidentified copies.
+const M12A_LOCK = "private.lock_claimable_game(uuid, uuid)";
+export const m12aMutations = [
+  sql("a claim's trigger accepts an unpublished game", "pgtap", rewrite(M12A_LOCK,
+    "  if not found or v_status <> 'published' then", "  if not found then")),
+  sql("the policy check accepts an unpublished game", "pgtap", rewrite("private.can_claim(uuid, uuid)",
+    "where g.id = p_game and g.status = 'published')", "where g.id = p_game)")),
+  sql("a claim locks its game FOR KEY SHARE", "api", rewrite(M12A_LOCK,
+    "where g.id = p_game for share;", "where g.id = p_game for key share;")),
+  sql("clients may change a claim directly", "pgtap",
+    "grant update (claimed_region_code, release_id) on public.collection_items to authenticated;"),
+  sql("a copy may name both a release and a claim", "pgtap",
+    "alter table public.collection_items drop constraint collection_items_identity;"),
+  sql("the identity trigger watches only the release", "pgtap", `drop trigger check_copy_release_move on public.collection_items;
+create trigger check_copy_release_move before update of release_id on public.collection_items
+  for each row when (new.release_id is distinct from old.release_id) execute function private.check_moved_copy_release();`),
+  sql("the owner's identity changes go unrecorded", "pgtap",
+    "drop trigger record_copy_identity_change on public.collection_items;"),
+  sql("an exclusion skips the claims on the game it excludes", "both", rewrite("public.exclude_release(uuid, text, text, text, text, boolean, boolean)",
+    "           or (c.release_id is null and c.claimed_game_id in (", "           or (false and c.claimed_game_id in (")),
+  sql("restoring takes back copies the owner has changed", "pgtap", rewrite("public.restore_exclusion(uuid, integer, text)",
+    "      and c.record_status = 'invalid_preserved' and c.invalidated_at = ex.excluded_at", "      or true")),
+  sql("a preserved copy counts as owned", "pgtap", rewrite("public.get_my_game_ownership(uuid)",
+    "'owned', exists (select 1 from mine m where m.status <> 'invalid')", "'owned', exists (select 1 from mine m)")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations };

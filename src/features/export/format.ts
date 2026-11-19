@@ -3,14 +3,15 @@
  * page's messages. Pure, so it can be tested without a server. src/features/export/server.ts
  * reads the data, as the person, and streams what this shapes.
  *
- * Format "my-game-dex-export", version 1: one JSON object, written in this key order:
+ * Format "my-game-dex-export", version 2 (M12a: a copy may be unidentified, with status
+ * "unidentified" or "invalid", a null release and a "claim"): one JSON object, written in this key order:
  *   format, version, exported_at, notice, account, profile, preferences, authenticators,
  *   collection (an array), submissions (an array), not_included, complete (true, last).
  * A file without "complete": true at the end was cut off and is incomplete.
  */
 
 export const EXPORT_FORMAT = "my-game-dex-export";
-export const EXPORT_VERSION = 1;
+export const EXPORT_VERSION = 2;
 /** Copies read per page (each page is four bounded reads). PostgREST returns up to 1,000 rows. */
 export const EXPORT_PAGE = 200;
 /** The database's ceiling per account (M6): a loop that passes it is refused rather than run on. */
@@ -36,9 +37,13 @@ export const NOT_INCLUDED = [
 type Row = Record<string, unknown>;
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
-/** A copy's status as the collection pages show it (M6/M7): from the copy and its release, if readable. */
-export function copyStatus(recordStatus: unknown, releaseStatus: unknown): "owned" | "pending" | "not_approved" | "invalid" {
+/**
+ * A copy's status as the collection pages show it (M6/M7): from the copy and its release,
+ * if readable. M12a: a copy that names no release is "unidentified" while active.
+ */
+export function copyStatus(recordStatus: unknown, releaseStatus: unknown, unidentified = false): "owned" | "pending" | "not_approved" | "invalid" | "unidentified" {
   if (recordStatus === "invalid_preserved") return "invalid";
+  if (unidentified) return "unidentified";
   if (releaseStatus === "published") return "owned";
   if (releaseStatus === "rejected") return "not_approved";
   if (typeof releaseStatus !== "string") return "invalid";
@@ -110,10 +115,11 @@ function releaseOf(item: Row, lookups: Lookups): { release: Row | null; game: Ro
 
 /** One copy, with its owner-only details and pieces. Every copy is its own entry, duplicates included. */
 export function shapeCopy(item: Row, priv: Row | undefined, pieces: Row[], lookups: Lookups): Row {
-  const { release, game } = releaseOf(item, lookups);
+  const claimed = item.release_id == null;
+  const { release, game } = claimed ? { release: null, game: claimedGame(item, lookups) } : releaseOf(item, lookups);
   return {
     id: item.id,
-    status: copyStatus(item.record_status, lookups.releases.get(String(item.release_id))?.status),
+    status: copyStatus(item.record_status, lookups.releases.get(String(item.release_id))?.status, claimed),
     record_status: item.record_status,
     invalidated_at: item.invalidated_at ?? null,
     added_at: item.created_at,
@@ -134,6 +140,27 @@ export function shapeCopy(item: Row, priv: Row | undefined, pieces: Row[], looku
       : null,
     game,
     release,
+    // M12a: what an unidentified copy claims; null for a copy that names a release.
+    claim: claimed ? claimOf(item, lookups) : null,
+  };
+}
+
+/** M12a: an unidentified copy's game: as the catalog shows it, or as preserved after an exclusion. */
+function claimedGame(item: Row, lookups: Lookups): Row | null {
+  const g = lookups.games.get(String(item.claimed_game_id));
+  if (g) return { id: g.id, slug: g.status === "published" ? (g.slug ?? null) : null, title: g.title ?? null, kind: g.kind ?? null };
+  const p = lookups.preserved.get(String(item.id));
+  return p ? { title: p.title ?? null } : null;
+}
+
+/** M12a: what an unidentified copy claims. Null region or edition: the owner wasn't sure. */
+function claimOf(item: Row, lookups: Lookups): Row {
+  const code = str(item.claimed_region_code);
+  return {
+    platform: platformOf(lookups, item.claimed_platform_id),
+    region: code ? { code, label: lookups.regions.get(code)?.label ?? null } : null,
+    edition_kind: item.claimed_edition_kind ?? null,
+    edition_name: item.claimed_edition_name ?? null,
   };
 }
 

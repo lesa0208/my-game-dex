@@ -17,6 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
 import { CURRENCIES } from "@/features/collection/currencies";
 import {
+  claimEdition,
+  claimLine,
   completenessLabel,
   conditionLabel,
   copyStatusLabel,
@@ -31,7 +33,7 @@ import {
   releaseLine,
 } from "@/features/collection/details";
 import { collectionHref, type CollectionParams, copyHref, readCollectionParams, readMoveParams } from "@/features/collection/list-params";
-import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyReleaseCopies } from "@/features/collection/queries";
+import { getMediaCategory, getMyCopy, getMyDefaultCurrency, getMyPreservedClaim, getMyReleaseCopies } from "@/features/collection/queries";
 import { getMySubmissionForRelease } from "@/features/submissions/queries";
 import { exclusionReasonLabel, withListedPieces } from "@/features/exclusion/form";
 import { getMyPreservedRelease } from "@/features/exclusion/queries";
@@ -96,7 +98,11 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   const copy: CopyDetail = outcome.data;
   // A preserved copy's excluded release isn't readable through the catalog; its owner
   // reads a fixed set of its fields through get_my_preserved_release (M7b-2b, D3).
-  const excluded = copy.status === "invalid" && !copy.release ? await getMyPreservedRelease(copy.id) : null;
+  // M12a: an unidentified copy names no release. One preserved by an exclusion of its
+  // game is read the same way, through get_my_preserved_claim.
+  const claim = copy.identity === "claim" ? copy.claim : null;
+  const excluded = copy.status === "invalid" && !copy.release && !claim ? await getMyPreservedRelease(copy.id) : null;
+  const preservedClaim = copy.status === "invalid" && claim ? await getMyPreservedClaim(copy.id) : null;
   const release = copy.release ?? excluded?.release ?? null;
   const { game } = copy;
 
@@ -111,8 +117,8 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
   // agree. A copy older than the newest 100 isn't in it and gets no number.
   const number = siblings?.copies.find((c) => c.id === copy.id)?.number ?? null;
   const status = copyStatusLabel(copy.status);
-  const title = game?.title ?? excluded?.game.title ?? "A release no longer in the catalog";
-  const line = release ? releaseLine(release) : null;
+  const title = game?.title ?? excluded?.game.title ?? preservedClaim?.game.title ?? "A release no longer in the catalog";
+  const line = release ? releaseLine(release) : claim ? claimLine(claim) : null;
   const copyName = `${number ? `copy ${number} of ` : "this copy of "}${title}${line ? ` (${line})` : ""}`;
 
   // A preserved copy can't be changed (the M6 guards refuse it), only moved or removed.
@@ -147,7 +153,7 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
           {line ? <p className="text-sm text-muted-foreground">{line}</p> : null}
           {release?.local_title ? <p className="text-sm text-muted-foreground">{release.local_title}</p> : null}
           <p className="mt-1.5 text-sm">
-            {number && siblings ? `Copy ${number} of ${siblings.count} of this release` : "Your copy of this release"} · Added {formatDay(copy.added_at)}
+            {number && siblings ? `Copy ${number} of ${siblings.count} of this release` : claim ? "Your copy" : "Your copy of this release"} · Added {formatDay(copy.added_at)}
           </p>
           {status ? <p className="mt-1.5 inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{status}</p> : null}
           {submissionId ? (
@@ -173,14 +179,16 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
             <TriangleAlert aria-hidden="true" className="size-4" />
             This copy is kept privately
           </h2>
-          {excluded?.exclusion ? (
+          {(excluded ?? preservedClaim)?.exclusion ? (
             <p className="mb-2 text-sm">
-              <span className="font-medium">Removed from the catalog:</span> {exclusionReasonLabel(excluded.exclusion.reason_code)}.
-              {excluded.exclusion.note ? <span className="mt-1 block break-words whitespace-pre-wrap">“{excluded.exclusion.note}”</span> : null}
+              <span className="font-medium">Removed from the catalog:</span> {exclusionReasonLabel((excluded ?? preservedClaim)!.exclusion!.reason_code)}.
+              {(excluded ?? preservedClaim)!.exclusion!.note ? (
+                <span className="mt-1 block break-words whitespace-pre-wrap">“{(excluded ?? preservedClaim)!.exclusion!.note}”</span>
+              ) : null}
             </p>
           ) : null}
           <p className="text-sm">
-            Its release is no longer in the catalog, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
+            {claim ? "Its game is no longer in the catalog" : "Its release is no longer in the catalog"}, so the copy isn&apos;t counted as owned. Everything you recorded is kept, but it can&apos;t be edited until
             it&apos;s on a release in the catalog.
             {viewer.isActive ? (
               <>
@@ -266,6 +274,22 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
               { label: "Packaging", value: packagingLabel(release.packaging_code, release.packaging) },
               { label: "Product code", value: release.identifiers.product_code },
               { label: "Barcode", value: release.identifiers.barcode },
+            ]}
+          />
+        </Section>
+      ) : null}
+
+      {claim ? (
+        <Section id="copy-claim" title="What you own">
+          <p className="mb-2 text-sm text-muted-foreground">
+            This copy isn&apos;t linked to a release in the catalog. These are the details you recorded, not a verified release.
+            {claim.catalog_pairing ? null : ` The catalog doesn't list this game on ${claim.platform.name}.`}
+          </p>
+          <Facts
+            rows={[
+              { label: "Platform", value: claim.platform.name },
+              { label: "Region", value: claim.region?.label ?? "Not sure", always: true },
+              { label: "Edition", value: claimEdition(claim) ?? "Not sure", always: true },
             ]}
           />
         </Section>
