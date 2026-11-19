@@ -2,7 +2,7 @@
 
 **Written for:** the product owner and catalog editors deciding how real NES/Famicom, SNES/Super Famicom and PlayStation releases enter the catalog.
 
-**Status: accepted as the design foundation on 2026-11-18, subject to the corrections now in sections 6 and 8. MIG-1 (the cartridge formats, M11b-1a) and MIG-2 with MIG-3 (identity and packaging, M11b-1b) are implemented on the test stack and not applied to development. MIG-4 and MIG-5 are revised designs awaiting review.** Decisions are in section 10. M11b-0 is analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
+**Status: accepted as the design foundation on 2026-11-18, subject to the corrections now in sections 6 and 8. MIG-1 (the cartridge formats, M11b-1a) and MIG-2 with MIG-3 (identity and packaging, M11b-1b) are implemented, merged into main by PR #16 (`1ac0eb8`, 2026-11-19) and applied to development, which has 72 migrations. MIG-4 (release identifiers) is cancelled, and MIG-5 (source links) is not implemented. The first real pilot is M12c-A ([catalog-pilot-m12c.md](catalog-pilot-m12c.md)), which revalidated section 8 on 2026-11-19.** Decisions are in section 10. M11b-0 itself was analysis and design only. No migration, import, clearance, catalog record or reference row was created, and the development catalog was not changed (it was read, read-only, on 2026-11-18). Every proposal below waits for the product owner's approval. Items marked **Legal** also need legal review. Artwork stays out of scope until D15 is resolved.
 
 Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalog), [relationships.md § Physical release examples](relationships.md#physical-release-examples), [security-rls.md § Catalog import](security-rls.md#catalog-import), [architecture-decisions.md § M5 decisions](architecture-decisions.md#m5-decisions-the-catalog-and-its-import), [ADR-031](architecture-decisions.md#adr-031-platform-identity-is-separate-from-its-names), [ADR-032](architecture-decisions.md#adr-032-physical-media-is-a-category-plus-a-reference-format), [reference-data-sources.md](reference-data-sources.md).
 
@@ -11,11 +11,11 @@ Related: [database-schema.md § Gaming catalog](database-schema.md#gaming-catalo
 - **Reuse the existing catalog.** Game, game–platform pairing, Release, release markets, components, field locks, provenance, the M5b importer, the review guard and the merge tooling already express almost everything. No parallel catalog is proposed.
 - **Famicom and Super Famicom stay on the `nes` and `snes` platforms** (ADR-031). Their physical difference moves from "implied by platform and region" to an explicit **media format**: four new formats for the cartridge shells. The format is already enforced by foreign key, already an identity field for verification, and already a merge guard.
 - **Migrations**, detailed in section 6:
-  - The shell formats (MIG-1) are **implemented on the test stack** (M11b-1a).
-  - MIG-2 and MIG-3 are one migration, **implemented on the test stack** (M11b-1b): identity and packaging, checked against the exact final key, and keeping legacy distinctions.
-  - MIG-4 adds release identifiers.
-  - MIG-5 adds fact-level source links that can support several releases.
-  - MIG-2 to MIG-5 are revised designs, not written.
+  - The shell formats (MIG-1) are **implemented** (M11b-1a).
+  - MIG-2 and MIG-3 are one migration, **implemented** (M11b-1b): identity and packaging, checked against the exact final key, and keeping legacy distinctions.
+  - Both are in main (PR #16) and applied to development (72 migrations).
+  - MIG-4, release identifiers, is **cancelled**. Disc serials and further codes stay in the evidence, not in the catalog.
+  - MIG-5, fact-level source links, is **not implemented**, and isn't part of M12c.
 - **Sources:**
   - **Wikidata** (CC0) for game identity on all three platforms.
   - **No-Intro**, whose Data Usage License permits commercial reuse of data it can license, as evidence for NES and SNES cartridge releases. Manual saved downloads only, since its site bans bots.
@@ -126,7 +126,7 @@ Their own terms weren't reviewed for bulk reuse.
 
 ### Recommendation (D), implemented in M11b-1a
 
-**Implemented on the test stack only:** migration `20261130100000_m11b1a_media_formats.sql`, with the identifiers the product owner approved on 2026-11-18. **These codes are stable catalog identifiers:** once used, they are never renamed, reused or removed.
+**Implemented:** migration `20261130100000_m11b1a_media_formats.sql`, in main and applied to development since PR #16, with the identifiers the product owner approved on 2026-11-18. **These codes are stable catalog identifiers:** once used, they are never renamed, reused or removed.
 
 | Format code | Category | Name | Position | Platform | Physical facts it records |
 | --- | --- | --- | --- | --- | --- |
@@ -231,7 +231,7 @@ Evidence for the shells, checked 2026-11-18:
 2. The packaging vocabulary (MIG-3).
 3. No new region codes or markets. No new platforms.
 
-**Migrations.** MIG-1 is implemented (M11b-1a, test stack only). MIG-2 to MIG-5 are designs, not written. All are forward-only, with no `DROP ... CASCADE`, no change to Supabase-managed schemas, and exact-signature replacements for functions.
+**Migrations.** MIG-1 to MIG-3 are implemented (M11b-1a and M11b-1b) and applied to development. MIG-4 is cancelled and MIG-5 isn't implemented. All are forward-only, with no `DROP ... CASCADE`, no change to Supabase-managed schemas, and exact-signature replacements for functions.
 
 | # | Migration | Detail |
 | --- | --- | --- |
@@ -268,7 +268,7 @@ Single-format platforms, such as PlayStation with `cd-rom`, keep the automatic p
 
 ### MIG-2 and MIG-3 together: release identity and packaging (implemented in M11b-1b)
 
-**Implemented on the test stack only:** migration `20261201100000_m11b1b_release_identity.sql`. Not applied to development.
+**Implemented:** migration `20261201100000_m11b1b_release_identity.sql`, in main and applied to development since PR #16.
 
 **Why the design changed after review.** The first design gave every existing release `packaging_code = 'unclassified'` and then put only `packaging_code` in the identity key. Two published releases that differed only in their packaging text would then have collided. The implementation keeps the historical text in the key until an editor classifies the release, and its preflight evaluates the exact final key.
 
@@ -746,12 +746,12 @@ PSXDataCenter documents each disc by serial, with dates and languages. No packag
 | M11b-D1 | Wikidata for game identity | **Approved.** Clearance is recorded by an operator in M11b-2 with a saved terms copy |
 | M11b-D2 | No-Intro metadata | **Conditionally approved**: metadata only, respecting its terms and permitted access (manual saved downloads). Still open: a person accepts the gate and confirms what an NES and SNES record holds |
 | M11b-D3 | Redump | **Held** pending clarification of rights and access conditions |
-| M11b-D4 | Explicit cartridge differences, one platform per family | **Approved** with the identifiers `famicom-cartridge`, `nes-game-pak`, `snes-cartridge-jp-pal`, `snes-game-pak-na`. Implemented in M11b-1a, test stack only |
+| M11b-D4 | Explicit cartridge differences, one platform per family | **Approved** with the identifiers `famicom-cartridge`, `nes-game-pak`, `snes-cartridge-jp-pal`, `snes-game-pak-na`. Implemented in M11b-1a; on development since PR #16 |
 | M11b-D5 | Controlled packaging vocabulary | **Approved and implemented** (M11b-1b) with `cardboard-box`, `jewel-case`, `double-depth-jewel-case`, `plastic-case`, `paper-sleeve`, `unclassified` and `unknown`; no `big-box` or multi-disc type |
 | M11b-D6 | Video standard column | **Approved: not now** |
-| M11b-D7 | Release identifiers (MIG-4) | **Approved in principle.** Clarifications in section 6, for review |
+| M11b-D7 | Release identifiers (MIG-4) | **Cancelled.** Not to be revived in M12c |
 | M11b-D8 | Source evidence links (MIG-5) | Revised design in section 6, for review. Not to be implemented before that review |
-| M11b-D9 | MIG-2 and MIG-3 as one collision-safe migration | **Approved and implemented** (M11b-1b), test stack only |
+| M11b-D9 | MIG-2 and MIG-3 as one collision-safe migration | **Approved and implemented** (M11b-1b); on development since PR #16 |
 | M11b-D10 | The pilot list in section 8 | **Accepted as a review candidate, not an approved import.** The final selection is approved before any development import |
 | M11b-D11 | Who reviews on development | Open. No-self-review and every staff publication protection are kept (approved). No permanent Owner account is created for it |
 | M11b-D12 | The 16 existing development SNES releases | **Not modified without individual verification** (approved). No bulk reclassification |
@@ -760,18 +760,18 @@ PSXDataCenter documents each disc by serial, with dates and languages. No packag
 
 Each step is a checkpoint, stopped for review.
 
-1. **M11b-1a, media formats.** MIG-1, importer behavior proof, test updates. **Done on the test stack** (2026-11-18). Not applied to development.
-2. **M11b-1b, identity and packaging.** **Done on the test stack** (2026-11-18): MIG-2 and MIG-3 as one migration, the exact-key preflight (proved through the CLI, and on a restored copy of development), the publication trigger, the packaging selects, tests and focused mutations. Not applied to development.
-3. **M11b-1c, identifiers and source links.** MIG-4, then MIG-5, after review. Also:
-   - the importer's Wikidata platform ids;
-   - an NES No-Intro parser test with a synthetic DAT.
-4. **M11b-1 on development.** Apply M11b-1a to M11b-1c to development behind a backup and restore check, with approval.
+1. **M11b-1a, media formats.** MIG-1, importer behavior proof, test updates. **Done** (2026-11-18), and on development since PR #16.
+2. **M11b-1b, identity and packaging.** **Done on the test stack** (2026-11-18): MIG-2 and MIG-3 as one migration, the exact-key preflight (proved through the CLI, and on a restored copy of development), the publication trigger, the packaging selects, tests and focused mutations. On development since PR #16.
+3. **M11b-1c, identifiers and source links.** MIG-4 is cancelled and MIG-5 isn't implemented. The importer's Wikidata platform ids were added in M12c-A; the NES No-Intro parser test is still open.
+4. **M11b-1 on development.** **Done**: M11b-1a and M11b-1b were applied with PR #16, behind a backup and restore check.
+Steps 5 to 7 became the M12c-A pilot, on the test stack ([catalog-pilot-m12c.md](catalog-pilot-m12c.md)):
+
 5. **M11b-2, NES / Famicom pilot.**
    - Clearance, snapshots and a fixed-id import on the test stack.
    - Editor A builds the candidates and editor B reviews.
    - A report, then the approved load into development.
 6. **M11b-3, SNES / Super Famicom pilot.** The same. Existing development SNES releases change only by individual, verified correction (D12).
-7. **M11b-4, PlayStation pilot.** Wikidata games plus editor-entered releases with disc serials (MIG-4), and Redump only if cleared.
+7. **M11b-4, PlayStation pilot.** Wikidata games plus editor-entered releases. Disc serials stay in each release's evidence (MIG-4 is cancelled), and Redump only if cleared.
 8. **M11b-5, quality.**
    - A duplicate audit across the three platforms.
    - Search checks on localized titles and codes.

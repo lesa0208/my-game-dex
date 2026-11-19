@@ -32,6 +32,7 @@ import {
   stopApp,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 // The page's text, without its scripts, which carry the streamed render data too.
 const plain = (html) => decode(html.replace(/<script\b[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
@@ -308,6 +309,11 @@ commit;`);
   check("My Collection lists it as not approved", list.includes("Zqx Never Was") && list.includes("Not approved"));
 }
 
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.catalog_change_requests","public.collection_items","public.games","public.releases","private.collection_item_identity_events","private.submission_requests"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
+
 try {
   installFixture();
   starfallUs = release("SNS-ZSFE-USA");
@@ -342,7 +348,7 @@ commit;`);
   removeFixture();
   check(
     "no submissions, requests, copies, history or catalog data are left behind",
-    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from private.collection_item_identity_events) + (select count(*) from private.submission_requests);") === "0",
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint,
   );
 }
 

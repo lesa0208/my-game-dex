@@ -457,8 +457,8 @@ Each adapter is one module, for example `src/features/catalog/providers/<code>/`
 | --- | --- | --- |
 | IGDB | Secondary sources say commercial use requires a partnership ([IGDB's post](https://medium.com/igdb/igdb-api-v4-is-coming-6ba97874edbc), [Twitch developer forum](https://discuss.dev.twitch.com/t/commercial-use-of-igdb-api/23567)) | Confirm directly |
 | MobyGames | No commercial pricing or terms found | Unknown |
-| ScreenScraper | No commercial terms found. Community tool documentation lists request limits ([Skyscraper docs](https://gemba.github.io/skyscraper/SCRAPINGMODULES)) | Unknown |
-| TheGamesDB | No commercial terms found. Community tool documentation lists request limits (same source) | Unknown |
+| ScreenScraper | Re-checked in M12c-A (2026-11-19, [webapi2](https://www.screenscraper.fr/webapi2.php)): the API may be built only into "applications entièrement gratuites" (completely free applications), otherwise only with the team's prior authorisation and conditions. Developer credentials come through its forum; per-user quotas depend on level and donations. The site footer names CC BY-NC-SA 4.0, and its media is credited to third parties ([catalog-pilot-m12c.md](catalog-pilot-m12c.md#sources-and-licensing)) | **Not usable** without a written commercial licence, which still wouldn't clear third-party images |
+| TheGamesDB | Re-checked in M12c-A (2026-11-19): no published terms of use, licence or attribution rules on the site or API pages. API keys need a signed-in account; allowances and their increase aren't documented in readable form. The GPL-3.0 on its GitHub covers the site code, not the data | **Held** until its staff confirm commercial use, local storage, attribution and image rights in writing |
 
 Most general game databases focus on games rather than physical releases. Expect region, edition and product code coverage to be uneven, which is one reason user submissions (D5) matter. Check each provider's coverage for releases as part of [D14](#needed-before-catalog-work).
 

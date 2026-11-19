@@ -37,6 +37,7 @@ import {
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { claimsFor, decodeClaims } from "./lib/mfa-session.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 function uuidv7(at = Date.now()) {
   const bytes = randomBytes(16);
@@ -82,6 +83,11 @@ async function rpcAs(user, fn, args) {
 const add = async (owner, releaseId, details = {}) => (await rpcAs(owner, "add_collection_item", { p_item_id: uuidv7(), p_release: releaseId, p_details: details })).item_id;
 /** Every field the form names, acknowledged: what a browser sends once every box is ticked. */
 const acknowledgeAll = (form) => Object.fromEntries(form.names.filter((n) => n.startsWith("ack_") || n === "acknowledge_copies").map((n) => [n, "yes"]));
+
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["private.catalog_merges","public.collection_items","public.games","public.releases","public.catalog_change_requests"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
 
 try {
   installFixture();
@@ -252,7 +258,7 @@ commit;`);
   if (everyone) psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${everyone}) or target_profile_id in (${everyone}); commit;`);
   removeFixture();
   check("no merges, copies or catalog data are left behind",
-    psql("select (select count(*) from private.catalog_merges) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from public.catalog_change_requests);") === "0");
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
 const errorLines = appErrorLines();

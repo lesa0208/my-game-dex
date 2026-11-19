@@ -314,6 +314,13 @@ async function secondFactor(user) {
 // ---------------------------------------------------------------------------
 
 // The app first: startApp exits when the build is missing or stale, before a browser starts.
+// M12c-A: the stack may hold deliberate catalog records (the staged pilot). What the checks
+// make is removed; what was there before must be exactly as it was, not absent.
+const CATALOG_TABLES = ["public.releases", "public.catalog_change_requests", "private.catalog_merges", "private.catalog_exclusions", "private.catalog_record_origins",
+  "private.catalog_verifications", "private.import_runs", "private.provider_records", "private.catalog_reclassifications"];
+const catalogFootprint = () =>
+  psql(`select ${CATALOG_TABLES.map((t) => `(select count(*) || ':' || coalesce(md5(string_agg(x::text, '|' order by x::text)), '') from ${t} x)`).join(" || '/' || ")};`);
+const startingCatalog = catalogFootprint();
 const origin = await startApp(3296);
 let browser;
 try {
@@ -997,12 +1004,10 @@ commit;`);
   psql("delete from private.handle_holds where kind = 'released' and handle like 'ay\\_%';");
   removeFixture();
   ok("no account, Owner record, registration, hold, submission or audit row is left behind",
+    catalogFootprint() === startingCatalog &&
     psql(`select (select count(*) from auth.users where id in (${list})) + (select count(*) from private.platform_owner) + (select count(*) from private.ownership_transfers)
       + (select count(*) from private.owner_recoveries) + (select count(*) from private.mfa_factor_registrations where user_id in (${list}))
-      + (select count(*) from private.handle_holds where handle like 'ay\\_%') + (select count(*) from public.catalog_change_requests) + (select count(*) from public.releases)
-      + (select count(*) from private.catalog_merges) + (select count(*) from private.catalog_exclusions)
-      + (select count(*) from private.catalog_record_origins) + (select count(*) from private.catalog_verifications)
-      + (select count(*) from private.import_runs) + (select count(*) from private.provider_records) + (select count(*) from private.catalog_reclassifications)
+      + (select count(*) from private.handle_holds where handle like 'ay\\_%')
       + (select count(*) from private.audit_events where actor_id in (${list}) or target_profile_id in (${list}));`) === "0");
 }
 

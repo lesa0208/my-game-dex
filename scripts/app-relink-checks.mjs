@@ -35,6 +35,7 @@ import {
   stopApp,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 /** A UUIDv7 for a new copy, as the app makes them. */
 function uuidv7(at = Date.now()) {
@@ -71,6 +72,11 @@ async function add(owner, releaseId, details = {}) {
   return body.item_id;
 }
 const hrefs = (html) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => decode(m[1]));
+
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.collection_items","public.games","public.releases","public.catalog_change_requests"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
 
 try {
   installFixture();
@@ -174,7 +180,7 @@ commit;`);
   if (all) psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${all}) or target_profile_id in (${all}); commit;`);
   removeFixture();
   check("no copies or catalog data are left behind",
-    psql("select (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from public.catalog_change_requests);") === "0");
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
 const errorLines = appErrorLines();

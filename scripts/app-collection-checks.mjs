@@ -34,6 +34,7 @@ import {
   writeSession,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 const SLUG = "starfall-odyssey";
 const release = (code) => psql(`select id from public.releases where product_code = '${code}';`);
@@ -220,6 +221,11 @@ async function catalog() {
   check("and asks for the platform, region and edition, or a release, before adding", game.html.includes("Choose the platform, region and edition you have, or pick your release below."));
 }
 
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.collection_items","public.games"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
+
 try {
   installFixture();
   published = release("SNS-ZSFE-USA");
@@ -241,7 +247,7 @@ try {
     psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${ids.map((id) => `'${id}'`).join(",")}) or target_profile_id in (${ids.map((id) => `'${id}'`).join(",")}); commit;`);
   }
   removeFixture();
-  check("no copies or catalog data are left behind", psql("select (select count(*) from public.collection_items) + (select count(*) from public.games);") === "0");
+  check("no copies or catalog data are left behind", footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
 const errorLines = appErrorLines();

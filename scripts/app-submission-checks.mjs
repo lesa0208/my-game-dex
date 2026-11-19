@@ -36,6 +36,7 @@ import {
   stopApp,
 } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 // M12b: a rendered form makes one submission (its id names the request), so a check that
 // sends a form again as a new submission gives it a new id, as a fresh page would.
@@ -255,6 +256,11 @@ async function regressions() {
   check("the release picker lists no submitted release", !plain(picker.html).includes("Players Choice") && !plain(picker.html).includes("Limit 3"));
 }
 
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.catalog_change_requests","public.collection_items","public.games","public.releases"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
+
 try {
   installFixture();
   starfall = psql("select id from public.games where title = 'Starfall Odyssey' and status = 'published';");
@@ -286,7 +292,7 @@ commit;`);
   }
   removeFixture();
   check("no submissions, copies or catalog data are left behind",
-    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.collection_items) + (select count(*) from public.games) + (select count(*) from public.releases);") === "0");
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
 const errorLines = appErrorLines();

@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { elevate } from "./lib/mfa-session.mjs";
 import { stackConfigPath, stackStatus } from "./lib/stack.mjs";
+import { footprint } from "./lib/footprint.mjs";
 
 const projectId = /project_id\s*=\s*"([^"]+)"/.exec(readFileSync(stackConfigPath, "utf8"))[1];
 const psqlArgs = ["exec", "-i", `supabase_db_${projectId}`, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At"];
@@ -145,8 +146,13 @@ commit;`);
   }
   psql("delete from private.handle_holds where kind = 'released' and handle like 'rv\\_%';");
   check("no submissions, catalog data or notifications are left behind",
-    psql("select (select count(*) from public.catalog_change_requests) + (select count(*) from public.games) + (select count(*) from public.releases) + (select count(*) from public.collection_items) + (select count(*) from public.notifications) + (select count(*) from private.audit_events);") === "0");
+    footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
+
+// M12c-A: what the stack held before (the staged pilot, reviewed releases, a reviewer's own
+// collection) must be exactly as it was afterwards; on a clean stack that means empty.
+const LEFTOVER_TABLES = ["public.catalog_change_requests","public.games","public.releases","public.collection_items","public.notifications","private.audit_events"];
+const startingFootprint = footprint(psql, LEFTOVER_TABLES);
 
 try {
   installFixture();

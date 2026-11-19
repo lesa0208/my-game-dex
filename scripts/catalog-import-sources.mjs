@@ -8,8 +8,12 @@
  */
 import { createHash } from "node:crypto";
 
-/** Wikidata items for the platforms the pilot may import. Check before each import. */
-export const WIKIDATA_PLATFORMS = { snes: "Q183259" };
+/**
+ * Wikidata items for the platforms the pilot may import. Check before each import.
+ * M12c-A: nes (Q172742, "Nintendo Entertainment System", with Famicom among its
+ * aliases), famicom-disk-system (Q135321) and playstation, each checked on 2026-11-19.
+ */
+export const WIKIDATA_PLATFORMS = { nes: "Q172742", snes: "Q183259", "famicom-disk-system": "Q135321", playstation: "Q10677" };
 
 // Latin-script label languages, for titles that differ by market.
 const LATIN_LABELS = ["de", "fr", "es", "it", "nl", "pt", "sv"];
@@ -18,6 +22,9 @@ const LATIN_LABELS = ["de", "fr", "es", "it", "nl", "pt", "sv"];
  * A SPARQL query for video games on one platform, with English labels and aliases,
  * Japanese labels, Revised Hepburn romanizations (P2125), labels in other Latin-script
  * languages, and publication dates. Wikidata data is CC0. Descriptions are never read.
+ * The label falls back to "mul" (M12c-A): Wikidata now keeps a name shared by every
+ * language there, without an English copy (Super Mario World, Q853143), and such an
+ * item would otherwise come back unlabelled and be ignored.
  */
 export function wikidataQuery(platform) {
   const qid = WIKIDATA_PLATFORMS[platform];
@@ -31,7 +38,7 @@ export function wikidataQuery(platform) {
   OPTIONAL { ?item rdfs:label ?ja . FILTER(LANG(?ja) = "ja") }
   OPTIONAL { ?item wdt:P2125 ?romaji . }
   OPTIONAL { ?item rdfs:label ?latin . FILTER(LANG(?latin) IN (${LATIN_LABELS.map((l) => `"${l}"`).join(", ")})) }
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
 }
 GROUP BY ?item ?itemLabel ?date ?precision`;
 }
@@ -68,8 +75,16 @@ export function parseWikidata(text) {
   const entries = [];
   for (const item of [...items.values()].sort((a, b) => Number(a.qid.slice(1)) - Number(b.qid.slice(1)))) {
     const titles = [...new Set([item.label, ...item.aliases].filter(Boolean))].sort();
-    // The earliest date, preferring the most precise one on that day.
-    const earliest = item.dates.sort((a, b) => a.value.localeCompare(b.value) || rank(b.precision) - rank(a.precision))[0];
+    // The earliest date, preferring the most precise one on that day. M12c-A: a year or
+    // month is stored as its first day, so "1985" sorted before 13 September 1985 and won.
+    // A coarser date that contains a more precise one gives way to it.
+    const sorted = item.dates.sort((a, b) => a.value.localeCompare(b.value) || rank(b.precision) - rank(a.precision));
+    let earliest = sorted[0];
+    if (earliest) {
+      const within = (d, period) => d.value.startsWith(period.value.slice(0, period.precision === "year" ? 4 : 7));
+      const finer = sorted.filter((d) => rank(d.precision) > rank(earliest.precision) && within(d, earliest));
+      if (earliest.precision !== "day" && finer.length) earliest = finer.sort((a, b) => a.value.localeCompare(b.value) || rank(b.precision) - rank(a.precision))[0];
+    }
     const payload = { title: item.label, titles };
     if (item.ja.size) payload.ja_titles = [...item.ja].sort();
     if (earliest) Object.assign(payload, { first_release_date: earliest.value, first_release_precision: earliest.precision });

@@ -1,7 +1,7 @@
 // Unit tests for the import snapshot parsers (M5b). Synthetic data only.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compactTitleKey, displayTitle, extendSelection, legacyTitleKey, mainTitleKey, parseNoIntro, parseWikidata, pilotSelection, pilotSlice, titleKey } from "./catalog-import-sources.mjs";
+import { compactTitleKey, displayTitle, extendSelection, legacyTitleKey, mainTitleKey, parseNoIntro, parseWikidata, pilotSelection, pilotSlice, titleKey, WIKIDATA_PLATFORMS, wikidataQuery } from "./catalog-import-sources.mjs";
 
 const dat = (...names) => `<?xml version="1.0"?><datafile><header><name>SNES</name></header>${names
   .map((n) => (Array.isArray(n) ? n : [n]))
@@ -80,6 +80,29 @@ test("Wikidata: a year-only date stays a year, and an item without an English la
   const [year, unlabelled] = parseWikidata(sparql([row("Q2", "Pilotwings", "1990-01-01T00:00:00Z", 9), row("Q3", "Q3", null)]));
   assert.equal(year.payload.first_release_precision, "year");
   assert.equal(unlabelled.ignore_reason, "no English label");
+});
+
+test("Wikidata: a year that contains a precise date gives way to it, never to a later year (M12c-A)", () => {
+  const [smb] = parseWikidata(sparql([row("Q11168", "Super Mario Bros.", "1985-01-01T00:00:00Z", 9), row("Q11168", "Super Mario Bros.", "1985-09-13T00:00:00Z", 11)]));
+  assert.deepEqual([smb.payload.first_release_date, smb.payload.first_release_precision], ["1985-09-13", "day"]);
+  const [month] = parseWikidata(sparql([row("Q9", "A", "1990-11-01T00:00:00Z", 10), row("Q9", "A", "1990-11-21T00:00:00Z", 11), row("Q9", "A", "1990-12-02T00:00:00Z", 11)]));
+  assert.deepEqual([month.payload.first_release_date, month.payload.first_release_precision], ["1990-11-21", "day"]);
+  // An earlier year keeps its place: it may be the true first release, known less precisely.
+  const [earlier] = parseWikidata(sparql([row("Q8", "B", "1984-01-01T00:00:00Z", 9), row("Q8", "B", "1985-09-13T00:00:00Z", 11)]));
+  assert.deepEqual([earlier.payload.first_release_date, earlier.payload.first_release_precision], ["1984-01-01", "year"]);
+});
+
+test("Wikidata: the query falls back to the shared mul label, for every pilot platform (M12c-A)", () => {
+  for (const platform of ["nes", "snes", "famicom-disk-system", "playstation"]) {
+    const query = wikidataQuery(platform);
+    assert.match(query, /wikibase:language "en,mul"/);
+    assert.match(query, new RegExp(`wdt:P400 wd:${WIKIDATA_PLATFORMS[platform]} `));
+  }
+  assert.throws(() => wikidataQuery("mega-drive"), /no Wikidata item/);
+  // An item labelled only in mul comes back with that label, and is a game like any other.
+  const [shared] = parseWikidata(sparql([row("Q853143", "Super Mario World", "1990-11-21T00:00:00Z", 11)]));
+  assert.equal(shared.payload.title, "Super Mario World");
+  assert.equal(shared.ignore_reason, undefined);
 });
 
 test("Pilot selection is deterministic, bounded and keeps title groups whole", () => {
