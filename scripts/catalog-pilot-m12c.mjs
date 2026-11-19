@@ -26,6 +26,22 @@
  * exists to require, so this pilot stops at staged candidates until one is available.
  * - report: what's staged, published and held, read-only.
  *
+ * The human reviewer's account (editor B). The product owner runs these themselves, in
+ * their own terminal, only when they decide to; nothing runs them automatically:
+ *
+ *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs reviewer-account --email <name>@example.test
+ *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs grant-reviewer --email <name>@example.test
+ *   MGD_STACK=test node scripts/catalog-pilot-m12c.mjs revoke-reviewer --email <name>@example.test
+ *
+ * - reviewer-account: a confirmed test account. The password is typed at a hidden prompt
+ *   on an interactive terminal (twice), sent only to the local Auth server, and never
+ *   stored or printed. It has no staff role and no authenticator yet: the reviewer signs
+ *   in on the test preview and enrolls their own authenticator under Settings → Security.
+ * - grant-reviewer: the catalog_editor role, as for editor A, only for an account that
+ *   isn't editor A, created none of the pilot's records, has a handle and has a verified
+ *   authenticator of its own.
+ * - revoke-reviewer: removes that role when the review is over.
+ *
  * Nothing here writes a catalog row as postgres. postgres only records the clearance (an
  * operator procedure), reads, and gives the disposable test accounts their staff role,
  * as the review checks do. Every catalog change goes through the editors' own sessions,
@@ -228,10 +244,107 @@ function report() {
   console.log(psql(`select 'held (not entered): ' || ${lit(HELD.map((h) => h.id).join(", "))};`));
 }
 
+// ---------------------------------------------------------------------------
+// The human reviewer (editor B), run by the product owner
+// ---------------------------------------------------------------------------
+
+function reviewerEmail(o) {
+  const email = typeof o.email === "string" ? o.email.trim().toLowerCase() : "";
+  if (!/^[a-z0-9._+-]{1,64}@example\.test$/.test(email)) fail("--email must be a disposable test address ending in @example.test.");
+  return email;
+}
+
+/** A line typed without echo, on an interactive terminal only. */
+function hidden(prompt) {
+  return new Promise((resolve) => {
+    const input = process.stdin;
+    process.stdout.write(prompt);
+    input.setRawMode(true);
+    input.resume();
+    input.setEncoding("utf8");
+    let value = "";
+    const onData = (chunk) => {
+      for (const ch of chunk) {
+        if (ch === "\r" || ch === "\n") {
+          input.setRawMode(false);
+          input.pause();
+          input.removeListener("data", onData);
+          process.stdout.write("\n");
+          resolve(value);
+          return;
+        }
+        if (ch === "\u0003") {
+          input.setRawMode(false);
+          process.stdout.write("\n");
+          process.exit(130);
+        }
+        if (ch === "\u007f" || ch === "\b") value = value.slice(0, -1);
+        else value += ch;
+      }
+    };
+    input.on("data", onData);
+  });
+}
+
+async function reviewerAccount(o) {
+  const email = reviewerEmail(o);
+  if (!process.stdin.isTTY || !process.stdout.isTTY) fail("Run this yourself in an interactive terminal: the password is typed at a hidden prompt.");
+  if (psql(`select count(*) from auth.users where lower(email) = ${lit(email)};`) !== "0") fail("That address already has an account on the test stack.");
+  const password = await hidden("Choose a password for the reviewer account (12+ characters, not shown): ");
+  if (password.length < 12 || Buffer.byteLength(password, "utf8") > 72) fail("The password must be at least 12 characters and at most 72 bytes.");
+  if ((await hidden("Type it again: ")) !== password) fail("The two passwords differ. Nothing was created.");
+  const created = await fetch(`${api}/auth/v1/admin/users`, {
+    method: "POST",
+    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, email_confirm: true }),
+  });
+  if (!created.ok) fail(`The test Auth server refused the account (status ${created.status}). Nothing was created.`);
+  console.log(`Created ${email} on the test stack, with no staff role and no authenticator.
+Next, on http://127.0.0.1:3002:
+  1. Sign in with it, and choose a handle.
+  2. Settings → Security: add an authenticator, scanning the code with your own authenticator app.
+  3. Then grant the role: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs grant-reviewer --email ${email}`);
+}
+
+function reviewerId(email) {
+  const id = psql(`select id from auth.users where lower(email) = ${lit(email)};`);
+  if (!id) fail("No account with that address on the test stack. Create it with reviewer-account first.");
+  return id;
+}
+
+function grantReviewer(o) {
+  const email = reviewerEmail(o);
+  const id = reviewerId(email);
+  let editorA = [];
+  try {
+    editorA = JSON.parse(readFileSync(EDITORS, "utf8")).map((e) => e.id);
+  } catch {
+    // No staged editor recorded on this machine: the created-records check still applies.
+  }
+  if (editorA.includes(id)) fail("Refusing: that is editor A, who created the candidates.");
+  const created = psql(`select count(*) from private.audit_events where actor_id = ${lit(id)} and action = 'catalog_record_created';`);
+  if (created !== "0") fail("Refusing: that account created catalog records, so it can't be their reviewer.");
+  if (!psql(`select coalesce(handle, '') from public.profiles where id = ${lit(id)};`)) fail("Sign in on the test preview and choose a handle first.");
+  if (psql(`select count(*) from auth.mfa_factors where user_id = ${lit(id)} and factor_type = 'totp' and status = 'verified';`) === "0") {
+    fail("Add your own authenticator under Settings → Security on the test preview first.");
+  }
+  if (psql(`select count(*) from public.staff_roles where user_id = ${lit(id)} and role = 'catalog_editor';`) !== "0") fail("That account is already a catalog editor.");
+  // Test-stack account setup, as for editor A. Verification and publication stay the reviewer's.
+  psql(`insert into public.staff_roles (user_id, role) values (${lit(id)}, 'catalog_editor');`);
+  console.log(`${email} is a catalog editor on the test stack. Sign in again on http://127.0.0.1:3002 and open Admin → Catalog.`);
+}
+
+function revokeReviewer(o) {
+  const email = reviewerEmail(o);
+  const id = reviewerId(email);
+  const removed = psql(`with d as (delete from public.staff_roles where user_id = ${lit(id)} and role = 'catalog_editor' returning 1) select count(*) from d;`);
+  console.log(removed === "0" ? "That account had no catalog editor role." : `${email} is no longer a catalog editor. Its history stays in the audit log.`);
+}
+
 const o = args(process.argv.slice(2));
-const commands = { "clear-wikidata": clearWikidata, import: importGames, stage, report };
+const commands = { "clear-wikidata": clearWikidata, import: importGames, stage, report, "reviewer-account": reviewerAccount, "grant-reviewer": grantReviewer, "revoke-reviewer": revokeReviewer };
 const command = commands[o._[0]];
-if (!command) fail("Usage: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs clear-wikidata|import|stage|report. See the header of this file.");
+if (!command) fail("Usage: MGD_STACK=test node scripts/catalog-pilot-m12c.mjs clear-wikidata|import|stage|report|reviewer-account|grant-reviewer|revoke-reviewer. See the header of this file.");
 try {
   await command(o);
 } catch (error) {

@@ -138,6 +138,17 @@ export function actorLabel(actor: HistoryActor): string {
   }
 }
 
+/**
+ * M12c-A: the creating editor's reason, shown on a record as an evidence note for the
+ * reviewer. It's free text from the audit history, not structured source evidence
+ * (release_evidence holds only what an import recorded), and nothing checks it. Null when
+ * the creation isn't on this page of the history (it's then further down, in History).
+ */
+export function creationNote(items: Pick<HistoryEvent, "action" | "details" | "reason" | "actor" | "occurred_at">[], entity: "game" | "release") {
+  const created = items.find((e) => e.action === "catalog_record_created" && e.details.entity === entity);
+  return created?.reason ? { reason: created.reason, actor: created.actor, occurred_at: created.occurred_at } : null;
+}
+
 const ENTITY_WORDS: Record<string, string> = { game: "the game", release: "the release", game_platform: "a platform pairing", game_relation: "a related game" };
 
 /**

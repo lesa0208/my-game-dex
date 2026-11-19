@@ -165,17 +165,73 @@ The pilot stops before review, deliberately. Each release needs a second catalog
 - Editor A's attempt to publish was refused (`release not verified`).
 - The admin release page tells editor A: "You created this record, so another editor verifies and publishes it."
 
-**For a reviewer on the test preview (port 3002):**
-1. Sign in as a catalog editor who isn't editor A. The test stack needs one more disposable editor for this (M11b-D11: who reviews on development is still open).
-2. Open **Admin → Catalog records**, search each title, and filter by status "In review". Staff-created candidates aren't in the submission review queue, which lists collectors' submissions only.
-3. For each A release: open it, read its creation reason in **History**, compare it with the saved page named there, then verify it.
-4. Verify the game: title and date against its Wikidata item.
-5. Publish the release, which publishes the game and its pairing.
+**Who reviews.** The product owner is editor B, on the isolated test stack only (decided 2026-11-19). They create, sign in to and verify with their own test account. No script signs in as editor B, completes their MFA, or verifies or publishes in their name.
 
-Each of verify, publish and verify-game needs a reason and a TOTP verification in the last 10 minutes.
+### Human review guide: the first batch
 
-6. Leave B rows in review until their gap is closed.
-7. Then run `MGD_STACK=test node scripts/app-catalog-pilot-checks.mjs`.
+**1. The reviewer's account.** Run this yourself in an interactive terminal, only when you choose to:
+
+```text
+MGD_STACK=test node scripts/catalog-pilot-m12c.mjs reviewer-account --email <you>-review@example.test
+```
+
+- It asks twice, without echo, for a password you choose (12+ characters).
+- The password goes only to the local test Auth server, and is never stored or printed.
+- The account has no staff role yet.
+
+**2. Your authenticator.** On http://127.0.0.1:3002:
+1. Sign in and choose a handle.
+2. Under **Settings → Security**, add an authenticator by scanning the code with your own app.
+
+Nobody else sees the secret.
+
+**3. The catalog editor role.** Then run:
+
+```text
+MGD_STACK=test node scripts/catalog-pilot-m12c.mjs grant-reviewer --email <you>-review@example.test
+```
+
+It refuses any account that:
+- is editor A;
+- created any catalog record;
+- has no handle;
+- has no verified authenticator of its own.
+
+Sign out and in again so the session carries the role. `revoke-reviewer` removes the role afterwards.
+
+**4. Review three releases, one at a time.** These are the strongest independently checkable candidates. That editor A classed them as item-level evidence proves nothing: judge each one yourself against the source. If one doesn't hold up, leave it unpublished and pick another from **Admin → Catalog → Releases in review**.
+
+| | Super Mario World, NTSC-J | Super Mario World, NTSC-U/C | Crash Bandicoot, NTSC-J |
+| --- | --- | --- | --- |
+| Admin record | [S1](http://127.0.0.1:3002/admin/catalog/releases/01a1f558-7030-7bf8-920e-4144e32320f7) | [S2](http://127.0.0.1:3002/admin/catalog/releases/01a1f558-704c-76d9-95bf-38419a28679f) | [P11](http://127.0.0.1:3002/admin/catalog/releases/01a1f558-7114-7097-9eb6-c4c4a0c3cb25) |
+| Game record | [Super Mario World](http://127.0.0.1:3002/admin/catalog/games/24f7b33f-a991-46bf-aa4a-ec374fe9c75b), Wikidata [Q853143](https://www.wikidata.org/wiki/Q853143), first released 1990-11-21 | Same game | [Crash Bandicoot](http://127.0.0.1:3002/admin/catalog/games/d0ce5968-d1c3-4e88-af0e-d2aadb6264d0), Wikidata [Q719176](https://www.wikidata.org/wiki/Q719176), first released 1996-09-09 |
+| Platform, format | SNES, Super Famicom / PAL SNES Cartridge | SNES, North American SNES Game Pak | PlayStation, CD-ROM, 1 disc |
+| Region, edition | NTSC-J, Standard | NTSC-U/C, Standard | NTSC-J, Standard |
+| Evidence | [SNES Central 0000](https://snescentral.com/article.php?id=0000), "Cartridge label information": Asia, Japan, `SHVC-MW`, "regular release", with a label scan | Same page: Americas, USA, `SNS-MW-USA`, "regular release", with a label scan | [PSXDataCenter SCPS-10031](https://psxdatacenter.com/games/J/C/SCPS-10031.html): "Crash Bandicoot", NTSC-J, serial SCPS-10031, released 6 December 1996, barcode 4948872100311 "From the back cover". The PlayStation the Best reprint has its own serial and page (SCPS-91057) |
+| Shell | [Wikipedia, SNES](https://en.wikipedia.org/wiki/Super_Nintendo_Entertainment_System): non-North-American cartridges "are narrower with a smooth curve on the front" | Same page: "North American cartridges have a rectangular bottom with inset grooves" | Not applicable |
+| Missing or uncertain | No release date (SNES Central gives manufacturing codes). Packaging `unknown`. The Japanese printed title isn't recorded. Publisher "Nintendo" is SNES Central's "Japan Publisher". Sold in: Japan | No release date. Packaging `unknown`. A second US label (`SNS-MW-USA-1`, two-line logo) is a separate candidate, S3 | No package code (the disc serial isn't assumed to be one). Packaging, publisher and languages aren't recorded. No markets |
+
+**5. For each release, in the admin pages:**
+1. **Inspect.** Open the release record. Under **Sources and locks**, the *Editor's evidence note* is editor A's free text: a pointer, not proof. Open the source page it names and check every field:
+   - platform and format;
+   - region;
+   - edition and its type;
+   - code or barcode;
+   - disc or cartridge count;
+   - packaging;
+   - markets.
+
+   Correct anything wrong with **Edit the release**, giving a reason. Any change ends an earlier verification of the record.
+2. **Verify the release** in **Verification and publication**, with a reason naming what you checked (for example "Checked SNES Central 0000 label table: Japan, SHVC-MW, regular release"). The app asks for your authenticator if you last verified more than 10 minutes ago.
+3. **Verify the game** from its game record (the first time only): the title, and the first release date against its Wikidata item.
+4. **Publish the release.** This publishes the game and its platform pairing with it.
+5. **If it doesn't hold up,** leave it in review and note why. Nothing is published by default.
+
+**6. After you've published,** tell me, and I'll run the collector checks against what you published, never against what's still in review: `MGD_STACK=test node scripts/app-catalog-pilot-checks.mjs`. Until then they report nothing as passed.
+
+**On 3002:**
+- Editor A's record page shows the evidence note and "You created this record, so another editor verifies and publishes it". To editor B the same page offers verification.
+- The B rows stay in review until their gap is closed.
 
 **Development** gets nothing until the product owner approves the reviewed result (M11b-D10). The same steps then run there, behind a backup and restore check, without a seed or bulk import.
 
@@ -195,15 +251,29 @@ Nothing new was built to stage the pilot:
   - A year that contains a more precise date gives way to it. Super Mario Bros. was imported as "1985" instead of 1985-09-13.
 - **`scripts/catalog-pilot-m12c-data.mjs`:** the evidence and candidates.
 - **`scripts/catalog-pilot-m12c.mjs`:** a runner with the commands `clear-wikidata`, `import`, `stage` and `report`. It refuses any stack but the test stack.
-- **`scripts/app-catalog-pilot-checks.mjs`:** the collector checks, to run after review.
+- **`scripts/app-catalog-pilot-checks.mjs`:** the ten collector checks, run against whatever a human has published and against nothing still in review. With nothing published they stop and report nothing as passed. They also compare every other collection on the stack before and after.
+- **Reviewer commands** in the runner (`reviewer-account`, `grant-reviewer`, `revoke-reviewer`), which the product owner runs. The password is typed at a hidden prompt. The role goes only to an account that isn't editor A, created no records, has a handle and has its own verified authenticator.
+- **Two admin fixes:** a **Releases in review** link, and the release record's *Editor's evidence note* beside *Structured source evidence* (findings 2 and 3).
+- **`scripts/db-import-checks.mjs`** now leaves records that were on the stack before it exactly as they were, and never deletes them. It restores each provider's clearance as it found it, and compares the stack's runs, source records and games before and after, instead of requiring an empty catalog. With the pilot staged it passes 45 of 45, and the pilot's releases, games, markets and clearance hash the same before and after.
 
 **postgres** recorded the clearance, gave the disposable test editor its role (as the review checks do), and read. It wrote no catalog row.
 
-## Findings for review
+## Findings for review (investigated 2026-11-19)
 
-1. **Staged candidates are invisible to collectors, so a collector can submit a duplicate.** While a game is in review, search shows "No games found" and offers "Add it to My Game Dex". The submission duplicate check compares with published releases only. Editors see possible duplicates in review, but the gap is widest exactly while a pilot waits for review. Options: publish promptly, or have the submission check also flag staff candidates to the editor (not to the collector).
-2. **Staff-created candidates have no review queue.** A reviewer finds them by title in Catalog records. A "staff candidates awaiting review" view would make the second-editor step practical at scale.
-3. **Evidence is recorded only as text.** A release's evidence is its creation reason in the audit history; the record page shows "Evidence: None" under Sources, because `release_evidence` holds importer evidence only and MIG-5 isn't implemented. This works for a pilot of 29 releases, but not for thousands.
+1. **Duplicates of unpublished staff candidates.**
+   - **Collector side:** a collector searching a game that's only in review sees "No games found" and can submit it. Their submission stays private to them and editors.
+   - **Already caught in review:** when an editor reviews that submission, **Possible duplicates** lists unpublished records too. `get_submission_review` matches any status but merged: similar game titles, and releases on the same game and platform or with the same code or barcode.
+   - **Correction: no code.** Review practice: when a submission duplicates a staff candidate, publish the reviewed candidate first, then merge the collector's release into it (M7b-2c), which moves their copy with its history. Collectors never see staff candidates.
+   - **M12c-B:** it should also check staff candidates before creating a discovery candidate.
+2. **Finding staff-created candidates.**
+   - The submission queue lists collectors' submissions only.
+   - Catalog records already lists every release in review: the search accepts an empty query with a status filter (`/admin/catalog/search?kind=releases&status=under_review`), showing each row as verified or not.
+   - **Correction (done):** a **Releases in review** link on the review queue page. No new queue or database change.
+3. **"Evidence: None".**
+   - That row shows `release_evidence`: structured, per-field evidence an import recorded. Editor-built releases have none, and MIG-5 isn't implemented.
+   - **Correction (done):** the row is now **Structured source evidence** ("None from an import").
+   - Next to it is a new **Editor's evidence note**: the creating editor's reason, from the audit history, labelled as their free text and "A note, not structured evidence: check it against the source before verifying".
+   - No migration. The note is reviewer-facing only, and admin pages are staff-only.
 4. **Packaging is `unknown` for every A release.** The sources never state construction. A packaging fact needs a person with the item, or a source that states it.
 
 ## Artwork: a separate dependency

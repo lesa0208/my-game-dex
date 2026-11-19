@@ -299,8 +299,10 @@ function cleanup() {
 create temp table t_records on commit drop as
   select distinct x.provider_record_id as id from private.import_run_records x where x.import_run_id in (${runs})
   union select pr.id from private.provider_records pr where pr.import_run_id in (${runs});
-create temp table t_games on commit drop as select matched_game_id as id from private.provider_records where id in (select id from t_records) and matched_game_id is not null
-  union select game_id from private.external_references where game_id is not null and external_id like 'Q9000000%';
+create temp table t_games on commit drop as select x.id from (select matched_game_id as id from private.provider_records where id in (select id from t_records) and matched_game_id is not null
+  union select game_id from private.external_references where game_id is not null and external_id like 'Q9000000%') x
+  -- M12c-A: never a game that was on the stack before the checks (the staged pilot's).
+  where x.id <> all (${q(`{${startingGames}}`)}::uuid[]);
 delete from private.release_evidence where provider_record_id in (select id from t_records);
 delete from public.releases where game_id in (select id from t_games);
 delete from public.games where id in (select id from t_games);
@@ -308,17 +310,39 @@ delete from private.external_references where external_id like 'Q9000000%' or ex
 delete from private.import_run_records where import_run_id in (${runs});
 delete from private.provider_records where id in (select id from t_records);
 delete from private.import_runs where id in (${runs});
-update private.external_providers set commercial_use_cleared = false, terms_url = null, terms_sha256 = null, terms_reviewed_at = null, cleared_note = null
-  where code in ('wikidata', 'no-intro');
+-- M12c-A: each provider's clearance goes back exactly as it was before the checks.
+update private.external_providers p set commercial_use_cleared = c.cleared, terms_url = c.url, terms_sha256 = c.sha, terms_reviewed_at = c.at, cleared_note = c.note
+  from pg_catalog.json_to_recordset(${q(startingClearance)}::json) as c(code text, cleared boolean, url text, sha text, at timestamptz, note text)
+  where p.code = c.code;
 set local session_replication_role = replica;
 delete from private.audit_events where reason like 'Import checks%';
 commit;
 alter role catalog_importer nologin password null;`);
   rmSync(dir, { recursive: true, force: true });
-  const left = psql(`select (select count(*) from private.import_runs) + (select count(*) from private.provider_records) + (select count(*) from public.games) + (select count(*) from private.audit_events where reason like 'Import checks%')
-    || '/' || (select rolcanlogin from pg_roles where rolname = 'catalog_importer');`);
-  check("nothing is left behind, and the importer can't log in", left === "0/false", left);
+  // Exactly the runs, source records and games the stack had before (none on a clean stack).
+  const left = psql(`select (select count(*) from private.audit_events where reason like 'Import checks%') || '/' || (select rolcanlogin from pg_roles where rolname = 'catalog_importer');`);
+  check("nothing is left behind, and the importer can't log in", left === "0/false" && importRows() === startingRows, left);
+  check(
+    "records that were there before are untouched, and clearances restored",
+    psql("select coalesce(string_agg(id::text, ',' order by id), '') from public.games;") === startingGames && clearanceState() === startingClearance,
+  );
 }
+
+// M12c-A: the stack may hold deliberate records (the staged catalog pilot) and a recorded
+// clearance. The checks start from uncleared providers, as they assert, and leave
+// everything they didn't make exactly as it was.
+function importRows() {
+  const digest = (table) => `(select count(*) || ':' || coalesce(md5(string_agg(id::text, ',' order by id)), '') from ${table})`;
+  return psql(`select ${digest("private.import_runs")} || '|' || ${digest("private.provider_records")} || '|' || ${digest("public.games")};`);
+}
+function clearanceState() {
+  return psql(`select coalesce(json_agg(json_build_object('code', code, 'cleared', commercial_use_cleared, 'url', terms_url, 'sha', terms_sha256, 'at', terms_reviewed_at, 'note', cleared_note) order by code), '[]')
+    from private.external_providers where code in ('wikidata', 'no-intro');`);
+}
+const startingRows = importRows();
+const startingGames = psql("select coalesce(string_agg(id::text, ',' order by id), '') from public.games;");
+const startingClearance = clearanceState();
+psql("update private.external_providers set commercial_use_cleared = false, terms_url = null, terms_sha256 = null, terms_reviewed_at = null, cleared_note = null where code in ('wikidata', 'no-intro');");
 
 try {
   psql(`alter role catalog_importer login password ${q(scramVerifier(password))};`);

@@ -14,7 +14,7 @@ import { componentLabel, editionKindLabel, formatCatalogDate, languageName } fro
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { exclusionReasonLabel } from "@/features/exclusion/form";
-import { recordFieldLabel, recordStatusLabel } from "@/features/records/form";
+import { actorLabel, creationNote, recordFieldLabel, recordStatusLabel } from "@/features/records/form";
 import { getRecordHistory, getReleaseRecord } from "@/features/records/queries";
 import type { ReleaseSummary } from "@/features/records/queries";
 import { requestStatusLabel } from "@/features/review/form";
@@ -52,6 +52,7 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
   }
   const r = outcome.data;
   if (!r) notFound();
+  const note = history.ok && history.data ? creationNote(history.data.items, "release") : null;
   const region = r.region
     ? r.region.code === "unknown"
       ? r.region_unknown_confirmed
@@ -190,10 +191,26 @@ async function ReleaseRecordView({ params, searchParams }: { params: PageProps<"
                 value: r.external_references.length ? r.external_references.map((x) => `${x.provider}: ${x.external_id}`).join(", ") : "None",
               },
               {
-                label: "Evidence",
+                // Structured: what an import recorded per field (release_evidence).
+                label: "Structured source evidence",
                 value: r.evidence.length
                   ? r.evidence.map((e) => `${recordFieldLabel(e.field)} from ${e.provider}${e.sources > 1 ? ` (${e.sources} entries)` : ""}`).join(", ")
-                  : "None",
+                  : "None from an import",
+              },
+              {
+                // M12c-A: the creating editor's reason, as written. Free text for the reviewer.
+                label: "Editor's evidence note",
+                value: note ? (
+                  <>
+                    <span className="break-words whitespace-pre-wrap">{note.reason}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Written by {actorLabel(note.actor)} when creating the release, {formatWhen(note.occurred_at)}. A note, not structured evidence: check it against the source
+                      before verifying.
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">{before ? "On the first page of the history" : "None. See the history below"}</span>
+                ),
               },
               {
                 label: "Locked against imports",
