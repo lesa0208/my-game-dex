@@ -279,3 +279,8 @@ Later phases:
 - **Social:** real feed, posts, likes, comments, following, reviews
 - **Discovery:** Explore, global search, collector recommendations, trending games
 - **Advanced:** notifications, messaging, statistics, collection valuation, marketplace
+
+## Contact
+For questions about My Game Dex, API usage, integrations, licensing, or data-provider partnerships, please open a GitHub Issue:
+https://github.com/lesa0208/my-game-dex/issues/new
+The project maintainer monitors incoming issues and will respond through GitHub.
