@@ -25,6 +25,11 @@
  * MGD_STACK=scratch. It's for running every suite on a clean database while the test
  * stack keeps records worth keeping; destroy removes its containers and volumes.
  *
+ * MGD_TEST_STACK=b1 selects the persistent B1 ingestion-test stack (M12c-B1): project
+ * "my-game-dex-b1" in .supabase-b1/, every port moved up by 3000, and run sets MGD_STACK=b1.
+ * It keeps B1 batches and their review history, so reset and destroy refuse unless
+ * MGD_ALLOW_B1_RESET=1 is also set.
+ *
  * MGD_TEST_SIGNUP=off at start or reset makes the test stack invite-only, as a hosted
  * project will be: [auth] enable_signup = false, with the email provider left on (turning
  * that off also blocks password sign-in and recovery; M11a-0).
@@ -38,12 +43,23 @@ import { redact } from "./lib/redact.mjs";
 
 const root = join(import.meta.dirname, "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
-const SCRATCH = process.env.MGD_TEST_STACK === "scratch";
-if (process.env.MGD_TEST_STACK && !SCRATCH) throw new Error('MGD_TEST_STACK may only be "scratch".');
-const TEST_PROJECT_ID = SCRATCH ? "my-game-dex-scratch" : "my-game-dex-test";
-const OFFSET = SCRATCH ? 2000 : 1000;
-const STACK = SCRATCH ? "scratch" : "test";
-const dir = join(root, SCRATCH ? ".supabase-scratch" : ".supabase-test");
+const VARIANTS = {
+  test: { project: "my-game-dex-test", offset: 1000, dir: ".supabase-test", persistent: false },
+  scratch: { project: "my-game-dex-scratch", offset: 2000, dir: ".supabase-scratch", persistent: false },
+  b1: { project: "my-game-dex-b1", offset: 3000, dir: ".supabase-b1", persistent: true },
+};
+const STACK = process.env.MGD_TEST_STACK ?? "test";
+if (!Object.hasOwn(VARIANTS, STACK)) throw new Error('MGD_TEST_STACK may only be "scratch" or "b1".');
+const TEST_PROJECT_ID = VARIANTS[STACK].project;
+const OFFSET = VARIANTS[STACK].offset;
+const dir = join(root, VARIANTS[STACK].dir);
+
+/** A persistent stack's data is review history: resetting or destroying it needs an explicit yes. */
+function guardPersistent(command) {
+  if (VARIANTS[STACK].persistent && process.env.MGD_ALLOW_B1_RESET !== "1") {
+    throw new Error(`Refusing to ${command} the ${STACK} stack: it keeps import batches and their review history. Set MGD_ALLOW_B1_RESET=1 to confirm.`);
+  }
+}
 const target = join(dir, "supabase");
 const PORT_KEYS = new Set(["port", "shadow_port", "inspector_port"]);
 const DISABLED = new Set(["studio", "analytics", "edge_runtime"]);
@@ -122,9 +138,11 @@ async function main() {
     case "status":
       return supabase(["status"]);
     case "reset":
+      guardPersistent("reset");
       prepare();
       return supabase(["db", "reset"]);
     case "destroy":
+      guardPersistent("destroy");
       if (!existsSync(target)) return 0;
       return supabase(["stop", "--no-backup"]);
     case "run":

@@ -2,7 +2,7 @@
 
 **Written for:** the product owner approving M12c-B1, and the engineers who will build it.
 
-**Status, 2026-11-20: approved with corrections (R-1 to R-8). Checkpoint one (parser and acquisition tooling) is implemented. The migrations are specified for review, not implemented.**
+**Status, 2026-11-20: approved with corrections (R-1 to R-8).** Checkpoint one (parser and tooling) and checkpoint two (the isolated B1 stack, source revalidation, critical errors, migration drafts validated on scratch) are done. The migrations are drafts under review, applied nowhere persistent. The full Wikidata fetch waits for an operator-configured contact.
 - No migration, import or download beyond what is listed under [Measured](#measured).
 - Development and the human-reviewed test pilot are unchanged.
 
@@ -119,7 +119,135 @@ Implemented on the local B0 branch: no migration, publication function, staff pa
 
 Processing is in seconds for the pilot. Database growth for the pilot is negligible. These are estimates until measured with the real snapshot.
 
-## The B1 ingestion-test environment (R-6): proposed, not created
+## Checkpoint two: isolation, source revalidation and migration drafts (2026-11-20)
+
+**Approvals recorded.**
+- **A-1:** the architecture is approved in principle. The exact SQL is under review.
+- **A-2:** create the B1 stack.
+- **A-3:** an operator-provided `WIKIDATA_USER_AGENT` only.
+- **A-4:** unresolved critical errors block approval. One approver suffices for the pilot; a configurable second approver applies above 1,000.
+- **A-5:** B1-M0 is a separate migration.
+
+### The B1 stack (created)
+
+| | Value |
+| --- | --- |
+| Project | `my-game-dex-b1`, in `.supabase-b1/` (git-ignored) |
+| Ports | API 57321, database 57322, shadow 57320, pooler 57329, Mailpit 57324, inspector 11083 (studio 57323 and analytics 57327 configured, disabled) |
+| Containers and volumes | `supabase_*_my-game-dex-b1`; volumes `supabase_db_my-game-dex-b1`, `supabase_storage_my-game-dex-b1` |
+| State | The 72 current migrations, no catalog data, no accounts, no provider cleared |
+| Selector | `MGD_STACK=b1`. `MGD_TEST_STACK=b1 node scripts/test-stack.mjs start\|stop\|status` |
+
+**Guards added:**
+- **One table of stacks.** `scripts/lib/stack.mjs` keeps one table of the four stacks (development, test, scratch, b1). An unknown selector is refused, and each config must name its own project.
+- **`requireStack(name)`** refuses any other stack. B1 tooling uses it to stay off development and the M12c-A test stack.
+- **Reset and destroy** of the B1 stack refuse unless `MGD_ALLOW_B1_RESET=1` is set, because it will hold review history.
+
+**Verified on 2026-11-20:**
+- **Ports:** before the start, nothing listened on B1's ports. Port blocks don't overlap: development 543xx and 8083, test 553xx and 9083, scratch 563xx and 10083, B1 573xx and 11083.
+- **Development unchanged:** 72 migrations, 19 games, 30 releases and 5 copies, the same before and after.
+- **M12c-A test stack unchanged:** its releases, collections and audit count hash the same.
+- **Volumes:** exactly two new (B1's), none removed, all 9 `mgd_demo` backups present. Ports 3000 and 3002 still serve.
+
+**Not caused by B1:** in development, the auxiliary `edge_runtime` container had exited and `vector` (log shipping) was restarting. Neither was touched, and development's database, API and auth are healthy.
+
+### Full Wikidata records: not fetched
+
+**No `WIKIDATA_USER_AGENT` is configured** (not in the environment or in project files), so no request was sent.
+
+**What's needed:** the operator sets it to a tool name, a version and a project contact (a role address or a project URL). Then:
+
+```text
+WIKIDATA_USER_AGENT="<tool>/<version> (<project contact>) node/22" \
+  node scripts/catalog-b1.mjs fetch-entities --selection ~/.my-game-dex/catalog-pilot/m12c-b1/selection-snes-150.json --out ~/.my-game-dex/catalog-snapshots/<date>/
+```
+
+That makes 3 requests (50 entities each, at least 1 s apart, `maxlag=5`, honouring `Retry-After`). Then rerun `dry-run` with `--entities`.
+
+### Revalidating the 150
+
+**The selection is unchanged** (SHA-256 `a3774c7b4772ede12d80acb551875c8bef430d1e203ff22af1ccbff2d8961f9c`; source snapshot `ff483655…7bd6e`).
+
+**Changes to the dry run:**
+- Real collisions are now detected on the Unicode-aware key, so "Ⅱ" and "II" collide.
+- Items colliding only on the plain key are reported as artifacts.
+- Each item gets a readiness state and its possible critical errors.
+- A record still pending detail can never be ready.
+
+**The dry run of the query snapshot** (`dry-run-2026-11-20-cp2/`; JSON `6e65c9c6…6f10`, Markdown `26f47d40…1217`):
+
+| | Count |
+| --- | --- |
+| New candidates (create) | 147 |
+| Existing matches (the three M12c-A SNES games) | 3 |
+| Duplicates of catalog games | 0 |
+| Held | 0 |
+| Real collisions: same title after normalization | 12 items in 6 groups |
+| Unicode artifacts (distinct games) | 2 items in 1 group |
+| Pending detail: missing critical evidence, can't be ready | **150** |
+| Ready for editorial consideration | **0** (until the entity records are fetched) |
+| Year-only dates / no date | 21 / 6 |
+
+**The seven collision groups**, from the query snapshot's labels, aliases, Japanese labels and dates:
+
+| Group | Items | Finding | Status |
+| --- | --- | --- | --- |
+| Super Momotaro Dentetsu Ⅱ / Ⅲ | Q11313984, Q11313985 | **False collision.** Separate games (1991-12-20, 1994-12-09) whose numerals the plain key dropped. Normalized, their keys differ | Continue (pending detail) |
+| Space Ace | Q1081894 (1984, year only), Q117865047 (1994-03-25) | Probably the original game's item and a separate item for the SNES version. Our catalog keeps a port under one game, so both would create **conflicting canonical identities** | **Held** |
+| Rocky & Bullwinkle | Q2473951, Q16144658 | The second item's aliases include the first's exact title. Probably a **duplicate item**, or an NES/SNES split | **Held** |
+| Scooby-Doo Mystery | Q3476003, Q65146861 | Identical title and month (1995-11). **Different SNES and Genesis games** share this title, so these may be distinct; or one item is mis-tagged with the SNES | **Held** |
+| Action Pachio | Q4677134, Q135194451 | Same day-precise date. The newer item adds only a Japanese alias. Probably a **duplicate item** | **Held** |
+| Tower Dream | Q7829649, Q132527560 | The newer item is undated, with a Japanese label. Probably a **duplicate item** | **Held** |
+| Albert Odyssey II | Q17192216, Q128221862 | "II" and "2"; the newer item undated. Probably a **duplicate item** | **Held** |
+
+**So the 150 items are probably about 143 or 144 distinct games, not 150.** The held groups need a person: choose the canonical item, and record the other as a duplicate, or confirm two games.
+
+**Eligibility and identifiers can't be assessed** from the query snapshot. These wait for the entity records: other instance-of values (compilations, cancelled or homebrew games), distribution formats (now captured), every platform, and the IGDB and MobyGames ids (two items sharing one is flagged). Physical-catalog eligibility is never inferred from Wikidata: a reviewer confirms it (R-2, R-8).
+
+### Critical errors
+
+**Defined in code** (`CRITICAL_ERRORS` in `scripts/wikidata-entities.mjs`) **and in B1-M2's item check:**
+- `wrong_identity_or_type`: incorrect game identity or type;
+- `wrong_platform`: wrong platform association;
+- `physical_eligibility_unsupported`: physical-catalog eligibility not supported;
+- `distinct_games_merged`: distinct games merged into one;
+- `conflicting_duplicate_identities`: duplicates that would create conflicting canonical games;
+- `conflicting_identifiers`: conflicting authoritative identifiers;
+- `missing_provenance`: missing provenance for a required validation fact.
+
+**Not critical by themselves:** genre, developer, publisher or an exact date.
+
+**How flags relate to them.** Flags point to possible critical errors (`CRITICAL_SIGNALS`). A flagged item is reviewed in full, and in B1-M2 an unresolved critical error blocks the whole batch. **Pending detail always counts as `missing_provenance`.**
+
+### Migration drafts
+
+Complete SQL and pgTAP drafts are in [`docs/proposals/m12c-b1/`](../proposals/m12c-b1/README.md), with invariants, RLS, no-self-review, MFA, revision invalidation and rollbacks. They were validated on a disposable scratch stack, then destroyed:
+- the full pgTAP suite with the drafts passes **3,786 / 3,786** (the existing 3,715, plus 14, 25 and 32 new);
+- 13 database check suites pass **786 / 786**;
+- both rollbacks apply.
+
+They are **not** applied to development, the M12c-A stack or the B1 stack.
+
+### Remaining critical errors (pilot data)
+
+| # | Item | Possible critical error |
+| --- | --- | --- |
+| 1 | All 150 | `missing_provenance` until the entity records are fetched |
+| 2 | Space Ace (2 items) | `conflicting_duplicate_identities` |
+| 3 | Rocky & Bullwinkle (2) | `conflicting_duplicate_identities` |
+| 4 | Scooby-Doo Mystery (2) | `conflicting_duplicate_identities`, or `wrong_platform` if one is the Genesis game |
+| 5 | Action Pachio (2) | `conflicting_duplicate_identities` |
+| 6 | Tower Dream (2) | `conflicting_duplicate_identities` |
+| 7 | Albert Odyssey II (2) | `conflicting_duplicate_identities` |
+
+### Recommended next checkpoint
+
+1. The operator configures `WIKIDATA_USER_AGENT`. Then fetch the 150 entity records and rerun the full-detail dry run.
+2. Review of the migration drafts. Once approved, they move to `supabase/migrations/` and are applied to the B1 stack only.
+3. The importer step: entity snapshots through the M5b importer, with the parser's flags in `payload.review_flags`, as candidates on the B1 stack.
+4. Then the batch, the census review by the product owner as editor B, approval, and the collector checks generalized to identity-only games.
+
+## The B1 ingestion-test environment (R-6): created in checkpoint two
 
 A fourth local stack, persistent like the test stack, built by the same generator (`scripts/test-stack.mjs`) as a third variant:
 
@@ -489,7 +617,7 @@ Each step ends at a checkpoint for review. Every database change is forward-only
 | R-3 | Sampling parameters | 2% tolerable error, 95% confidence, c = 0 (sample 138 for about 1,280 unflagged SNES items) |
 | R-4 | Who approves batches | A catalog editor who didn't create the batch. Optionally a second approver for batches over a size the product owner sets |
 | R-5 | Storing IGDB and MobyGames ids from Wikidata | In source records now (CC0 values), as external references only once that provider is cleared |
-| R-6 | Pilot location | **Decided:** a separate, persistent B1 stack, not the M12c-A test stack (see [the B1 environment](#the-b1-ingestion-test-environment-r-6-proposed-not-created)) |
+| R-6 | Pilot location | **Decided:** a separate, persistent B1 stack, not the M12c-A test stack (see [the B1 environment](#the-b1-ingestion-test-environment-r-6-created-in-checkpoint-two)) |
 | R-7 | The project contact for `WIKIDATA_USER_AGENT` | Chosen by the product owner (D-7) |
 | R-8 | Whether pairing verification is a separate step, or part of identity approval | Part of batch approval for imported identities, separate for editor-made ones |
 | D-8 | Legal review | Before a commercial launch, or before accepting any provider's contractual terms (recorded) |

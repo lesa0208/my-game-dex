@@ -114,7 +114,15 @@ test("the dry run: create, match, duplicate and hold, with batch and catalog fla
   for (const id of ["Q1003", "Q1004", "Q1011"]) assert.equal(it[id].outcome, "held");
   assert.ok(it.Q1001.flags.includes("title_collision_in_batch") && it.Q1007.flags.includes("title_collision_in_batch"));
   assert.ok(it.Q1001.flags.includes("external_id_shared_in_batch") && it.Q1006.flags.includes("external_id_shared_in_batch"));
-  assert.deepEqual(report.totals, { items: 12, create: 7, matched: 1, duplicate: 1, held: 3, exception_review: 8, clean: 1, releases_created: 0, published: 0 });
+  assert.deepEqual(report.totals, {
+    items: 12, create: 7, matched: 1, duplicate: 1, held: 3, exception_review: 8, clean: 1,
+    readiness: { held: 3, pending_detail: 0, needs_review: 8, ready_for_editorial_consideration: 1 },
+    possible_critical: 6, releases_created: 0, published: 0,
+  });
+  assert.deepEqual(it.Q1001.possible_critical, ["conflicting_duplicate_identities", "conflicting_identifiers"]);
+  assert.deepEqual(it.Q1005.possible_critical, ["wrong_identity_or_type", "wrong_platform"]);
+  assert.equal(it.Q1009.readiness, "ready_for_editorial_consideration");
+  assert.deepEqual(report.collision_groups.map((g) => [g.verdict, g.members.map((m) => m.id)]), [["same_title_needs_review", ["Q1001", "Q1007"]]]);
 });
 
 test("without entity records, the query snapshot is used and flagged as pending detail", () => {
@@ -188,4 +196,30 @@ test("the fetch refuses without a project contact, batches by 50, waits between 
   // A request that keeps failing stops the fetch, and nothing is returned.
   const failing = async () => ({ ok: false, status: 503, headers: { get: () => null }, json: async () => ({}) });
   await assert.rejects(fetchEntities(["Q1"], { userAgent: "MyTool/1.0 (ops@example.test) node/22", fetchImpl: failing, now: () => 0, sleep: async () => {} }), /after 5 attempt/);
+});
+
+test("Unicode numerals: Ⅱ and Ⅲ collide on the plain key only, and are reported as an artifact", () => {
+  const entry = (id, title) => ({ entity_type: "game", external_id: id, flags: [], payload: { title, titles: [title], first_release_date: "1991-12-20", first_release_precision: "day", source: { external_ids: {} } } });
+  const report = dryRun({
+    selection: { selector: "f", seed: "f", ids: ["Q1", "Q2", "Q3", "Q4"] },
+    platformQid: SNES,
+    entries: [entry("Q1", "Zqx Rail Baron Ⅱ"), entry("Q2", "Zqx Rail Baron Ⅲ"), entry("Q3", "Zqx Night Ⅱ"), entry("Q4", "Zqx Night II")],
+    catalog: { games: [] },
+  });
+  const it = Object.fromEntries(report.items.map((i) => [i.id, i]));
+  assert.deepEqual([it.Q1.flags, it.Q2.flags], [["title_collision_unicode_artifact"], ["title_collision_unicode_artifact"]]);
+  assert.equal(it.Q1.readiness, "ready_for_editorial_consideration");
+  // "Ⅱ" and "II" are the same title once normalized: a real collision.
+  assert.deepEqual([it.Q3.flags, it.Q4.flags], [["title_collision_in_batch"], ["title_collision_in_batch"]]);
+  assert.equal(it.Q3.readiness, "needs_review");
+  assert.deepEqual(report.collision_groups.map((g) => g.verdict).sort(), ["same_title_needs_review", "unicode_artifact_distinct_titles"]);
+});
+
+test("a record whose entity detail is pending is never ready, whatever else it shows", () => {
+  const report = dryRunFiles({ selectionText: JSON.stringify({ selector: "f", seed: "f", ids: ["Q1009", "Q1013"] }), wikidataText: fixture("query-snes.json"), catalogText: fixture("catalog.json") });
+  for (const i of report.items) {
+    assert.equal(i.readiness, "pending_detail");
+    assert.ok(i.possible_critical.includes("missing_provenance"));
+  }
+  assert.equal(report.totals.readiness.ready_for_editorial_consideration, 0);
 });

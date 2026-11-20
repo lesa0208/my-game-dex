@@ -1,0 +1,107 @@
+--- supabase/tests/database/01_foundation.test.sql	2026-11-19 14:14:13.349525100 +0100
++++ supabase/tests/database/01_foundation.test.sql	2026-11-20 11:07:33.079506600 +0100
+@@ -18,7 +18,7 @@
+ -- Only approved objects exist. Later steps add to this list deliberately.
+ select is(
+   (select coalesce(array_agg(c.relname::text order by c.relname), '{}') from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname in ('public', 'private') and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')),
+-  array['account_invitations', 'audit_events', 'blocked_users', 'catalog_change_requests', 'catalog_exclusion_copies', 'catalog_exclusions', 'catalog_field_locks', 'catalog_merge_copies', 'catalog_merge_references', 'catalog_merges', 'catalog_reclassifications', 'catalog_record_origins', 'catalog_verifications', 'collection_item_components', 'collection_item_identity_events', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'mfa_factor_registrations', 'notifications', 'owner_recoveries', 'ownership_transfers', 'packaging_types', 'platform_media_formats', 'platform_names', 'platform_owner', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'request_slots', 'staff_roles', 'submission_requests', 'user_preferences'],
++  array['account_invitations', 'audit_events', 'blocked_users', 'catalog_change_requests', 'catalog_exclusion_copies', 'catalog_exclusions', 'catalog_field_locks', 'catalog_merge_copies', 'catalog_merge_references', 'catalog_merges', 'catalog_pairing_origins', 'catalog_reclassifications', 'catalog_record_origins', 'catalog_review_batch_approvals', 'catalog_review_batch_items', 'catalog_review_batches', 'catalog_review_policy', 'catalog_verifications', 'collection_item_components', 'collection_item_identity_events', 'collection_item_private', 'collection_items', 'external_providers', 'external_references', 'follows', 'game_aliases', 'game_platforms', 'game_relations', 'game_title_keys', 'games', 'handle_holds', 'hardware_requirements', 'import_run_records', 'import_runs', 'markets', 'media_formats', 'mfa_factor_registrations', 'notifications', 'owner_recoveries', 'ownership_transfers', 'packaging_types', 'platform_media_formats', 'platform_names', 'platform_owner', 'platforms', 'profiles', 'provider_records', 'region_codes', 'release_components', 'release_evidence', 'release_hardware_requirements', 'release_markets', 'releases', 'request_slots', 'staff_roles', 'submission_requests', 'user_preferences'],
+   'only the approved tables exist, with no views or sequences'
+ );
+ 
+--- supabase/tests/database/10_staff_and_functions.test.sql	2026-11-19 13:47:07.136362100 +0100
++++ supabase/tests/database/10_staff_and_functions.test.sql	2026-11-20 11:10:08.786888700 +0100
+@@ -83,35 +83,40 @@
+ select is(
+   (select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef),
+   array[
+-    'accept_follow_request(uuid)', 'accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'approve_submission(uuid,integer,bigint,bigint,text,text)',
+-    'block_user(uuid)', 'can_review_submissions()', 'cancel_follow_request(uuid)', 'cancel_owner_recovery(uuid,text)', 'cancel_ownership_transfer(uuid,text)', 'claim_handle(text)', 'complete_my_password_setup()',
+-    'confirm_owner_recovery(uuid)', 'create_account_invitation(text,text)', 'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)',
+-    'delete_notification(uuid)', 'exclude_release(uuid,text,text,text,text,boolean,boolean)', 'find_account_by_handle(text)', 'get_account_invitations(integer,uuid)', 'get_account_summary(text)',
+-    'get_admin_overview()', 'get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)', 'get_catalog_record_history(text,uuid,integer,uuid)',
+-    'get_catalog_review_queue(integer)', 'get_exclusion(uuid)', 'get_exclusion_preview(uuid)', 'get_exclusions(text,uuid,integer)', 'get_follow_state(uuid)', 'get_followers(uuid,integer,timestamp with time zone,uuid)',
+-    'get_following(uuid,integer,timestamp with time zone,uuid)', 'get_game_record(uuid)', 'get_import_providers()', 'get_import_run(uuid)', 'get_import_run_records(uuid,text,integer,integer)',
+-    'get_import_runs(integer,uuid,text,text)', 'get_merge(uuid)', 'get_merge_candidates(uuid)', 'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_admin_access()',
+-    'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_my_copy_history(uuid)', 'get_my_factor_status()', 'get_my_game_ownership(uuid)', 'get_my_merged_submission(uuid)', 'get_my_notifications(integer,uuid)', 'get_my_onboarding()', 'get_my_owned_games(uuid[])', 'get_my_preserved_claim(uuid)', 'get_my_preserved_release(uuid)',
+-    'get_my_preserved_titles(uuid[])', 'get_my_submission(uuid)', 'get_ownership_status()', 'get_profile_counts(uuid)', 'get_received_follow_requests(integer,timestamp with time zone,uuid)',
+-    'get_release_picker(text,text,text,uuid)', 'get_release_record(uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'get_staff_overview()', 'get_submission_queue(text,uuid,integer)',
+-    'get_submission_review(uuid)', 'get_system_status()', 'get_unread_notification_count()', 'grant_staff_role(uuid,staff_role,text)', 'invitation_delivery_plan(uuid)', 'invitation_revocation_target(uuid)',
+-    'list_catalog_platforms()', 'mark_notifications_read(uuid)', 'merge_release(uuid,uuid,text,text,text,text[],boolean)', 'my_catalog_submissions(uuid,integer)', 'my_submission_for_release(uuid)',
+-    'private.account_standing(uuid)', 'private.block_peers()', 'private.can_claim(uuid,uuid)', 'private.can_exercise_owner_authority()', 'private.can_read_release(uuid)', 'private.can_use_release(uuid)', 'private.can_view_collection(uuid)',
+-    'private.can_view_connections(uuid)', 'private.can_view_level(uuid,visibility_level)', 'private.check_catalog_publication()', 'private.check_moved_copy_release()', 'private.check_new_copy_release()',
+-    'private.guard_catalog_record_origin()', 'private.handle_new_user()', 'private.has_staff_role(staff_role)', 'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)', 'private.is_active_user()',
+-    'private.is_blocked_between(uuid)', 'private.is_catalog_editor()', 'private.is_designated_owner(uuid)', 'private.lock_claimable_game(uuid,uuid)', 'private.lock_usable_release(uuid,uuid)', 'private.mature_totp_factor_count(uuid)',
+-    'private.mfa_recent(interval)', 'private.mfa_session_ok()', 'private.my_preserved_claims(uuid[])', 'private.my_preserved_releases(uuid[])', 'private.notify_follow_change()', 'private.owner_authority_refusal()', 'private.owner_integrity()',
+-    'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.record_copy_identity_change()', 'private.require_active_user()', 'private.require_verified_user()', 'private.session_is_live()', 'private.sync_catalog_verification()',
+-    'private.totp_factor_count(uuid,interval)', 'private.validate_display_name()', 'publish_release(uuid,text,bigint)', 'reconcile_invitation(uuid)', 'record_invitation_delivery(uuid,text,text)',
+-    'register_my_verified_factors()', 'register_succession_document(text,text)', 'reject_follow_request(uuid)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)', 'remove_follower(uuid)',
+-    'remove_game_alias(uuid,text)', 'request_follow(uuid)', 'request_invitation_resend(uuid,text)', 'request_invitation_revocation(uuid,text)', 'request_submission_changes(uuid,integer,text,text)',
+-    'resolve_catalog_review(uuid,text)', 'resolve_merged_release(uuid)', 'restore_exclusion(uuid,integer,text)', 'resubmit_my_submission(uuid,text)', 'retry_invitation_revocation(uuid)',
+-    'revoke_staff_role(uuid,staff_role,text)', 'search_accounts(text,integer)', 'search_catalog(text,text[],integer,text)', 'search_catalog_records(text,text,text,text,integer,text)', 'set_account_status(uuid,account_status,text)',
+-    'set_avatar_path(uuid,text)', 'set_catalog_field_lock(text,uuid,text,boolean,text)', 'set_game_platform(uuid,uuid,text)', 'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_my_copy_identity(uuid,jsonb)',
+-    'set_owner_successor(uuid,text)', 'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)', 'start_ownership_transfer(uuid,text)',
+-    'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'take_request_slot(text)',
+-    'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)', 'verify_game(uuid,text,bigint)', 'verify_release(uuid,text,bigint)',
+-    'withdraw_my_submission(uuid)'
++    'accept_follow_request(uuid)', 'accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'approve_review_batch(uuid,text)',
++    'approve_submission(uuid,integer,bigint,bigint,text,text)', 'block_user(uuid)', 'can_review_submissions()', 'cancel_follow_request(uuid)', 'cancel_owner_recovery(uuid,text)',
++    'cancel_ownership_transfer(uuid,text)', 'claim_handle(text)', 'complete_my_password_setup()', 'confirm_owner_recovery(uuid)', 'create_account_invitation(text,text)',
++    'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)', 'create_review_batch(uuid,uuid,text)', 'delete_notification(uuid)', 'exclude_release(uuid,text,text,text,text,boolean,boolean)',
++    'find_account_by_handle(text)', 'get_account_invitations(integer,uuid)', 'get_account_summary(text)', 'get_admin_overview()', 'get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)',
++    'get_catalog_record_history(text,uuid,integer,uuid)', 'get_catalog_review_queue(integer)', 'get_exclusion(uuid)', 'get_exclusion_preview(uuid)', 'get_exclusions(text,uuid,integer)',
++    'get_follow_state(uuid)', 'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)', 'get_game_record(uuid)', 'get_import_providers()',
++    'get_import_run(uuid)', 'get_import_run_records(uuid,text,integer,integer)', 'get_import_runs(integer,uuid,text,text)', 'get_merge(uuid)', 'get_merge_candidates(uuid)',
++    'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_admin_access()', 'get_my_blocks(integer,timestamp with time zone,uuid)',
++    'get_my_copy_history(uuid)', 'get_my_factor_status()', 'get_my_game_ownership(uuid)', 'get_my_merged_submission(uuid)', 'get_my_notifications(integer,uuid)',
++    'get_my_onboarding()', 'get_my_owned_games(uuid[])', 'get_my_preserved_claim(uuid)', 'get_my_preserved_release(uuid)', 'get_my_preserved_titles(uuid[])',
++    'get_my_submission(uuid)', 'get_ownership_status()', 'get_profile_counts(uuid)', 'get_received_follow_requests(integer,timestamp with time zone,uuid)', 'get_release_picker(text,text,text,uuid)',
++    'get_release_record(uuid)', 'get_review_batch(uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'get_staff_overview()', 'get_submission_queue(text,uuid,integer)',
++    'get_submission_review(uuid)', 'get_system_status()', 'get_unread_notification_count()', 'grant_staff_role(uuid,staff_role,text)', 'invitation_delivery_plan(uuid)',
++    'invitation_revocation_target(uuid)', 'list_catalog_platforms()', 'mark_notifications_read(uuid)', 'merge_release(uuid,uuid,text,text,text,text[],boolean)', 'my_catalog_submissions(uuid,integer)',
++    'my_submission_for_release(uuid)', 'private.account_standing(uuid)', 'private.block_peers()', 'private.can_claim(uuid,uuid)', 'private.can_exercise_owner_authority()',
++    'private.can_read_release(uuid)', 'private.can_use_release(uuid)', 'private.can_view_collection(uuid)', 'private.can_view_connections(uuid)', 'private.can_view_level(uuid,visibility_level)',
++    'private.check_catalog_publication()', 'private.check_moved_copy_release()', 'private.check_new_copy_release()', 'private.guard_catalog_record_origin()', 'private.handle_new_user()',
++    'private.has_staff_role(staff_role)', 'private.hold_handle_on_delete()', 'private.is_accepted_follower(uuid)', 'private.is_active_user()', 'private.is_blocked_between(uuid)',
++    'private.is_catalog_editor()', 'private.is_designated_owner(uuid)', 'private.lock_claimable_game(uuid,uuid)', 'private.lock_usable_release(uuid,uuid)', 'private.mature_totp_factor_count(uuid)',
++    'private.mfa_recent(interval)', 'private.mfa_session_ok()', 'private.my_preserved_claims(uuid[])', 'private.my_preserved_releases(uuid[])', 'private.notify_follow_change()',
++    'private.owner_authority_refusal()', 'private.owner_integrity()', 'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()',
++    'private.record_copy_identity_change()', 'private.require_active_user()', 'private.require_verified_user()', 'private.session_is_live()', 'private.sync_catalog_verification()',
++    'private.totp_factor_count(uuid,interval)', 'private.validate_display_name()', 'publish_game_identity(uuid,uuid[],text,bigint)', 'publish_release(uuid,text,bigint)', 'reconcile_invitation(uuid)',
++    'record_batch_outcome(uuid,uuid,text,text,text)', 'record_invitation_delivery(uuid,text,text)', 'register_my_verified_factors()', 'register_succession_document(text,text)', 'reject_follow_request(uuid)',
++    'reject_review_batch(uuid,text)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)', 'remove_follower(uuid)', 'remove_game_alias(uuid,text)',
++    'request_follow(uuid)', 'request_invitation_resend(uuid,text)', 'request_invitation_revocation(uuid,text)', 'request_submission_changes(uuid,integer,text,text)', 'resolve_catalog_review(uuid,text)',
++    'resolve_merged_release(uuid)', 'restore_exclusion(uuid,integer,text)', 'resubmit_my_submission(uuid,text)', 'retry_invitation_revocation(uuid)', 'revoke_staff_role(uuid,staff_role,text)',
++    'search_accounts(text,integer)', 'search_catalog(text,text[],integer,text)', 'search_catalog_records(text,text,text,text,integer,text)', 'set_account_status(uuid,account_status,text)', 'set_avatar_path(uuid,text)',
++    'set_catalog_field_lock(text,uuid,text,boolean,text)', 'set_game_platform(uuid,uuid,text)', 'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_my_copy_identity(uuid,jsonb)', 'set_owner_successor(uuid,text)',
++    'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)', 'start_ownership_transfer(uuid,text)', 'start_submission_review(uuid,integer,text)',
++    'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'take_request_slot(text)',
++    'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)',
++    'verify_game(uuid,text,bigint)', 'verify_game_platform(uuid,uuid,jsonb,text,bigint)', 'verify_release(uuid,text,bigint)', 'withdraw_my_submission(uuid)'
+   ],
+   'only the expected functions are SECURITY DEFINER'
+ );
+--- supabase/tests/database/14_audit.test.sql	2026-11-18 17:00:00.773770300 +0100
++++ supabase/tests/database/14_audit.test.sql	2026-11-20 11:07:33.079506600 +0100
+@@ -81,7 +81,7 @@
+ -- Schema and access
+ select has_table('private', 'audit_events', 'audit_events exists in private');
+ select is((select string_agg(e.enumlabel, ',' order by e.enumsortorder) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'audit_action'),
+-  'staff_role_granted,staff_role_revoked,account_suspended,account_reinstated,operator_action,catalog_record_created,catalog_record_updated,catalog_record_verified,catalog_record_published,catalog_field_locked,catalog_field_unlocked,catalog_import_run,catalog_provider_cleared,catalog_record_withdrawn,catalog_review_queued,catalog_review_resolved,catalog_alias_added,catalog_alias_removed,catalog_submission_created,catalog_submission_updated,catalog_submission_withdrawn,catalog_submission_review_started,catalog_submission_approved,catalog_submission_changes_requested,catalog_submission_rejected,catalog_submission_resubmitted,catalog_release_excluded,catalog_exclusion_restored,catalog_release_merged,owner_assigned,owner_recovery_started,owner_recovery_completed,owner_status_set_by_operator,owner_recovery_confirmed,owner_recovery_cancelled,ownership_transfer_started,ownership_transfer_accepted,ownership_transfer_cancelled,owner_successor_set,owner_succession_registered,owner_protection_refused,staff_change_refused,account_invited,account_invitation_delivery,account_invitation_resent,account_invitation_revoke_requested,account_invitation_revoked', 'the M4, M5a, M5b, M5c, M7a, M7b-1, M7b-2b, M8a and M11a-1 audit actions exist');
++  'staff_role_granted,staff_role_revoked,account_suspended,account_reinstated,operator_action,catalog_record_created,catalog_record_updated,catalog_record_verified,catalog_record_published,catalog_field_locked,catalog_field_unlocked,catalog_import_run,catalog_provider_cleared,catalog_record_withdrawn,catalog_review_queued,catalog_review_resolved,catalog_alias_added,catalog_alias_removed,catalog_submission_created,catalog_submission_updated,catalog_submission_withdrawn,catalog_submission_review_started,catalog_submission_approved,catalog_submission_changes_requested,catalog_submission_rejected,catalog_submission_resubmitted,catalog_release_excluded,catalog_exclusion_restored,catalog_release_merged,owner_assigned,owner_recovery_started,owner_recovery_completed,owner_status_set_by_operator,owner_recovery_confirmed,owner_recovery_cancelled,ownership_transfer_started,ownership_transfer_accepted,ownership_transfer_cancelled,owner_successor_set,owner_succession_registered,owner_protection_refused,staff_change_refused,account_invited,account_invitation_delivery,account_invitation_resent,account_invitation_revoke_requested,account_invitation_revoked,catalog_batch_created,catalog_batch_outcome_recorded,catalog_batch_approval_recorded,catalog_batch_approved,catalog_batch_rejected', 'the M4, M5a, M5b, M5c, M7a, M7b-1, M7b-2b, M8a, M11a-1 and M12c-B1 audit actions exist');
+ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) p
+   where has_table_privilege(r, 'private.audit_events', p)), 0, 'no API role has any privilege on audit_events');
+ select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array[
+--- supabase/tests/database/03_schema_guards.test.sql	2026-11-19 13:47:07.136362100 +0100
++++ supabase/tests/database/03_schema_guards.test.sql	2026-11-20 11:05:43.401467200 +0100
+@@ -109,6 +109,10 @@
+   ('verify_release(uuid,text,bigint)', 'authenticated'),
+   ('publish_release(uuid,text,bigint)', 'authenticated'),
+   ('set_catalog_field_lock(text,uuid,text,boolean,text)', 'authenticated'),
++  -- M12c-B1: identity publication (B1-M1) and review batches (B1-M2). Each checks the caller itself.
++  ('verify_game_platform(uuid,uuid,jsonb,text,bigint)', 'authenticated'), ('publish_game_identity(uuid,uuid[],text,bigint)', 'authenticated'),
++  ('create_review_batch(uuid,uuid,text)', 'authenticated'), ('record_batch_outcome(uuid,uuid,text,text,text)', 'authenticated'),
++  ('approve_review_batch(uuid,text)', 'authenticated'), ('reject_review_batch(uuid,text)', 'authenticated'), ('get_review_batch(uuid)', 'authenticated'),
+   -- M5b: the editor review queue.
+   ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
+   -- M5c: editor aliases, and the public search, which anyone may call.

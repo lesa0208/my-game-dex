@@ -9,6 +9,10 @@
  *                   "my-game-dex-scratch", ports plus 2000, for running every suite from
  *                   scratch while the test stack keeps records worth keeping
  *                   (MGD_TEST_STACK=scratch node scripts/test-stack.mjs start|run|destroy)
+ *   MGD_STACK=b1    the persistent B1 ingestion-test stack (M12c-B1): .supabase-b1/, project
+ *                   "my-game-dex-b1", ports plus 3000. It keeps B1 import batches and their
+ *                   human review history, apart from development, the M12c-A test stack and
+ *                   scratch (MGD_TEST_STACK=b1 node scripts/test-stack.mjs start|stop|status)
  *
  * Every script reads the project, container, CLI arguments and status from here, so
  * none can mix the two. Both stacks must answer on a loopback address, and each must
@@ -33,27 +37,40 @@ export const TEST_PROJECT_ID = "my-game-dex-test";
 /** The test stack's ports are the development ports plus this. */
 export const TEST_PORT_OFFSET = 1000;
 export const SCRATCH_PROJECT_ID = "my-game-dex-scratch";
+export const B1_PROJECT_ID = "my-game-dex-b1";
+
+/** Every local stack: its project id, its directory (the CLI's --workdir) and its port offset. */
+export const STACKS = {
+  dev: { project: DEV_PROJECT_ID, dir: ".", offset: 0 },
+  test: { project: TEST_PROJECT_ID, dir: ".supabase-test", offset: TEST_PORT_OFFSET },
+  scratch: { project: SCRATCH_PROJECT_ID, dir: ".supabase-scratch", offset: 2000 },
+  b1: { project: B1_PROJECT_ID, dir: ".supabase-b1", offset: 3000 },
+};
 export const DEV_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-dev-stack");
 
 const requested = process.env.MGD_STACK ?? "dev";
-if (requested !== "dev" && requested !== "test" && requested !== "scratch") {
-  throw new Error(`MGD_STACK must be "dev", "test" or "scratch", not "${requested}".`);
+if (!Object.hasOwn(STACKS, requested)) {
+  throw new Error(`MGD_STACK must be one of ${Object.keys(STACKS).map((k) => `"${k}"`).join(", ")}, not "${requested}".`);
 }
 export const stackName = requested;
 export const testStackDir = join(root, ".supabase-test");
 export const scratchStackDir = join(root, ".supabase-scratch");
 /** The directory the Supabase CLI treats as the project (its --workdir). */
-export const stackDir = stackName === "test" ? testStackDir : stackName === "scratch" ? scratchStackDir : root;
+export const stackDir = stackName === "dev" ? root : join(root, STACKS[stackName].dir);
 export const stackConfigPath = join(stackDir, "supabase", "config.toml");
 
 if (!existsSync(stackConfigPath)) {
   throw new Error(
-    stackName === "test" ? "The test stack isn't prepared. Run npm run test-stack:start." : stackName === "scratch" ? "The scratch stack isn't prepared. Run MGD_TEST_STACK=scratch node scripts/test-stack.mjs start." : `Missing ${stackConfigPath}.`,
+    stackName === "dev"
+      ? `Missing ${stackConfigPath}.`
+      : stackName === "test"
+        ? "The test stack isn't prepared. Run npm run test-stack:start."
+        : `The ${stackName} stack isn't prepared. Run MGD_TEST_STACK=${stackName} node scripts/test-stack.mjs start.`,
   );
 }
 export const stackConfig = readFileSync(stackConfigPath, "utf8");
 export const projectId = /project_id\s*=\s*"([^"]+)"/.exec(stackConfig)?.[1];
-const expectedProject = stackName === "test" ? TEST_PROJECT_ID : stackName === "scratch" ? SCRATCH_PROJECT_ID : DEV_PROJECT_ID;
+const expectedProject = STACKS[stackName].project;
 if (projectId !== expectedProject) {
   throw new Error(`Refusing: the ${stackName} stack's config names project "${projectId}", not "${expectedProject}".`);
 }
@@ -62,6 +79,17 @@ const apiPort = Number(/\[api\][\s\S]*?\nport\s*=\s*(\d+)/.exec(stackConfig)?.[1
 /** Extra Supabase CLI arguments that select this stack. */
 export const workdirArgs = stackName === "dev" ? [] : ["--workdir", stackDir];
 export const dbContainer = `supabase_db_${projectId}`;
+
+/**
+ * M12c-B1: throws unless the selected stack is exactly the one a tool is written for, so B1
+ * tooling can never reach development or the M12c-A test stack, and M12c-A tooling never B1.
+ */
+export function requireStack(name, label = "this tool") {
+  if (!Object.hasOwn(STACKS, name)) throw new Error(`Unknown stack "${name}".`);
+  if (stackName !== name || projectId !== STACKS[name].project) {
+    throw new Error(`Refusing: ${label} runs only on the ${name} stack (MGD_STACK=${name}), not on "${stackName}" (project "${projectId}").`);
+  }
+}
 
 /** Throws if destructive work would target the protected development stack. */
 export function guardDevStack(label = "this script") {

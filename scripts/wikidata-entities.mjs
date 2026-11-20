@@ -35,6 +35,7 @@ export const WD = {
   publisher: "P123",
   genre: "P136",
   romanizedJapanese: "P2125",
+  distributionFormat: "P437",
   igdbGameId: "P5794",
   mobyGamesGameId: "P11688",
   mobyGamesGameIdFormer: "P1933",
@@ -72,9 +73,42 @@ export const FLAGS = {
   external_id_shared_in_batch: "exception",
   catalog_title_match_same_platform: "exception",
   catalog_title_match_other_platform: "info",
+  title_collision_unicode_artifact: "info",
   catalog_source_id_linked: "info",
   many_platforms: "info",
 };
+
+/**
+ * Critical errors (M12c-B1, A-4 and § 4 of the checkpoint-two brief). A batch can't be
+ * approved while any is unresolved, whatever its sample says. They are decided by a person;
+ * the flags below only point to where one may be.
+ */
+export const CRITICAL_ERRORS = {
+  wrong_identity_or_type: "Incorrect game identity or game type (not a game, a compilation or edition taken for a game, two games as one)",
+  wrong_platform: "Wrong platform association",
+  physical_eligibility_unsupported: "Physical-catalog eligibility not supported (digital-only, broadcast, prototype, homebrew, unreleased)",
+  distinct_games_merged: "Distinct games merged into one identity",
+  conflicting_duplicate_identities: "Duplicate identities that would create conflicting canonical games",
+  conflicting_identifiers: "Conflicting authoritative identifiers",
+  missing_provenance: "Missing provenance for a required validation fact",
+};
+
+/** Flags that may indicate a critical error: an item carrying one can't be ready until a person resolves it. */
+export const CRITICAL_SIGNALS = {
+  entity_detail_pending: "missing_provenance",
+  title_collision_in_batch: "conflicting_duplicate_identities",
+  external_id_shared_in_batch: "conflicting_identifiers",
+  catalog_title_match_same_platform: "conflicting_duplicate_identities",
+  other_instance_of: "wrong_identity_or_type",
+  platform_date_before_launch: "wrong_platform",
+  platform_date_after_era: "physical_eligibility_unsupported",
+};
+
+/**
+ * The title key for identity checks: compatibility-normalized first (NFKC), so "Ⅱ" is "II"
+ * and no longer vanishes. B1-M0 proposes the same for the database keys.
+ */
+export const identityTitleKey = (title) => titleKey(String(title ?? "").normalize("NFKC"));
 
 const PRECISION = { 9: "year", 10: "month", 11: "day" };
 const RANK = { day: 3, month: 2, year: 1 };
@@ -173,6 +207,7 @@ export function entityToEntry(entity, platformQid) {
       developers: itemIds(entity, WD.developer),
       publishers: itemIds(entity, WD.publisher),
       genres: itemIds(entity, WD.genre),
+      distribution_formats: itemIds(entity, WD.distributionFormat),
       external_ids: {
         igdb: strings(entity, WD.igdbGameId),
         mobygames: strings(entity, WD.mobyGamesGameId),
@@ -276,11 +311,11 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
   const platformSlug = PLATFORM_ERAS[platformQid]?.slug ?? null;
   const byId = new Map(entries.map((e) => [e.external_id, e]));
   const linked = new Map();
-  const keyIndex = { title: new Map(), compact: new Map(), main: new Map() };
+  const keyIndex = { title: new Map(), identity: new Map(), compact: new Map(), main: new Map() };
   for (const g of catalog?.games ?? []) {
     for (const q of g.wikidata ?? []) linked.set(q, g);
     for (const t of new Set([g.title, ...(g.titles ?? [])].filter(Boolean))) {
-      for (const [kind, fn] of [["title", titleKey], ["compact", compactTitleKey], ["main", mainTitleKey]]) {
+      for (const [kind, fn] of [["title", titleKey], ["identity", identityTitleKey], ["compact", compactTitleKey], ["main", mainTitleKey]]) {
         const k = fn(t);
         if (k) keyIndex[kind].set(k, [...(keyIndex[kind].get(k) ?? []), g]);
       }
@@ -297,8 +332,30 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
     for (const it of items) for (const k of keyOf(it)) m.set(k, [...(m.get(k) ?? []), it]);
     return [...m.values()].filter((group) => group.length > 1);
   };
-  for (const group of tally((it) => (it.entry.ignore_reason ? [] : [titleKey(it.entry.payload.title ?? "")].filter(Boolean)))) {
-    for (const it of group) it.flags.push("title_collision_in_batch");
+  // Real collisions share the Unicode-aware key ("Ⅱ" and "II" alike). Items that share
+  // only the plain key collided because a character such as "Ⅱ" was dropped from it.
+  const collisionGroups = [];
+  const titled = (it) => !it.entry.ignore_reason && it.entry.payload?.title;
+  const summary = (it) => ({
+    id: it.id,
+    title: it.entry.payload.title,
+    identity_key: identityTitleKey(it.entry.payload.title),
+    first_release: it.entry.payload.first_release_date ?? null,
+    precision: it.entry.payload.first_release_precision ?? null,
+  });
+  const real = new Set();
+  for (const group of tally((it) => (titled(it) ? [identityTitleKey(it.entry.payload.title)].filter(Boolean) : []))) {
+    for (const it of group) {
+      it.flags.push("title_collision_in_batch");
+      real.add(it);
+    }
+    collisionGroups.push({ key: identityTitleKey(group[0].entry.payload.title), verdict: "same_title_needs_review", members: group.map(summary) });
+  }
+  for (const group of tally((it) => (titled(it) ? [titleKey(it.entry.payload.title)].filter(Boolean) : []))) {
+    const artifacts = group.filter((it) => !real.has(it));
+    if (new Set(group.map((it) => identityTitleKey(it.entry.payload.title))).size === 1) continue;
+    for (const it of artifacts) it.flags.push("title_collision_unicode_artifact");
+    collisionGroups.push({ key: titleKey(group[0].entry.payload.title), verdict: "unicode_artifact_distinct_titles", members: group.map(summary) });
   }
   const ext = (it) => {
     const x = it.entry.payload?.source?.external_ids ?? {};
@@ -328,7 +385,7 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
     const titles = [...new Set([e.payload.title, ...(e.payload.titles ?? [])].filter(Boolean))];
     const hits = new Map();
     for (const t of titles) {
-      for (const [kind, fn] of [["title", titleKey], ["compact", compactTitleKey], ["main", mainTitleKey]]) {
+      for (const [kind, fn] of [["title", titleKey], ["identity", identityTitleKey], ["compact", compactTitleKey], ["main", mainTitleKey]]) {
         for (const g of keyIndex[kind].get(fn(t)) ?? []) hits.set(g.id, g);
       }
     }
@@ -341,7 +398,19 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
       it.catalog = same.map((g) => ({ id: g.id, title: g.title, status: g.status }));
     } else it.outcome = "create";
   }
-  for (const it of items) it.flags = [...new Set(it.flags)].sort();
+  for (const it of items) {
+    it.flags = [...new Set(it.flags)].sort();
+    // A record whose full source details are pending can never be ready (checkpoint two § 4).
+    it.critical = [...new Set(it.flags.map((f) => CRITICAL_SIGNALS[f]).filter(Boolean))].sort();
+    it.readiness =
+      it.outcome === "held"
+        ? "held"
+        : it.flags.includes("entity_detail_pending")
+          ? "pending_detail"
+          : it.critical.length || it.flags.some((f) => FLAGS[f] === "exception")
+            ? "needs_review"
+            : "ready_for_editorial_consideration";
+  }
 
   const count = (pred) => items.filter(pred).length;
   const flagCounts = {};
@@ -357,15 +426,25 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
       held: count((it) => it.outcome === "held"),
       exception_review: count((it) => it.flags.some((f) => FLAGS[f] === "exception")),
       clean: count((it) => it.outcome !== "held" && !it.flags.some((f) => FLAGS[f] === "exception")),
+      readiness: {
+        held: count((it) => it.readiness === "held"),
+        pending_detail: count((it) => it.readiness === "pending_detail"),
+        needs_review: count((it) => it.readiness === "needs_review"),
+        ready_for_editorial_consideration: count((it) => it.readiness === "ready_for_editorial_consideration"),
+      },
+      possible_critical: count((it) => it.critical.length > 0),
       releases_created: 0,
       published: 0,
     },
     flags: Object.fromEntries(Object.entries(flagCounts).sort()),
+    collision_groups: collisionGroups,
     items: items.map((it) => ({
       id: it.id,
       title: it.entry.payload?.title ?? null,
       first_release: it.entry.payload?.first_release_date ? `${it.entry.payload.first_release_date} (${it.entry.payload.first_release_precision})` : null,
       outcome: it.outcome,
+      readiness: it.readiness,
+      ...(it.critical.length ? { possible_critical: it.critical } : {}),
       ...(it.entry.ignore_reason ? { reason: it.entry.ignore_reason } : {}),
       flags: it.flags,
       ...(it.catalog ? { catalog: it.catalog } : {}),
