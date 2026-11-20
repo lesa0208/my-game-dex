@@ -1,0 +1,191 @@
+// M12c-B1 checkpoint one: the Wikidata entity parser, the selection, the dry run and the
+// fetch policy. Synthetic fixtures (fictional titles) in scripts/fixtures/wikidata-b1/, plus
+// one real record (Super Mario World, Q853143, CC0, trimmed and without references). No
+// network: the fetch tests use a stub.
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { dryRunFiles, fetchEntities, reportMarkdown, validUserAgent } from "./catalog-b1.mjs";
+import { parseWikidata } from "./catalog-import-sources.mjs";
+import { b1Selection, dryRun, earliestDate, entityObjects, parseWikidataEntities, timeValue } from "./wikidata-entities.mjs";
+
+const SNES = "Q183259";
+const fixture = (name) => readFileSync(new URL(`./fixtures/wikidata-b1/${name}`, import.meta.url), "utf8");
+const byId = (entries) => Object.fromEntries(entries.map((e) => [e.external_id, e]));
+
+test("entity input: a wbgetentities response, the snapshot and the dump give the same entries", () => {
+  const response = parseWikidataEntities(fixture("entities-response.json"), SNES);
+  const snapshot = parseWikidataEntities(fixture("entities-snapshot.json"), SNES);
+  const dump = parseWikidataEntities(fixture("entities-dump.json"), SNES);
+  assert.deepEqual(snapshot, response);
+  // The dump has no "missing" placeholder; every other entity is identical.
+  assert.deepEqual(dump, response.filter((e) => e.external_id !== "Q1011"));
+  assert.equal(entityObjects(fixture("entities-dump.json")).length, 11);
+});
+
+test("titles, aliases, dates and source-only fields", () => {
+  const e = byId(parseWikidataEntities(fixture("entities-response.json"), SNES)).Q1001;
+  assert.equal(e.ignore_reason, undefined);
+  assert.equal(e.payload.title, "Zqx Starfall Saga");
+  assert.deepEqual(e.payload.titles, ["Starfall Saga", "Zqx Starfall Saga"]);
+  assert.deepEqual(e.payload.ja_titles, ["ズクスの星"]);
+  // The game's first release is the earliest anywhere; the SNES date stays in the source.
+  assert.deepEqual([e.payload.first_release_date, e.payload.first_release_precision], ["1991-12-01", "month"]);
+  assert.deepEqual(e.payload.source.platform_first_release, { value: "1992-03-10", precision: "day" });
+  assert.deepEqual(e.payload.source.external_ids, { igdb: ["zqx-starfall-saga"], mobygames: ["9001"], mobygames_former: [] });
+  assert.deepEqual([e.payload.source.developers, e.payload.source.publishers], [["Q500001"], ["Q500002"]]);
+  assert.equal(e.payload.source.release_dates.length, 2);
+  assert.deepEqual(e.flags, []);
+  // Never a release field: nothing here names a region, edition, code or packaging.
+  for (const k of ["region_codes", "edition_name", "edition_kind", "serial", "packaging", "media_count", "release_type"]) assert.equal(e.payload[k], undefined);
+});
+
+test("hard problems hold an entity; suspicious ones flag it", () => {
+  const e = byId(parseWikidataEntities(fixture("entities-response.json"), SNES));
+  assert.equal(e.Q1003.ignore_reason, "not on this platform");
+  assert.equal(e.Q1004.ignore_reason, "not a video game");
+  assert.equal(e.Q1011.ignore_reason, "missing entity");
+  assert.deepEqual(e.Q1002.flags, ["mul_label_only", "year_precision_only"]);
+  assert.deepEqual(e.Q1005.flags, ["platform_date_before_launch", "other_instance_of"]);
+  assert.deepEqual(e.Q1012.flags, ["year_precision_only", "platform_date_after_era", "many_platforms"]);
+  // A deprecated statement is no date at all.
+  assert.deepEqual(e.Q1008.flags, ["no_release_date"]);
+  assert.equal(e.Q1008.payload.first_release_date, undefined);
+});
+
+test("time values keep their precision; a year containing a precise date gives way to it", () => {
+  assert.deepEqual(timeValue({ time: "+1992-03-10T00:00:00Z", precision: 11 }), { value: "1992-03-10", precision: "day" });
+  assert.deepEqual(timeValue({ time: "+1992-03-00T00:00:00Z", precision: 10 }), { value: "1992-03-01", precision: "month" });
+  assert.equal(timeValue({ time: "+1992-00-00T00:00:00Z", precision: 8 }), null);
+  assert.equal(timeValue({ time: "+1940-01-01T00:00:00Z", precision: 11 }), null);
+  assert.deepEqual(earliestDate([{ value: "1985-01-01", precision: "year" }, { value: "1985-09-13", precision: "day" }]), { value: "1985-09-13", precision: "day" });
+  assert.deepEqual(earliestDate([{ value: "1984-01-01", precision: "year" }, { value: "1985-09-13", precision: "day" }]), { value: "1984-01-01", precision: "year" });
+});
+
+test("a real record: Super Mario World (Q853143), labelled only in mul", () => {
+  const [e] = parseWikidataEntities(fixture("real-q853143-trimmed.json"), SNES);
+  assert.equal(e.ignore_reason, undefined);
+  assert.equal(e.payload.title, "Super Mario World");
+  assert.equal(e.payload.source.label_language, "mul");
+  assert.deepEqual([e.payload.first_release_date, e.payload.first_release_precision], ["1990-11-21", "day"]);
+  assert.deepEqual(e.payload.source.platform_first_release, { value: "1990-11-21", precision: "day" });
+  assert.ok(e.payload.source.platforms.includes(SNES));
+  assert.deepEqual(e.payload.source.external_ids.igdb, ["super-mario-world"]);
+  assert.deepEqual(e.payload.source.external_ids.mobygames, ["6591"]);
+  assert.ok(e.payload.ja_titles.includes("スーパーマリオワールド"));
+  assert.deepEqual(e.flags, ["mul_label_only", "many_platforms"]);
+  // Qualifiers are read: some dates name platforms and places.
+  assert.ok(e.payload.source.release_dates.some((d) => d.platforms.includes(SNES) && d.places.length));
+});
+
+test("the selection is deterministic, takes every collision and the fixed ids, and has the size asked", () => {
+  const entries = parseWikidata(fixture("query-snes.json"));
+  const a = b1Selection(entries, { seed: "s1", size: 8, fixed: ["Q1009", "Q4040"] });
+  const b = b1Selection(entries, { seed: "s1", size: 8, fixed: ["Q1009", "Q4040"] });
+  assert.deepEqual(a, b);
+  assert.equal(a.ids.length, 8);
+  assert.deepEqual(a.strata.title_collisions, ["Q1001", "Q1007"]);
+  assert.deepEqual(a.strata.fixed, ["Q1009"]);
+  assert.deepEqual(a.strata.fixed_missing, ["Q4040"]);
+  assert.equal(a.strata.random.length, 5);
+  for (const id of [...a.strata.title_collisions, ...a.strata.fixed]) assert.ok(a.ids.includes(id));
+  // Another seed draws other random items, never other collisions or fixed ids.
+  const c = b1Selection(entries, { seed: "s2", size: 8, fixed: ["Q1009"] });
+  assert.deepEqual(c.strata.title_collisions, a.strata.title_collisions);
+  assert.notDeepEqual(c.strata.random, a.strata.random);
+  // Sorted by numeric id.
+  assert.deepEqual(a.ids, [...a.ids].sort((x, y) => Number(x.slice(1)) - Number(y.slice(1))));
+});
+
+test("the dry run: create, match, duplicate and hold, with batch and catalog flags", () => {
+  const selection = { selector: "fixture", seed: "fixture", ids: ["Q1001", "Q1002", "Q1003", "Q1004", "Q1005", "Q1006", "Q1007", "Q1008", "Q1009", "Q1010", "Q1011", "Q1012"] };
+  const report = dryRun({ selection, platformQid: SNES, entries: parseWikidataEntities(fixture("entities-snapshot.json"), SNES), catalog: JSON.parse(fixture("catalog.json")) });
+  const it = Object.fromEntries(report.items.map((i) => [i.id, i]));
+  assert.equal(it.Q1009.outcome, "matched");
+  assert.equal(it.Q1009.catalog.title, "Zqx Linked Legend");
+  assert.equal(it.Q1010.outcome, "duplicate");
+  assert.ok(it.Q1010.flags.includes("catalog_title_match_same_platform"));
+  assert.equal(it.Q1012.outcome, "create");
+  assert.ok(it.Q1012.flags.includes("catalog_title_match_other_platform"));
+  for (const id of ["Q1003", "Q1004", "Q1011"]) assert.equal(it[id].outcome, "held");
+  assert.ok(it.Q1001.flags.includes("title_collision_in_batch") && it.Q1007.flags.includes("title_collision_in_batch"));
+  assert.ok(it.Q1001.flags.includes("external_id_shared_in_batch") && it.Q1006.flags.includes("external_id_shared_in_batch"));
+  assert.deepEqual(report.totals, { items: 12, create: 7, matched: 1, duplicate: 1, held: 3, exception_review: 8, clean: 1, releases_created: 0, published: 0 });
+});
+
+test("without entity records, the query snapshot is used and flagged as pending detail", () => {
+  const selection = JSON.stringify({ selector: "fixture", seed: "fixture", ids: ["Q1001", "Q1013", "Q9999"] });
+  const report = dryRunFiles({ selectionText: selection, wikidataText: fixture("query-snes.json"), catalogText: fixture("catalog.json") });
+  const it = Object.fromEntries(report.items.map((i) => [i.id, i]));
+  assert.ok(it.Q1013.flags.includes("entity_detail_pending"));
+  // Date flags come from the query snapshot too.
+  const dates = dryRunFiles({ selectionText: JSON.stringify({ selector: "f", seed: "f", ids: ["Q1002", "Q1008"] }), wikidataText: fixture("query-snes.json") });
+  assert.deepEqual(dates.items.map((i) => i.flags), [["entity_detail_pending", "year_precision_only"], ["entity_detail_pending", "no_release_date"]]);
+  assert.equal(it.Q1013.outcome, "create");
+  // An id missing from every snapshot is never silently dropped: it is held, with the reason.
+  assert.equal(report.items.length, 3);
+  assert.deepEqual([it.Q9999.outcome, it.Q9999.reason], ["held", "not in the snapshot"]);
+  const withEntities = dryRunFiles({ selectionText: selection, wikidataText: fixture("query-snes.json"), entitiesText: fixture("entities-snapshot.json") });
+  assert.ok(!withEntities.items.find((i) => i.id === "Q1001").flags.includes("entity_detail_pending"));
+  assert.match(reportMarkdown(report, [{ kind: "selection", file: "s.json", sha256: "0" }]), /\| Q1013 \| Zqx Unselected Garden \|/);
+});
+
+test("the CLI end to end on fixtures: select, then dry run, writing outside the repository", () => {
+  const dir = mkdtempSync(join(tmpdir(), "mgd-b1-"));
+  try {
+    const node = (...a) => execFileSync(process.execPath, [new URL("./catalog-b1.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"), ...a], { encoding: "utf8" });
+    const query = new URL("./fixtures/wikidata-b1/query-snes.json", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    const entities = query.replace("query-snes.json", "entities-snapshot.json");
+    const catalog = query.replace("query-snes.json", "catalog.json");
+    node("select", "--wikidata", query, "--out", join(dir, "selection.json"), "--size", "10", "--seed", "fixture", "--fixed", "Q1009");
+    const selection = JSON.parse(readFileSync(join(dir, "selection.json"), "utf8"));
+    assert.equal(selection.ids.length, 10);
+    assert.match(selection.snapshot.sha256, /^[0-9a-f]{64}$/);
+    node("dry-run", "--selection", join(dir, "selection.json"), "--wikidata", query, "--entities", entities, "--catalog", catalog, "--out", join(dir, "report"));
+    const report = JSON.parse(readFileSync(join(dir, "report", "dry-run.json"), "utf8"));
+    assert.equal(report.totals.items, 10);
+    assert.equal(report.totals.releases_created + report.totals.published, 0);
+    assert.equal(report.sources.length, 4);
+    assert.ok(readFileSync(join(dir, "report", "dry-run.md"), "utf8").startsWith("# M12c-B1 dry run"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the fetch refuses without a project contact, batches by 50, waits between requests and backs off", async () => {
+  assert.equal(validUserAgent("CatalogResearch/0.1 curl"), false);
+  assert.equal(validUserAgent("MyTool/1.0 (no contact here) node/22"), false);
+  assert.equal(validUserAgent(undefined), false);
+  assert.equal(validUserAgent("MyTool/1.0 (https://example.test/contact) node/22"), true);
+  assert.equal(validUserAgent("MyTool/1.0 (ops@example.test) node/22"), true);
+  await assert.rejects(fetchEntities(["Q1"], { userAgent: "CatalogResearch/0.1 curl" }), /project contact/);
+
+  let clock = 0;
+  const sleeps = [];
+  const calls = [];
+  const replies = [{ status: 429, headers: { get: () => "3" } }, { status: 200 }, { status: 200 }, { status: 200 }];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, agent: init.headers["User-Agent"] });
+    const r = replies.shift();
+    const ids = new URL(url).searchParams.get("ids").split("|");
+    return { ok: r.status === 200, status: r.status, headers: r.headers ?? { get: () => null }, json: async () => ({ entities: Object.fromEntries(ids.map((id) => [id, { id }])) }) };
+  };
+  const ids = Array.from({ length: 120 }, (_, i) => `Q${i + 1}`);
+  const snapshot = await fetchEntities(ids, { userAgent: "MyTool/1.0 (ops@example.test) node/22", fetchImpl, now: () => clock, sleep: async (ms) => { sleeps.push(ms); clock += ms; } });
+  assert.equal(snapshot.requests, 3);
+  assert.equal(snapshot.ids.length, 120);
+  assert.equal(calls.length, 4);
+  assert.ok(calls.every((c) => c.agent === "MyTool/1.0 (ops@example.test) node/22"));
+  assert.ok(calls.every((c) => new URL(c.url).searchParams.get("maxlag") === "5" && new URL(c.url).searchParams.get("props") === "labels|aliases|claims" && new URL(c.url).searchParams.get("languages").split("|").includes("mul")));
+  assert.equal(new URL(calls[0].url).searchParams.get("ids").split("|").length, 50);
+  assert.ok(sleeps.includes(3000), "Retry-After is honoured");
+  assert.ok(sleeps.filter((ms) => ms === 1000).length >= 2, "at least 1 s between requests");
+
+  // A request that keeps failing stops the fetch, and nothing is returned.
+  const failing = async () => ({ ok: false, status: 503, headers: { get: () => null }, json: async () => ({}) });
+  await assert.rejects(fetchEntities(["Q1"], { userAgent: "MyTool/1.0 (ops@example.test) node/22", fetchImpl: failing, now: () => 0, sleep: async () => {} }), /after 5 attempt/);
+});
