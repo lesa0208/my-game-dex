@@ -2,7 +2,7 @@
 -- sampling, human approval and audit (invariants B1 to B8). One rolled-back transaction.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(32);
+select plan(51);
 
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
 begin
@@ -32,9 +32,9 @@ end $t$;
 
 insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
 select pg_temp.u(s), 'authenticated', 'authenticated', s || '@example.test', now(), '00000000-0000-0000-0000-000000000000'
-from unnest(array['e1', 'e2', 'e3']) as s;
+from unnest(array['e1', 'e2', 'e3', 'c4']) as s;
 update public.profiles set handle = 'bb_' || right(id::text, 2), handle_changed_at = now()
-where id in (select pg_temp.u(s) from unnest(array['e1', 'e2', 'e3']) as s);
+where id in (select pg_temp.u(s) from unnest(array['e1', 'e2', 'e3', 'c4']) as s);
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e1'), 'catalog_editor'), (pg_temp.u('e2'), 'catalog_editor'), (pg_temp.u('e3'), 'catalog_editor');
 
 -- An import run with game candidates, as the importer leaves them: unpublished, unverified,
@@ -87,6 +87,8 @@ select is(private.review_sample_size(1279, 0.02, 0.95, 0), 138, '1,279 unflagged
 select is(private.review_sample_size(1279, 0.02, 0.95, 1), 216, 'one error allowed: 216');
 select is(private.review_sample_size(10000, 0.02, 0.95, 0), 148, '10,000 unflagged: 148');
 select is(private.review_sample_size(4, 0.02, 0.95, 0), 4, 'a small lot is reviewed in full');
+select is(private.review_critical_signal('distribution_format_unclassified'), 'physical_eligibility_unsupported',
+  'an unclassified distribution format may mean the game isn''t eligible: a critical signal');
 
 create temp table b (tag text primary key, id uuid);
 create function pg_temp.b(p_tag text) returns uuid language sql stable as $$ select id from b where tag = p_tag $$;
@@ -126,6 +128,9 @@ select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L,
   (select id from public.games where title = 'Zqx Batch Twin' order by first_release_date desc limit 1))), 'true', 'the other is a duplicate: a critical error');
 select is(pg_temp.outcome('e2', 'Zqx Batch Odd Kind', 'excluded', 'wrong_identity_or_type'), 'true', 'the odd kind is excluded, with its critical error');
 select is(pg_temp.approve('e2', pg_temp.b('a')), 'error: critical errors unresolved', 'an unresolved critical error blocks approval');
+select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'excluded', null, 'left out')::text$q$, pg_temp.b('a'),
+  (select id from public.games where title = 'Zqx Batch Twin' order by first_release_date desc limit 1))), 'error: outcome recorded',
+  'a recorded critical error can''t be cleared (B9)');
 select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'excluded', 'conflicting_duplicate_identities', 'left out')::text$q$, pg_temp.b('a'),
   (select id from public.games where title = 'Zqx Batch Twin' order by first_release_date desc limit 1))), 'true', 'the duplicate is excluded from the batch');
 
@@ -165,7 +170,82 @@ select pg_temp.make_run('s', '[{"title": "Zqx Pair One", "date": "1992-03-01"}, 
 insert into b values ('s', pg_temp.as_user('e1', format($$select public.create_review_batch(%L, (select id from public.platforms where slug = 'snes'), 'Third batch')::text$$, pg_temp.run('s')))::uuid);
 select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, null)::text$q$, pg_temp.b('s'), g)) from unnest(array[pg_temp.g('Zqx Pair One'), pg_temp.g('Zqx Pair Two')]) g;
 select is(pg_temp.approve('e2', pg_temp.b('s')), '{"status": "awaiting_approval", "required": 2, "approvals": 1}', 'a large batch waits for a second approver');
+select is(pg_temp.approve('e2', pg_temp.b('s')), 'error: already approved', 'the same editor can''t be the second approver (B6)');
+select is(pg_temp.as_user('e3', format($q$select public.record_batch_outcome(%L, %L, 'excluded', null, 'late change')::text$q$, pg_temp.b('s'), pg_temp.g('Zqx Pair One'))),
+  'error: batch approval started', 'once an approval is recorded, the findings can''t change (B9)');
 select is(pg_temp.approve('e3', pg_temp.b('s')), '{"status": "approved", "published": 2}', 'a different editor completes the approval');
+
+
+-- B9 to B11. A policy that samples part of a small lot: 45% tolerable error at 80% confidence
+-- gives a sample of 2 for 6 unflagged members.
+update private.catalog_review_policy set second_approval_above = 1000, tolerable_error = 0.45, confidence = 0.8;
+create function pg_temp.sampled(p_tag text) returns uuid[] language sql stable as $$
+  select array_agg(game_id order by game_id) from private.catalog_review_batch_items where batch_id = pg_temp.b(p_tag) and sampled $$;
+create function pg_temp.outcome_in(p_actor text, p_tag text, p_game uuid, p_outcome text, p_critical text) returns text language sql as $$
+  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, null)::text$q$, pg_temp.b(p_tag), p_game, p_outcome, p_critical)) $$;
+create function pg_temp.as_stale_actor(p_actor text, p_sql text) returns text language plpgsql as $t$
+declare r text;
+begin
+  perform set_config('request.jwt.claims', jsonb_build_object('sub', pg_temp.u(p_actor), 'role', 'authenticated', 'aal', 'aal2', 'session_id', pg_temp.u(p_actor))::text, true);
+  perform set_config('role', 'authenticated', true);
+  execute p_sql into r;
+  perform set_config('role', 'none', true);
+  return coalesce(r, '');
+exception when others then
+  perform set_config('role', 'none', true);
+  return 'error: ' || sqlerrm;
+end $t$;
+
+-- B10: a withdrawn (excluded) pairing never joins a batch.
+select pg_temp.make_run('p', '[{"title": "Zqx Lot One", "date": "1992-04-01"}, {"title": "Zqx Lot Two", "date": "1992-04-02"},
+  {"title": "Zqx Lot Three", "date": "1992-04-03"}, {"title": "Zqx Lot Four", "date": "1992-04-04"}, {"title": "Zqx Lot Five", "date": "1992-04-05"},
+  {"title": "Zqx Lot Six", "date": "1992-04-06"}, {"title": "Zqx Lot Withdrawn", "date": "1992-04-07"}]');
+update public.game_platforms set status = 'excluded' where game_id = pg_temp.g('Zqx Lot Withdrawn');
+insert into b values ('p', pg_temp.as_user('e1', format($$select public.create_review_batch(%L, (select id from public.platforms where slug = 'snes'), 'Lot batch')::text$$, pg_temp.run('p')))::uuid);
+select ok((select item_count = 6 and flagged_count = 0 and sample_size = 2 from private.catalog_review_batches where id = pg_temp.b('p'))
+          and not exists (select 1 from private.catalog_review_batch_items where batch_id = pg_temp.b('p') and game_id = pg_temp.g('Zqx Lot Withdrawn')),
+  'the withdrawn pairing isn''t a member: six members, two sampled (B10)');
+
+-- B9: findings only become more conservative, and a sampled member that isn't correct fails the sample.
+select is(pg_temp.outcome_in('e2', 'p', (pg_temp.sampled('p'))[1], 'correct', null), 'true', 'the first sampled member is correct');
+select is(pg_temp.outcome_in('e2', 'p', (pg_temp.sampled('p'))[2], 'incorrect', null), 'true', 'the second is incorrect');
+select is(pg_temp.outcome_in('e2', 'p', (pg_temp.sampled('p'))[2], 'correct', null), 'error: outcome recorded', 'an incorrect finding can''t become correct (B9)');
+select is(pg_temp.outcome_in('e2', 'p', (pg_temp.sampled('p'))[1], 'excluded', null), 'error: outcome recorded', 'nor can a recorded correct finding be changed (B9)');
+select is(pg_temp.outcome_in('e2', 'p', (pg_temp.sampled('p'))[2], 'excluded', null), 'true', 'an incorrect member can still be excluded');
+select is(pg_temp.approve('e2', pg_temp.b('p')), 'error: sample failed', 'an excluded sampled member is still a sample error (B4, B9)');
+
+-- B4, B10, B11: a passing batch, its stale and unauthorized approvals, and its provenance.
+select pg_temp.make_run('q', '[{"title": "Zqx Good One", "date": "1992-05-01"}, {"title": "Zqx Good Two", "date": "1992-05-02"},
+  {"title": "Zqx Good Three", "date": "1992-05-03"}, {"title": "Zqx Good Four", "date": "1992-05-04"}, {"title": "Zqx Good Five", "date": "1992-05-05"},
+  {"title": "Zqx Good Six", "date": "1992-05-06"}]');
+insert into b values ('q', pg_temp.as_user('e1', format($$select public.create_review_batch(%L, (select id from public.platforms where slug = 'snes'), 'Good batch')::text$$, pg_temp.run('q')))::uuid);
+select pg_temp.outcome_in('e2', 'q', g, 'correct', null) from unnest(pg_temp.sampled('q')) g;
+
+savepoint withdrawn;
+select ok(pg_temp.as_user('e3', format($q$select public.withdraw_game_platform(%L, (select id from public.platforms where slug = 'snes'), 'Not an SNES game', %s)::text$q$,
+  (pg_temp.sampled('q'))[1], (select revision from public.games where id = (pg_temp.sampled('q'))[1]))) ~ '^[0-9a-f-]{36}$', 'another editor withdraws a member''s pairing');
+select is(pg_temp.approve('e2', pg_temp.b('q')), 'error: batch stale', 'a member withdrawn after freezing makes the batch stale (B4, B10)');
+rollback to savepoint withdrawn;
+
+update auth.mfa_amr_claims set created_at = now() - interval '1 hour', updated_at = now() - interval '1 hour' where session_id = pg_temp.u('e2');
+select is(pg_temp.as_stale_actor('e2', format($q$select public.approve_review_batch(%L, 'Reviewed')::text$q$, pg_temp.b('q'))), 'error: reauthentication required',
+  'approval needs a recent verification (B4)');
+update auth.mfa_amr_claims set created_at = now(), updated_at = now() where session_id = pg_temp.u('e2');
+select is(pg_temp.approve('c4', pg_temp.b('q')), 'error: not permitted', 'a collector can''t approve a batch');
+select is(pg_temp.approve('e2', pg_temp.b('q')), '{"status": "approved", "published": 6}', 'an independent editor approves it');
+select ok((select bool_and(gp.verification_basis ->> 'physical_eligibility' = 'confirmed'
+                           and gp.verification_basis ->> 'reference' = pr.external_id and gp.verification_basis ->> 'snapshot_sha256' = pr.payload_sha256)
+           from private.catalog_review_batch_items i
+           join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
+           join private.provider_records pr on pr.id = i.provider_record_id
+           where i.batch_id = pg_temp.b('q') and i.sampled),
+  'a member a person found correct is confirmed, with its source record''s id and hash (B11)');
+select ok((select count(*) = 4 and bool_and(gp.verification_basis ->> 'physical_eligibility' = 'batch_accepted')
+           from private.catalog_review_batch_items i
+           join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
+           where i.batch_id = pg_temp.b('q') and not i.sampled),
+  'an unsampled member is recorded as accepted with the batch, not as individually confirmed (B11)');
+select is(pg_temp.approve('e3', pg_temp.b('q')), 'error: record unavailable', 'a decided batch can''t be approved again');
 
 select * from finish();
 rollback;

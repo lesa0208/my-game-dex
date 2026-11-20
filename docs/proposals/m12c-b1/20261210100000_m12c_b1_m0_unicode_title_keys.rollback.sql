@@ -91,6 +91,26 @@ $function$
 -- 3. Recompute only the rows whose keys change. Generated columns are recomputed when the
 -- row is updated; replica mode skips user triggers, so no revision, updated_at, verification
 -- or audit side effect happens (this is a key recompute, not an edit).
+-- Preflight, with the previous functions in place: two aliases of one game that B1-M0 told apart
+-- (such as "Foo Ⅱ" and "Foo") would collide in game_aliases_unique again. Refuse before any key
+-- changes; remove the redundant alias first.
+do $$
+declare
+  v_collisions text;
+begin
+  select pg_catalog.string_agg(pg_catalog.format('game %s: %s', x.game_id, x.k), '; ')
+  into v_collisions
+  from (
+    select a.game_id, private.catalog_search_key(a.title) as k
+    from public.game_aliases a
+    group by a.game_id, private.catalog_search_key(a.title), a.language_code, a.region_code
+    having count(*) > 1
+  ) x;
+  if v_collisions is not null then
+    raise exception 'B1-M0 rollback preflight: alias keys would collide (%). Nothing was changed.', v_collisions;
+  end if;
+end $$;
+
 set local session_replication_role = replica;
 update public.games g set title = g.title
 where g.search_key is distinct from private.catalog_search_key(g.title);

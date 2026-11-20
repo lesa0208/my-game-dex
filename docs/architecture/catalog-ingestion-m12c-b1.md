@@ -2,7 +2,12 @@
 
 **Written for:** the product owner approving M12c-B1, and the engineers who will build it.
 
-**Status, 2026-11-20: approved with corrections (R-1 to R-8).** Checkpoint one (parser and tooling) and checkpoint two (the isolated B1 stack, source revalidation, critical errors, migration drafts validated on scratch) are done. The migrations are drafts under review, applied nowhere persistent. The full Wikidata fetch waits for an operator-configured contact.
+**Status, 2026-11-20: approved with corrections (R-1 to R-8).** Done so far:
+- **Checkpoint one:** the parser and tooling.
+- **Checkpoint two** (accepted with conditions): the isolated B1 stack, source revalidation, critical errors, and migration drafts validated on scratch.
+- **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
+
+The migrations are final drafts awaiting approval, applied nowhere persistent. The full Wikidata fetch still waits for an operator-configured contact.
 - No migration, import or download beyond what is listed under [Measured](#measured).
 - Development and the human-reviewed test pilot are unchanged.
 
@@ -246,6 +251,73 @@ They are **not** applied to development, the M12c-A stack or the B1 stack.
 2. Review of the migration drafts. Once approved, they move to `supabase/migrations/` and are applied to the B1 stack only.
 3. The importer step: entity snapshots through the M5b importer, with the parser's flags in `payload.review_flags`, as candidates on the B1 stack.
 4. Then the batch, the census review by the product owner as editor B, approval, and the collector checks generalized to identity-only games.
+
+## Checkpoint three: full source validation and migration security review (2026-11-20)
+
+Checkpoint two (`f38ba42`) was accepted with conditions. The B1 environment is approved and stays isolated from development, M12c-A and scratch.
+
+### The 150 Wikidata records: still not fetched
+
+**`WIKIDATA_USER_AGENT` is not configured**: not in the process, user or machine environment, or any `.env` file. No HTTP request was made, and the selection is unchanged (SHA-256 `a3774c7b…61f9c`).
+
+**So the full-detail quality report can't be produced yet.** Here is what each requested category needs:
+
+| Category | From the query snapshot (now) | Needs the entity records |
+| --- | --- | --- |
+| New game identities | 147 candidates, about 140 or 141 after the held duplicate groups | Confirmation of type, platforms and identifiers |
+| Matched existing games | 3 (the M12c-A SNES games) | — |
+| Real duplicate Wikidata entities | 6 held groups, 12 items (checkpoint two) | Identifiers and every statement, to choose the canonical item |
+| False title collisions | 1 (Super Momotaro Dentetsu Ⅱ / Ⅲ) | — |
+| Missing or conflicting identifiers | Not assessable | IGDB and MobyGames ids; two items sharing one is flagged |
+| Wrong platform associations | Not assessable | Every platform statement and dated release |
+| Digital-only or ineligible candidates | Not assessable | Distribution formats (P437) and other instance-of values |
+| Physical-eligibility confirmation | **All 150**, always by a person (R-2, R-8) | — |
+| Actually ready for editorial review | **0**: every record is pending detail | The fetch |
+
+**The parser is ready for those categories.** A stated distribution format is now flagged until a person classifies that format once, as physical or not. Wikidata formats are never guessed, and the dry run lists each distinct format with its count. Both flags count as a possible `physical_eligibility_unsupported`, in the parser and in B1-M2, and a test keeps the two mappings identical.
+
+### Withdrawing an incorrect pairing
+
+**`withdraw_game_platform` removes one game-platform pairing without excluding the game.** It's in B1-M1 (W1 to W8), with a preview and a restoration by a different editor.
+- **Who:** an editor with a recent second factor, a reason and the reviewed game revision.
+- **Refused while it would strand something:** any release on the pairing that isn't closed, or the last listed platform of a published game. A published release is resolved first through the reviewed M7b-2b exclusion, which preserves its copies.
+- **Copies are never touched.** A collector's claim of the game on that platform stays exactly as it is.
+- **What it does:** the pairing is kept, excluded, with its verification cleared and recorded on an immutable withdrawal row. The game's revision moves on, invalidating verifications and open batches at the earlier revision.
+- **Restoration** returns the pairing to review, unverified, so it is published again only through independent verification.
+
+**Excluding the last release of a reviewed identity** no longer takes its verified pairing and the game with it (W9).
+
+### Unicode normalization, rechecked
+
+- **Distinct numerals stay distinct:** "II" and "III", "Ⅱ" and "Ⅲ", "Ⅱ" and "III", and a numeral attached to Japanese text.
+- **Equivalent forms match:** "Ⅱ", "ⅱ" and "II".
+- **Fixed regression:** NFKC would have turned "Tetris™" into "TetrisTM"; "™" and "℠" now become a space first, in both database functions and the parser.
+- **Nothing is merged.** The keys are search and matching keys, and the importer links only by external id; a title match is held as a possible duplicate.
+- **Titles and aliases are preserved:** a before-and-after fingerprint of every non-key column is identical.
+- **Real uniqueness conflicts:** B1-M0 and its rollback each refuse alias collisions, and a read-only preflight report lists them first. On development, the M12c-A stack and B1 it found **no conflicts and no key changes**, so nothing needs resolving.
+
+### Final migration review
+
+The exact SQL, the tests, the authorization matrix, the invariants and the rollback and data-preservation behaviour are in [docs/proposals/m12c-b1/README.md](../proposals/m12c-b1/README.md).
+
+**Nine defects were found and fixed**, six of them in B1-M2's approval security. The key ones:
+- a withdrawn pairing could join a batch;
+- a sampled member marked "excluded" escaped the sample;
+- findings could be overwritten, including between two approvals;
+- the batch claimed individual physical-eligibility confirmation for unsampled members.
+
+**Validated on fresh scratch stacks, then destroyed:**
+- **pgTAP:** 3,849 of 3,849.
+- **Database checks:** 13 suites, 786 of 786.
+- **Rollbacks:** each rollback and refusal behaves as specified.
+
+Nothing is applied to a persistent stack.
+
+### Recommended next checkpoint
+
+1. **Approve or amend the drafts.** The open points are listed in the proposals README.
+2. **The operator configures `WIKIDATA_USER_AGENT`.** Then fetch the 150 records (3 requests) and produce the full-detail report, including classifying the distribution formats found.
+3. **Once both are done,** the migrations move to `supabase/migrations/` and are applied to B1 only. Then the import step with `payload.review_flags`.
 
 ## The B1 ingestion-test environment (R-6): created in checkpoint two
 

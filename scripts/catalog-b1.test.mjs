@@ -11,7 +11,7 @@ import test from "node:test";
 
 import { dryRunFiles, fetchEntities, reportMarkdown, validUserAgent } from "./catalog-b1.mjs";
 import { parseWikidata } from "./catalog-import-sources.mjs";
-import { b1Selection, dryRun, earliestDate, entityObjects, parseWikidataEntities, timeValue } from "./wikidata-entities.mjs";
+import { b1Selection, CRITICAL_SIGNALS, dryRun, earliestDate, entityObjects, identityTitleKey, parseWikidataEntities, timeValue } from "./wikidata-entities.mjs";
 
 const SNES = "Q183259";
 const fixture = (name) => readFileSync(new URL(`./fixtures/wikidata-b1/${name}`, import.meta.url), "utf8");
@@ -213,6 +213,39 @@ test("Unicode numerals: Ⅱ and Ⅲ collide on the plain key only, and are repor
   assert.deepEqual([it.Q3.flags, it.Q4.flags], [["title_collision_in_batch"], ["title_collision_in_batch"]]);
   assert.equal(it.Q3.readiness, "needs_review");
   assert.deepEqual(report.collision_groups.map((g) => g.verdict).sort(), ["same_title_needs_review", "unicode_artifact_distinct_titles"]);
+});
+
+test("identity keys: Ⅱ is II, Ⅱ and Ⅲ stay distinct, and a trademark sign adds nothing", () => {
+  assert.equal(identityTitleKey("Albert Odyssey Ⅱ"), identityTitleKey("Albert Odyssey II"));
+  assert.notEqual(identityTitleKey("Super Momotaro Dentetsu Ⅱ"), identityTitleKey("Super Momotaro Dentetsu Ⅲ"));
+  assert.notEqual(identityTitleKey("Breath of Fire II"), identityTitleKey("Breath of Fire III"));
+  assert.notEqual(identityTitleKey("Breath of Fire Ⅱ"), identityTitleKey("Breath of Fire III"));
+  assert.equal(identityTitleKey("Breath of Fire ⅱ"), identityTitleKey("Breath of Fire II"));
+  assert.equal(identityTitleKey("Tetris™"), identityTitleKey("Tetris"));
+  assert.equal(identityTitleKey("ＳＵＰＥＲ ＭＥＴＲＯＩＤ"), identityTitleKey("Super Metroid"));
+});
+
+test("a stated distribution format is held for a person to classify, and listed once per format", () => {
+  const j = JSON.parse(fixture("entities-response.json"));
+  const fmt = (id) => ({ mainsnak: { property: "P437", datavalue: { value: { "entity-type": "item", id }, type: "wikibase-entityid" }, snaktype: "value" }, rank: "normal" });
+  j.entities.Q1001.claims.P437 = [fmt("Q900001"), fmt("Q900002")];
+  const entries = parseWikidataEntities(JSON.stringify(j), SNES);
+  const e = entries.find((x) => x.external_id === "Q1001");
+  assert.deepEqual(e.payload.source.distribution_formats, ["Q900001", "Q900002"]);
+  assert.deepEqual(e.flags, ["distribution_format_unclassified"]);
+  const report = dryRun({ selection: { selector: "f", seed: "f", ids: ["Q1001"] }, platformQid: SNES, entries, catalog: { games: [] } });
+  const [it] = report.items;
+  assert.equal(it.readiness, "needs_review");
+  assert.deepEqual(it.possible_critical, ["physical_eligibility_unsupported"]);
+  assert.deepEqual(report.distribution_formats, { Q900001: 1, Q900002: 1 });
+  assert.ok(reportMarkdown(report, []).includes("- Q900001: 1 item\n"));
+});
+
+test("the batch migration maps every flag to the same possible critical error as the parser", () => {
+  const sql = readFileSync(new URL("../docs/proposals/m12c-b1/20261210100300_m12c_b1_m2_review_batches.sql", import.meta.url), "utf8");
+  const body = sql.slice(sql.indexOf("create function private.review_critical_signal"), sql.indexOf("revoke all on function private.review_critical_signal"));
+  const mapped = Object.fromEntries([...body.matchAll(/when '([a-z_]+)' then '([a-z_]+)'/g)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(mapped, CRITICAL_SIGNALS);
 });
 
 test("a record whose entity detail is pending is never ready, whatever else it shows", () => {

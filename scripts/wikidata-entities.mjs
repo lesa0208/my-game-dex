@@ -68,6 +68,8 @@ export const FLAGS = {
   platform_date_before_launch: "exception",
   platform_date_after_era: "exception",
   other_instance_of: "exception",
+  distribution_format_unclassified: "exception",
+  distribution_non_physical: "exception",
   entity_detail_pending: "exception",
   title_collision_in_batch: "exception",
   external_id_shared_in_batch: "exception",
@@ -93,6 +95,15 @@ export const CRITICAL_ERRORS = {
   missing_provenance: "Missing provenance for a required validation fact",
 };
 
+/**
+ * Wikidata distribution formats (P437), classified by a person once per format, never guessed.
+ * Empty until the fetched records' formats are reviewed: the dry run lists each distinct value
+ * with its count, and every record stating an unclassified format is flagged for review. A
+ * physical format is still not proof of a physical retail release (R-2, R-8); it only clears
+ * this flag.
+ */
+export const DISTRIBUTION_FORMATS = Object.freeze({ physical: Object.freeze([]), non_physical: Object.freeze([]) });
+
 /** Flags that may indicate a critical error: an item carrying one can't be ready until a person resolves it. */
 export const CRITICAL_SIGNALS = {
   entity_detail_pending: "missing_provenance",
@@ -100,15 +111,18 @@ export const CRITICAL_SIGNALS = {
   external_id_shared_in_batch: "conflicting_identifiers",
   catalog_title_match_same_platform: "conflicting_duplicate_identities",
   other_instance_of: "wrong_identity_or_type",
+  distribution_format_unclassified: "physical_eligibility_unsupported",
+  distribution_non_physical: "physical_eligibility_unsupported",
   platform_date_before_launch: "wrong_platform",
   platform_date_after_era: "physical_eligibility_unsupported",
 };
 
 /**
  * The title key for identity checks: compatibility-normalized first (NFKC), so "Ⅱ" is "II"
- * and no longer vanishes. B1-M0 proposes the same for the database keys.
+ * and no longer vanishes. "™" and "℠" become a space first, since NFKC would turn "Tetris™"
+ * into "TetrisTM". B1-M0 proposes exactly the same for the database keys.
  */
-export const identityTitleKey = (title) => titleKey(String(title ?? "").normalize("NFKC"));
+export const identityTitleKey = (title) => titleKey(String(title ?? "").replace(/[™℠]/gu, " ").normalize("NFKC"));
 
 const PRECISION = { 9: "year", 10: "month", 11: "day" };
 const RANK = { day: 3, month: 2, year: 1 };
@@ -231,6 +245,11 @@ export function entityToEntry(entity, platformQid) {
   if (era && onPlatform && onPlatform.value > era.lateAfter) entry.flags.push("platform_date_after_era");
   if (instanceOf.some((q) => q !== WD.videoGame)) entry.flags.push("other_instance_of");
   if (platforms.length > 4) entry.flags.push("many_platforms");
+  const formats = entry.payload.source.distribution_formats;
+  if (formats.some((q) => DISTRIBUTION_FORMATS.non_physical.includes(q))) entry.flags.push("distribution_non_physical");
+  if (formats.some((q) => !DISTRIBUTION_FORMATS.physical.includes(q) && !DISTRIBUTION_FORMATS.non_physical.includes(q))) {
+    entry.flags.push("distribution_format_unclassified");
+  }
   return entry;
 }
 
@@ -437,6 +456,15 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
       published: 0,
     },
     flags: Object.fromEntries(Object.entries(flagCounts).sort()),
+    // Each distinct distribution format stated by the items, for a person to classify once.
+    distribution_formats: Object.fromEntries(
+      Object.entries(
+        items.reduce((acc, it) => {
+          for (const q of it.entry.payload?.source?.distribution_formats ?? []) acc[q] = (acc[q] ?? 0) + 1;
+          return acc;
+        }, {}),
+      ).sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))),
+    ),
     collision_groups: collisionGroups,
     items: items.map((it) => ({
       id: it.id,

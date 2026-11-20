@@ -473,3 +473,109 @@ $function$
 
 drop function private.catalog_game_listed(uuid, uuid[]);
 drop function private.game_has_identity_pairing(uuid);
+
+-- Withdrawals (section 8): the functions go; the withdrawal rows stay as history, and a
+-- withdrawn pairing stays excluded. Excluding a release cascades as before B1-M1.
+revoke all on function public.get_pairing_withdrawal_preview(uuid, uuid), public.withdraw_game_platform(uuid, uuid, text, bigint),
+  public.restore_game_platform(uuid, text, bigint) from public, anon, authenticated, service_role;
+drop function public.get_pairing_withdrawal_preview(uuid, uuid);
+drop function public.withdraw_game_platform(uuid, uuid, text, bigint);
+drop function public.restore_game_platform(uuid, text, bigint);
+drop function private.pairing_withdrawal_plan(uuid, uuid);
+
+CREATE OR REPLACE FUNCTION private.exclusion_plan(p_release uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO ''
+AS $function$
+declare
+  rel public.releases;
+  req public.catalog_change_requests;
+  v_game public.games;
+  v_cascade jsonb := '[]';
+  v_games uuid[] := '{}';
+  v_blocking jsonb;
+  v_copies bigint;
+  v_owners bigint;
+  v_claims bigint;
+begin
+  select * into rel from public.releases r where r.id = p_release;
+  if not found or rel.status not in ('unverified', 'under_review', 'published', 'rejected') then
+    return null;
+  end if;
+  -- The submission an exclusion closes: the active one, or else the latest rejected one.
+  select * into req from public.catalog_change_requests s
+  where s.release_id = rel.id and s.request_type in ('new_game', 'new_release')
+    and s.status in ('open', 'in_review', 'changes_requested', 'rejected')
+  order by (s.status <> 'rejected') desc, s.id desc
+  limit 1;
+  select * into v_game from public.games g where g.id = rel.game_id;
+
+  if rel.status = 'published' then
+    -- The pairing, if no other published release is on it.
+    if exists (select 1 from public.game_platforms gp where gp.game_id = rel.game_id and gp.platform_id = rel.platform_id and gp.status = 'published')
+       and not exists (select 1 from public.releases o where o.game_id = rel.game_id and o.platform_id = rel.platform_id and o.status = 'published' and o.id <> rel.id) then
+      v_cascade := v_cascade || pg_catalog.jsonb_build_object('entity', 'pairing', 'game_id', rel.game_id, 'platform_id', rel.platform_id, 'previous_status', 'published');
+    end if;
+    -- The game, if this was its last published physical release.
+    if v_game.status = 'published' and not private.game_keeps_release(v_game.id, rel.id) then
+      v_games := v_games || v_game.id;
+    end if;
+    -- Games cataloged only through this release, if the game is a compilation.
+    v_games := v_games || coalesce((
+      select pg_catalog.array_agg(t.id order by t.id)
+      from public.game_relations gr
+      join public.games t on t.id = gr.target_game_id and t.status = 'published'
+      where gr.source_game_id = rel.game_id and gr.relation = 'contains' and t.id <> rel.game_id
+        and not private.game_keeps_release(t.id, rel.id)
+    ), '{}');
+    v_cascade := v_cascade || coalesce((
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('entity', 'game', 'id', g.id, 'previous_status', 'published',
+               'contained', g.id <> rel.game_id) order by g.id)
+      from public.games g where g.id = any (v_games)
+    ), '[]');
+  elsif req.created_game and v_game.status in ('unverified', 'under_review')
+        and not exists (select 1 from public.releases o where o.game_id = v_game.id and o.id <> rel.id
+                        and o.status in ('unverified', 'under_review', 'published', 'rejected')) then
+    -- A game the submission made, used by nothing else, as rejection treats it.
+    v_games := array[v_game.id];
+    v_cascade := v_cascade || pg_catalog.jsonb_build_object('entity', 'game', 'id', v_game.id, 'previous_status', v_game.status, 'contained', false);
+  end if;
+
+  -- What would be stranded or left pointing at an excluded record (D1, D10).
+  select coalesce(pg_catalog.jsonb_agg(b order by b ->> 'kind', b ->> 'id'), '[]') into v_blocking from (
+    select pg_catalog.jsonb_build_object('kind', 'submission', 'id', o.id, 'game_id', o.game_id) as b
+    from public.releases o
+    where o.game_id = any (v_games) and o.id <> rel.id and o.status in ('unverified', 'under_review', 'rejected')
+    union all
+    select pg_catalog.jsonb_build_object('kind', 'merged_release', 'id', o.id)
+    from public.releases o where o.merged_into_id = rel.id
+    union all
+    select pg_catalog.jsonb_build_object('kind', 'merged_game', 'id', o.id)
+    from public.games o where o.merged_into_id = any (v_games)
+  ) x;
+
+  -- M12a: the copies on the release, and the active claims on each game it excludes.
+  select count(*), count(distinct c.owner_id), count(*) filter (where c.release_id is null) into v_copies, v_owners, v_claims
+  from public.collection_items c
+  where c.record_status = 'active'
+    and (c.release_id = rel.id or (c.release_id is null and c.claimed_game_id = any (v_games)));
+
+  return pg_catalog.jsonb_build_object(
+    'release_id', rel.id,
+    'game_id', rel.game_id,
+    'platform_id', rel.platform_id,
+    'status', rel.status,
+    'request_id', req.id,
+    'request_status', req.status,
+    'cascade', v_cascade,
+    'blocking', v_blocking,
+    'copies', v_copies,
+    'owners', v_owners,
+    'claimed_copies', v_claims,
+    'token', pg_catalog.md5(pg_catalog.jsonb_build_array(
+      rel.id, rel.status, rel.revision, req.id, req.status, req.version, v_cascade, pg_catalog.jsonb_array_length(v_blocking))::text)
+  );
+end;
+$function$;

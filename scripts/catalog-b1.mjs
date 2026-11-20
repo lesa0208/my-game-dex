@@ -153,6 +153,12 @@ export function reportMarkdown(report, sources) {
     "",
     ...(report.collision_groups ?? []).map((g) => `- **${g.verdict.replace(/_/g, " ")}** (key ${g.key}): ${g.members.map((m) => `${m.id} "${m.title}" (${m.first_release ?? "no date"})`).join("; ")}`),
     "",
+    "## Distribution formats (P437), to classify once each",
+    "",
+    ...(Object.keys(report.distribution_formats ?? {}).length
+      ? Object.entries(report.distribution_formats).map(([q, n]) => `- ${q}: ${n} item${n === 1 ? "" : "s"}`)
+      : ["- None stated."]),
+    "",
     "| Flag | Kind | Count |",
     "| --- | --- | --- |",
     ...Object.entries(report.flags).map(([f, n]) => `| ${f} | ${FLAGS[f] ?? "?"} | ${n} |`),

@@ -6,7 +6,18 @@
 -- isn't a letter or digit in their own sense, so single-character Roman numerals such as
 -- "Ⅱ" (U+2161) and "Ⅲ" (U+2162) vanish: "Super Momotaro Dentetsu Ⅱ" and "… Ⅲ" get the same
 -- key, and "Ⅱ" never matches "II". NFKC turns "Ⅱ" into "II" (then "2" by the existing
--- Roman-numeral rule), fullwidth letters into ASCII and ligatures into letters.
+-- Roman-numeral rule), fullwidth letters into ASCII and ligatures into letters. The trademark
+-- signs "™" and "℠" become a space first: NFKC would otherwise turn "Tetris™" into "TetrisTM",
+-- where today's key is "tetris".
+--
+-- Distinct numerals stay distinct: "Ⅱ" and "II" both become "2", "Ⅲ" and "III" both "3".
+-- Nothing here merges games: these are search and import-matching keys, not identities, and
+-- the importer never links a source record to a game by title (a title match is held for
+-- review as a possible duplicate; only an external identifier links). Titles, aliases and
+-- every other column keep their values.
+--
+-- Run b1_m0_preflight_report.sql (read-only) on the target database first, and resolve what it
+-- lists, before applying this migration.
 --
 -- What changes: the two key functions, and the stored keys derived from them, only where
 -- the new key differs:
@@ -32,10 +43,10 @@
 create temp table m0_new_keys on commit drop as
 select 'alias' as kind, a.id, a.game_id, a.language_code, a.region_code,
        a.search_key as old_key,
-       private.catalog_search_key(normalize(a.title, NFKC)) as new_key
+       private.catalog_search_key(normalize(pg_catalog.translate(a.title, '™℠', '  '), NFKC)) as new_key
 from public.game_aliases a
 union all
-select 'game', g.id, g.id, null, null, g.search_key, private.catalog_search_key(normalize(g.title, NFKC))
+select 'game', g.id, g.id, null, null, g.search_key, private.catalog_search_key(normalize(pg_catalog.translate(g.title, '™℠', '  '), NFKC))
 from public.games g;
 
 do $$
@@ -62,15 +73,16 @@ do $$
 declare
   v_report text;
 begin
-  select pg_catalog.string_agg(pg_catalog.format('%s (%s games)', x.new_key, x.n), '; ')
+  -- Each key once, with every game that shares it (changed or not).
+  select pg_catalog.string_agg(pg_catalog.format('%s (%s games)', s.new_key,
+           (select count(*) from m0_new_keys o where o.kind = 'game' and o.new_key = s.new_key)), '; ' order by s.new_key)
   into v_report
   from (
-    select k.new_key, count(*) as n
+    select distinct k.new_key
     from m0_new_keys k
     where k.kind = 'game' and k.new_key is distinct from k.old_key
       and exists (select 1 from m0_new_keys o where o.kind = 'game' and o.id <> k.id and o.new_key = k.new_key)
-    group by k.new_key
-  ) x;
+  ) s;
   if v_report is not null then
     raise notice 'B1-M0: games that now share a search key with another game (reported, not merged): %', v_report;
   end if;
@@ -94,7 +106,7 @@ begin
     return null;
   end if;
   -- B1-M0: compatibility characters first ("Ⅱ" is "II", fullwidth "Ａ" is "A").
-  v := pg_catalog.translate(pg_catalog.lower(normalize(p_title, NFKC)), 'àáâãäåāçćčèéêëēěìíîïīłñńòóôõöøōùúûüūýÿžšśźżß', 'aaaaaaaccceeeeeeiiiiilnnooooooouuuuuyyzsszzs');
+  v := pg_catalog.translate(pg_catalog.lower(normalize(pg_catalog.translate(p_title, '™℠', '  '), NFKC)), 'àáâãäåāçćčèéêëēěìíîïīłñńòóôõöøōùúûüūýÿžšśźżß', 'aaaaaaaccceeeeeeiiiiilnnooooooouuuuuyyzsszzs');
   v := pg_catalog.replace(v, '&', ' and ');
   v := pg_catalog.regexp_replace(v, '[''`´‘’]', '', 'g');
   v := pg_catalog.regexp_replace(v, '^(.*), (the|a|an)( - .*)?$', '\2 \1\3');
@@ -136,7 +148,7 @@ begin
     return null;
   end if;
   -- B1-M0: compatibility characters first, as private.catalog_search_key.
-  v := pg_catalog.translate(pg_catalog.lower(normalize(p_title, NFKC)), 'àáâãäåāçćčèéêëēěìíîïīñńòóôõöøōùúûüūýÿžšß', 'aaaaaaaccceeeeeeiiiiinnooooooouuuuuyyzss');
+  v := pg_catalog.translate(pg_catalog.lower(normalize(pg_catalog.translate(p_title, '™℠', '  '), NFKC)), 'àáâãäåāçćčèéêëēěìíîïīñńòóôõöøōùúûüūýÿžšß', 'aaaaaaaccceeeeeeiiiiinnooooooouuuuuyyzss');
   v := pg_catalog.replace(v, '&', ' and ');
   v := pg_catalog.regexp_replace(v, '[''`´‘’]', '', 'g');
   v := pg_catalog.regexp_replace(v, '^(.*), (the|a|an)( - .*)?$', '\2 \1\3');

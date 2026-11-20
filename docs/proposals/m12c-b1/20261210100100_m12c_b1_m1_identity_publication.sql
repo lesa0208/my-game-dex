@@ -20,6 +20,10 @@
 --       M12c-A rule, and publish_release still publishes its game and pairing.
 --   I8  Public reads show a published, verified pairing without releases, with release_count 0
 --       ("No verified physical release yet"); nothing about who verified it or its provenance.
+--   W1-W8  An incorrect pairing is withdrawn without excluding its game: section 8.
+--   W9  Excluding a release keeps an independently verified pairing and its game: section 7.
+--
+-- Requires 20261210100090_m12c_b1_m1_withdrawal_types.sql (its two audit actions).
 --
 -- RLS: no table gets a new client grant. The new game_platforms columns have no column grant
 -- (the table uses column grants), so anon and authenticated can't read them.
@@ -27,7 +31,8 @@
 -- Rollback: 20261210100100_m12c_b1_m1_identity_publication.rollback.sql (forward). It refuses
 -- while any game or pairing is published only as an identity: published records can't be
 -- unpublished (guard_published_catalog_row), so those are excluded through the exclusion
--- tools first, with their history kept.
+-- tools first, with their history kept. Withdrawal rows stay as history, and a withdrawn
+-- pairing stays excluded.
 
 -- 1. Pairing verification columns.
 alter table public.game_platforms
@@ -733,3 +738,385 @@ revoke all on function public.verify_game_platform(uuid, uuid, jsonb, text, bigi
   from public, anon, authenticated, service_role;
 grant execute on function public.verify_game_platform(uuid, uuid, jsonb, text, bigint), public.publish_game_identity(uuid, uuid[], text, bigint)
   to authenticated;
+
+-- 7. Excluding a release keeps an independently verified pairing (W9). Replaces
+-- private.exclusion_plan by exact signature: the current body with marked substitutions. A
+-- verified pairing stays published without the release, and a game keeping a verified,
+-- published pairing stays published. Without this, excluding the last release of a reviewed
+-- identity would take the whole game with it. Pairings and games without an identity
+-- verification cascade exactly as before.
+CREATE OR REPLACE FUNCTION private.exclusion_plan(p_release uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO ''
+AS $function$
+declare
+  rel public.releases;
+  req public.catalog_change_requests;
+  v_game public.games;
+  v_cascade jsonb := '[]';
+  v_games uuid[] := '{}';
+  v_blocking jsonb;
+  v_copies bigint;
+  v_owners bigint;
+  v_claims bigint;
+begin
+  select * into rel from public.releases r where r.id = p_release;
+  if not found or rel.status not in ('unverified', 'under_review', 'published', 'rejected') then
+    return null;
+  end if;
+  -- The submission an exclusion closes: the active one, or else the latest rejected one.
+  select * into req from public.catalog_change_requests s
+  where s.release_id = rel.id and s.request_type in ('new_game', 'new_release')
+    and s.status in ('open', 'in_review', 'changes_requested', 'rejected')
+  order by (s.status <> 'rejected') desc, s.id desc
+  limit 1;
+  select * into v_game from public.games g where g.id = rel.game_id;
+
+  if rel.status = 'published' then
+    -- The pairing, if no other published release is on it.
+    -- B1-M1: and it isn't independently verified; a verified pairing stays published (W9).
+    if exists (select 1 from public.game_platforms gp where gp.game_id = rel.game_id and gp.platform_id = rel.platform_id and gp.status = 'published'
+                 and gp.verified_at is null)
+       and not exists (select 1 from public.releases o where o.game_id = rel.game_id and o.platform_id = rel.platform_id and o.status = 'published' and o.id <> rel.id) then
+      v_cascade := v_cascade || pg_catalog.jsonb_build_object('entity', 'pairing', 'game_id', rel.game_id, 'platform_id', rel.platform_id, 'previous_status', 'published');
+    end if;
+    -- The game, if this was its last published physical release.
+    -- B1-M1: unless it keeps a verified, published pairing.
+    if v_game.status = 'published' and not private.game_keeps_release(v_game.id, rel.id)
+       and not private.game_has_identity_pairing(v_game.id) then
+      v_games := v_games || v_game.id;
+    end if;
+    -- Games cataloged only through this release, if the game is a compilation.
+    v_games := v_games || coalesce((
+      select pg_catalog.array_agg(t.id order by t.id)
+      from public.game_relations gr
+      join public.games t on t.id = gr.target_game_id and t.status = 'published'
+      where gr.source_game_id = rel.game_id and gr.relation = 'contains' and t.id <> rel.game_id
+        and not private.game_keeps_release(t.id, rel.id)
+        and not private.game_has_identity_pairing(t.id)   -- B1-M1
+    ), '{}');
+    v_cascade := v_cascade || coalesce((
+      select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('entity', 'game', 'id', g.id, 'previous_status', 'published',
+               'contained', g.id <> rel.game_id) order by g.id)
+      from public.games g where g.id = any (v_games)
+    ), '[]');
+  elsif req.created_game and v_game.status in ('unverified', 'under_review')
+        and not exists (select 1 from public.releases o where o.game_id = v_game.id and o.id <> rel.id
+                        and o.status in ('unverified', 'under_review', 'published', 'rejected')) then
+    -- A game the submission made, used by nothing else, as rejection treats it.
+    v_games := array[v_game.id];
+    v_cascade := v_cascade || pg_catalog.jsonb_build_object('entity', 'game', 'id', v_game.id, 'previous_status', v_game.status, 'contained', false);
+  end if;
+
+  -- What would be stranded or left pointing at an excluded record (D1, D10).
+  select coalesce(pg_catalog.jsonb_agg(b order by b ->> 'kind', b ->> 'id'), '[]') into v_blocking from (
+    select pg_catalog.jsonb_build_object('kind', 'submission', 'id', o.id, 'game_id', o.game_id) as b
+    from public.releases o
+    where o.game_id = any (v_games) and o.id <> rel.id and o.status in ('unverified', 'under_review', 'rejected')
+    union all
+    select pg_catalog.jsonb_build_object('kind', 'merged_release', 'id', o.id)
+    from public.releases o where o.merged_into_id = rel.id
+    union all
+    select pg_catalog.jsonb_build_object('kind', 'merged_game', 'id', o.id)
+    from public.games o where o.merged_into_id = any (v_games)
+  ) x;
+
+  -- M12a: the copies on the release, and the active claims on each game it excludes.
+  select count(*), count(distinct c.owner_id), count(*) filter (where c.release_id is null) into v_copies, v_owners, v_claims
+  from public.collection_items c
+  where c.record_status = 'active'
+    and (c.release_id = rel.id or (c.release_id is null and c.claimed_game_id = any (v_games)));
+
+  return pg_catalog.jsonb_build_object(
+    'release_id', rel.id,
+    'game_id', rel.game_id,
+    'platform_id', rel.platform_id,
+    'status', rel.status,
+    'request_id', req.id,
+    'request_status', req.status,
+    'cascade', v_cascade,
+    'blocking', v_blocking,
+    'copies', v_copies,
+    'owners', v_owners,
+    'claimed_copies', v_claims,
+    'token', pg_catalog.md5(pg_catalog.jsonb_build_array(
+      rel.id, rel.status, rel.revision, req.id, req.status, req.version, v_cascade, pg_catalog.jsonb_array_length(v_blocking))::text)
+  );
+end;
+$function$;
+
+-- 8. Withdrawing an incorrect pairing without excluding its game (W1 to W8).
+--
+--   W1  An active catalog editor (begin_catalog_edit, which needs a signed-in second factor)
+--       with a verification in the last 10 minutes (require_recent_mfa), and a reason.
+--   W2  Revision-sensitive: the caller names the game revision they reviewed; any change since
+--       refuses ('record changed'). Withdrawal moves the game's revision on, so every
+--       verification of the game or its other pairings at the earlier revision, and any open
+--       review batch holding the game, no longer counts (I5, B4).
+--   W3  Never strands a release: refused while any release on the pairing is unverified, under
+--       review or published ('withdrawal blocked'). Each is first excluded (M7b-2b, which
+--       preserves its copies), relinked or rejected, through its own reviewed procedure.
+--       Rejected, excluded and merged releases keep pointing at the pairing, which is kept.
+--   W4  Never strands a game: refused when a published game would be left with no published
+--       release and no other verified, published pairing ('last platform'). That is a
+--       game-level decision (exclusion or merge), not a pairing withdrawal.
+--   W5  Copies are never changed: release copies can't exist on it (W3), and a collector's
+--       claim of the game on the platform depends only on the game being published
+--       (private.can_claim), so it stays exactly as it is. The withdrawal records their count.
+--   W6  Recorded: an immutable withdrawal row (who, when, why, previous status and
+--       verification, the game revision) and an audit event. The pairing row is kept,
+--       excluded, with its verification cleared.
+--   W7  No self-review bypass: withdrawal only removes. A different editor restores it, and
+--       restoration returns the pairing to review, unverified: it is published again only
+--       through verify_game_platform and publish_game_identity (I4, I5) or a published release.
+--   W8  A pairing under an active submission is refused; the submission is reviewed instead.
+create table private.catalog_pairing_withdrawals (
+  id uuid primary key default gen_random_uuid(),
+  game_id uuid not null,
+  platform_id uuid not null,
+  withdrawn_by uuid references public.profiles (id) on delete set null,
+  withdrawn_at timestamptz not null default now(),
+  reason text not null check (char_length(reason) between 1 and 500),
+  previous_status text not null check (previous_status in ('unverified', 'under_review', 'published')),
+  previous_verification jsonb check (previous_verification is null or jsonb_typeof(previous_verification) = 'object'),
+  game_revision bigint not null,
+  claimed_copies integer not null check (claimed_copies >= 0),
+  restored_by uuid references public.profiles (id) on delete set null,
+  restored_at timestamptz,
+  restore_reason text check (char_length(restore_reason) between 1 and 500),
+  foreign key (game_id, platform_id) references public.game_platforms (game_id, platform_id) on delete restrict,
+  check ((restored_at is null) = (restore_reason is null)),
+  check (restored_by is null or restored_at is not null)
+);
+-- One open withdrawal per pairing.
+create unique index catalog_pairing_withdrawals_open on private.catalog_pairing_withdrawals (game_id, platform_id) where restored_at is null;
+revoke all on private.catalog_pairing_withdrawals from public, anon, authenticated, service_role;
+
+-- W6: kept as recorded. The only changes: one restoration, and account deletion clearing an
+-- editor's reference.
+create function private.guard_pairing_withdrawal()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'withdrawals are kept' using errcode = 'check_violation';
+  end if;
+  if (pg_catalog.to_jsonb(new) - array['withdrawn_by', 'restored_by', 'restored_at', 'restore_reason'])
+       is distinct from (pg_catalog.to_jsonb(old) - array['withdrawn_by', 'restored_by', 'restored_at', 'restore_reason'])
+     or (new.withdrawn_by is distinct from old.withdrawn_by and new.withdrawn_by is not null)
+     or (old.restored_at is not null
+         and ((new.restored_at, new.restore_reason) is distinct from (old.restored_at, old.restore_reason)
+              or (new.restored_by is distinct from old.restored_by and new.restored_by is not null))) then
+    raise exception 'a withdrawal is kept as recorded' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+create trigger guard_pairing_withdrawal before update or delete on private.catalog_pairing_withdrawals
+  for each row execute function private.guard_pairing_withdrawal();
+
+-- What withdrawing a pairing would do, or why it can't: the plan the preview shows and the
+-- withdrawal rechecks under its locks. Null for a missing or closed record.
+create function private.pairing_withdrawal_plan(p_game uuid, p_platform uuid)
+returns jsonb
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  v_game public.games;
+  v_pair public.game_platforms;
+  v_blocking jsonb;
+  v_keeps boolean;
+  v_claims integer;
+begin
+  select * into v_game from public.games g where g.id = p_game;
+  select * into v_pair from public.game_platforms gp where gp.game_id = p_game and gp.platform_id = p_platform;
+  if v_game.id is null or v_pair.game_id is null
+     or v_game.status not in ('unverified', 'under_review', 'published')
+     or v_pair.status not in ('unverified', 'under_review', 'published') then
+    return null;
+  end if;
+
+  -- W3, W8: what must be resolved first.
+  select coalesce(pg_catalog.jsonb_agg(b order by b ->> 'kind', b ->> 'id'), '[]') into v_blocking from (
+    select pg_catalog.jsonb_build_object('kind', 'release', 'id', r.id, 'status', r.status) as b
+    from public.releases r
+    where r.game_id = p_game and r.platform_id = p_platform and r.status in ('unverified', 'under_review', 'published')
+    union all
+    select pg_catalog.jsonb_build_object('kind', 'submission', 'id', null)
+    where v_pair.submitted_by is not null
+  ) x;
+
+  -- W4: what keeps a published game listed once this pairing is gone.
+  v_keeps := exists (select 1 from public.releases r where r.game_id = p_game and r.status = 'published' and r.platform_id <> p_platform)
+    or exists (select 1 from public.game_relations gr
+               join public.games c on c.id = gr.source_game_id and c.status = 'published'
+               join public.releases r on r.game_id = c.id and r.status = 'published'
+               where gr.target_game_id = p_game and gr.relation = 'contains')
+    or exists (select 1 from public.game_platforms gp
+               where gp.game_id = p_game and gp.platform_id <> p_platform and gp.status = 'published' and gp.verified_at is not null);
+
+  -- W5: collectors' claims of the game on this platform, which stay as they are.
+  select count(*)::integer into v_claims from public.collection_items c
+  where c.release_id is null and c.claimed_game_id = p_game and c.claimed_platform_id = p_platform and c.record_status = 'active';
+
+  return pg_catalog.jsonb_build_object(
+    'game_id', p_game, 'platform_id', p_platform,
+    'status', v_pair.status, 'verified', v_pair.verified_at is not null,
+    'game_status', v_game.status, 'game_revision', v_game.revision,
+    'blocking', v_blocking,
+    'last_platform', v_game.status = 'published' and not v_keeps,
+    'claimed_copies', v_claims);
+end;
+$$;
+
+create function public.get_pairing_withdrawal_preview(p_game uuid, p_platform uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_plan jsonb;
+begin
+  perform private.require_active_staff('catalog_editor');
+  v_plan := private.pairing_withdrawal_plan(p_game, p_platform);
+  if v_plan is null then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  return v_plan || pg_catalog.jsonb_build_object('can_withdraw',
+    pg_catalog.jsonb_array_length(v_plan -> 'blocking') = 0 and not (v_plan ->> 'last_platform')::boolean);
+end;
+$$;
+
+create function public.withdraw_game_platform(p_game uuid, p_platform uuid, p_reason text, p_expected_game_revision bigint)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_game public.games;
+  v_pair public.game_platforms;
+  v_plan jsonb;
+  v_previous jsonb;
+  v_id uuid;
+begin
+  v_me := private.begin_catalog_edit();                         -- W1 (locks the caller's profile first)
+  perform private.require_recent_mfa();
+  v_reason := private.require_reason(p_reason);
+  if p_expected_game_revision is null then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+
+  -- Lock order (M7b-2b): profiles, then the game, the releases on the pairing (so none is
+  -- published meanwhile), then the pairing.
+  select * into v_game from public.games g where g.id = p_game for update;
+  if not found or v_game.status not in ('unverified', 'under_review', 'published') then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if v_game.revision <> p_expected_game_revision then          -- W2
+    raise exception 'record changed' using errcode = 'P0001';
+  end if;
+  perform 1 from public.releases r where r.game_id = p_game and r.platform_id = p_platform order by r.id for share;
+  select * into v_pair from public.game_platforms gp where gp.game_id = p_game and gp.platform_id = p_platform for update;
+  if not found or v_pair.status not in ('unverified', 'under_review', 'published') then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+
+  v_plan := private.pairing_withdrawal_plan(p_game, p_platform);
+  if pg_catalog.jsonb_array_length(v_plan -> 'blocking') > 0 then -- W3, W8
+    raise exception 'withdrawal blocked' using errcode = 'P0001';
+  end if;
+  if (v_plan ->> 'last_platform')::boolean then                 -- W4
+    raise exception 'last platform' using errcode = 'P0001';
+  end if;
+
+  v_previous := case when v_pair.verified_at is not null then pg_catalog.jsonb_build_object(
+    'verified_at', v_pair.verified_at, 'verified_by', v_pair.verified_by,
+    'verified_game_revision', v_pair.verified_game_revision, 'verification_basis', v_pair.verification_basis) end;
+  insert into private.catalog_pairing_withdrawals (game_id, platform_id, withdrawn_by, reason, previous_status,
+    previous_verification, game_revision, claimed_copies)
+  values (p_game, p_platform, v_me, v_reason, v_pair.status, v_previous, v_game.revision, (v_plan ->> 'claimed_copies')::integer)
+  returning id into v_id;
+
+  -- W6: excluded, kept, its verification cleared. W5: no copy is touched.
+  update public.game_platforms gp set status = 'excluded',
+    verified_at = null, verified_by = null, verified_game_revision = null, verification_basis = null
+  where gp.game_id = p_game and gp.platform_id = p_platform;
+  -- W2: the game's identity changed.
+  update public.games g set revision = g.revision + 1 where g.id = p_game;
+
+  perform private.record_catalog_audit(v_me, 'catalog_pairing_withdrawn', 'game_platform', p_game, v_reason,
+    pg_catalog.jsonb_build_object('withdrawal_id', v_id, 'platform_id', p_platform, 'previous_status', v_pair.status,
+      'previous_verification', v_previous, 'game_revision', v_game.revision,
+      'claimed_copies', (v_plan ->> 'claimed_copies')::integer));
+  return v_id;
+end;
+$$;
+
+create function public.restore_game_platform(p_withdrawal uuid, p_reason text, p_expected_game_revision bigint)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  w private.catalog_pairing_withdrawals;
+  v_game public.games;
+  v_pair public.game_platforms;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();
+  v_reason := private.require_reason(p_reason);
+  if p_expected_game_revision is null then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+  select * into w from private.catalog_pairing_withdrawals x where x.id = p_withdrawal for update;
+  if not found or w.restored_at is not null then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if w.withdrawn_by = v_me then                                  -- W7: a different editor
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  select * into v_game from public.games g where g.id = w.game_id for update;
+  if not found or v_game.status not in ('unverified', 'under_review', 'published') then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if v_game.revision <> p_expected_game_revision then
+    raise exception 'record changed' using errcode = 'P0001';
+  end if;
+  select * into v_pair from public.game_platforms gp where gp.game_id = w.game_id and gp.platform_id = w.platform_id for update;
+  if not found or v_pair.status <> 'excluded' then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+
+  update private.catalog_pairing_withdrawals x set restored_by = v_me, restored_at = pg_catalog.clock_timestamp(), restore_reason = v_reason
+  where x.id = p_withdrawal;
+  -- W7: back to review, unverified. Never straight back to published.
+  update public.game_platforms gp set status = 'under_review'
+  where gp.game_id = w.game_id and gp.platform_id = w.platform_id;
+  update public.games g set revision = g.revision + 1 where g.id = w.game_id;
+  perform private.record_catalog_audit(v_me, 'catalog_pairing_restored', 'game_platform', w.game_id, v_reason,
+    pg_catalog.jsonb_build_object('withdrawal_id', w.id, 'platform_id', w.platform_id, 'previous_status', w.previous_status,
+      'restored_status', 'under_review', 'game_revision', v_game.revision));
+  return true;
+end;
+$$;
+
+revoke all on function private.guard_pairing_withdrawal(), private.pairing_withdrawal_plan(uuid, uuid)
+  from public, anon, authenticated, service_role;
+revoke all on function public.get_pairing_withdrawal_preview(uuid, uuid), public.withdraw_game_platform(uuid, uuid, text, bigint),
+  public.restore_game_platform(uuid, text, bigint) from public, anon, authenticated, service_role;
+grant execute on function public.get_pairing_withdrawal_preview(uuid, uuid), public.withdraw_game_platform(uuid, uuid, text, bigint),
+  public.restore_game_platform(uuid, text, bigint) to authenticated;

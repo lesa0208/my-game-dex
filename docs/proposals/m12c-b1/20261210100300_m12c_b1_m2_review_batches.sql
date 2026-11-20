@@ -15,7 +15,7 @@
 --       or pairings; without recent MFA; if the sample's incorrect count exceeds the acceptance
 --       number; if any critical error is unresolved; if a sampled (unflagged) member has a
 --       critical error (the validators missed one: reject, fix, re-batch); if any member's
---       revision changed after freezing.
+--       revision changed after freezing, or its game or pairing left review (B10).
 --   B5  A rejected batch is never reopened or resampled. Its members can join a new batch with
 --       a new seed. No automatic acceptance ever follows a failed sample.
 --   B6  Batches above the policy's size need a second, different approver (A-4); the pilot
@@ -24,6 +24,15 @@
 --       verifies or publishes a release.
 --   B8  Every step writes an audit row naming the editor, the batch, its content hash, source
 --       run, seed, sample, findings and decision. Audit rows are never edited.
+--   B9  Findings only become more conservative: a recorded outcome changes only from incorrect
+--       to excluded, a recorded critical error is never cleared, and nothing changes once an
+--       approval is recorded. A sampled member that isn't correct (incorrect or excluded) is a
+--       sample error.
+--   B10 Members are only records still in review: a withdrawn (excluded) or rejected pairing
+--       never joins a batch, and a member whose game or pairing left review makes it stale.
+--   B11 Each published pairing's provenance is its frozen source record (provider, id, payload
+--       hash). Physical eligibility is "confirmed" only for a member a person found correct;
+--       an unsampled member is "batch_accepted".
 --
 -- RLS: the tables are in the private schema with no client grants; editors act only through
 -- the SECURITY DEFINER functions below, which check the caller.
@@ -259,6 +268,8 @@ as $$
     when 'other_instance_of' then 'wrong_identity_or_type'
     when 'platform_date_before_launch' then 'wrong_platform'
     when 'platform_date_after_era' then 'physical_eligibility_unsupported'
+    when 'distribution_format_unclassified' then 'physical_eligibility_unsupported'
+    when 'distribution_non_physical' then 'physical_eligibility_unsupported'
   end
 $$;
 revoke all on function private.review_critical_signal(text) from public, anon, authenticated, service_role;
@@ -303,7 +314,8 @@ begin
   join public.games g on g.id = pr.matched_game_id
   join public.game_platforms gp on gp.game_id = g.id and gp.platform_id = p_platform
   where rr.import_run_id = p_run and pr.entity_type = 'game'
-    and g.status in ('unverified', 'under_review') and g.verified_at is null and gp.status <> 'published'
+    -- Only records still in review: a withdrawn (excluded) or rejected pairing never joins.
+    and g.status in ('unverified', 'under_review') and g.verified_at is null and gp.status in ('unverified', 'under_review')
     and not exists (select 1 from private.catalog_review_batch_items i join private.catalog_review_batches b on b.id = i.batch_id
                     where i.game_id = g.id and b.status = 'open')
   order by g.id, pr.created_at desc;
@@ -383,9 +395,21 @@ begin
   if v_batch.created_by = v_me then
     raise exception 'own record' using errcode = 'P0001';
   end if;
+  -- B9: outcomes are final once any approval is recorded, so every approver approves the same findings.
+  if exists (select 1 from private.catalog_review_batch_approvals a where a.batch_id = p_batch) then
+    raise exception 'batch approval started' using errcode = 'P0001';
+  end if;
   select * into v_item from private.catalog_review_batch_items i where i.batch_id = p_batch and i.game_id = p_game for update;
   if not found or not (v_item.sampled or cardinality(v_item.flags) > 0) then
     raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  -- B9: a recorded finding only becomes more conservative. A member found incorrect can still be
+  -- excluded, but never changed to correct, and a recorded critical error is never cleared or
+  -- replaced. To undo a mistaken finding, reject the batch and review a new one.
+  if v_item.outcome is not null
+     and not (v_item.outcome = 'incorrect' and p_outcome = 'excluded'
+              and (v_item.critical_error is null or v_item.critical_error is not distinct from p_critical_error)) then
+    raise exception 'outcome recorded' using errcode = 'P0001';
   end if;
   update private.catalog_review_batch_items i set outcome = p_outcome, critical_error = p_critical_error,
     reviewed_by = v_me, note = nullif(pg_catalog.btrim(p_note), ''), recorded_at = pg_catalog.clock_timestamp()
@@ -435,8 +459,10 @@ begin
     raise exception 'already approved' using errcode = 'P0001';
   end if;
 
+  -- A sampled member that isn't correct is a sample error whether it was marked incorrect or
+  -- excluded: excluding it doesn't make the validators' miss go away (B4).
   select count(*) filter (where (i.sampled or cardinality(i.flags) > 0) and i.outcome is null),
-         count(*) filter (where i.sampled and i.outcome = 'incorrect'),
+         count(*) filter (where i.sampled and i.outcome <> 'correct'),
          count(*) filter (where i.critical_error is not null and i.outcome = 'incorrect'),
          count(*) filter (where i.sampled and i.critical_error is not null)
   into v_missing, v_incorrect, v_critical, v_sample_critical
@@ -454,7 +480,11 @@ begin
   from private.catalog_review_batch_items i
   left join public.games g on g.id = i.game_id
   left join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
-  where i.batch_id = p_batch and (g.id is null or gp.game_id is null or g.revision <> i.frozen_game_revision);
+  -- A member is stale if its game changed (any edit, status change or pairing withdrawal moves
+  -- the revision), or its game or pairing is no longer in review.
+  where i.batch_id = p_batch and (g.id is null or gp.game_id is null or g.revision <> i.frozen_game_revision
+                                  or g.status not in ('unverified', 'under_review') or g.verified_at is not null
+                                  or gp.status not in ('unverified', 'under_review'));
   if v_stale > 0 then
     raise exception 'batch stale' using errcode = 'P0001';                        -- B4: revision invalidation
   end if;
@@ -468,11 +498,15 @@ begin
   end if;
 
   -- B7: publish identities: each member reviewed correct, or unflagged and not sampled.
+  -- Provenance is the frozen member's own source record. Physical eligibility is "confirmed" for
+  -- a member a person reviewed and found correct, and "batch_accepted" for an unsampled member
+  -- accepted with the batch's passing sample: never presented as an individual check.
   for v_item in
-    select i.game_id, i.platform_id, i.provider_record_id, g.title, g.slug, g.revision, x.external_id
+    select i.game_id, i.platform_id, g.title, g.slug, g.revision, pr.provider_code, pr.external_id, pr.payload_sha256,
+           i.outcome = 'correct' as reviewed
     from private.catalog_review_batch_items i
     join public.games g on g.id = i.game_id
-    left join private.external_references x on x.game_id = i.game_id and x.provider_code = 'wikidata'
+    join private.provider_records pr on pr.id = i.provider_record_id
     where i.batch_id = p_batch and (i.outcome = 'correct' or (i.outcome is null and cardinality(i.flags) = 0 and not i.sampled))
     order by i.game_id
   loop
@@ -481,8 +515,9 @@ begin
       pg_catalog.jsonb_build_object('revision', v_item.revision, 'batch_id', p_batch));
     update public.game_platforms gp set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me,
       verified_game_revision = v_item.revision,
-      verification_basis = pg_catalog.jsonb_build_object('source', 'wikidata', 'reference', coalesce(v_item.external_id, 'unknown'),
-        'physical_eligibility', 'confirmed', 'batch_id', p_batch::text)
+      verification_basis = pg_catalog.jsonb_build_object('source', v_item.provider_code, 'reference', v_item.external_id,
+        'snapshot_sha256', v_item.payload_sha256,
+        'physical_eligibility', case when v_item.reviewed then 'confirmed' else 'batch_accepted' end, 'batch_id', p_batch::text)
     where gp.game_id = v_item.game_id and gp.platform_id = v_item.platform_id;
     perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game_platform', v_item.game_id, v_reason,
       pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch));
