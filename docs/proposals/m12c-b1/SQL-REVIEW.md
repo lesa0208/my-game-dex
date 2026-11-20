@@ -150,3 +150,12 @@ Neither status is evidence of a specific physical release. Releases stay individ
 4. **The pilot sample is close to a census.** With 150 members and so many flags, most members get an individual outcome anyway. `batch_accepted` matters at scale: above 1,000 members, two approvers are required.
 5. **Pairing origins for API sessions** are recorded as `staff` for any non-submitter (README open point 4).
 6. **Submitted games** keep the M7b-1 guard, so identity publication can't bypass an active submission review.
+7. **RLS on the new private tables is off.** This matches the existing private catalog tables, `catalog_record_origins` and `catalog_verifications`. The six tables have no grants and `private` has no `USAGE` for client roles, so only the definer functions reach them. Enabling RLS with no policies is a defense-in-depth option that would leave the functions unaffected. See [INVENTORY.md](INVENTORY.md).
+
+## 9. Inventory
+
+[INVENTORY.md](INVENTORY.md) lists every changed object and privilege. It was generated from a fresh scratch catalog read before B1, after B1 and after the rollbacks:
+- 24 new and 7 replaced functions;
+- 10 new functions for `authenticated`, and none for `anon`, `service_role`, `catalog_importer` or `PUBLIC`;
+- 0 table or column grant changes;
+- after the rollbacks, nothing missing or different from pre-B1.

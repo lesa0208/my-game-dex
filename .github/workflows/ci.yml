@@ -50,6 +50,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Mutation runners refuse without an explicit opt-in
+        run: npm run mutation:guard-test
+
       - name: Build
         run: npm run build
 

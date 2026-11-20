@@ -1,5 +1,5 @@
 /**
- * Deliberate security violations, used by db-mutation-checks.mjs to prove the tests
+ * Deliberate security violations, used by mutation-db-runner.mjs to prove the tests
  * detect them. Each entry applies one violation to the local database, or to a
  * source file.
  *

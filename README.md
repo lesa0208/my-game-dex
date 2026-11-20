@@ -70,8 +70,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run app:editing-checks` | After a build, test catalog editing in the running app against the local stack: who reaches the pages, creating games and releases, no self-review, a change ending a verification, step-up without replay, catalog metadata, and that no page names a creator (M10c) |
 | `npm run app:reference-checks` | After a build, test the Reference, Imports and System sections and the reclassification queue in the running app: who reaches each page, what each shows, that only resolving a queue item writes, and that no page shows a key, address, lease or raw source data (M10d) |
 | `npm run app:a11y-checks` | After a build, test `/admin` and Settings → Security in a real browser with JavaScript (Edge, or Chrome; `A11Y_BROWSER=chrome` picks it): access and navigation for each role, TOTP enrollment, step-up without replay, keyboard focus, and axe-core accessibility and sideways scrolling at phone and desktop widths |
-| `npm run db:mutation` | Prove the tests detect real violations, one suite or all (see [Local database](#local-database)) |
-| `npm run mutation:campaign` | Run several mutation suites unattended. `-- --dry-run` checks readiness and runs nothing |
+| `MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run db:mutation -- --suite <name>` | Prove the tests detect real violations of one suite, on the disposable scratch stack only (see [Local database](#local-database)). Destructive: it resets the stack it runs on. Without the opt-in, a named suite and `MGD_STACK=scratch` it refuses and changes nothing |
+| `MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run mutation:campaign` | Run several mutation suites unattended, on scratch only. `-- --dry-run` checks readiness and runs nothing, without the opt-in |
+| `npm run mutation:guard-test` | Offline: the mutation runners refuse without the opt-in, and no ordinary `*-checks.mjs` suite resets a stack or applies violations (also in CI) |
 
 Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks` and `app:a11y-checks`.
 
@@ -109,7 +110,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 13. **MFA checks** in `scripts/db-mfa-checks.mjs`, with real TOTP sessions from the local Auth: live session and factor checks, stale and signed-out tokens, freshness, factor maturity and its ledger.
 14. **Ownership checks** in `scripts/db-ownership-checks.mjs`: the staff matrix through the API, transfers, succession and recovery, with forced races and the refusal rate limit.
 
-`npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
+`npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. It is destructive and never part of an ordinary test run: it is named `scripts/mutation-db-runner.mjs` (outside the `*-checks.mjs` pattern) and refuses unless `MGD_MUTATION_TESTING=1`, `--suite <name>` and `MGD_STACK=scratch` are all given. Start scratch first with `MGD_TEST_STACK=scratch npm run test-stack:start`. The app runner (`npm run app:mutation`) needs the opt-in and `--set <name>`. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 
 It stops at the first failed stage and prints a summary. A failing test names the check that failed.
 
