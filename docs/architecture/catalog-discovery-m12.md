@@ -159,7 +159,8 @@ On a copy's own page, its owner can later set or correct an unidentified copy's 
 
 - **M12b:** the fast add, internal search with ownership, the missing-game fallback with immediate tracking, and this document. *Merged (PR #16) and on development.*
 - **M12c-A:** the first real NES, SNES and PlayStation catalog, from the M11b-0 shortlist revalidated against current evidence, through the existing importer and review. *On the test stack: 29 candidates staged, 4 published after human review.*
-- **M12c-B0: providers, licensing and bulk acquisition.** Research and proposal (2026-11-20): Wikidata by dump as the primary game-identity source, IGDB only under a written partnership, physical releases from editors and per-source permissions ([catalog-acquisition-m12c-b0.md](catalog-acquisition-m12c-b0.md)). *Proposal, awaiting decisions.*
+- **M12c-B0: providers, licensing and bulk acquisition.** Research and decisions (2026-11-20): Wikidata as the initial game-identity source (D-1), IGDB pending written partnership terms, physical releases from editors and per-source permissions ([catalog-acquisition-m12c-b0.md](catalog-acquisition-m12c-b0.md)).
+- **M12c-B1 (proposed):** game identities published separately from physical releases, batch review with validation and sampling, and a 150-identity SNES pilot ([catalog-ingestion-m12c-b1.md](catalog-ingestion-m12c-b1.md)). *Awaiting approval.*
 - **M12c-B: external API discovery.** A required part of the launch journey (step 2), not an optional extra. Requirements and the implementation plan are in [catalog-pilot-m12c.md § M12c-B](catalog-pilot-m12c.md#m12c-b-external-api-discovery). If no provider can be cleared, discovery stays the open launch requirement in section 2, with its dependency and the alternative plan.
 
 ## Review notes (M12b)

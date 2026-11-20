@@ -2,7 +2,7 @@
 
 **Written for:** the product owner deciding how My Game Dex gets a large, legally usable catalog, and the engineers who will build it.
 
-**Status: research and proposal, 2026-11-20.**
+**Status: research and proposal, 2026-11-20. The product owner's decisions are recorded in [section 8](#8-decisions-recorded-2026-11-20), and the next milestone is proposed in [catalog-ingestion-m12c-b1.md](catalog-ingestion-m12c-b1.md).** Revised the same day: the IGDB findings now record the conflict between IGDB's partnership FAQ and the Twitch agreement.
 - Baseline `main` at `f3eea87` (PR #17).
 - Nothing was integrated, registered, downloaded in bulk or imported.
 - No message was sent, and no terms were accepted.
@@ -14,21 +14,25 @@ Related: [ADR-015](architecture-decisions.md#adr-015-metadata-providers-are-repl
 
 ## Summary
 
-1. **Primary game-level source: Wikidata, now.**
+1. **Primary game-level source: Wikidata (decided, D-1).**
    - It is the only source whose terms already allow everything we need: commercial use, bulk import, indefinite storage, public serving and keeping the data forever. Its structured data is CC0, with official weekly JSON dumps.
    - It is already cleared for game identity (M11b-D1), and the importer already reads it.
    - Its weakness is coverage and consistency per platform, not licensing.
-2. **IGDB: a written partnership, or nothing.**
-   - Under the default terms (the Twitch Developer Services Agreement), data may be cached for 24 hours. It must be deleted on termination, and redistribution is prohibited. That rules out importing it into our own database.
-   - A partnership (partner@igdb.com) is the realistic way to a large, well-structured game layer, with daily CSV dumps. It must explicitly grant storage, public display and retention after termination.
+2. **IGDB: a strong candidate, pending written confirmation of the partnership terms.**
+   - **IGDB's own FAQ** in its API docs allows storing and keeping the data. It says:
+     - "Am I allowed to store/cache the data locally? Yes. In fact, we prefer if you store and serve the data to your end users";
+     - on partnership termination, "You are allowed to keep all data you retrieve from the API and we will not ask you to remove the data".
+   - **The Twitch Developer Services Agreement** points the other way. The IGDB docs place the API under it, and it limits caching to 24 hours without written authorization, requires deleting data on termination, and prohibits redistribution.
+   - **The two conflict.** Which governs a partner is exactly what the partnership must confirm in writing. IGDB is not unsuitable; it is unconfirmed.
+   - The product owner has written to partner@igdb.com. No credentials are requested and no data is taken until the terms are confirmed in writing and reviewed (D-8).
 3. **MobyGames: the most promising commercial source for regional releases.** It documents releases by country with product codes. Its terms couldn't be read (the site blocks automated access), so it is a written enquiry, not a plan.
 4. **Physical releases have no ready-made licensed bulk source.**
    - No-Intro's data licence is explicitly commercial and needs no attribution, but its data describes ROM dumps, not retail packages.
    - Redump, GameTDB and VGCollect have the best retail fields, and none publishes reuse terms for a commercial product.
    - Physical releases keep coming from human editors citing item-level sources, collector submissions, and written permissions as they arrive.
 5. **TheGamesDB stays held** (no published terms). **ScreenScraper stays out** of commercial use (CC BY-NC-SA 4.0, API for free apps only). **RAWG and Giant Bomb don't fit** a stored catalog.
-6. **The importer can do a controlled bulk import of game identities,** with three gaps to close first: a Wikidata dump reader, a policy for publishing game identities at scale, and update handling (below).
-7. **Recommended first volume:** one platform's full Wikidata set (SNES, about 1,430 items in the November snapshot) imported as unpublished candidates and audited by sample. Nothing is imported until the product owner approves.
+6. **The importer can do a controlled bulk import of game identities,** with three gaps to close first: an entity parser and fetch for selected Wikidata items (which also reads the dump later), publishing game identities at scale, and update handling (below).
+7. **First volume (decided, D-5):** a controlled SNES pilot of about 100 to 200 game identities (150 proposed), reviewed in full. The larger SNES set (about 1,430 items in the November snapshot) follows only after the pilot's quality review. Nothing is imported into development. The exact scope is in [catalog-ingestion-m12c-b1.md](catalog-ingestion-m12c-b1.md#3-the-first-snes-import-exact-scope-d-5).
 
 ## 1. Two catalog layers
 
@@ -54,11 +58,11 @@ Verdicts: **Confirmed** (the terms allow it), **Prohibited**, **Unclear**, **Wri
 | Question | Wikidata | IGDB | MobyGames *(unverified)* | TheGamesDB | ScreenScraper | RAWG | Giant Bomb *(unverified)* |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Commercial use | **Confirmed**: dumps "can be used for personal or commercial use" | **Written**: the docs say the API "is free for both non-commercial and commercial projects", and that monetized products take a partnership | **Written**: paid commercial tiers reported, not seen | **Unclear**: no terms published | **Prohibited**: API only in "applications entièrement gratuites" (completely free applications), site under CC BY-NC-SA 4.0 | **Confirmed within limits**, but contradictory: terms say free commercial use within 20,000 requests a month, while the plan table says "Non-commercial projects only" | **Prohibited** (reported) |
-| Import into our database | **Confirmed** | **Prohibited by default**: "cache such information for only a twenty-four hour time period" unless authorized in writing | **Written**: storage reportedly recommended | **Unclear** | **Prohibited** | **Written**: no copying "without our prior express written consent" | **Unclear** |
+| Import into our database | **Confirmed** | **Conflict, written confirmation needed**: the FAQ says "Yes … we prefer if you store and serve the data to your end users"; the Twitch agreement says "cache such information for only a twenty-four hour time period" unless authorized in writing | **Written**: storage reportedly recommended | **Unclear** | **Prohibited** | **Written**: no copying "without our prior express written consent" | **Unclear** |
 | Bulk dump | **Confirmed**: weekly JSON (`latest-all.json.gz`, about 157 GB) | **Written**: daily CSV dumps "exclusively available to our Data Partners" | None found | **Unclear**: a "private key" for mirroring is reported | **Prohibited** | **Written**: enterprise "Downloadable file api" | None found |
-| Store indefinitely | **Confirmed** (CC0) | **Prohibited by default** | **Unclear** | **Unclear** | **Prohibited** | **Unclear** | **Unclear** |
-| Serve publicly | **Confirmed** | **Written**: display with attribution, but "re-syndication and re-distribution … prohibited" | **Written**: "cannot compete … cannot repackage" reported | **Unclear** | **Prohibited** | **Prohibited** beyond the project's own pages: "No data redistribution" | **Unclear** |
-| Keep after the relationship ends | **Confirmed** | **Prohibited by default**: "delete all Twitch Data collected upon termination" | **Unclear** | **Unclear** | **Prohibited** | **Unclear** | **Unclear** |
+| Store indefinitely | **Confirmed** (CC0) | **Conflict, written confirmation needed** (as above) | **Unclear** | **Unclear** | **Prohibited** | **Unclear** | **Unclear** |
+| Serve publicly | **Confirmed** | **Conflict, written confirmation needed**: the FAQ prefers that you "store and serve the data to your end users", with fair, static attribution; the Twitch agreement prohibits "re-syndication and re-distribution" | **Written**: "cannot compete … cannot repackage" reported | **Unclear** | **Prohibited** | **Prohibited** beyond the project's own pages: "No data redistribution" | **Unclear** |
+| Keep after the relationship ends | **Confirmed** | **Conflict, written confirmation needed**: the FAQ says "You are allowed to keep all data you retrieve … in case of partnership termination"; the Twitch agreement says "delete all Twitch Data collected upon termination" | **Unclear** | **Unclear** | **Prohibited** | **Unclear** | **Unclear** |
 | Attribution | Requested, not required ("we would greatly appreciate it") | **Required**: "user facing attribution to IGDB.com" for partners | **Required** (reported): "Data by MobyGames.com" | **Unclear** | Required by the licence | **Required**: a link on every page using the data | **Unclear** |
 | Keys, contract, price | None for dumps. A User-Agent with contact information for the APIs | A Twitch developer app with 2FA. A partner agreement for commercial use and dumps; price not published | API key and a paid plan, reported at $99.99 to $4,999.99 a month | Signed-in API key. A paid allowance increase | Developer credentials through its forum, plus quotas | API key; Business plan $149 a month; Enterprise by contact | A free key, non-commercial |
 | Limits and updates | Query Service: 60 s per query, 5 parallel queries. API limits are new in 2026. Weekly dumps, daily incremental XML, a recent-changes stream | 4 requests a second, 8 open requests. Webhooks for added, updated and deleted records. `updated_at` on every record | Rate by plan (reported) | Monthly allowance | Per-user quotas; 429 and 430 errors | 20,000 to 1,000,000 requests a month, changeable at will. An `updated` filter | Reportedly 400 requests per 15 minutes |
@@ -66,8 +70,13 @@ Verdicts: **Confirmed** (the terms allow it), **Prohibited**, **Unclear**, **Wri
 | Evidence | [Database download](https://www.wikidata.org/wiki/Wikidata:Database_download), [Data access](https://www.wikidata.org/wiki/Wikidata:Data_access), [Licensing](https://www.wikidata.org/wiki/Wikidata:Licensing) | [API docs](https://api-docs.igdb.com/), [Twitch Developer Services Agreement](https://legal.twitch.com/legal/developer-agreement/) | [API](https://www.mobygames.com/info/api/), [terms](https://www.mobygames.com/info/terms/) (403) | [Site](https://thegamesdb.net/), [API](https://api.thegamesdb.net/) | [webapi2](https://www.screenscraper.fr/webapi2.php) | [Terms](https://rawg.io/tos_api), [plans](https://rawg.io/apidocs) | [API](https://www.giantbomb.com/api/) (403) |
 
 **IGDB in detail.**
-- Whether the agreement's Schedule 1 (the 24-hour cache) applies to IGDB, which isn't on dev.twitch.tv, is itself unclear. The IGDB docs place the API under that agreement.
-- A partnership must state, in writing:
+- **The FAQ** is in the commercial-partnership part of the [API docs](https://api-docs.igdb.com/), saved 2026-11-20 (SHA-256 `18579023…07178d2`). It allows storing and serving data, and keeping it after partnership termination. It asks for "fair attribution … visible to your users and located in a static location".
+- **The Twitch Developer Services Agreement** ([legal.twitch.com](https://legal.twitch.com/legal/developer-agreement/), saved rendered copy `8fbde374…a13332d`) says otherwise:
+  - its Schedule 1 allows a 24-hour cache without written authorization, and prohibits re-syndication;
+  - its §VI requires deleting Twitch Data on termination.
+  - Whether Schedule 1, which defines Twitch APIs by dev.twitch.tv, applies to IGDB is itself unclear.
+- **The earlier B0 reading** marked storage and retention "prohibited by default". That overstated it: the provider's own FAQ says the opposite for partners, so the accurate status is a conflict to resolve in writing.
+- A partnership must state, in writing, which terms govern, and confirm:
   - indefinite storage;
   - public display;
   - keeping data after termination;
@@ -102,13 +111,13 @@ Verdicts: **Confirmed** (the terms allow it), **Prohibited**, **Unclear**, **Wri
 
 | Blocker | Kind | What clears it |
 | --- | --- | --- |
-| IGDB's default terms forbid storing beyond 24 hours, and require deletion on termination | Legal | A signed partnership that grants storage, display and retention |
+| IGDB's FAQ allows storing and keeping data, but the Twitch agreement it points to limits caching to 24 hours and requires deletion on termination | Legal | Written confirmation from IGDB of the partnership terms that govern (requested by the product owner), then legal review (D-8) |
 | MobyGames, PriceCharting and Giant Bomb terms couldn't be read (403 to automated clients) | Evidence | The product owner reads them in a browser, and writes to the provider |
 | No commercial licence for any retail-package dataset (Redump, GameTDB, VGCollect) | Legal | Written permission, per source |
 | TheGamesDB publishes no terms | Legal | Written terms from its staff (Discord) |
 | A game is public only with a published, verified release | Product and technical | A decision on publishing game identities at scale (decision D-3) |
 | Editors verify one record at a time | Process | A sampling policy for layer A (decision D-4); layer B stays per item |
-| The Wikidata path reads Query Service results, not dumps | Technical | A streaming dump reader (plan, phase 1) |
+| The Wikidata path reads one Query Service result per platform, with only a few fields | Technical | An entity parser and targeted `wbgetentities` fetch; the same parser streams the dump if ever needed (B1 steps 1 and 2) |
 | No developer, publisher or genre fields; no image provenance (`images_cleared` is described in ADR-015 but doesn't exist) | Technical | Separate designs, only if wanted |
 
 ## 4. The existing importer, against bulk ingestion
@@ -137,7 +146,7 @@ Verdicts: **Confirmed** (the terms allow it), **Prohibited**, **Unclear**, **Wri
 
 | Gap | Why it matters | Proposed fix |
 | --- | --- | --- |
-| Wikidata comes from one Query Service result per platform | Large results time out or hit limits, and the service had an outage. Wikidata recommends dumps for large extractions | A streaming reader for the weekly JSON dump, filtered to video games on our platforms, producing the same entry shape as the existing parser. Fetching the dump is one public download, but 100 GB or more |
+| Wikidata comes from one Query Service result per platform | Large results time out or hit limits, and the service had an outage. It also returns only a few fields | An entity parser and a fetch of selected items with `wbgetentities` (50 per request), producing the same entry shape as today. The same parser can stream the weekly JSON dump (157 GB compressed) if targeted fetching ever proves insufficient ([B1 § 5](catalog-ingestion-m12c-b1.md#5-storage-and-resources)) |
 | Four platforms have Wikidata items | The catalog has 59 | Map and check each platform's Wikidata item, as M12c-A did for four |
 | Game fields are title, aliases, Japanese titles and first date only | Developer and publisher are often what tells same-titled games apart | Optionally stage them in the source record payload (no schema change), and decide later whether the catalog stores them |
 | A game is public only through a published, verified release | Thousands of game identities would be invisible to collectors. Unidentified copies need a published game | Decision D-3. If approved, a later milestone lets an editor publish a verified game identity with its pairing, with no release, labelled as having no verified physical release yet |
@@ -154,8 +163,8 @@ Each phase ends in a checkpoint for the product owner. Nothing runs on developme
 | Phase | What | Exit criteria |
 | --- | --- | --- |
 | **0. Authorized access** | Wikidata's clearance stands (M11b-D1). Send the outreach below; record every answer and saved terms in this document. No other provider is cleared without its written terms | Written answers, or a decision to proceed on Wikidata alone |
-| **1. Dump reader and platform map** | Build the dump reader with unit tests on a synthetic dump fragment. Map the Wikidata items of the pilot platforms first (`nes`, `snes`, `playstation`, `famicom-disk-system`), then the rest | Reader output identical to the existing parser's for the same items |
-| **2. Small controlled import, on the scratch stack** | One platform (SNES), all its video-game items from one dump: about 1,430 entries, all unpublished candidates. Measure time per entry | The quality checks below are met |
+| **1. Entity parser, fetch command and platform map** | A parser for Wikidata entity JSON (the shape of both `wbgetentities` and the weekly dump), and a fetch command for selected items. Map the Wikidata items of the pilot platforms first (`nes`, `snes`, `playstation`, `famicom-disk-system`), then the rest. The dump itself isn't downloaded ([B1 § 5](catalog-ingestion-m12c-b1.md#5-storage-and-resources)) | Parser output identical to the existing parser's for the same items |
+| **2. Controlled SNES pilot** | About 100 to 200 identities (150 proposed), selected as in [B1 § 3](catalog-ingestion-m12c-b1.md#3-the-first-snes-import-exact-scope-d-5), all unpublished candidates, reviewed in full (a census). Then the larger SNES set, by exception review and sampling | The quality checks below, and B1's sampling plan for larger batches |
 | **3. Duplicates and provenance** | Review the run report: `needs_review` duplicates, word-break and main-title suggestions, ignored and held entries. Resolve duplicates through the existing merge and reject tools | Duplicate rate and held reasons are understood, and each fix is recorded |
 | **4. Editorial review** | A sampled audit of game identities (decision D-4); physical releases keep per-item review | The acceptance threshold is met, and the sample is recorded |
 | **5. Larger incremental imports** | Platform by platform: the pilot platforms, then the rest. Each run is a reviewed checkpoint | Each run meets the same checks |
@@ -168,8 +177,8 @@ Each phase ends in a checkpoint for the product owner. Nothing runs on developme
 | Entries with a title (English or `mul`) | ≥ 99% |
 | Entries with a first release date at year precision or better | ≥ 90% (a gap, not a failure) |
 | Exact or word-break duplicates within the run, and with the existing catalog | < 1%, every one listed for review |
-| Non-games or wrong kinds in a random sample of 100 (DLC, ports wrongly split, compilations) | ≤ 2 |
-| Identity correct in the same sample: title, platform and date checked against a second source | ≥ 98% |
+| Non-games or wrong kinds (DLC, ports wrongly split, compilations) | Every one found in the pilot's census is excluded, and traced to a validator |
+| Identity correct: title, platform and date checked against a second source | Pilot: counted exactly (census). Larger batches: by the acceptance plan in [B1 § 4](catalog-ingestion-m12c-b1.md#4-validation-and-sampling). A sample's observed rate is never reported as the batch's accuracy: 98 correct of 100 shows at least 93.8% at 95% confidence |
 | Entries that create a release | 0 (game identity only) |
 | Published or verified by the import | 0 |
 | Run completes, and resumes after a forced stop | Yes, with each entry once |
@@ -259,8 +268,8 @@ TheGamesDB, ScreenScraper and RAWG get the same questions as the MobyGames lette
 
 ## 7. Recommendation
 
-1. **Primary game-identity source: Wikidata, by dump.** Proceed with phases 1 to 4 on Wikidata alone. They need no new licence, and they prove the bulk path end to end.
-2. **Pursue IGDB in parallel,** as the candidate second source for coverage and structure, only under a written partnership. Our ids stay ours, and Wikidata's IGDB ids can match the two.
+1. **Primary game-identity source: Wikidata (decided, D-1),** by targeted extraction of selected items. The dump is kept for later, if needed. Proceed with B1 on Wikidata alone: it needs no new licence, and it proves the path end to end.
+2. **Pursue IGDB in parallel** (the product owner has written to partner@igdb.com), as the candidate second source for coverage and structure. Wait for written partnership terms that resolve the FAQ and agreement conflict. Our ids stay ours, and Wikidata's IGDB ids can match the two.
 3. **Physical releases:**
    - **Editors first.** Keep editor-built releases from item-level sources, reviewed one at a time.
    - **Collectors.** Collector submissions add more, through review.
@@ -268,15 +277,15 @@ TheGamesDB, ScreenScraper and RAWG get the same questions as the MobyGames lette
    - **No-Intro.** Its data may add serial and language facts, never a release.
 4. **No artwork** from any source until D15.
 
-## 8. Decisions needed from the product owner
+## 8. Decisions recorded (2026-11-20)
 
-| # | Decision | Recommendation |
+| # | Decision | Recorded |
 | --- | --- | --- |
-| D-1 | Primary game-level source | Wikidata (CC0, by dump), now |
-| D-2 | Send the outreach, from which identity | IGDB first, then MobyGames and the physical-release databases. Sent by the product owner, not by an agent |
-| D-3 | May a verified game identity be published without a verified physical release, so collectors can find it and record an unidentified copy? | Yes, labelled as having no verified physical release. It is a design and migration of its own |
-| D-4 | Verifying game identities by sampled batch, with a recorded threshold, instead of one by one | Yes for layer A only, with no self-review. Layer B stays per item |
-| D-5 | First import target and thresholds | SNES from one Wikidata dump, on the scratch stack, with the checks in section 5 |
-| D-6 | Whether developer, publisher and genre become catalog fields | Stage them in source records now, and decide on schema later |
-| D-7 | User-Agent contact for Wikimedia requests | A role address or project URL the product owner chooses. An agent never uses personal data |
-| D-8 | Legal review before any commercial launch | Yes, for every provider whose data ships |
+| D-1 | Primary game-level source | **Wikidata (CC0)** for initial game identities. IGDB is a high-priority potential partner; the product owner emailed partner@igdb.com and awaits a reply |
+| D-2 | Outreach | **Prepared, not sent,** for MobyGames and selected physical-release providers (section 6) |
+| D-3 | Identity without a physical release | **Design approved:** a reviewed game identity can be published without a published release, and never implies a verified retail edition. Designed in [catalog-ingestion-m12c-b1.md § 1](catalog-ingestion-m12c-b1.md#1-game-identities-and-physical-releases-published-separately) |
+| D-4 | Scalable identity review | **Design approved:** automated validation, random sampling, risk-based exception review and explicit human approval. Physical releases are never approved automatically. [B1 § 2 and § 4](catalog-ingestion-m12c-b1.md#2-reviewing-identities-at-scale-d-4) |
+| D-5 | First import | **A controlled SNES pilot of about 100 to 200 identities,** then the larger SNES set after quality review. No bulk import into development |
+| D-6 | Developer, publisher, genre | **Planned as optional metadata with provenance,** not a prerequisite. Staged in source records first |
+| D-7 | Wikimedia contact | **No invented contact and no personal information.** The project contact is configured in `WIKIDATA_USER_AGENT` by the product owner ([B1 § 5](catalog-ingestion-m12c-b1.md#configuration-the-wikimedia-contact-d-7)) |
+| D-8 | Legal review | **Required** before a commercial launch, or before accepting any data provider's contractual terms |
