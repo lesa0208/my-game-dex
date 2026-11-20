@@ -19,7 +19,7 @@
  *   duplicate, or ignore) with every flag, as JSON and Markdown. Uses the entity snapshot
  *   when given; without it, the query snapshot's fields, flagged "entity_detail_pending".
  * - fetch-entities: the live Wikimedia request for the selection's entity records, 50 ids per
- *   request (wbgetentities: labels, aliases and claims only, in the languages the parser reads). It refuses to run unless
+ *   request (wbgetentities: info (for the revision), labels, aliases and claims only, in the languages the parser reads). It refuses to run unless
  *   WIKIDATA_USER_AGENT names a tool and a project contact (an email address or a URL), as
  *   the Wikimedia User-Agent policy requires. Nobody invents that contact (M12c-B1, D-7).
  *   Rate limits: one request at a time, at least 1 s apart, maxlag=5; on HTTP 429 or 503, or a
@@ -228,6 +228,13 @@ export function validUserAgent(agent) {
 /** Only the label languages the parser reads (en, mul, ja and the Latin-script alternates). */
 export const FETCH_LANGUAGES = "en|mul|ja|de|fr|es|it|nl|pt|sv";
 
+/**
+ * The entity fields requested. "info" carries lastrevid, the source revision the risk assessment
+ * records (B1-M2, B15); the 2026-11-20 snapshot was fetched without it and has to be fetched again
+ * before the import.
+ */
+export const ENTITY_PROPS = "info|labels|aliases|claims";
+
 export const FETCH_POLICY = { batch: 50, minIntervalMs: 1000, maxAttempts: 5, maxlag: 5, backoffMs: [2000, 4000, 8000, 16000] };
 
 /**
@@ -235,7 +242,7 @@ export const FETCH_POLICY = { batch: 50, minIntervalMs: 1000, maxAttempts: 5, ma
  * and `now` are injectable for tests. Returns the snapshot object; throws on failure, so a
  * partial snapshot is never written.
  */
-export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), policy = FETCH_POLICY, props = "labels|aliases|claims", languages = FETCH_LANGUAGES } = {}) {
+export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), policy = FETCH_POLICY, props = ENTITY_PROPS, languages = FETCH_LANGUAGES } = {}) {
   if (!validUserAgent(userAgent)) throw new Error("WIKIDATA_USER_AGENT must name a tool, a version and a project contact (an email address or a URL) chosen by the operator.");
   const unique = [...new Set(ids)].filter((id) => /^Q[0-9]+$/.test(id));
   const responses = [];

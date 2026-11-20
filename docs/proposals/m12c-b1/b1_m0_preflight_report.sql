@@ -16,6 +16,9 @@
 --                              equivalent titles.
 --   3 keys_changing            stored keys B1-M0 would recompute, by table.
 --   4 source_records_rekeyed   provider records whose titles contain compatibility characters.
+--   5 orphaned_title_keys      import title keys whose game or source record no longer exists
+--                              (left by a cleanup that deleted rows with foreign keys off). B1-M0
+--                              doesn't change them and won't add any; worth removing separately.
 begin transaction isolation level repeatable read read only;
 
 with k as (
@@ -57,6 +60,13 @@ where tk.origin = 'source'
       case when pg_catalog.jsonb_typeof(pr.payload -> 'titles') = 'array' then pr.payload -> 'titles' else '[]' end
       || pg_catalog.jsonb_build_array(coalesce(pr.payload ->> 'title', ''))) t
     where normalize(pg_catalog.translate(t, '™℠', '  '), NFKC) <> t)
+union all
+select '5 orphaned_title_keys', 'missing game', null, count(*)::text
+from private.game_title_keys k where not exists (select 1 from public.games g where g.id = k.game_id)
+union all
+select '5 orphaned_title_keys', 'missing source record', null, count(*)::text
+from private.game_title_keys k
+where k.provider_record_id is not null and not exists (select 1 from private.provider_records pr where pr.id = k.provider_record_id)
 order by 1, 2, 3;
 
 rollback;

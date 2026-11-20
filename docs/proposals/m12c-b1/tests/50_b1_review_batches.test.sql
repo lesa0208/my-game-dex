@@ -38,8 +38,18 @@ where id in (select pg_temp.u(s) from unnest(array['e1', 'e2', 'e3', 'c4']) as s
 insert into public.staff_roles (user_id, role) values (pg_temp.u('e1'), 'catalog_editor'), (pg_temp.u('e2'), 'catalog_editor'), (pg_temp.u('e3'), 'catalog_editor');
 
 -- An import run with game candidates, as the importer leaves them: unpublished, unverified,
--- paired with the SNES, each with its source record (payload.source present; review_flags
+-- paired with the SNES, each with its source record (payload.source present; payload.risk_assessment
 -- carry the parser's flags).
+-- The source is cleared against the run's terms (B16), and each record carries the parser's
+-- risk assessment (B15), as the B1 import stages them.
+select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', encode(digest('terms', 'sha256'), 'hex'), 'B1 test clearance');
+create function pg_temp.assessment(p_id text, p_snapshot text, p_flags jsonb) returns jsonb language sql stable as $f$
+  select jsonb_build_object('contract', 'mgd-risk-assessment', 'version', 1, 'assessor', 'b1-test', 'assessor_version', '1',
+    'source', jsonb_build_object('provider', 'wikidata', 'external_id', p_id, 'revision', 1, 'snapshot_sha256', p_snapshot),
+    'flags', p_flags,
+    'critical', coalesce((select jsonb_agg(distinct private.review_critical_signal(f)) from jsonb_array_elements_text(p_flags) f
+                          where private.review_critical_signal(f) is not null), '[]'))
+$f$;
 create temp table runs (tag text primary key, id uuid);
 create function pg_temp.run(p_tag text) returns uuid language sql stable as $$ select id from runs where tag = p_tag $$;
 create function pg_temp.g(p_title text) returns uuid language sql stable as $$ select id from public.games where title = p_title $$;
@@ -63,7 +73,7 @@ begin
     returning id into v_game;
     insert into public.game_platforms (game_id, platform_id, status) values (v_game, (select id from public.platforms where slug = 'snes'), 'under_review');
     insert into private.provider_records (provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, matched_game_id)
-    values ('wikidata', 'game', 'Q9' || p_tag || i, jsonb_build_object('title', e ->> 'title', 'source', '{}'::jsonb, 'review_flags', coalesce(e -> 'flags', '[]')),
+    values ('wikidata', 'game', 'Q9' || p_tag || i, jsonb_build_object('title', e ->> 'title', 'source', '{}'::jsonb, 'risk_assessment', pg_temp.assessment('Q9' || p_tag || i, encode(digest(p_tag, 'sha256'), 'hex'), coalesce(e -> 'flags', '[]'))),
             encode(digest(p_tag || i, 'sha256'), 'hex'), v_run, 'promoted', v_game)
     returning id into v_record;
     insert into private.import_run_records (import_run_id, provider_record_id, position) values (v_run, v_record, i);
@@ -124,7 +134,7 @@ select is(pg_temp.approve('e2', pg_temp.b('a')), 'error: batch not reviewed', 'a
 select is(pg_temp.outcome('e1', 'Zqx Batch Undated', 'correct', null), 'error: own record', 'the batch''s creator records no outcome');
 select pg_temp.outcome('e2', t, 'correct', null)
 from unnest(array['Zqx Batch Undated', 'Zqx Batch Clean One', 'Zqx Batch Clean Two', 'Zqx Batch Clean Three', 'Zqx Batch Clean Four']) t;
-select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, 'one twin')::text$q$, pg_temp.b('a'),
+select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, 'Earlier release date: this twin is the game itself')::text$q$, pg_temp.b('a'),
   (select id from public.games where title = 'Zqx Batch Twin' order by first_release_date limit 1))), 'true', 'one twin is the game');
 select is(pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'incorrect', 'conflicting_duplicate_identities', 'duplicate item')::text$q$, pg_temp.b('a'),
   (select id from public.games where title = 'Zqx Batch Twin' order by first_release_date desc limit 1))), 'true', 'the other is a duplicate: a critical error');

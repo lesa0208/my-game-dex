@@ -7,6 +7,7 @@
 - **Checkpoint two** (accepted with conditions): the isolated B1 stack, source revalidation, critical errors, and migration drafts validated on scratch.
 - **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
 - **Checkpoint four:** the 150 records fetched and classified, multiple-id detection, editorial notes, and two B1-M2 fixes.
+- **Independent SQL review of 62267d6:** changes required; findings resolved in the drafts (B12 to B18), awaiting a second review.
 
 The migrations are final drafts awaiting approval, applied nowhere persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
 - No migration, import or download beyond what is listed under [Measured](#measured).
@@ -252,6 +253,25 @@ They are **not** applied to development, the M12c-A stack or the B1 stack.
 2. Review of the migration drafts. Once approved, they move to `supabase/migrations/` and are applied to the B1 stack only.
 3. The importer step: entity snapshots through the M5b importer, with the parser's flags in `payload.review_flags`, as candidates on the B1 stack.
 4. Then the batch, the census review by the product owner as editor B, approval, and the collector checks generalized to identity-only games.
+
+## Independent SQL review of 62267d6: changes made (2026-11-20)
+
+The review's decision was **changes required**: the architecture was accepted in principle, and six findings and some hardening had to be resolved before any migration reaches B1. All are addressed in the unapplied drafts, which now await a second review. [SQL-REVIEW.md](../proposals/m12c-b1/SQL-REVIEW.md) gives each finding's verdict, change, line references and tests.
+
+**What changes for the first SNES import:**
+- **The import writes a risk assessment.** It stages each parser entry through `withRiskAssessment()`, which writes `payload.risk_assessment`: contract `mgd-risk-assessment`, version 1. A batch is refused if any member's assessment is missing or invalid, so a critical parser flag can't be lost between staging and approval.
+- **Licence clearance is rechecked at publication.** Wikidata's clearance is checked again when a batch is approved. If Wikidata's CC0 rights are to survive a later change of clearance, an operator records that once with `private.record_provider_rights`, for the exact terms reviewed.
+- **Held records stay out of batches.**
+  - The 13 held records and the unresolved duplicate groups can be staged.
+  - In a batch they are flagged, so they need individual outcomes. They are never sampled or batch accepted, and they stay unpublished until each is resolved.
+  - Unrelated safe candidates can proceed in the same batch.
+- **Re-batching after a rejection needs a real change.** A rejected batch's unchanged members can't be batched again with a new sample. They come back only after an audited edit or a new source record.
+- **Publication stays layered.** Game identity, verified game-platform eligibility and specific physical releases remain separate. Physical releases stay under independent, item-level review.
+- **The 150 records must be fetched again before the import.** The assessment records each record's source revision. The 2026-11-20 snapshot was fetched without the `info` property, so its records have no revision, and every one would be refused. The fetch tooling now requests `info|labels|aliases|claims`. The fetch is the same 150 frozen ids in 3 requests, and it hasn't been run.
+
+**Found during validation:**
+- **The M12c-A test stack has 21 orphaned import title keys.** They were left by an older cleanup in `db-ownership-claim-checks.mjs`, which is now fixed.
+- **They are left in place.** They are outside B1, B1-M0 neither adds nor needs them, and the read-only preflight reports them.
 
 ## Checkpoint four: source classification and identity quality gate (2026-11-20)
 

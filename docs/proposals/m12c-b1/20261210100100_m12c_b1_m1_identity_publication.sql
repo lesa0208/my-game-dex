@@ -55,6 +55,9 @@ create table private.catalog_pairing_origins (
   foreign key (game_id, platform_id) references public.game_platforms (game_id, platform_id) on delete cascade
 );
 revoke all on private.catalog_pairing_origins from public, anon, authenticated, service_role;
+-- Defense in depth (SQL review of 62267d6, item 7): RLS with no policies. Only the owner, which
+-- the SECURITY DEFINER functions run as, reaches the table.
+alter table private.catalog_pairing_origins enable row level security;
 
 create function private.record_pairing_origin()
 returns trigger
@@ -893,6 +896,9 @@ create table private.catalog_pairing_withdrawals (
 -- One open withdrawal per pairing.
 create unique index catalog_pairing_withdrawals_open on private.catalog_pairing_withdrawals (game_id, platform_id) where restored_at is null;
 revoke all on private.catalog_pairing_withdrawals from public, anon, authenticated, service_role;
+-- Defense in depth (SQL review of 62267d6, item 7): RLS with no policies. Only the owner, which
+-- the SECURITY DEFINER functions run as, reaches the table.
+alter table private.catalog_pairing_withdrawals enable row level security;
 
 -- W6: kept as recorded. The only changes: one restoration, and account deletion clearing an
 -- editor's reference.

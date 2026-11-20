@@ -360,6 +360,43 @@ export function externalIdConflict(externalIds) {
   return { igdb, mobygames: moby, hints };
 }
 
+/**
+ * The risk-assessment contract between this parser and batch creation (B1-M2, B15). The B1
+ * import writes it into each staged payload as `risk_assessment`; create_review_batch refuses
+ * the whole batch if any member's is missing or invalid. The SQL validator
+ * (private.review_risk_problems) checks the same fields: known flags only, critical signals
+ * equal to CRITICAL_SIGNALS of those flags, and provenance tying it to the record and snapshot.
+ */
+export const RISK_ASSESSMENT = Object.freeze({ contract: "mgd-risk-assessment", version: 1, assessor: "mgd-wikidata-entities", assessor_version: "1" });
+
+/**
+ * An entry with its risk assessment, for staging. `snapshotSha256` is the hash of the entity
+ * snapshot the import run is started with (its source_sha256). Ignored entries are returned
+ * unchanged: they are never candidates. Only the entry's own flags are assessed here; the batch
+ * recomputes dates and in-batch collisions itself.
+ */
+export function withRiskAssessment(entry, { snapshotSha256 }) {
+  if (entry.ignore_reason) return entry;
+  if (!/^[0-9a-f]{64}$/.test(snapshotSha256 ?? "")) throw new Error("A risk assessment needs the snapshot's SHA-256.");
+  const revision = entry.payload?.source?.revision;
+  if (!Number.isInteger(revision)) throw new Error(`${entry.external_id}: no source revision; a record without full source detail can't be assessed.`);
+  const unknown = entry.flags.filter((f) => !FLAGS[f]);
+  if (unknown.length) throw new Error(`${entry.external_id}: unknown flags ${unknown.join(", ")}`);
+  const flags = [...new Set(entry.flags)].sort();
+  return {
+    ...entry,
+    payload: {
+      ...entry.payload,
+      risk_assessment: {
+        ...RISK_ASSESSMENT,
+        source: { provider: "wikidata", external_id: entry.external_id, revision, snapshot_sha256: snapshotSha256 },
+        flags,
+        critical: [...new Set(flags.map((f) => CRITICAL_SIGNALS[f]).filter(Boolean))].sort(),
+      },
+    },
+  };
+}
+
 /** The distinct distribution formats (P437, non-deprecated) the entities state, in numeric id order. */
 export function distributionFormatIds(text) {
   return [...new Set(entityObjects(text).flatMap((e) => itemIds(e, WD.distributionFormat)))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));

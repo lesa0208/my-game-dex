@@ -25,7 +25,9 @@ import {
   FLAGS,
   identityTitleKey,
   parseWikidataEntities,
+  RISK_ASSESSMENT,
   timeValue,
+  withRiskAssessment,
 } from "./wikidata-entities.mjs";
 
 const SNES = "Q183259";
@@ -203,7 +205,7 @@ test("the fetch refuses without a project contact, batches by 50, waits between 
   assert.equal(snapshot.ids.length, 120);
   assert.equal(calls.length, 4);
   assert.ok(calls.every((c) => c.agent === "MyTool/1.0 (ops@example.test) node/22"));
-  assert.ok(calls.every((c) => new URL(c.url).searchParams.get("maxlag") === "5" && new URL(c.url).searchParams.get("props") === "labels|aliases|claims" && new URL(c.url).searchParams.get("languages").split("|").includes("mul")));
+  assert.ok(calls.every((c) => new URL(c.url).searchParams.get("maxlag") === "5" && new URL(c.url).searchParams.get("props") === "info|labels|aliases|claims" && new URL(c.url).searchParams.get("languages").split("|").includes("mul")));
   assert.equal(new URL(calls[0].url).searchParams.get("ids").split("|").length, 50);
   assert.ok(sleeps.includes(3000), "Retry-After is honoured");
   assert.ok(sleeps.filter((ms) => ms === 1000).length >= 2, "at least 1 s between requests");
@@ -405,4 +407,47 @@ test("a record whose entity detail is pending is never ready, whatever else it s
     assert.ok(i.possible_critical.includes("missing_provenance"));
   }
   assert.equal(report.totals.readiness.ready_for_editorial_consideration, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The risk-assessment contract with batch creation (SQL review of 62267d6, finding 5)
+// ---------------------------------------------------------------------------
+
+const B1_DIR = new URL("../docs/proposals/m12c-b1/", import.meta.url);
+const m2Sql = () => readFileSync(new URL("20261210100300_m12c_b1_m2_review_batches.sql", B1_DIR), "utf8");
+const SNAP = "5b1e2d0a3c4f69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
+
+test("the batch migration knows every parser flag, with the same kind", () => {
+  const sql = m2Sql();
+  const body = sql.slice(sql.indexOf("create function private.review_flag_kind"), sql.indexOf("create function private.review_critical_signal"));
+  const kinds = {};
+  for (const m of body.matchAll(/when p_flag in \(([^)]*)\)\s*then '([a-z]+)'/g)) for (const f of m[1].matchAll(/'([a-z_]+)'/g)) kinds[f[1]] = m[2];
+  assert.deepEqual(kinds, FLAGS);
+});
+
+test("an entry's risk assessment follows the contract the batch validates", () => {
+  const entries = parseWikidataEntities(fixture("entities-response.json"), SNES);
+  const e = entries.find((x) => x.external_id === "Q1005");
+  const a = withRiskAssessment(e, { snapshotSha256: SNAP }).payload.risk_assessment;
+  assert.deepEqual(a, {
+    contract: "mgd-risk-assessment", version: 1, assessor: "mgd-wikidata-entities", assessor_version: "1",
+    source: { provider: "wikidata", external_id: "Q1005", revision: 2005, snapshot_sha256: SNAP },
+    flags: ["other_instance_of", "platform_date_before_launch"],
+    critical: ["wrong_identity_or_type", "wrong_platform"],
+  });
+  const sql = m2Sql();
+  assert.ok(sql.includes(`a ->> 'contract' is distinct from '${RISK_ASSESSMENT.contract}'`) && sql.includes(`a -> 'version' is distinct from '${RISK_ASSESSMENT.version}'::jsonb`));
+  const ignored = entries.find((x) => x.ignore_reason);
+  assert.equal(withRiskAssessment(ignored, { snapshotSha256: SNAP }), ignored, "an ignored entry is never a candidate and isn't assessed");
+  assert.throws(() => withRiskAssessment(e, { snapshotSha256: "abc" }), /SHA-256/);
+  assert.throws(() => withRiskAssessment({ ...e, payload: { ...e.payload, source: { ...e.payload.source, revision: null } } }, { snapshotSha256: SNAP }), /no source revision/);
+  assert.throws(() => withRiskAssessment({ ...e, flags: ["made_up_flag"] }, { snapshotSha256: SNAP }), /unknown flags/);
+});
+
+test("the end-to-end pgTAP test stages exactly what the parser produces", () => {
+  const sql = readFileSync(new URL("tests/51_b1_review_hardening.test.sql", B1_DIR), "utf8");
+  const block = sql.slice(sql.indexOf("-- BEGIN parser-payload"), sql.indexOf("-- END parser-payload"));
+  const literal = JSON.parse(/\$p\$(\{.*\})\$p\$/.exec(block)[1]);
+  const e = parseWikidataEntities(fixture("entities-response.json"), SNES).find((x) => x.external_id === "Q1005");
+  assert.deepEqual(literal, withRiskAssessment(e, { snapshotSha256: SNAP }).payload);
 });

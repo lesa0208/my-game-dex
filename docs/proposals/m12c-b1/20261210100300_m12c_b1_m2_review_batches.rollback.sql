@@ -2,6 +2,13 @@
 --
 -- Run before the B1-M1 rollback (approval uses B1-M1's pairing_created_by).
 --
+-- Not a complete schema reversal: it removes what can act (the five editor functions) and keeps
+-- the schema objects that hold or protect history. Kept: the four tables with their guard
+-- triggers and RLS, the provider-rights columns of private.external_providers (rights stay
+-- recorded), and the helpers only the owner can run (review_flag_kind, review_critical_signal,
+-- review_risk_problems, review_sample_size and its maths, record_provider_rights,
+-- require_publication_rights).
+--
 -- The five editor functions go. The policy, batches, items and approvals stay as review history,
 -- with their immutability triggers; nothing that was published is unpublished (published
 -- records can't be, and their audit rows name the batch). An open batch can no longer be

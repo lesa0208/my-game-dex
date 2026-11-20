@@ -12,16 +12,16 @@ The raw lists are in `inventory/` in the review archive. The stack was destroyed
 
 | | Count |
 | --- | --- |
-| Functions new | 24 |
+| Functions new | 28 |
 | Functions replaced (same signature) | 7 |
 | Functions executable by `authenticated` (new) | 10 |
 | New functions executable by `anon`, `service_role`, `catalog_importer` or `PUBLIC` | 0 |
 | Replaced functions whose grants changed | 0 (the two public reads keep `anon, authenticated`) |
 | Tables new | 6 (all in `private`) |
-| Columns added to existing tables | 4 (`public.game_platforms`) |
+| Columns added to existing tables | 4 (`private.external_providers`), 4 (`public.game_platforms`) |
 | Table or column grant changes, to any role | 0 |
 | RLS policy changes | 0 |
-| Constraints / indexes / triggers added | 53 / 8 / 5 |
+| Constraints / indexes / triggers added | 56 / 8 / 5 |
 | Enum values added (`private.audit_action`) | 7 |
 | Objects removed | 7 lines, all the old definitions of the 7 replaced functions |
 
@@ -55,7 +55,11 @@ Every function has a fixed `search_path` (`''`). "Executable by" lists every rol
 | B1-M2 | `private.guard_review_batch_item()` | new | invoker | `''` | none (owner only) |
 | B1-M2 | `private.hypergeometric_cdf(p_c integer, p_n integer, p_lot integer, p_defects integer)` | new | invoker | `''` | none (owner only) |
 | B1-M2 | `private.ln_choose(p_n integer, p_k integer)` | new | invoker | `''` | none (owner only) |
+| B1-M2 | `private.record_provider_rights(p_code text, p_survives boolean, p_terms_sha256 text, p_note text)` | new | invoker | `''` | none (owner only) |
+| B1-M2 | `private.require_publication_rights(p_provider text, p_terms_sha256 text)` | new | invoker | `''` | none (owner only) |
 | B1-M2 | `private.review_critical_signal(p_flag text)` | new | invoker | `''` | none (owner only) |
+| B1-M2 | `private.review_flag_kind(p_flag text)` | new | invoker | `''` | none (owner only) |
+| B1-M2 | `private.review_risk_problems(p_record private.provider_records)` | new | invoker | `''` | none (owner only) |
 | B1-M2 | `private.review_sample_size(p_lot integer, p_tolerable numeric, p_confidence numeric, p_c integer)` | new | invoker | `''` | none (owner only) |
 | B1-M2 | `public.approve_review_batch(p_batch uuid, p_reason text)` | new | definer | `''` | authenticated |
 | B1-M2 | `public.create_review_batch(p_run uuid, p_platform uuid, p_reason text)` | new | definer | `''` | authenticated |
@@ -68,22 +72,23 @@ Every function has a fixed `search_path` (`''`). "Executable by" lists every rol
 - **`private.catalog_pairing_origins`** (new), 4 constraints: `created_at timestamp not null`, `creator_id uuid`, `game_id uuid not null`, `origin text not null`, `platform_id uuid not null`
 - **`private.catalog_pairing_withdrawals`** (new), 11 constraints: `claimed_copies integer not null`, `game_id uuid not null`, `game_revision bigint not null`, `id uuid not null`, `platform_id uuid not null`, `previous_status text not null`, `previous_verification jsonb`, `reason text not null`, `restore_reason text`, `restored_at timestamp`, `restored_by uuid`, `withdrawn_at timestamp not null`, `withdrawn_by uuid`
 - **`private.catalog_review_batch_approvals`** (new), 4 constraints: `approved_at timestamp not null`, `approver_id uuid not null`, `batch_id uuid not null`, `reason text not null`
-- **`private.catalog_review_batch_items`** (new), 11 constraints: `batch_id uuid not null`, `critical_error text`, `critical_flags ARRAY not null`, `flags ARRAY not null`, `frozen_game_revision bigint not null`, `game_id uuid not null`, `note text`, `outcome text`, `platform_id uuid not null`, `provider_record_id uuid`, `recorded_at timestamp`, `reviewed_by uuid`, `sampled boolean not null`
+- **`private.catalog_review_batch_items`** (new), 11 constraints: `batch_id uuid not null`, `critical_error text`, `critical_flags ARRAY not null`, `flags ARRAY not null`, `frozen_game_revision bigint not null`, `game_id uuid not null`, `info_flags ARRAY not null`, `note text`, `outcome text`, `platform_id uuid not null`, `provider_record_id uuid`, `recorded_at timestamp`, `reviewed_by uuid`, `sampled boolean not null`
 - **`private.catalog_review_batches`** (new), 15 constraints: `acceptance_number integer not null`, `confidence numeric not null`, `content_sha256 text not null`, `created_at timestamp not null`, `created_by uuid`, `decided_at timestamp`, `decision_reason text`, `flagged_count integer not null`, `id uuid not null`, `import_run_id uuid not null`, `item_count integer not null`, `platform_id uuid not null`, `reason text not null`, `required_approvals integer not null`, `sample_size integer not null`, `seed uuid not null`, `status text not null`, `tolerable_error numeric not null`
 - **`private.catalog_review_policy`** (new), 6 constraints: `acceptance_number integer not null`, `confidence numeric not null`, `id boolean not null`, `second_approval_above integer not null`, `tolerable_error numeric not null`, `updated_at timestamp not null`
+- **`private.external_providers`** (existing table, new columns), 3 constraints: `rights_note text`, `rights_recorded_at timestamp`, `rights_survive_withdrawal boolean not null`, `rights_terms_sha256 text`
 - **`public.game_platforms`** (existing table, new columns), 2 constraints: `verification_basis jsonb`, `verified_at timestamp`, `verified_by uuid`, `verified_game_revision bigint`
 
 **No role is granted anything on these tables.** There are 0 table or column grant changes. `private` has no `USAGE` for `anon`, `authenticated` or `service_role` (M0 foundation), so the tables are reachable only through the definer functions above. The four new `public.game_platforms` columns get no column grant: the table is granted column by column (`game_id`, `platform_id`, `status`, `created_at`, `updated_at` to `anon` and `authenticated`), so who verified a pairing, when and why stays unreadable to every role but the owner (I8).
 
 **RLS:**
-- `private.catalog_pairing_origins enabled=false forced=false`
-- `private.catalog_pairing_withdrawals enabled=false forced=false`
-- `private.catalog_review_batch_approvals enabled=false forced=false`
-- `private.catalog_review_batch_items enabled=false forced=false`
-- `private.catalog_review_batches enabled=false forced=false`
-- `private.catalog_review_policy enabled=false forced=false`
+- `private.catalog_pairing_origins enabled=true forced=false`
+- `private.catalog_pairing_withdrawals enabled=true forced=false`
+- `private.catalog_review_batch_approvals enabled=true forced=false`
+- `private.catalog_review_batch_items enabled=true forced=false`
+- `private.catalog_review_batches enabled=true forced=false`
+- `private.catalog_review_policy enabled=true forced=false`
 
-RLS is not enabled on the new private tables. This follows the existing private catalog tables, `private.catalog_record_origins` and `private.catalog_verifications`, which also have it off; the other 24 private tables have it on. **Reviewer decision:** whether to enable RLS (with no policies) on all eight as defense in depth. Definer functions run as the owner and are unaffected.
+RLS is enabled, with no policies, on all six new private tables (SQL review of 62267d6, item 7). It is defense in depth: no client role has a grant or schema usage, and the definer functions run as the table owner, which RLS doesn't restrict. The two older private catalog tables `catalog_record_origins` and `catalog_verifications` still have it off; they are outside B1.
 
 ## Triggers, indexes and enum values
 
@@ -111,9 +116,10 @@ RLS is not enabled on the new private tables. This follows the existing private 
 ## After the three rollbacks
 
 - **Pre-B1 objects missing or different:** 0. Every replaced function is byte-identical to its pre-B1 definition again (same `pg_get_functiondef` hash), with the same grants.
-- **Objects that remain:** 163 lines. They are the history the rollbacks keep by design:
-  - the six private tables, with their constraints and guard triggers;
+- **Objects that remain:** 179 lines. They are the history the rollbacks keep by design:
+  - the six private tables, with their constraints, guard triggers and RLS;
   - the four `game_platforms` verification columns and their two constraints;
+  - the provider-rights columns and constraint on `private.external_providers` (rights stay recorded);
   - the seven enum values.
 - **Helper functions that remain:**
   - `private.guard_pairing_withdrawal()`
@@ -124,8 +130,12 @@ RLS is not enabled on the new private tables. This follows the existing private 
   - `private.ln_choose(p_n integer, p_k integer)`
   - `private.pairing_created_by(p_me uuid, p_game uuid, p_platform uuid)`
   - `private.record_pairing_origin()`
+  - `private.record_provider_rights(p_code text, p_survives boolean, p_terms_sha256 text, p_note text)`
   - `private.require_pairing_basis(p_basis jsonb)`
+  - `private.require_publication_rights(p_provider text, p_terms_sha256 text)`
   - `private.review_critical_signal(p_flag text)`
+  - `private.review_flag_kind(p_flag text)`
+  - `private.review_risk_problems(p_record private.provider_records)`
   - `private.review_sample_size(p_lot integer, p_tolerable numeric, p_confidence numeric, p_c integer)`
 
-  They are executable by `postgres` only. The pairing-origin trigger itself is dropped; its function stays, unused.
+  They are executable by `postgres` only. The pairing-origin trigger itself is dropped; its function stays, unused. The rollbacks are forward migrations that remove what can act; they are not a complete schema reversal.

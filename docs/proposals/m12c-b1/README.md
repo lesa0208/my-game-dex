@@ -2,7 +2,8 @@
 
 **Written for:** the reviewer of B1-M0, B1-M1 and B1-M2, before any of them moves to `supabase/migrations/`.
 
-**Status, 2026-11-20 (checkpoint four):** final drafts for review. The short reviewer checklist is [SQL-REVIEW.md](SQL-REVIEW.md).
+**Status, 2026-11-20 (after the independent SQL review of 62267d6):** revised drafts for a second review. [SQL-REVIEW.md](SQL-REVIEW.md) gives each finding's verdict, change and test; [INVENTORY.md](INVENTORY.md) lists every changed object and privilege.
+- **Review of 62267d6 (changes required):** B1-M2 gains invariants B12 to B18 (concurrency, per-member self-review, recent MFA for outcomes, no resampling of rejected cohorts, a validated risk-assessment contract, publication rights, evidence for overrides, a complete content hash), RLS on the six new private tables, and B1-M0 an orphaned-key postcheck. Test 51 (45 pgTAP tests) and a two-session concurrency check are new.
 - **Checkpoint four:** two B1-M2 fixes (10 and 11 below), three more pgTAP tests. B1-M0 and B1-M1 unchanged.
 - **Not applied** to development, the M12c-A test stack or the B1 stack.
 - **Validated on a disposable scratch stack:** built fresh from the 72 current migrations, with these files applied from disk in order, then destroyed.
@@ -26,6 +27,8 @@
 | | `tests/48_b1_unicode_title_keys.test.sql` | 25 pgTAP tests | |
 | | `tests/49_b1_identity_publication.test.sql` | 58 pgTAP tests | |
 | | `tests/50_b1_review_batches.test.sql` | 54 pgTAP tests | |
+| | `tests/51_b1_review_hardening.test.sql` | 45 pgTAP tests: the review findings 2 to 7, and the end-to-end path through the M5b importer | |
+| | `tests/concurrency/b1_concurrency_check.mjs` | Finding 1 with two real sessions (scratch only): 10 checks, and `--demonstrate-defect` against the 5c75321 approval | |
 | | `tests/schema_guard_updates.patch` | The approved lists in `01_foundation`, `03_schema_guards`, `10_staff_and_functions` and `14_audit` gain the new tables, grants, `SECURITY DEFINER` functions and audit actions, nothing else | |
 
 **Generated, not hand-retyped.** B1-M1 replaces five existing functions by exact signature:
@@ -42,7 +45,8 @@ Their bodies are the database's current definitions with marked substitutions (`
 | Run | Result |
 | --- | --- |
 | The five migrations, applied from disk in order | Applied without error |
-| Full pgTAP: the existing 47 files with the guard patch, and 48, 49 and 50 | **3,852 / 3,852** (3,715 existing + 25 + 58 + 54; checkpoint four) |
+| Full pgTAP: the existing 47 files with the guard patch, and 48, 49, 50 and 51 | **3,897 / 3,897** (3,715 existing + 25 + 58 + 54 + 45; after the review of 62267d6) |
+| Two-session concurrency (`tests/concurrency/b1_concurrency_check.mjs --demonstrate-defect`) | **10 / 10**, including the defect reproduced on the 5c75321 approval |
 | Existing behaviour tests unchanged, including `16_catalog`, `26_release_exclusion` and `46_flexible_ownership` | Pass. Each relaxation applies only to verified pairings |
 | Database checks: catalog, search, import, release identity, ownership claims, collection, submission, review, relink, exclusion, merge, authorization, MFA | 13 suites, **786 / 786** |
 | B1-M1 rollback with an identity-only publication present | **Refused**, nothing changed |
@@ -182,7 +186,7 @@ Re-applying B1-M1 or B1-M2 after its rollback is a new forward migration, since 
 
 1. **The physical-eligibility wording for unsampled members** is now `"batch_accepted"` (fix 6). The alternative is to require individual confirmation for every pilot member, which the pilot's census-sized sample nearly is.
 2. **Distribution formats (decided, checkpoint four).** The 12 formats the pilot states are classified in the parser's `DISTRIBUTION_FORMAT_TABLE`, from their fetched labels. A physical class only clears the "unclassified" flag and never establishes a physical release. Only a record whose every format for the platform is digital is held (`distribution_non_physical`); digital alongside physical is information only.
-3. **Review flags.** B1's import step must copy each entry's flags into `payload.review_flags`, so `create_review_batch` sees them. The batch also recomputes date and title-collision flags itself.
+3. **Risk assessments (decided after the review of 62267d6).** B1's import step stages each entry through `withRiskAssessment()` (scripts/wikidata-entities.mjs), which writes `payload.risk_assessment` (contract `mgd-risk-assessment`, version 1). `create_review_batch` refuses the whole batch if any member's is missing or invalid (B15), and recomputes date, title and external-id collision flags itself.
 4. **Pairing origins for API sessions.** An API session that isn't the pairing's submitter is recorded as `staff`, matching how pairings are created today (only editors and submitters can). A stricter check (`has_staff_role`) can be added.
 5. **Staff pages** don't yet show pairing verification, withdrawal or batches (B1 step 5).
 6. **Submitted games.** A game a collector submitted keeps the M7b-1 guard (`guard_submitted_record`), so identity publication doesn't bypass submission review while the submission is active.

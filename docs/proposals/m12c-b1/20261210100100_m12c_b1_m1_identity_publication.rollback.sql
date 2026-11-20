@@ -5,6 +5,9 @@
 -- can't be unpublished (guard_published_catalog_row), so those go through the exclusion tools
 -- first, with their history kept. Verification columns and pairing origins are kept as
 -- history; only the functions and the trigger go.
+--
+-- Not a complete schema reversal: the verification columns, catalog_pairing_origins and
+-- catalog_pairing_withdrawals (with their RLS and guard), and the owner-only helpers stay.
 
 do $$
 begin

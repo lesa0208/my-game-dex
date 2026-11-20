@@ -111,6 +111,11 @@ begin
   end if;
 end $$;
 
+-- Title keys whose game or source record no longer exists, before this step (a test cleanup that
+-- deleted games in replica mode can leave some; b1_m0_preflight_report.sql lists them).
+create temp table m0_orphans_before on commit drop as select (select count(*) from private.game_title_keys k where not exists (select 1 from public.games g where g.id = k.game_id))
+       + (select count(*) from private.game_title_keys k
+          where k.provider_record_id is not null and not exists (select 1 from private.provider_records pr where pr.id = k.provider_record_id)) as n;
 set local session_replication_role = replica;
 update public.games g set title = g.title
 where g.search_key is distinct from private.catalog_search_key(g.title);
@@ -158,5 +163,12 @@ begin
      or exists (select 1 from private.game_title_keys k join public.games g on g.id = k.game_id
                 where k.origin = 'title' and k.title_key is distinct from private.import_title_key(g.title)) then
     raise exception 'B1-M0 postcheck: a stored key differs from its function. Rolled back.';
+  end if;
+  -- Replica mode skipped foreign-key triggers: no title key this step wrote may be orphaned.
+  if (select count(*) from private.game_title_keys k where not exists (select 1 from public.games g where g.id = k.game_id))
+     + (select count(*) from private.game_title_keys k
+        where k.provider_record_id is not null and not exists (select 1 from private.provider_records pr where pr.id = k.provider_record_id))
+     > (select n from m0_orphans_before) then
+    raise exception 'B1-M0 rollback postcheck: a title key lost its game or source record. Rolled back.';
   end if;
 end $$;
