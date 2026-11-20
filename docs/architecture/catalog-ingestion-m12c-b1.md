@@ -7,9 +7,10 @@
 - **Checkpoint two** (accepted with conditions): the isolated B1 stack, source revalidation, critical errors, and migration drafts validated on scratch.
 - **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
 - **Checkpoint four:** the 150 records fetched and classified, multiple-id detection, editorial notes, and two B1-M2 fixes.
-- **Independent SQL review of 62267d6:** changes required; findings resolved in the drafts (B12 to B18), awaiting a second review.
+- **Independent SQL review of 62267d6:** changes required; findings resolved in the drafts (B12 to B18).
+- **Second SQL review of 44a1bd5:** approved for the isolated B1 stack only. Applied to B1, validated, and the 150 SNES items staged there as unpublished candidates ([B1: migrations applied and the first controlled staging](#b1-migrations-applied-and-the-first-controlled-staging-2026-11-20)).
 
-The migrations are final drafts awaiting approval, applied nowhere persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
+The migrations are applied to the B1 stack only, and nowhere else persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
 - No migration, import or download beyond what is listed under [Measured](#measured).
 - Development and the human-reviewed test pilot are unchanged.
 
@@ -272,6 +273,93 @@ The review's decision was **changes required**: the architecture was accepted in
 **Found during validation:**
 - **The M12c-A test stack has 21 orphaned import title keys.** They were left by an older cleanup in `db-ownership-claim-checks.mjs`, which is now fixed.
 - **They are left in place.** They are outside B1, B1-M0 neither adds nor needs them, and the read-only preflight reports them.
+
+## B1: migrations applied and the first controlled staging (2026-11-20)
+
+The second independent SQL review of archive `44a1bd5` approved the drafts **for the isolated B1 stack only**. They were applied to B1 and nowhere else. Then the 150 frozen SNES items were staged on B1 as unpublished candidates.
+
+### Migrations on B1
+
+- **Files:** the nine SQL files are byte-identical to commit `44a1bd5` and to the reviewed archive's manifest. They were checked again inside the B1 container before use.
+- **Before:**
+  - `my-game-dex-b1` on port 57322, with 72 migrations;
+  - no games, users, audit events or import runs;
+  - Wikidata not cleared, and the importer login disabled.
+- **Recovery point:** a full custom-format dump of B1's database, taken before anything was applied. It is outside the repository, at `~/.my-game-dex/backups/b1/b1-before-m12c-b1-migrations-2026-11-20.dump` (SHA-256 `59ecc98032d093dee4d1439e7e6f2b030a64aece59f8493b724aa706f0c12944`, 106 table-data entries).
+- **Applied:**
+  - The read-only preflight first. No title keys change and no records are re-keyed, and B1 has no orphaned title keys.
+  - Then B1-M0, the B1-M1 types, B1-M1, the B1-M2 types and B1-M2, each in one transaction (`psql -1 -v ON_ERROR_STOP=1`), as `postgres`. Each applied with no error, warning or notice.
+- **Where the files live:** they stay in `docs/proposals/m12c-b1/` and are applied from there.
+  - They aren't moved to `supabase/migrations/`, as the plan below first said. Moving them would let a reset of development or the M12c-A stack apply them.
+  - B1's `schema_migrations` still lists the 72 baseline migrations. These five are recorded here and in the run logs (`~/.my-game-dex/catalog-pilot/m12c-b1/migration-2026-11-20/`).
+- **Catalog after:** the reviewed read-only inventory query was run on B1. Its 2,783 lines match the reviewed scratch "after B1" inventory exactly: every function body hash, grant, column, policy and RLS flag.
+
+### Validation
+
+| Where | Check | Result |
+| --- | --- | --- |
+| B1 | Full pgTAP: the 47 existing files with the reviewed guard patch, and 48 to 51 | **3,897 / 3,897**. Every file rolls back, and B1 held no data afterwards; the tests folder was then restored |
+| Fresh scratch with the same five files | The 13 database suites (`db.mjs` suites run on scratch, never on B1) | **786 / 786** |
+| Same scratch | Two-session concurrency, with the pre-fix defect reproduced | **10 / 10** |
+| Offline | `catalog:test` | **54 + 9** |
+| Fresh scratch | Rehearsal of the staging below, with the same files | Same outcome as on B1 |
+
+The pgTAP files 49 to 51 cover the behaviour named in the approval:
+- RLS and grants, MFA, and no self-review;
+- batch approval, and withdrawing a game-platform pairing.
+
+No mutation runner ran, and B1 was neither reset nor restored.
+
+### The refreshed snapshot
+
+- **Fetch:** `wikidata-entities-snes-2026-11-20T22-45-42-949Z.json`, SHA-256 `96a8ac561e5f96efe73bbb51815b38a400f7b8f5b6916894d4f58e9e3920da92`.
+  - It holds exactly the 150 ids of the frozen selection (`a3774c7b…`), fetched in 3 requests with `info|labels|aliases|claims`.
+  - The configured project User-Agent was used, at one request at a time and with `maxlag=5`.
+- **Content:** none of the 150 is missing or redirected, and every one has its revision (`lastrevid`). Apart from that, every entry is identical to the 14:11 snapshot.
+- **Quality analysis:** rerun with checkpoint four's inputs, the result is identical to checkpoint four's, item for item.
+
+### Staging on B1
+
+- **Commands:** `catalog-b1.mjs clear-wikidata`, then `catalog-b1.mjs stage`.
+  - Both refuse every stack but B1.
+  - Staging runs the M5b importer (`catalog-import.mjs import --entities`), connected only as `catalog_importer`. Its login was enabled with a one-time password for the run and disabled afterwards.
+- **Clearance:** B1 has its own Wikidata clearance record, against the same saved terms page as M12c-A (`dd71f104…`). Rights surviving withdrawal are **not** recorded; that is the product owner's decision before publication.
+- **What was staged:** exactly the selection.
+  - Every entry carries its risk assessment (`withRiskAssessment`), bound to the snapshot hash the run was started with. The parser's flags travel inside it.
+  - The 13 records the editorial notes hold were staged with a `review_reason`, so the importer kept them held: no game, no pairing. This is stricter than the earlier note that held records could enter a batch flagged. A held record now needs an editor to resolve it before it can be a candidate at all.
+
+| Outcome on B1 | Count |
+| --- | --- |
+| Source records staged, each with a valid risk assessment | 150 (B1-M2's own validator refuses none) |
+| Game candidates created: `under_review`, unpublished, unverified, each with one pairing under review | 137 |
+| Held for an editor (editorial holds: 3 duplicate items, 2 distinct games on one item, and 8 single-item holds) | 13 |
+| Matched to an existing game | 0 (B1's catalog was empty; the 3 matches in the dry run are M12c-A games) |
+| Ignored | 0 |
+| Merged, releases, verifications, publications, review batches | 0 |
+| Users, staff roles, collections | 0 |
+
+- **Duplicates:**
+  - Of the 6 same-title groups, 5 have one member held, so only one candidate exists. In Rocky & Bullwinkle (2 items) both are held.
+  - The Unicode-artifact pair (Q11313984, Q11313985) has distinct titles and is classified as two distinct games, so both are candidates.
+  - Nothing was merged.
+  - The 18 records with several IGDB or MobyGames ids carry `external_ids_multiple`.
+- **Risk:**
+  - 28 records carry a parser critical signal: 21 candidates and 7 held. The signals are `conflicting_identifiers` 18, `physical_eligibility_unsupported` 10 and `wrong_identity_or_type` 2.
+  - 41 candidates have an exception flag, so they need individual outcomes and are never sampled. 96 have info flags only, or none.
+  - Date and in-batch collision flags are recomputed when a batch is created (B15). That is why the dry run counts 37 possible critical errors.
+- **Not done:** no review batch was created, and nothing was verified or published.
+
+**Defect found and fixed: the run's source name.**
+- The B1 run recorded its snapshot by its full local path, which includes the operator's Windows account folder. The intent was the file name only: the new `--entities` reader split paths on `/` only.
+- That path is in the run's `source_name` and in its "started" audit event, which is append-only. Both are left as recorded: rewriting the audit would bypass its guard, and restoring B1 is ruled out. Neither may be copied into a review archive or export.
+- The reader now uses `basename()`, and a test requires the bare file name.
+
+### Remaining before editorial review
+
+1. **Editor accounts on B1.** B1 has no users. An editor A (a disposable test account with a staff role and an authenticator) creates the batch. Editor B is the product owner, as a human reviewer with their own account.
+2. **Batch creation by editor A.** The 137 candidates form the batch; the 13 held records stay out until resolved.
+3. **The census review and approval by editor B.** No agent acts as editor B.
+4. **Before publication:** decide whether to record that Wikidata's CC0 rights survive withdrawal (`private.record_provider_rights`).
 
 ## Checkpoint four: source classification and identity quality gate (2026-11-20)
 

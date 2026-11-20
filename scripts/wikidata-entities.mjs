@@ -397,6 +397,59 @@ export function withRiskAssessment(entry, { snapshotSha256 }) {
   };
 }
 
+/** The editorial notes a staging run accepts (docs/proposals/m12c-b1/editorial-review-snes-150.json). */
+export const EDITORIAL_NOTES = Object.freeze({ format: "mgd-editorial-review-notes", version: 1 });
+/** stage_records keeps at most this much of a hold reason. */
+export const HOLD_REASON_MAX = 200;
+
+/**
+ * The importer entries for a staging run (M12c-B1): exactly the selection's entities, in
+ * numeric id order, as stage_records accepts them ({ entity_type, external_id, payload,
+ * ignore_reason? | review_reason? }).
+ *   - Every candidate carries its risk assessment (withRiskAssessment), so its flags travel in
+ *     payload.risk_assessment; the entry's own `flags` key isn't staged.
+ *   - A record an editorial note holds is staged with a review_reason, so the importer keeps it
+ *     held and never applies it (no game, no pairing) until an editor resolves it. A note can
+ *     only add a hold: it never clears a flag.
+ *   - An ignored entry stays ignored, and isn't held as well (stage_records refuses both).
+ * Throws when an id is missing from the snapshot or appears twice, when a note names a record
+ * outside the selection or a hold has no reason, or when an entry can't be assessed.
+ */
+export function stagingEntries({ entries, ids, snapshotSha256, notes = null }) {
+  if (!Array.isArray(ids) || !ids.length || new Set(ids).size !== ids.length) throw new Error("The selection must list distinct ids.");
+  const wanted = new Set(ids);
+  const byId = new Map();
+  for (const e of entries) {
+    if (!wanted.has(e.external_id)) continue;
+    if (byId.has(e.external_id)) throw new Error(`${e.external_id} appears twice in the snapshot.`);
+    byId.set(e.external_id, e);
+  }
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length) throw new Error(`The snapshot lacks ${missing.length} selected id(s): ${missing.join(", ")}`);
+
+  const holds = new Map();
+  if (notes) {
+    if (notes.format !== EDITORIAL_NOTES.format || notes.version !== EDITORIAL_NOTES.version) throw new Error("Not a version 1 editorial-notes file.");
+    for (const [id, note] of Object.entries(notes.records ?? {})) {
+      if (!wanted.has(id)) throw new Error(`The editorial notes name ${id}, which isn't in the selection.`);
+      if (note?.hold !== true) continue;
+      const reason = typeof note.reason === "string" ? note.reason.trim() : "";
+      if (!reason) throw new Error(`${id}: a hold needs a reason.`);
+      holds.set(id, `Editorial hold (${note.category ?? "unspecified"}): ${reason}`.slice(0, HOLD_REASON_MAX));
+    }
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => Number(a.external_id.slice(1)) - Number(b.external_id.slice(1)))
+    .map((entry) => {
+      // The flags travel in payload.risk_assessment; stage_records accepts no "flags" key.
+      const base = { ...withRiskAssessment(entry, { snapshotSha256 }) };
+      delete base.flags;
+      if (base.ignore_reason) return base;
+      return holds.has(base.external_id) ? { ...base, review_reason: holds.get(base.external_id) } : base;
+    });
+}
+
 /** The distinct distribution formats (P437, non-deprecated) the entities state, in numeric id order. */
 export function distributionFormatIds(text) {
   return [...new Set(entityObjects(text).flatMap((e) => itemIds(e, WD.distributionFormat)))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));

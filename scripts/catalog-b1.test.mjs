@@ -4,7 +4,8 @@
 // network: the fetch tests use a stub.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -23,9 +24,11 @@ import {
   externalIdConflict,
   FLAG_REASONS,
   FLAGS,
+  HOLD_REASON_MAX,
   identityTitleKey,
   parseWikidataEntities,
   RISK_ASSESSMENT,
+  stagingEntries,
   timeValue,
   withRiskAssessment,
 } from "./wikidata-entities.mjs";
@@ -450,4 +453,96 @@ test("the end-to-end pgTAP test stages exactly what the parser produces", () => 
   const literal = JSON.parse(/\$p\$(\{.*\})\$p\$/.exec(block)[1]);
   const e = parseWikidataEntities(fixture("entities-response.json"), SNES).find((x) => x.external_id === "Q1005");
   assert.deepEqual(literal, withRiskAssessment(e, { snapshotSha256: SNAP }).payload);
+  // The staging path stages that same payload.
+  const staged = stagingEntries({ entries: parseWikidataEntities(fixture("entities-response.json"), SNES), ids: ["Q1005"], snapshotSha256: SNAP });
+  assert.deepEqual(staged, [{ entity_type: "game", external_id: "Q1005", payload: literal }]);
+});
+
+// The keys catalog_import.stage_records accepts (M5b), and never both reasons.
+const STAGE_KEYS = new Set(["entity_type", "external_id", "ignore_reason", "payload", "review_reason"]);
+const notesFor = (records) => ({ format: "mgd-editorial-review-notes", version: 1, records });
+
+test("staging entries: exactly the selection, assessed, in the shape stage_records accepts", () => {
+  const entries = parseWikidataEntities(fixture("entities-response.json"), SNES);
+  const ids = ["Q1012", "Q1001", "Q1003", "Q1005", "Q1008"];
+  const staged = stagingEntries({ entries, ids, snapshotSha256: SNAP });
+  assert.deepEqual(staged.map((e) => e.external_id), ["Q1001", "Q1003", "Q1005", "Q1008", "Q1012"], "numeric id order, nothing outside the selection");
+  for (const e of staged) {
+    assert.ok(Object.keys(e).every((k) => STAGE_KEYS.has(k)), `${e.external_id}: only the keys stage_records accepts`);
+    assert.ok(!("ignore_reason" in e && "review_reason" in e));
+    if (e.ignore_reason) assert.equal(e.payload.risk_assessment, undefined, "an ignored entry isn't a candidate");
+    else {
+      const source = entries.find((x) => x.external_id === e.external_id);
+      assert.deepEqual(e.payload.risk_assessment.flags, [...source.flags].sort(), "the parser's flags travel in the assessment");
+      assert.equal(e.payload.risk_assessment.source.snapshot_sha256, SNAP);
+    }
+  }
+  assert.equal(staged.find((e) => e.external_id === "Q1003").ignore_reason, "not on this platform");
+});
+
+test("staging entries: an editorial hold stages the record held, with its flags kept", () => {
+  const entries = parseWikidataEntities(fixture("entities-response.json"), SNES);
+  const notes = notesFor({
+    Q1012: { category: "duplicate_item", hold: true, reason: "A second item for the same game; held until an editor chooses the canonical identity." },
+    Q1001: { category: "duplicate_canonical_candidate", hold: false, reason: "Proposed canonical identity." },
+    Q1003: { category: "out_of_scope", hold: true, reason: "Ignored anyway." },
+  });
+  const staged = byId(stagingEntries({ entries, ids: ["Q1001", "Q1003", "Q1012"], snapshotSha256: SNAP, notes }));
+  assert.equal(staged.Q1012.review_reason, "Editorial hold (duplicate_item): A second item for the same game; held until an editor chooses the canonical identity.");
+  assert.deepEqual(staged.Q1012.payload.risk_assessment.flags, ["many_platforms", "platform_date_after_era", "year_precision_only"], "a hold never clears a flag");
+  assert.equal(staged.Q1001.review_reason, undefined, "a note without a hold changes nothing");
+  assert.deepEqual(staged.Q1001.payload, withRiskAssessment(entries.find((e) => e.external_id === "Q1001"), { snapshotSha256: SNAP }).payload);
+  assert.equal(staged.Q1003.review_reason, undefined, "an ignored entry stays ignored and isn't also held");
+  const long = stagingEntries({ entries, ids: ["Q1001"], snapshotSha256: SNAP, notes: notesFor({ Q1001: { category: "x", hold: true, reason: "y".repeat(400) } }) });
+  assert.equal(long[0].review_reason.length, HOLD_REASON_MAX);
+});
+
+test("staging entries: refused when the snapshot, selection or notes don't fit", () => {
+  const entries = parseWikidataEntities(fixture("entities-response.json"), SNES);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001", "Q9999"], snapshotSha256: SNAP }), /lacks 1 selected id\(s\): Q9999/);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001", "Q1001"], snapshotSha256: SNAP }), /distinct ids/);
+  assert.throws(() => stagingEntries({ entries: [...entries, entries[0]], ids: ["Q1001"], snapshotSha256: SNAP }), /appears twice/);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001"], snapshotSha256: SNAP, notes: notesFor({ Q1002: { hold: true, reason: "x" } }) }), /isn't in the selection/);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001"], snapshotSha256: SNAP, notes: notesFor({ Q1001: { hold: true, reason: " " } }) }), /needs a reason/);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001"], snapshotSha256: SNAP, notes: { format: "other", version: 1, records: {} } }), /editorial-notes/);
+  assert.throws(() => stagingEntries({ entries, ids: ["Q1001"], snapshotSha256: "abc" }), /SHA-256/);
+  const noRevision = entries.map((e) => (e.external_id === "Q1001" ? { ...e, payload: { ...e.payload, source: { ...e.payload.source, revision: null } } } : e));
+  assert.throws(() => stagingEntries({ entries: noRevision, ids: ["Q1001"], snapshotSha256: SNAP }), /no source revision/, "the 2026-11-20 14:11 snapshot shape is refused");
+});
+
+test("the importer's --entities dry run stages the selection without a database", () => {
+  const dir = mkdtempSync(join(tmpdir(), "mgd-b1-stage-"));
+  try {
+    const snapshot = join(dir, "entities.json");
+    const selection = join(dir, "selection.json");
+    const notes = join(dir, "notes.json");
+    writeFileSync(snapshot, fixture("entities-response.json"));
+    writeFileSync(selection, JSON.stringify({ platform: "snes", ids: ["Q1001", "Q1005", "Q1012"] }));
+    writeFileSync(notes, JSON.stringify(notesFor({ Q1012: { category: "duplicate_item", hold: true, reason: "Held for the test." } })));
+    const run = (extra) => execFileSync(process.execPath, [new URL("./catalog-import.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"), "import", "--provider", "wikidata", "--platform", "snes", "--entities",
+      "--file", snapshot, "--ids", selection, "--terms-file", snapshot, "--reason", "test", "--dry-run", ...extra], { encoding: "utf8", env: { ...process.env, CATALOG_IMPORTER_DATABASE_URL: "" } });
+    const out = run(["--notes", notes]);
+    const sha = createHash("sha256").update(readFileSync(snapshot)).digest("hex");
+    // The run records the file name only, never the operator's local path (B1 run of 2026-11-20).
+    assert.match(out, new RegExp(`^entities\\.json: 12 entries, 3 in this import, sha256 ${sha}`));
+    assert.ok(snapshot.includes("\\") || snapshot.includes("/"));
+    const report = JSON.parse(out.slice(out.indexOf("{")));
+    assert.equal(report.entries, 3);
+    assert.equal(report.held, 1);
+    assert.match(report.slice, /^ids:[0-9a-f]{64};notes:[0-9a-f]{64}$/);
+    assert.equal(report.sample[0].payload.risk_assessment.source.snapshot_sha256, sha, "each assessment names the snapshot the run is started with");
+    assert.throws(() => execFileSync(process.execPath, [new URL("./catalog-import.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"), "import", "--provider", "wikidata", "--platform", "snes", "--entities",
+      "--file", snapshot, "--terms-file", snapshot, "--reason", "test", "--dry-run"], { stdio: "pipe" }), /needs --ids/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B1 staging and its clearance refuse every stack but B1", () => {
+  for (const command of [["clear-wikidata", "--terms-file", "x"], ["stage", "--entities", "x", "--selection", "x", "--notes", "x", "--terms-file", "x", "--reason", "x"], ["report"]]) {
+    for (const stack of ["scratch", "test"]) {
+      assert.throws(() => execFileSync(process.execPath, [new URL("./catalog-b1.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"), ...command], { stdio: "pipe", env: { ...process.env, MGD_STACK: stack } }),
+        (error) => /runs only on the B1 stack/.test(error.stderr.toString()), `${command[0]} on ${stack}`);
+    }
+  }
 });

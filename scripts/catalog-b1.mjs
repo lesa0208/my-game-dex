@@ -1,6 +1,6 @@
 /**
- * M12c-B1 checkpoint one: acquisition tooling for the SNES identity pilot. Nothing here
- * writes to any database, and nothing is imported or published.
+ * M12c-B1: acquisition and staging tooling for the SNES identity pilot. Only clear-wikidata and
+ * stage write, and only to the B1 stack (MGD_STACK=b1); nothing here verifies or publishes.
  *
  *   node scripts/catalog-b1.mjs select --wikidata <query snapshot> --out <selection.json>
  *        [--platform snes] [--seed mgd-m12c-b1-snes-1] [--size 150] [--fixed Q853143,Q370055]
@@ -10,6 +10,10 @@
  *   WIKIDATA_USER_AGENT=... node scripts/catalog-b1.mjs fetch-formats --entities <entity snapshot> --out <dir>
  *   WIKIDATA_USER_AGENT="<tool>/<version> (<project contact>) <library>/<version>" \
  *     node scripts/catalog-b1.mjs fetch-entities --selection <selection.json> --out <dir>
+ *   MGD_STACK=b1 node scripts/catalog-b1.mjs clear-wikidata --terms-file <saved Wikidata:Licensing page>
+ *   MGD_STACK=b1 node scripts/catalog-b1.mjs stage --entities <entity snapshot> --selection <selection.json>
+ *        --notes <editorial notes.json> --terms-file <same page> --reason "<why>"
+ *   MGD_STACK=b1 node scripts/catalog-b1.mjs report [--out <report.json>]
  *
  * - select: the deterministic 150-game selection from a saved query snapshot (the one the
  *   importer fetched), written outside the repository with the snapshot's hash.
@@ -26,10 +30,20 @@
  *   maxlag error, it waits for Retry-After (or 2, 4, 8, 16 s), up to 5 attempts, then stops
  *   without writing a partial snapshot.
  *
+ * - clear-wikidata: the operator procedure (private.record_provider_clearance, as postgres),
+ *   bound to the hash of the saved terms page, as on the M12c-A stack. B1 gets its own record.
+ * - stage: the M5b importer (catalog-import.mjs import --entities), connecting only as
+ *   catalog_importer, whose login is enabled with a one-time password for the run and disabled
+ *   afterwards. It stages exactly the selection, each candidate with its risk assessment; the
+ *   records the editorial notes hold stay held. It creates unpublished, unverified game
+ *   candidates and their under-review platform pairings, and nothing else: no releases, no
+ *   verification, no publication, no merge, no collector data.
+ * - report: what B1 holds, read only.
+ *
  * Snapshots, selections and reports stay outside the repository.
  */
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -308,11 +322,108 @@ async function cmdFetchFormats(o) {
   console.log(`${file}: ${snapshot.ids.length} ids in ${snapshot.requests} request(s), sha256 ${sha256(Buffer.from(text))}`);
 }
 
+// ---------------------------------------------------------------------------
+// clear-wikidata, stage and report (the B1 stack only)
+// ---------------------------------------------------------------------------
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** The B1 stack's database container and port; refuses every other stack. */
+async function b1Stack(label) {
+  const { dbContainer, stackName, stackStatus } = await import("./lib/stack.mjs");
+  if (stackName !== "b1") fail(`Refusing: ${label} runs only on the B1 stack (MGD_STACK=b1).`);
+  const status = stackStatus({ label });
+  return { container: dbContainer, port: new URL(status.DB_URL).port };
+}
+
+const lit = (value) => `'${String(value).replace(/'/g, "''")}'`;
+function psql(container, sql) {
+  return execFileSync("docker", ["exec", "-i", container, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1"], {
+    input: sql,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, MSYS_NO_PATHCONV: "1" },
+  }).trim();
+}
+
+async function cmdClearWikidata(o) {
+  if (!o["terms-file"] || o["terms-file"] === true) fail("--terms-file is required: the saved Wikidata:Licensing page.");
+  const { container } = await b1Stack("the B1 Wikidata clearance");
+  const page = readFileSync(o["terms-file"]);
+  if (!page.toString("utf8").includes("released into the public domain under")) fail("That file isn't the Wikidata:Licensing page.");
+  const hash = sha256(page);
+  psql(container, `select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', ${lit(hash)},
+    ${lit("B1 stack: M11b-D1 approved Wikidata (CC0 structured data) for game identity. Saved terms copy read 2026-11-19. Game identity only: never evidence of a physical release.")});`);
+  console.log(`wikidata cleared on the B1 stack against terms sha256 ${hash}`);
+}
+
+async function cmdStage(o) {
+  for (const k of ["entities", "selection", "notes", "terms-file", "reason"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
+  const { port } = await b1Stack("B1 staging");
+  const fetchedAt = JSON.parse(readFileSync(o.entities, "utf8")).fetched_at;
+  if (!fetchedAt || Number.isNaN(Date.parse(fetchedAt))) fail("The entity snapshot has no fetched_at time.");
+  const password = randomBytes(24).toString("base64url");
+  const env = { ...process.env, CATALOG_IMPORTER_PASSWORD: password, MSYS_NO_PATHCONV: "1" };
+  const role = (command) => execFileSync(process.execPath, [join(ROOT, "scripts", "catalog-import-role.mjs"), command], { env, stdio: ["ignore", "ignore", "inherit"] });
+  role("enable");
+  try {
+    execFileSync(process.execPath, [join(ROOT, "scripts", "catalog-import.mjs"), "import", "--provider", "wikidata", "--platform", o.platform ?? "snes", "--entities",
+      "--file", o.entities, "--ids", o.selection, "--notes", o.notes, "--terms-file", o["terms-file"], "--reason", o.reason, "--fetched-at", fetchedAt], {
+      env: { ...process.env, CATALOG_IMPORTER_DATABASE_URL: `postgresql://catalog_importer:${encodeURIComponent(password)}@127.0.0.1:${port}/postgres` },
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+  } finally {
+    role("disable");
+  }
+}
+
+export const B1_REPORT_SQL = `begin transaction read only;
+select json_build_object(
+  'migrations', (select count(*) from supabase_migrations.schema_migrations),
+  'b1_functions', (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
+     and p.proname in ('create_review_batch', 'record_batch_outcome', 'approve_review_batch', 'reject_review_batch', 'get_review_batch',
+                       'verify_game_platform', 'publish_game_identity', 'get_pairing_withdrawal_preview', 'withdraw_game_platform', 'restore_game_platform')),
+  'providers', (select json_object_agg(code, json_build_object('cleared', commercial_use_cleared, 'terms_sha256', terms_sha256, 'rights_survive_withdrawal', rights_survive_withdrawal)) from private.external_providers),
+  'importer_can_log_in', (select rolcanlogin from pg_roles where rolname = 'catalog_importer'),
+  'runs', (select coalesce(json_agg(json_build_object('id', id, 'provider', provider_code, 'status', status, 'source_name', source_name, 'source_sha256', source_sha256, 'stats', stats) order by started_at), '[]') from private.import_runs),
+  'provider_records', (select coalesce(json_object_agg(k, n), '{}') from (select entity_type || ':' || status k, count(*) n from private.provider_records group by 1) s),
+  'needs_review_reasons', (select coalesce(json_object_agg(k, n), '{}') from (select case when review_reason is not null then 'held: ' || split_part(review_reason, ':', 1) else coalesce(match_notes ->> 'reason', 'unspecified') end k, count(*) n from private.provider_records where status = 'needs_review' group by 1) s),
+  'risk_assessed', (select count(*) from private.provider_records where payload ? 'risk_assessment'),
+  'risk_assessment_refused', (select count(*) from private.provider_records pr where pr.status <> 'ignored' and cardinality(private.review_risk_problems(pr)) > 0),
+  'critical_signals', (select coalesce(json_object_agg(k, n), '{}') from (select c k, count(*) n from private.provider_records, jsonb_array_elements_text(payload -> 'risk_assessment' -> 'critical') c group by 1) s),
+  'records_with_critical', (select count(*) from private.provider_records where jsonb_array_length(coalesce(payload -> 'risk_assessment' -> 'critical', '[]')) > 0),
+  'flags', (select coalesce(json_object_agg(k, n), '{}') from (select f k, count(*) n from private.provider_records, jsonb_array_elements_text(payload -> 'risk_assessment' -> 'flags') f group by 1) s),
+  'games', (select coalesce(json_object_agg(k, n), '{}') from (select status::text k, count(*) n from public.games group by 1) s),
+  'games_verified', (select count(*) from public.games where verified_at is not null),
+  'game_platforms', (select coalesce(json_object_agg(k, n), '{}') from (select status::text k, count(*) n from public.game_platforms group by 1) s),
+  'external_references', (select count(*) from private.external_references),
+  'title_keys', (select count(*) from private.game_title_keys),
+  'releases', (select count(*) from public.releases),
+  'review_batches', (select count(*) from private.catalog_review_batches),
+  'auth_users', (select count(*) from auth.users),
+  'collection_items', (select count(*) from public.collection_items),
+  'audit_events', (select coalesce(json_object_agg(k, n), '{}') from (select action::text k, count(*) n from private.audit_events group by 1) s)
+);
+rollback;`;
+
+async function cmdReport(o) {
+  const { container } = await b1Stack("the B1 report");
+  const out = psql(container, B1_REPORT_SQL).split("\n").filter((l) => l.startsWith("{")).pop();
+  const report = { stack: "b1", reported_at: new Date().toISOString(), ...JSON.parse(out) };
+  if (o.out && o.out !== true) {
+    if (!(await outsideRepo(o.out))) fail("Reports must be kept outside the repository.");
+    mkdirSync(dirname(o.out), { recursive: true });
+    writeFileSync(o.out, `${JSON.stringify(report, null, 2)}\n`);
+  }
+  console.log(JSON.stringify(report, null, 2));
+}
+
 async function main() {
   const o = args(process.argv.slice(2));
-  const commands = { select, "export-catalog": exportCatalog, "dry-run": cmdDryRun, "fetch-entities": cmdFetch, "fetch-formats": cmdFetchFormats };
+  const commands = { select, "export-catalog": exportCatalog, "dry-run": cmdDryRun, "fetch-entities": cmdFetch, "fetch-formats": cmdFetchFormats,
+    "clear-wikidata": cmdClearWikidata, stage: cmdStage, report: cmdReport };
   const command = commands[o._[0]];
-  if (!command) fail("Usage: node scripts/catalog-b1.mjs select|export-catalog|dry-run|fetch-entities [options]. See the header of this file.");
+  if (!command) fail("Usage: node scripts/catalog-b1.mjs select|export-catalog|dry-run|fetch-entities|fetch-formats|clear-wikidata|stage|report [options]. See the header of this file.");
   if (o.platform) platformQid(o.platform);
   try {
     await command(o);

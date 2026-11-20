@@ -1,11 +1,12 @@
-# M12c-B1 migration proposals (for review, not applied)
+# M12c-B1 migrations (applied to the B1 stack only)
 
 **Written for:** the reviewer of B1-M0, B1-M1 and B1-M2, before any of them moves to `supabase/migrations/`.
 
-**Status, 2026-11-20 (after the independent SQL review of 62267d6):** revised drafts for a second review. [SQL-REVIEW.md](SQL-REVIEW.md) gives each finding's verdict, change and test; [INVENTORY.md](INVENTORY.md) lists every changed object and privilege.
+**Status, 2026-11-20 (after the second SQL review, of 44a1bd5):** approved for the isolated B1 stack only, and applied there from this folder unchanged. The record is in [the architecture doc](../../architecture/catalog-ingestion-m12c-b1.md#b1-migrations-applied-and-the-first-controlled-staging-2026-11-20).
+- **Before that (after the independent SQL review of 62267d6):** revised drafts for a second review. [SQL-REVIEW.md](SQL-REVIEW.md) gives each finding's verdict, change and test; [INVENTORY.md](INVENTORY.md) lists every changed object and privilege.
 - **Review of 62267d6 (changes required):** B1-M2 gains invariants B12 to B18 (concurrency, per-member self-review, recent MFA for outcomes, no resampling of rejected cohorts, a validated risk-assessment contract, publication rights, evidence for overrides, a complete content hash), RLS on the six new private tables, and B1-M0 an orphaned-key postcheck. Test 51 (45 pgTAP tests) and a two-session concurrency check are new.
 - **Checkpoint four:** two B1-M2 fixes (10 and 11 below), three more pgTAP tests. B1-M0 and B1-M1 unchanged.
-- **Not applied** to development, the M12c-A test stack or the B1 stack.
+- **Applied to the B1 stack only.** Not applied to development or the M12c-A test stack, and not moved to `supabase/migrations/`.
 - **Validated on a disposable scratch stack:** built fresh from the 72 current migrations, with these files applied from disk in order, then destroyed.
 - **New in checkpoint three:**
   - withdrawing a single pairing (W1 to W9);

@@ -9,9 +9,18 @@
  *   node scripts/catalog-import.mjs import --provider wikidata|no-intro --platform snes
  *        --file <snapshot> --terms-file <saved terms> --reason "<why>"
  *        [--letters S | --ids <selection.json>] [--fetched-at <ISO time>] [--dry-run]
+ *   node scripts/catalog-import.mjs import --provider wikidata --platform snes --entities
+ *        --file <entity snapshot> --ids <selection.json> [--notes <editorial notes.json>]
+ *        --terms-file <saved terms> --reason "<why>" [--fetched-at <ISO time>] [--dry-run]
  *   node scripts/catalog-import.mjs select-pilot --wikidata <snapshot> --no-intro <snapshot> --out <selection.json>
  *        [--games 50] [--releases 100] [--seed mgd-snes-pilot-1] [--selector-version 2] [--reuse <earlier selection.json>]
  *   node scripts/catalog-import.mjs resume --run <id> --provider <p> --file <snapshot> [--letters S]
+ *        [--entities --ids <selection.json> [--notes <editorial notes.json>]]
+ *
+ * --entities (M12c-B1): the file is an entity snapshot (scripts/catalog-b1.mjs fetch-entities),
+ * staged as exactly the selection's ids (the selection's "ids"), each candidate with its risk
+ * assessment bound to the snapshot's hash (withRiskAssessment). Records the editorial notes hold
+ * are staged with a review reason, so the importer keeps them held and never applies them.
  *   node scripts/catalog-import.mjs report --run <id>
  *
  * Environment: CATALOG_IMPORTER_DATABASE_URL (as catalog_importer, never postgres),
@@ -20,10 +29,11 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, isAbsolute } from "node:path";
+import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { extendSelection, parseNoIntro, parseWikidata, pilotSelection, pilotSlice, wikidataQuery } from "./catalog-import-sources.mjs";
+import { WIKIDATA_PLATFORMS, extendSelection, parseNoIntro, parseWikidata, pilotSelection, pilotSlice, wikidataQuery } from "./catalog-import-sources.mjs";
+import { parseWikidataEntities, stagingEntries } from "./wikidata-entities.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STAGE_BATCH = 200;
@@ -76,6 +86,38 @@ export function readSnapshot(provider, file, letters, idsFile) {
     slice = `ids:${sha256(raw)}`;
   }
   return { entries, total, slice, sha256: sha256(buffer), name: file.split(/[\\/]/).pop(), mtime: statSync(file).mtime };
+}
+
+/**
+ * Reads an entity snapshot for --entities: the selection's entities, assessed and with the
+ * editorial holds, and the snapshot's hash, which the run is started with and every risk
+ * assessment names. The slice binds the run to the selection and the notes, so a resume must
+ * use the same files.
+ */
+export function readEntitySnapshot(provider, platform, file, idsFile, notesFile) {
+  if (provider !== "wikidata") fail("--entities reads Wikidata entity snapshots only.");
+  const qid = WIKIDATA_PLATFORMS[platform];
+  if (!qid) fail(`No Wikidata item for platform ${platform}.`);
+  if (!idsFile || idsFile === true) fail("--entities needs --ids <selection.json>.");
+  // The editorial notes are a reviewed file in the repository; source data stays outside it.
+  if (!outsideRepo(file) || !outsideRepo(idsFile)) fail("Snapshots and selections must be kept outside the repository.");
+  const buffer = readFileSync(file);
+  const selectionRaw = readFileSync(idsFile);
+  const selection = JSON.parse(selectionRaw.toString("utf8"));
+  if (selection.platform && selection.platform !== platform) fail(`The selection is for ${selection.platform}, not ${platform}.`);
+  const notesRaw = notesFile && notesFile !== true ? readFileSync(notesFile) : null;
+  const all = parseWikidataEntities(buffer.toString("utf8"), qid);
+  const hash = sha256(buffer);
+  const entries = stagingEntries({ entries: all, ids: selection.ids, snapshotSha256: hash, notes: notesRaw ? JSON.parse(notesRaw.toString("utf8")) : null });
+  const slice = `ids:${sha256(selectionRaw)}${notesRaw ? `;notes:${sha256(notesRaw)}` : ""}`;
+  return { entries, total: all.length, slice, sha256: hash, name: basename(file), mtime: statSync(file).mtime };
+}
+
+/** The snapshot an import or resume reads, by its options. */
+function loadSnapshot(o) {
+  if (o.entities) return readEntitySnapshot(o.provider, o.platform, o.file, o.ids, o.notes);
+  if (o.notes) fail("--notes applies to --entities only.");
+  return readSnapshot(o.provider, o.file, o.letters, o.ids);
 }
 
 /** Connects as catalog_importer, and refuses any other or more powerful role. */
@@ -150,11 +192,12 @@ async function report(client, run) {
 
 async function cmdImport(o) {
   for (const k of ["provider", "platform", "file", "terms-file", "reason"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
-  const snap = readSnapshot(o.provider, o.file, o.letters, o.ids);
+  const snap = loadSnapshot(o);
   console.log(`${snap.name}: ${snap.total} entries, ${snap.entries.length} in this import, sha256 ${snap.sha256}`);
   if (o["dry-run"]) {
     const ignored = snap.entries.filter((e) => e.ignore_reason).length;
-    console.log(JSON.stringify({ entries: snap.entries.length, ignored, sample: snap.entries.slice(0, 3) }, null, 2));
+    const held = snap.entries.filter((e) => e.review_reason).length;
+    console.log(JSON.stringify({ entries: snap.entries.length, ignored, held, slice: snap.slice, sample: snap.entries.slice(0, 3) }, null, 2));
     return;
   }
   const terms = sha256(readFileSync(o["terms-file"]));
@@ -177,7 +220,8 @@ async function cmdImport(o) {
 
 async function cmdResume(o) {
   for (const k of ["run", "provider", "file"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
-  const snap = readSnapshot(o.provider, o.file, o.letters, o.ids);
+  if (o.entities && (!o.platform || o.platform === true)) fail("--platform is required with --entities.");
+  const snap = loadSnapshot(o);
   const client = await connect();
   const lease = randomUUID();
   try {
