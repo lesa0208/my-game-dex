@@ -1,0 +1,103 @@
+{
+  "format": "mgd-editorial-review-notes",
+  "version": 1,
+  "selection": "selection-snes-150.json (sha256 a3774c7b4772ede12d80acb551875c8bef430d1e203ff22af1ccbff2d8961f9c)",
+  "entities": "wikidata-entities-snes-2026-11-20T14-11-04-475Z.json (sha256 4e87b22e5abb962349b4774431d3f895132ae2fb17fb2e8af164b569f656d8cd)",
+  "proposed_by": "M12c-B1 checkpoint four tooling review. Recommendations only, not editor decisions: a note can add a hold, never clear a flag or a critical signal, and nothing is merged or split.",
+  "rules": [
+    "A valid game identity is not proof of a particular physical release; every record still needs independent human evidence of its physical release.",
+    "Different games keep distinct identities; different releases of one game don't become separate games.",
+    "Pirate, counterfeit and unauthorized bootleg editions are held and stay out of the standard public catalog.",
+    "Verified, legitimately produced aftermarket physical releases are eligible for editorial consideration, whatever their date.",
+    "Unreleased prototypes and digital-only titles are never represented as published retail physical releases.",
+    "Non-commercial training cartridges and specialized non-retail software are out of scope for the first public catalog."
+  ],
+  "groups": [
+    {
+      "name": "Action Pachio",
+      "members": ["Q4677134", "Q135194451"],
+      "verdict": "duplicate_items_same_game",
+      "recommendation": "Same game: same title, publisher (Q5139870) and day-precise date (1993-04-09). Propose Q4677134 (the older item, which states a cartridge format) as the canonical identity, adding Q135194451's Japanese title (アクションパチ夫) as an alias. Hold Q135194451 and report the duplicate to Wikidata. An editor decides; nothing is merged."
+    },
+    {
+      "name": "Tower Dream",
+      "members": ["Q7829649", "Q132527560"],
+      "verdict": "duplicate_items_same_game",
+      "recommendation": "Same game. Q7829649 has the date (1996-10-25), the publisher and the IGDB id; Q132527560 has only the Japanese title (タワードリーム). Propose Q7829649 as canonical, taking the Japanese title as an alias; hold Q132527560."
+    },
+    {
+      "name": "Albert Odyssey II: Jashin no Taidou",
+      "members": ["Q17192216", "Q128221862"],
+      "verdict": "duplicate_items_same_game",
+      "recommendation": "Same game, split across two items: Q17192216 has the year (1996) and the Japanese title; Q128221862 has the IGDB id and the developer and publisher (Q2298387). Propose Q17192216 (the older item) as canonical, with Q128221862's facts as evidence to verify; hold Q128221862. The release date still needs a precise source."
+    },
+    {
+      "name": "The Adventures of Rocky and Bullwinkle and Friends",
+      "members": ["Q2473951", "Q16144658"],
+      "verdict": "ambiguous_distinct_games_on_one_item",
+      "recommendation": "Hold both. Q2473951 covers four platforms with three MobyGames ids: the NES, the Game Boy and the SNES/Genesis games of this name were different games, so the item describes several games. Q16144658 is SNES-only with no ids and a year (1992) that may belong to the NES game. An editor decides which item (corrected) carries the SNES game's identity; the SNES game must not merge with the NES or Game Boy games."
+    },
+    {
+      "name": "Space Ace",
+      "members": ["Q1081894", "Q117865047"],
+      "verdict": "distinct_games",
+      "recommendation": "Different games. Q1081894 is the 1983-84 laserdisc arcade original with twelve platforms and ports; Q117865047 is the SNES-only game (1994, its own developer Q99521312 and MobyGames 24930). Propose Q117865047 as the SNES identity and hold Q1081894's SNES pairing as a probable wrong platform association for that identity. Keep both identities distinct."
+    },
+    {
+      "name": "Scooby-Doo Mystery",
+      "members": ["Q3476003", "Q65146861"],
+      "verdict": "ambiguous_distinct_games_on_one_item",
+      "recommendation": "The SNES and Genesis games of this name were different games. Q3476003 covers both platforms with two MobyGames ids; Q65146861 is SNES-only with the same developer, publisher and date (1995-11). Propose Q65146861 as the SNES identity, with Q3476003 held until an editor confirms its scope; never merge the SNES and Genesis games."
+    },
+    {
+      "name": "Super Momotaro Dentetsu Ⅱ / Ⅲ",
+      "members": ["Q11313984", "Q11313985"],
+      "verdict": "distinct_games",
+      "recommendation": "Distinct games (1991-12-20 and 1994-12-09, different IGDB ids). They only collided under the old key, which dropped \"Ⅱ\" and \"Ⅲ\". Keep both. Ⅱ's two IGDB ids are IGDB-side duplicates of one game."
+    }
+  ],
+  "records": {
+    "Q135194451": { "category": "duplicate_item", "hold": true, "reason": "A second Wikidata item for Action Pachio (same title, publisher and date as Q4677134); held until an editor chooses the canonical identity." },
+    "Q4677134": { "category": "duplicate_canonical_candidate", "hold": false, "reason": "Proposed canonical identity for Action Pachio; the title collision stays until an editor resolves the group." },
+    "Q132527560": { "category": "duplicate_item", "hold": true, "reason": "A second Wikidata item for Tower Dream with no date or ids; held in favour of Q7829649." },
+    "Q7829649": { "category": "duplicate_canonical_candidate", "hold": false, "reason": "Proposed canonical identity for Tower Dream; the title collision stays until an editor resolves the group." },
+    "Q128221862": { "category": "duplicate_item", "hold": true, "reason": "A second Wikidata item for Albert Odyssey II (IGDB id, no date); held in favour of Q17192216." },
+    "Q17192216": { "category": "duplicate_canonical_candidate", "hold": false, "reason": "Proposed canonical identity for Albert Odyssey II; its release date is only a year and needs a precise source." },
+    "Q2473951": { "category": "distinct_games_on_one_item", "hold": true, "reason": "Covers the NES, Game Boy and SNES/Genesis games of this name (three MobyGames ids); the SNES game's identity must be decided before pairing." },
+    "Q16144658": { "category": "identity_scope_unresolved", "hold": true, "reason": "SNES-only item for Rocky and Bullwinkle with no ids and a year that may belong to the NES game; held until an editor decides the SNES identity." },
+    "Q1081894": { "category": "probable_wrong_platform_for_identity", "hold": true, "reason": "The 1983-84 laserdisc original; the SNES Space Ace is a different game with its own item (Q117865047)." },
+    "Q117865047": { "category": "platform_specific_identity", "hold": false, "reason": "Proposed SNES identity for Space Ace (1994, MobyGames 24930); the title collision stays until an editor resolves the group." },
+    "Q3476003": { "category": "distinct_games_on_one_item", "hold": true, "reason": "Covers the SNES and Genesis games of this name, which were different games (two MobyGames ids); held while Q65146861 is proposed as the SNES identity." },
+    "Q65146861": { "category": "platform_specific_identity", "hold": false, "reason": "Proposed SNES identity for Scooby-Doo Mystery; the title collision stays until an editor resolves the group." },
+
+    "Q370055": { "category": "provider_duplicate_ids", "hold": false, "reason": "Two IGDB slugs for one game (the second, \"--1\", is a later IGDB entry); one MobyGames id. Not separate games." },
+    "Q2312762": { "category": "compilation_on_platform", "hold": true, "reason": "The 1993 Super Famicom release of Dragon Quest II was part of the Dragon Quest I & II compilation; the second MobyGames id may be that release. Whether the SNES pairing belongs to this game or to a compilation is an editor's decision." },
+    "Q2748662": { "category": "distinct_versions_on_one_item", "hold": true, "reason": "The SNES, Genesis, Game Boy and Game Gear versions of this game were developed separately (four MobyGames ids); the identity's scope must be decided before the SNES pairing is accepted." },
+    "Q3107876": { "category": "provider_duplicate_ids", "hold": false, "reason": "Two IGDB slugs differing only by \"--1\", one MobyGames id: probably an IGDB duplicate." },
+    "Q3155973": { "category": "edition_ids", "hold": false, "reason": "Four of the five IGDB ids are seasonal tournament editions (haru, natsu, aki, fuyu) of the 1997 game, not separate retail games; the identity is the retail game." },
+    "Q3699821": { "category": "regional_title", "hold": false, "reason": "The second IGDB id is the Japanese title (Shinseiki GPX Cyber Formula) of the same game." },
+    "Q3977565": { "category": "per_platform_ids", "hold": false, "reason": "Two MobyGames ids, one from the former title \"Formation Soccer 95 della Serie A\": probably a per-platform or regional entry, not a second game." },
+    "Q4009249": { "category": "per_platform_ids", "hold": false, "reason": "Two MobyGames ids: probably separate MobyGames entries for the SNES and Game Boy versions." },
+    "Q4051520": { "category": "possible_other_game_id", "hold": false, "reason": "One MobyGames id formerly pointed at \"Tiny Toon Adventures: Wacky Sports\", which may be the separate Game Boy game; the SNES identity is unaffected but the identifier needs checking." },
+    "Q5236894": { "category": "canonical_title_from_later_release", "hold": true, "reason": "The SNES game is Kamaitachi no Yoru (1994); \"Banshee's Last Cry\" is the title of a later English release on other platforms. The SNES identity's canonical title must be decided." },
+    "Q6120028": { "category": "per_platform_ids", "hold": false, "reason": "Arcade original and SNES game: the two MobyGames ids are probably per-platform entries." },
+    "Q6197587": { "category": "per_platform_ids", "hold": false, "reason": "Two MobyGames ids and a 2015 date: probably a later re-release or another platform's entry." },
+    "Q7332377": { "category": "provider_duplicate_ids", "hold": false, "reason": "Two IGDB slugs differing only by \"--1\" and \"--2\": IGDB-side duplicates or per-platform entries." },
+    "Q7642490": { "category": "possible_other_game_id", "hold": false, "reason": "One IGDB id is \"super-kyoutei-2\", the sequel: the identifier probably belongs to another game. The identity is Super Kyotei (1995)." },
+    "Q11313984": { "category": "provider_duplicate_ids", "hold": false, "reason": "Two IGDB slugs for one game (IGDB-side duplicate); distinct from Super Momotaro Dentetsu Ⅲ." },
+
+    "Q3490467": { "category": "bootleg_candidate", "hold": true, "reason": "Typed in Wikidata with Q64139617 as well as video game (its label was not fetched; it was outside the approved requests). An SNES \"Sonic the Hedgehog 4\" is a pirate cartridge, not an official retail release. Out of the standard public catalog." },
+    "Q108662228": { "category": "non_retail", "hold": true, "reason": "The Multipurpose Arcade Combat Simulator was a US Army training cartridge, not a retail game: out of scope for the first public catalog." },
+    "Q11313782": { "category": "release_unconfirmed", "hold": true, "reason": "No release date in Wikidata, and the sources found conflict (1993 and 1996) without a primary source; the retail release needs evidence." },
+    "Q113462786": { "category": "release_evidence_found", "hold": false, "reason": "Secondary sources describe a North American retail release by Viacom New Media in November 1994 (product code SNS-ANGE-USA); not a prototype. Wikidata has no date: an editor verifies and records it." },
+    "Q120335973": { "category": "release_evidence_found", "hold": false, "reason": "Secondary sources describe a Japanese retail release by Yutaka in October 1995 (SHVC-A5YJ-JPN); 5 and 6 October are both given. Wikidata has no date: an editor verifies and records it." },
+    "Q25377234": { "category": "authorized_aftermarket", "hold": false, "reason": "Super Fighter Team's licensed cartridge release of the unreleased 1994 Nichibutsu game; it is eligible for editorial consideration. Wikidata says 2013-12-23, while reports date the shipping to January 2014; the release must not be confused with the earlier prototype or unofficial reproductions." },
+    "Q3529218": { "category": "benign_extra_type", "hold": false, "reason": "The extra type is Q7397 (software, by its well-known id; the label was not fetched); the record is a normal retail game, but a person still confirms it." }
+  },
+  "evidence": {
+    "Q113462786": ["https://www.giantbomb.com/nickelodeon-guts/3030-28946/releases/", "https://kotaku.com/games/nickelodeon-guts"],
+    "Q120335973": ["https://www.arcade-history.com/game/62244/", "https://giantbomb.com/supapoon/3030-54628/"],
+    "Q11313782": ["https://gamesdb.launchbox-app.com/games/details/82835-super-trump-collection-2", "https://giantbomb.com/wiki/Games/Super_Trump_Collection"],
+    "Q25377234": ["https://www.nintendolife.com/news/2012/02/new_snes_title_on_the_way_in_2013", "https://www.gamespark.jp/article/2014/01/22/45860.html", "https://nichegamer.com/nightmare-busters-is-finally-released-for-the-super-nintendo"]
+  }
+}

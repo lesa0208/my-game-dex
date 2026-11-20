@@ -2,7 +2,7 @@
 -- sampling, human approval and audit (invariants B1 to B8). One rolled-back transaction.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(54);
 
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
 begin
@@ -89,6 +89,8 @@ select is(private.review_sample_size(10000, 0.02, 0.95, 0), 148, '10,000 unflagg
 select is(private.review_sample_size(4, 0.02, 0.95, 0), 4, 'a small lot is reviewed in full');
 select is(private.review_critical_signal('distribution_format_unclassified'), 'physical_eligibility_unsupported',
   'an unclassified distribution format may mean the game isn''t eligible: a critical signal');
+select is(private.review_critical_signal('external_ids_multiple'), 'conflicting_identifiers',
+  'several IGDB or MobyGames ids on one item may be an identity conflict: a critical signal');
 
 create temp table b (tag text primary key, id uuid);
 create function pg_temp.b(p_tag text) returns uuid language sql stable as $$ select id from b where tag = p_tag $$;
@@ -245,6 +247,16 @@ select ok((select count(*) = 4 and bool_and(gp.verification_basis ->> 'physical_
            join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
            where i.batch_id = pg_temp.b('q') and not i.sampled),
   'an unsampled member is recorded as accepted with the batch, not as individually confirmed (B11)');
+select ok((select count(*) = 8 and count(*) filter (where e.metadata ->> 'acceptance' = 'batch_accepted') = 8
+           from private.audit_events e
+           join private.catalog_review_batch_items i on i.game_id::text = e.metadata ->> 'id'
+           where e.action = 'catalog_record_verified' and e.metadata ->> 'batch_id' = pg_temp.b('q')::text and i.batch_id = pg_temp.b('q') and not i.sampled),
+  'the verification audit rows of unsampled members say "batch_accepted", for the game and the pairing alike (B11)');
+select ok((select bool_and(e.metadata ->> 'acceptance' = 'individually_reviewed')
+           from private.audit_events e
+           join private.catalog_review_batch_items i on i.game_id::text = e.metadata ->> 'id'
+           where e.action = 'catalog_record_verified' and e.metadata ->> 'batch_id' = pg_temp.b('q')::text and i.batch_id = pg_temp.b('q') and i.sampled),
+  'a member a person found correct is recorded as individually reviewed (B11)');
 select is(pg_temp.approve('e3', pg_temp.b('q')), 'error: record unavailable', 'a decided batch can''t be approved again');
 
 select * from finish();

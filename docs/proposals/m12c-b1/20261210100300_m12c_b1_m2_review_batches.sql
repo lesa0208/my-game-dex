@@ -264,6 +264,7 @@ as $$
     when 'entity_detail_pending' then 'missing_provenance'
     when 'title_collision_in_batch' then 'conflicting_duplicate_identities'
     when 'external_id_shared_in_batch' then 'conflicting_identifiers'
+    when 'external_ids_multiple' then 'conflicting_identifiers'
     when 'catalog_title_match_same_platform' then 'conflicting_duplicate_identities'
     when 'other_instance_of' then 'wrong_identity_or_type'
     when 'platform_date_before_launch' then 'wrong_platform'
@@ -510,9 +511,12 @@ begin
     where i.batch_id = p_batch and (i.outcome = 'correct' or (i.outcome is null and cardinality(i.flags) = 0 and not i.sampled))
     order by i.game_id
   loop
+    -- The game row has no basis column, so its audit row says how it was accepted: a batch-accepted
+    -- record is never recorded as individually reviewed.
     update public.games g set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me where g.id = v_item.game_id;
     perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game', v_item.game_id, v_reason,
-      pg_catalog.jsonb_build_object('revision', v_item.revision, 'batch_id', p_batch));
+      pg_catalog.jsonb_build_object('revision', v_item.revision, 'batch_id', p_batch,
+        'acceptance', case when v_item.reviewed then 'individually_reviewed' else 'batch_accepted' end));
     update public.game_platforms gp set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me,
       verified_game_revision = v_item.revision,
       verification_basis = pg_catalog.jsonb_build_object('source', v_item.provider_code, 'reference', v_item.external_id,
@@ -520,7 +524,8 @@ begin
         'physical_eligibility', case when v_item.reviewed then 'confirmed' else 'batch_accepted' end, 'batch_id', p_batch::text)
     where gp.game_id = v_item.game_id and gp.platform_id = v_item.platform_id;
     perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game_platform', v_item.game_id, v_reason,
-      pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch));
+      pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch,
+        'acceptance', case when v_item.reviewed then 'individually_reviewed' else 'batch_accepted' end));
     v_slug := coalesce(v_item.slug, private.assign_game_slug(v_item.title));
     update public.games g set status = 'published', slug = v_slug, submitted_by = null where g.id = v_item.game_id;
     update public.game_platforms gp set status = 'published', submitted_by = null

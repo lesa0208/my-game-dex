@@ -11,7 +11,22 @@ import test from "node:test";
 
 import { dryRunFiles, fetchEntities, reportMarkdown, validUserAgent } from "./catalog-b1.mjs";
 import { parseWikidata } from "./catalog-import-sources.mjs";
-import { b1Selection, CRITICAL_SIGNALS, dryRun, earliestDate, entityObjects, identityTitleKey, parseWikidataEntities, timeValue } from "./wikidata-entities.mjs";
+import {
+  b1Selection,
+  CRITICAL_SIGNALS,
+  DISTRIBUTION_FORMAT_TABLE,
+  DISTRIBUTION_FORMATS,
+  distributionFlags,
+  dryRun,
+  earliestDate,
+  entityObjects,
+  externalIdConflict,
+  FLAG_REASONS,
+  FLAGS,
+  identityTitleKey,
+  parseWikidataEntities,
+  timeValue,
+} from "./wikidata-entities.mjs";
 
 const SNES = "Q183259";
 const fixture = (name) => readFileSync(new URL(`./fixtures/wikidata-b1/${name}`, import.meta.url), "utf8");
@@ -116,8 +131,8 @@ test("the dry run: create, match, duplicate and hold, with batch and catalog fla
   assert.ok(it.Q1001.flags.includes("external_id_shared_in_batch") && it.Q1006.flags.includes("external_id_shared_in_batch"));
   assert.deepEqual(report.totals, {
     items: 12, create: 7, matched: 1, duplicate: 1, held: 3, exception_review: 8, clean: 1,
-    readiness: { held: 3, pending_detail: 0, needs_review: 8, ready_for_editorial_consideration: 1 },
-    possible_critical: 6, releases_created: 0, published: 0,
+    readiness: { held: 3, held_for_editor: 0, pending_detail: 0, needs_review: 8, ready_for_editorial_consideration: 1 },
+    possible_critical: 6, external_id_conflicts: 0, physical_release_evidence_required: 9, releases_created: 0, published: 0,
   });
   assert.deepEqual(it.Q1001.possible_critical, ["conflicting_duplicate_identities", "conflicting_identifiers"]);
   assert.deepEqual(it.Q1005.possible_critical, ["wrong_identity_or_type", "wrong_platform"]);
@@ -237,8 +252,143 @@ test("a stated distribution format is held for a person to classify, and listed 
   const [it] = report.items;
   assert.equal(it.readiness, "needs_review");
   assert.deepEqual(it.possible_critical, ["physical_eligibility_unsupported"]);
-  assert.deepEqual(report.distribution_formats, { Q900001: 1, Q900002: 1 });
-  assert.ok(reportMarkdown(report, []).includes("- Q900001: 1 item\n"));
+  assert.deepEqual(report.distribution_formats, {
+    Q900001: { items: 1, label: null, class: "unclassified", media: null },
+    Q900002: { items: 1, label: null, class: "unclassified", media: null },
+  });
+  assert.ok(reportMarkdown(report, []).includes("| Q900001 | ? | unclassified | ? | 1 |"));
+});
+
+// ---------------------------------------------------------------------------
+// Classified distribution formats (checkpoint four)
+// ---------------------------------------------------------------------------
+
+const fmtClaim = (id, platforms = [], distributors = []) => ({
+  mainsnak: { property: "P437", datavalue: { value: { "entity-type": "item", id }, type: "wikibase-entityid" }, snaktype: "value" },
+  rank: "normal",
+  ...(platforms.length || distributors.length
+    ? {
+        qualifiers: {
+          ...(platforms.length ? { P400: platforms.map((p) => ({ datavalue: { value: { id: p } } })) } : {}),
+          ...(distributors.length ? { P750: distributors.map((p) => ({ datavalue: { value: { id: p } } })) } : {}),
+        },
+      }
+    : {}),
+});
+const withFormats = (claims) => {
+  const j = JSON.parse(fixture("entities-response.json"));
+  j.entities.Q1001.claims.P437 = claims;
+  const entries = parseWikidataEntities(JSON.stringify(j), SNES);
+  return { entries, e: entries.find((x) => x.external_id === "Q1001") };
+};
+
+test("every format the SNES pilot states is classified once, and the two classes don't overlap", () => {
+  const pilot = ["Q5293", "Q7982", "Q34467", "Q47770", "Q149757", "Q160710", "Q234870", "Q269415", "Q633454", "Q849572", "Q17048824", "Q54820071"];
+  assert.deepEqual(Object.keys(DISTRIBUTION_FORMAT_TABLE).sort(), [...pilot].sort());
+  assert.deepEqual([...DISTRIBUTION_FORMATS.non_physical].sort(), ["Q269415", "Q54820071"]);
+  assert.equal(DISTRIBUTION_FORMATS.physical.length, 10);
+  assert.ok(!DISTRIBUTION_FORMATS.physical.some((q) => DISTRIBUTION_FORMATS.non_physical.includes(q)));
+  assert.ok(Object.isFrozen(DISTRIBUTION_FORMAT_TABLE) && Object.isFrozen(DISTRIBUTION_FORMAT_TABLE.Q633454));
+});
+
+test("a physical format clears only the unclassified flag: the record still needs human physical-release evidence", () => {
+  const { entries, e } = withFormats([fmtClaim("Q633454")]);
+  assert.deepEqual(e.flags, []);
+  assert.deepEqual(e.payload.source.distribution, [{ format: "Q633454", platforms: [], distributors: [] }]);
+  const report = dryRun({ selection: { selector: "f", seed: "f", ids: ["Q1001"] }, platformQid: SNES, entries, catalog: { games: [] } });
+  assert.equal(report.items[0].readiness, "ready_for_editorial_consideration");
+  assert.equal(report.totals.physical_release_evidence_required, 1);
+  assert.ok(!JSON.stringify(report).includes("eligible"));
+  assert.ok(reportMarkdown(report, []).includes("still needs independent human evidence"));
+});
+
+test("digital alongside a physical format isn't a hold; digital only (for this platform or unqualified) is", () => {
+  assert.deepEqual(withFormats([fmtClaim("Q633454"), fmtClaim("Q54820071")]).e.flags, ["distribution_also_non_physical"]);
+  const digital = withFormats([fmtClaim("Q54820071")]).e;
+  assert.deepEqual(digital.flags, ["distribution_non_physical"]);
+  assert.deepEqual(withFormats([fmtClaim("Q269415", [SNES])]).e.flags, ["distribution_non_physical"]);
+  const report = dryRun({ selection: { selector: "f", seed: "f", ids: ["Q1001"] }, platformQid: SNES, entries: [digital], catalog: { games: [] } });
+  assert.deepEqual(report.items[0].possible_critical, ["physical_eligibility_unsupported"]);
+});
+
+test("a format qualified with another platform is about that version, and its qualifiers are kept", () => {
+  const { e } = withFormats([fmtClaim("Q54820071", ["Q94"], ["Q821067"])]);
+  assert.deepEqual(e.flags, []);
+  assert.deepEqual(e.payload.source.distribution, [{ format: "Q54820071", platforms: ["Q94"], distributors: ["Q821067"] }]);
+  assert.deepEqual(withFormats([fmtClaim("Q7982")]).e.flags, ["distribution_medium_not_platform"]);
+  assert.deepEqual(distributionFlags([{ format: "Q999", platforms: [] }], SNES), ["distribution_format_unclassified"]);
+});
+
+// ---------------------------------------------------------------------------
+// Multiple external ids (checkpoint four)
+// ---------------------------------------------------------------------------
+
+const withIds = ({ igdb = [], moby = [] }) => {
+  const j = JSON.parse(fixture("entities-response.json"));
+  const str = (property, value) => ({ mainsnak: { property, datavalue: { value, type: "string" }, snaktype: "value" }, rank: "normal" });
+  j.entities.Q1001.claims.P5794 = igdb.map((v) => str("P5794", v));
+  j.entities.Q1001.claims.P11688 = moby.map((v) => str("P11688", v));
+  const entries = parseWikidataEntities(JSON.stringify(j), SNES);
+  return { entries, e: entries.find((x) => x.external_id === "Q1001") };
+};
+
+test("several IGDB or MobyGames ids flag a possible identity conflict; one of each doesn't", () => {
+  assert.ok(!withIds({ igdb: ["a"], moby: ["1"] }).e.flags.includes("external_ids_multiple"));
+  for (const ids of [{ igdb: ["a", "a--1"] }, { moby: ["1", "2"] }, { igdb: ["a", "b"], moby: ["1"] }]) {
+    assert.ok(withIds(ids).e.flags.includes("external_ids_multiple"), JSON.stringify(ids));
+  }
+  const { entries } = withIds({ igdb: ["power-rangers", "power-rangers--2"], moby: ["60165", "50692"] });
+  const report = dryRun({ selection: { selector: "f", seed: "f", ids: ["Q1001"] }, platformQid: SNES, entries, catalog: { games: [] } });
+  const [it] = report.items;
+  assert.equal(it.readiness, "needs_review");
+  assert.deepEqual(it.possible_critical, ["conflicting_identifiers"]);
+  assert.ok(it.reasons.some((r) => r.includes("several IGDB or MobyGames ids")));
+  assert.equal(report.totals.external_id_conflicts, 1);
+  assert.deepEqual(report.external_id_conflicts[0].hints, ["igdb_slug_variants", "mobygames_several"]);
+});
+
+test("external-id hints describe the identifiers only", () => {
+  assert.equal(externalIdConflict({ igdb: ["a"], mobygames: ["1"] }), null);
+  assert.deepEqual(externalIdConflict({ igdb: ["cyber-spin", "shinseiki-gpx-cyber-formula--1"], mobygames: [] }).hints, ["igdb_distinct_slugs"]);
+  assert.deepEqual(externalIdConflict({ igdb: ["x", "x--1", "x--2"], mobygames: [] }).hints, ["igdb_slug_variants"]);
+});
+
+// ---------------------------------------------------------------------------
+// Editorial-review notes (checkpoint four)
+// ---------------------------------------------------------------------------
+
+test("an editorial note can add a hold with its reason, never clear a flag or a critical signal", () => {
+  const { entries } = withIds({ igdb: ["a", "b"] });
+  const selection = { selector: "f", seed: "f", ids: ["Q1001", "Q1002"] };
+  const review = {
+    records: {
+      Q1001: { category: "provider_duplicate_ids", hold: false, reason: "IGDB lists the same game twice." },
+      Q1002: { category: "bootleg_candidate", hold: true, reason: "Typed as an unlicensed game." },
+    },
+    groups: [{ name: "g", members: ["Q1001", "Q1002"], recommendation: "Keep distinct." }],
+  };
+  const report = dryRun({ selection, platformQid: SNES, entries, catalog: { games: [] }, review });
+  const it = Object.fromEntries(report.items.map((i) => [i.id, i]));
+  assert.equal(it.Q1001.readiness, "needs_review");
+  assert.deepEqual(it.Q1001.possible_critical, ["conflicting_identifiers"]);
+  assert.equal(it.Q1002.readiness, "held_for_editor");
+  assert.ok(it.Q1002.reasons.at(-1).includes("bootleg_candidate") && it.Q1002.reasons.at(-1).includes("unlicensed"));
+  assert.equal(report.totals.readiness.held_for_editor, 1);
+  assert.deepEqual(report.editorial_groups, review.groups);
+  assert.ok(reportMarkdown(report, []).includes("**g** (Q1001, Q1002): Keep distinct."));
+});
+
+test("editorial notes outside the selection, or without a reason or a boolean hold, are refused", () => {
+  const { entries } = withIds({});
+  const selection = { selector: "f", seed: "f", ids: ["Q1001"] };
+  const run = (records) => dryRun({ selection, platformQid: SNES, entries, catalog: { games: [] }, review: { records } });
+  assert.throws(() => run({ Q9: { category: "x", hold: true, reason: "r" } }), /outside the selection/);
+  assert.throws(() => run({ Q1001: { category: "x", hold: true, reason: " " } }), /need a category/);
+  assert.throws(() => run({ Q1001: { category: "x", hold: "yes", reason: "r" } }), /need a category/);
+});
+
+test("every exception flag has a reason an editor can read", () => {
+  for (const [flag, kind] of Object.entries(FLAGS)) assert.ok(FLAG_REASONS[flag], `${flag} (${kind}) has no reason`);
 });
 
 test("the batch migration maps every flag to the same possible critical error as the parser", () => {

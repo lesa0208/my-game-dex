@@ -2,7 +2,8 @@
 
 **Written for:** the reviewer of B1-M0, B1-M1 and B1-M2, before any of them moves to `supabase/migrations/`.
 
-**Status, 2026-11-20 (checkpoint three):** final drafts for review.
+**Status, 2026-11-20 (checkpoint four):** final drafts for review. The short reviewer checklist is [SQL-REVIEW.md](SQL-REVIEW.md).
+- **Checkpoint four:** two B1-M2 fixes (10 and 11 below), three more pgTAP tests. B1-M0 and B1-M1 unchanged.
 - **Not applied** to development, the M12c-A test stack or the B1 stack.
 - **Validated on a disposable scratch stack:** built fresh from the 72 current migrations, with these files applied from disk in order, then destroyed.
 - **New in checkpoint three:**
@@ -24,7 +25,7 @@
 | 5 | `20261210100300_m12c_b1_m2_review_batches.sql` | **B1-M2.** Policy, batches, items and approvals, immutability triggers, the exact sample-size function, and five editor functions | `….rollback.sql`: drops the five functions; the tables stay as history |
 | | `tests/48_b1_unicode_title_keys.test.sql` | 25 pgTAP tests | |
 | | `tests/49_b1_identity_publication.test.sql` | 58 pgTAP tests | |
-| | `tests/50_b1_review_batches.test.sql` | 51 pgTAP tests | |
+| | `tests/50_b1_review_batches.test.sql` | 54 pgTAP tests | |
 | | `tests/schema_guard_updates.patch` | The approved lists in `01_foundation`, `03_schema_guards`, `10_staff_and_functions` and `14_audit` gain the new tables, grants, `SECURITY DEFINER` functions and audit actions, nothing else | |
 
 **Generated, not hand-retyped.** B1-M1 replaces five existing functions by exact signature:
@@ -41,7 +42,7 @@ Their bodies are the database's current definitions with marked substitutions (`
 | Run | Result |
 | --- | --- |
 | The five migrations, applied from disk in order | Applied without error |
-| Full pgTAP: the existing 47 files with the guard patch, and 48, 49 and 50 | **3,849 / 3,849** (3,715 existing + 25 + 58 + 51) |
+| Full pgTAP: the existing 47 files with the guard patch, and 48, 49 and 50 | **3,852 / 3,852** (3,715 existing + 25 + 58 + 54; checkpoint four) |
 | Existing behaviour tests unchanged, including `16_catalog`, `26_release_exclusion` and `46_flexible_ownership` | Pass. Each relaxation applies only to verified pairings |
 | Database checks: catalog, search, import, release identity, ownership claims, collection, submission, review, relink, exclusion, merge, authorization, MFA | 13 suites, **786 / 786** |
 | B1-M1 rollback with an identity-only publication present | **Refused**, nothing changed |
@@ -66,6 +67,8 @@ Their bodies are the database's current definitions with marked substitutions (`
 | 7 | B1-M0 | **NFKC turns "™" into "TM"**, so "Tetris™" would have keyed as `tetristm` instead of `tetris` | "™" and "℠" become a space first, in both functions and the parser |
 | 8 | B1-M0 | The rollback had no collision preflight; its NOTICE counted games wrongly | Preflight added; the NOTICE counts every game sharing the key |
 | 9 | B1-M1 | **Excluding the last release of a reviewed identity cascaded to its verified pairing and the whole game** (`exclusion_plan` predates identities) | A verified pairing, and a game keeping one, stay published (W9) |
+| 10 | B1-M2 | (Checkpoint four.) **A parser critical flag the SQL mapping didn't know carried no critical signal**: `external_ids_multiple`, new in the parser, would not have blocked approval | `review_critical_signal` maps it to `conflicting_identifiers`; the JS/SQL consistency test covers it |
+| 11 | B1-M2 | (Checkpoint four.) **A batch-accepted game's verification audit rows didn't say it was batch accepted**: only the pairing basis did | Both `catalog_record_verified` rows carry `acceptance: individually_reviewed` or `batch_accepted` (B11) |
 
 Checkpoint two had already fixed:
 - a `normalize` syntax error;
@@ -178,7 +181,7 @@ Re-applying B1-M1 or B1-M2 after its rollback is a new forward migration, since 
 ## Open points for the reviewer
 
 1. **The physical-eligibility wording for unsampled members** is now `"batch_accepted"` (fix 6). The alternative is to require individual confirmation for every pilot member, which the pilot's census-sized sample nearly is.
-2. **Distribution formats.** Each stated format must be classified once, as physical or not, before records carrying it can pass; the parser lists them. Whether a classified physical format clears the flag (proposed) or only informs the reviewer is a policy choice.
+2. **Distribution formats (decided, checkpoint four).** The 12 formats the pilot states are classified in the parser's `DISTRIBUTION_FORMAT_TABLE`, from their fetched labels. A physical class only clears the "unclassified" flag and never establishes a physical release. Only a record whose every format for the platform is digital is held (`distribution_non_physical`); digital alongside physical is information only.
 3. **Review flags.** B1's import step must copy each entry's flags into `payload.review_flags`, so `create_review_batch` sees them. The batch also recomputes date and title-collision flags itself.
 4. **Pairing origins for API sessions.** An API session that isn't the pairing's submitter is recorded as `staff`, matching how pairings are created today (only editors and submitters can). A stricter check (`has_staff_role`) can be added.
 5. **Staff pages** don't yet show pairing verification, withdrawal or batches (B1 step 5).

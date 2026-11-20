@@ -6,7 +6,8 @@
  *        [--platform snes] [--seed mgd-m12c-b1-snes-1] [--size 150] [--fixed Q853143,Q370055]
  *   MGD_STACK=<stack> node scripts/catalog-b1.mjs export-catalog --out <catalog.json>
  *   node scripts/catalog-b1.mjs dry-run --selection <selection.json> --wikidata <query snapshot>
- *        [--entities <entity snapshot>] [--catalog <catalog.json>] [--platform snes] --out <dir>
+ *        [--entities <entity snapshot>] [--catalog <catalog.json>] [--review <notes.json>] [--platform snes] --out <dir>
+ *   WIKIDATA_USER_AGENT=... node scripts/catalog-b1.mjs fetch-formats --entities <entity snapshot> --out <dir>
  *   WIKIDATA_USER_AGENT="<tool>/<version> (<project contact>) <library>/<version>" \
  *     node scripts/catalog-b1.mjs fetch-entities --selection <selection.json> --out <dir>
  *
@@ -34,7 +35,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WIKIDATA_PLATFORMS, parseWikidata } from "./catalog-import-sources.mjs";
-import { FLAGS, b1Selection, dryRun, parseWikidataEntities } from "./wikidata-entities.mjs";
+import { FLAGS, b1Selection, distributionFormatIds, dryRun, parseWikidataEntities } from "./wikidata-entities.mjs";
 
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
 const fail = (message) => {
@@ -113,14 +114,15 @@ async function exportCatalog(o) {
 // dry-run
 // ---------------------------------------------------------------------------
 
-export function dryRunFiles({ selectionText, wikidataText, entitiesText = null, catalogText = null, platform = "snes" }) {
+export function dryRunFiles({ selectionText, wikidataText, entitiesText = null, catalogText = null, reviewText = null, platform = "snes" }) {
   const qid = WIKIDATA_PLATFORMS[platform];
   const selection = JSON.parse(selectionText);
   const fromQuery = new Map(parseWikidata(wikidataText).map((e) => [e.external_id, e]));
   const fromEntities = entitiesText ? new Map(parseWikidataEntities(entitiesText, qid).map((e) => [e.external_id, e])) : new Map();
   const entries = selection.ids.map((id) => fromEntities.get(id) ?? fromQuery.get(id)).filter(Boolean);
   const catalog = catalogText ? JSON.parse(catalogText) : { games: [] };
-  return dryRun({ selection, platformQid: qid, entries, catalog });
+  const review = reviewText ? JSON.parse(reviewText) : null;
+  return dryRun({ selection, platformQid: qid, entries, catalog, review });
 }
 
 export function reportMarkdown(report, sources) {
@@ -156,9 +158,24 @@ export function reportMarkdown(report, sources) {
     "## Distribution formats (P437), to classify once each",
     "",
     ...(Object.keys(report.distribution_formats ?? {}).length
-      ? Object.entries(report.distribution_formats).map(([q, n]) => `- ${q}: ${n} item${n === 1 ? "" : "s"}`)
+      ? [
+          "| Format | Label | Class | Medium | Items |",
+          "| --- | --- | --- | --- | --- |",
+          ...Object.entries(report.distribution_formats).map(([q, f]) => `| ${q} | ${f.label ?? "?"} | ${f.class} | ${f.media ?? "?"} | ${f.items} |`),
+          "",
+          "A physical class only clears the unclassified flag. It never establishes that a game had a physical release on this platform.",
+        ]
       : ["- None stated."]),
     "",
+    "## Multiple external ids (possible identity conflicts)",
+    "",
+    ...((report.external_id_conflicts ?? []).length
+      ? report.external_id_conflicts.map((c) => `- ${c.id} "${c.title}" (${c.readiness.replace(/_/g, " ")}): IGDB ${c.igdb.join(", ") || "none"}; MobyGames ${c.mobygames.join(", ") || "none"}; hints ${c.hints.join(", ")}${c.editorial ? `; editorial: ${c.editorial}` : ""}`)
+      : ["- None."]),
+    "",
+    ...((report.editorial_groups ?? []).length
+      ? ["## Editorial groups (recommendations only; nothing is merged or split)", "", ...report.editorial_groups.map((g) => `- **${g.name}** (${g.members.join(", ")}): ${g.recommendation}`), ""]
+      : []),
     "| Flag | Kind | Count |",
     "| --- | --- | --- |",
     ...Object.entries(report.flags).map(([f, n]) => `| ${f} | ${FLAGS[f] ?? "?"} | ${n} |`),
@@ -166,6 +183,12 @@ export function reportMarkdown(report, sources) {
     "| Id | Title | First release | Outcome | Readiness | Flags |",
     "| --- | --- | --- | --- | --- | --- |",
     ...report.items.map((it) => `| ${it.id} | ${(it.title ?? "").replace(/\|/g, "\\|")} | ${it.first_release ?? ""} | ${it.outcome}${it.reason ? ` (${it.reason})` : ""}${it.catalog && !Array.isArray(it.catalog) ? ` → ${it.catalog.title}` : ""} | ${it.readiness} | ${it.flags.join(", ")} |`),
+    "",
+    "## Why each record isn't ready",
+    "",
+    ...report.items.filter((it) => it.reasons?.length).map((it) => `- **${it.id} ${it.title ?? ""}** (${it.readiness.replace(/_/g, " ")}): ${it.reasons.join(" ")}`),
+    "",
+    "Every record, ready or not, still needs independent human evidence of its specific physical release.",
     "",
   ];
   return lines.join("\n");
@@ -175,12 +198,13 @@ async function cmdDryRun(o) {
   for (const k of ["selection", "wikidata", "out"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
   if (!(await outsideRepo(o.out))) fail("Reports must be kept outside the repository.");
   const read = (path) => (path && path !== true ? readFileSync(path) : null);
-  const files = { selection: read(o.selection), wikidata: read(o.wikidata), entities: read(o.entities), catalog: read(o.catalog) };
+  const files = { selection: read(o.selection), wikidata: read(o.wikidata), entities: read(o.entities), catalog: read(o.catalog), review: read(o.review) };
   const report = dryRunFiles({
     selectionText: files.selection.toString("utf8"),
     wikidataText: files.wikidata.toString("utf8"),
     entitiesText: files.entities?.toString("utf8") ?? null,
     catalogText: files.catalog?.toString("utf8") ?? null,
+    reviewText: files.review?.toString("utf8") ?? null,
     platform: o.platform ?? "snes",
   });
   const sources = Object.entries(files)
@@ -211,7 +235,7 @@ export const FETCH_POLICY = { batch: 50, minIntervalMs: 1000, maxAttempts: 5, ma
  * and `now` are injectable for tests. Returns the snapshot object; throws on failure, so a
  * partial snapshot is never written.
  */
-export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), policy = FETCH_POLICY } = {}) {
+export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), policy = FETCH_POLICY, props = "labels|aliases|claims", languages = FETCH_LANGUAGES } = {}) {
   if (!validUserAgent(userAgent)) throw new Error("WIKIDATA_USER_AGENT must name a tool, a version and a project contact (an email address or a URL) chosen by the operator.");
   const unique = [...new Set(ids)].filter((id) => /^Q[0-9]+$/.test(id));
   const responses = [];
@@ -219,7 +243,7 @@ export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep =
   for (let i = 0; i < unique.length; i += policy.batch) {
     const batch = unique.slice(i, i + policy.batch);
     const url = new URL("https://www.wikidata.org/w/api.php");
-    for (const [k, v] of Object.entries({ action: "wbgetentities", format: "json", ids: batch.join("|"), props: "labels|aliases|claims", languages: FETCH_LANGUAGES, maxlag: String(policy.maxlag) })) url.searchParams.set(k, v);
+    for (const [k, v] of Object.entries({ action: "wbgetentities", format: "json", ids: batch.join("|"), props, languages, maxlag: String(policy.maxlag) })) url.searchParams.set(k, v);
     for (let attempt = 1; ; attempt++) {
       const wait = last + policy.minIntervalMs - now();
       if (wait > 0) await sleep(wait);
@@ -237,7 +261,7 @@ export async function fetchEntities(ids, { userAgent, fetchImpl = fetch, sleep =
       await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : policy.backoffMs[Math.min(attempt - 1, policy.backoffMs.length - 1)]);
     }
   }
-  return { format: "mgd-wikidata-entities", version: 1, endpoint: "wbgetentities", props: "labels|aliases|claims", languages: FETCH_LANGUAGES, fetched_at: new Date(now()).toISOString(), ids: unique, requests: responses.length, responses };
+  return { format: "mgd-wikidata-entities", version: 1, endpoint: "wbgetentities", props, languages, fetched_at: new Date(now()).toISOString(), ids: unique, requests: responses.length, responses };
 }
 
 async function cmdFetch(o) {
@@ -254,9 +278,32 @@ async function cmdFetch(o) {
   console.log(`${file}: ${snapshot.ids.length} ids in ${snapshot.requests} requests, sha256 ${sha256(Buffer.from(text))}`);
 }
 
+/**
+ * fetch-formats: the labels and descriptions (en and mul only) of the distinct distribution
+ * formats (P437) the saved entity snapshot states, and nothing else, so each can be classified
+ * by a person. Same User-Agent rule, rate limits and retries as fetch-entities.
+ */
+async function cmdFetchFormats(o) {
+  for (const k of ["entities", "out"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
+  if (!(await outsideRepo(o.out))) fail("Snapshots must be kept outside the repository.");
+  const userAgent = process.env.WIKIDATA_USER_AGENT;
+  if (!validUserAgent(userAgent)) fail("Set WIKIDATA_USER_AGENT to \"<tool>/<version> (<project contact>) <library>/<version>\", with a project contact the operator chose (an email address or a URL). It is never invented.");
+  const source = readFileSync(o.entities);
+  const ids = distributionFormatIds(source.toString("utf8"));
+  if (!ids.length) fail("The entity snapshot states no distribution formats.");
+  const snapshot = await fetchEntities(ids, { userAgent, props: "labels|descriptions", languages: "en|mul" });
+  snapshot.purpose = "distribution formats (P437) stated by the entity snapshot";
+  snapshot.source_snapshot = { file: o.entities.split(/[\\/]/).pop(), sha256: sha256(source) };
+  mkdirSync(o.out, { recursive: true });
+  const file = join(o.out, `wikidata-formats-${snapshot.fetched_at.replace(/[:.]/g, "-")}.json`);
+  const text = JSON.stringify(snapshot);
+  writeFileSync(file, text);
+  console.log(`${file}: ${snapshot.ids.length} ids in ${snapshot.requests} request(s), sha256 ${sha256(Buffer.from(text))}`);
+}
+
 async function main() {
   const o = args(process.argv.slice(2));
-  const commands = { select, "export-catalog": exportCatalog, "dry-run": cmdDryRun, "fetch-entities": cmdFetch };
+  const commands = { select, "export-catalog": exportCatalog, "dry-run": cmdDryRun, "fetch-entities": cmdFetch, "fetch-formats": cmdFetchFormats };
   const command = commands[o._[0]];
   if (!command) fail("Usage: node scripts/catalog-b1.mjs select|export-catalog|dry-run|fetch-entities [options]. See the header of this file.");
   if (o.platform) platformQid(o.platform);

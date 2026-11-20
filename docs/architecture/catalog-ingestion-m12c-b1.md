@@ -6,8 +6,9 @@
 - **Checkpoint one:** the parser and tooling.
 - **Checkpoint two** (accepted with conditions): the isolated B1 stack, source revalidation, critical errors, and migration drafts validated on scratch.
 - **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
+- **Checkpoint four:** the 150 records fetched and classified, multiple-id detection, editorial notes, and two B1-M2 fixes.
 
-The migrations are final drafts awaiting approval, applied nowhere persistent. The full Wikidata fetch still waits for an operator-configured contact.
+The migrations are final drafts awaiting approval, applied nowhere persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
 - No migration, import or download beyond what is listed under [Measured](#measured).
 - Development and the human-reviewed test pilot are unchanged.
 
@@ -251,6 +252,75 @@ They are **not** applied to development, the M12c-A stack or the B1 stack.
 2. Review of the migration drafts. Once approved, they move to `supabase/migrations/` and are applied to the B1 stack only.
 3. The importer step: entity snapshots through the M5b importer, with the parser's flags in `payload.review_flags`, as candidates on the B1 stack.
 4. Then the batch, the census review by the product owner as editor B, approval, and the collector checks generalized to identity-only games.
+
+## Checkpoint four: source classification and identity quality gate (2026-11-20)
+
+Nothing was imported, published or applied to a persistent stack.
+
+### Sources (all outside the repository)
+
+| File | SHA-256 |
+| --- | --- |
+| Selection `selection-snes-150.json` (unchanged) | `a3774c7b4772ede12d80acb551875c8bef430d1e203ff22af1ccbff2d8961f9c` |
+| Query snapshot `wikidata-snes-2026-11-19T19-30-13-272Z.json` | `ff4836552cf03f0b92c7908f67a281d12c0221b7223a1a02eb80755743e7bd6e` |
+| Entity records `wikidata-entities-snes-2026-11-20T14-11-04-475Z.json`: 150 entities in 3 requests | `4e87b22e5abb962349b4774431d3f895132ae2fb17fb2e8af164b569f656d8cd` |
+| Format records `wikidata-formats-2026-11-20T18-32-38-232Z.json`: the 12 formats, labels and descriptions only (en, mul), 1 request | `93797a673e7717d1269c0766d748d682533d83bc10c3d61b4cadfecbb0bff1c7` |
+| M12c-A catalog export (read-only) | `89493b6aa7c8f72409d7e10249a304027eb2eae0ba2d1746c3cfd3f5a069ee3c` |
+| Editorial notes [`editorial-review-snes-150.json`](../proposals/m12c-b1/editorial-review-snes-150.json) | `c24d2a0a72e0ae2d423edafa672375a3aca12bc8491056108af8fab31e2f1c68` |
+| Dry run `dry-run-2026-11-20-cp4/dry-run.json` | `b66d7c1a3ba489fc90221b585659efaa5064ed64189a01e660b15a2252aa13f6` |
+
+### What changed in the tooling
+
+- **Distribution formats are classified** in `DISTRIBUTION_FORMAT_TABLE`, from the fetched labels:
+  - 10 are physical: ROM cartridge, SNES Game Pak, read-only memory, floppy disk, compact cassette, CD-ROM, compact disc, optical disc, GD-ROM and Blu-ray;
+  - 2 are digital: digital distribution and digital download.
+- **What a physical class does.** It only clears the "unclassified" flag. It never establishes a physical release.
+- **Qualifiers are kept.** Each P437 statement keeps its platform (P400) and distributor (P750) qualifiers. A statement qualified only with another platform is ignored for this one.
+- **When a record is held for digital formats.** Only when every format stated for the platform is digital (`distribution_non_physical`). Digital alongside physical is information only, and so is a medium the platform doesn't use, such as a disc for a cartridge system.
+- **Several IGDB or MobyGames ids** raise `external_ids_multiple`, a possible `conflicting_identifiers`. The dry run lists the ids with hints: `igdb_slug_variants`, `igdb_distinct_slugs` or `mobygames_several`. The hints never split, merge or clear anything.
+- **Editorial-review notes** are a file of recommendations. A note can only add a hold (`held_for_editor`) with its reason, never clear a flag. Notes are refused if:
+  - they name a record outside the selection;
+  - they have no reason;
+  - their hold value isn't a boolean.
+- **Every record lists its reasons.** That covers every exception flag's reason in words and the editorial note.
+- **Tests.** 9 new tooling tests; `catalog:test` passes 46 + 9.
+
+### Results (150 items)
+
+| | Count |
+| --- | --- |
+| New candidates / matched to M12c-A / duplicate of the catalog | 147 / 3 / 0 |
+| Ready for editorial consideration | 92 |
+| Needs review | 45 |
+| Held for an editor, with a stated reason | 13 |
+| With a possible critical error | 37 (18 conflicting identifiers, 12 duplicate identities, 10 physical eligibility, 2 identity or type) |
+| Need independent physical-release evidence | **150** |
+
+**"Ready" is not approval.** It only means no flag or editorial note stands in the way of an editor's review. Every record, ready or not, still needs evidence of its specific physical release.
+
+**The nine "digital only" holds are mostly well-known cartridges:**
+- Wild Guns;
+- Super R-Type;
+- Pilotwings;
+- Super Street Fighter II;
+- Fatal Fury Special;
+- Ms. Pac-Man;
+- Brawl Brothers;
+- Vegas Stakes;
+- Sonic the Hedgehog 4, the bootleg candidate, which is held anyway.
+
+Wikidata lists only their digital re-releases for these. The hold is correct: a digital statement is a signal, resolved by evidence, not by the tooling.
+
+The recommendations for each duplicate group and each multiple-id record are in the editorial notes and the dry run's Markdown report. Super Momotaro Dentetsu Ⅱ and Ⅲ remain distinct.
+
+### SQL
+
+Two defects in B1-M2 were found and fixed: an unmapped critical flag, and batch-accepted audit rows that didn't say they were batch accepted. See [SQL-REVIEW.md](../proposals/m12c-b1/SQL-REVIEW.md).
+
+Validation on a fresh scratch stack, which was then destroyed:
+- pgTAP 3,852 / 3,852;
+- 13 database suites, 786 / 786;
+- the rollbacks applied in order.
 
 ## Checkpoint three: full source validation and migration security review (2026-11-20)
 

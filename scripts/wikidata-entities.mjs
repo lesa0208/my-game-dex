@@ -70,6 +70,7 @@ export const FLAGS = {
   other_instance_of: "exception",
   distribution_format_unclassified: "exception",
   distribution_non_physical: "exception",
+  external_ids_multiple: "exception",
   entity_detail_pending: "exception",
   title_collision_in_batch: "exception",
   external_id_shared_in_batch: "exception",
@@ -78,6 +79,34 @@ export const FLAGS = {
   title_collision_unicode_artifact: "info",
   catalog_source_id_linked: "info",
   many_platforms: "info",
+  distribution_also_non_physical: "info",
+  distribution_medium_not_platform: "info",
+};
+
+/**
+ * Why a flag holds or marks a record, in words an editor can act on. Every hold in a dry run
+ * is one or more of these (or an editorial-review note), never a bare status.
+ */
+export const FLAG_REASONS = {
+  mul_label_only: "Title comes only from Wikidata's language-neutral label; an English title needs confirming.",
+  no_release_date: "No release date stated; the release (and that it happened at all) needs evidence.",
+  year_precision_only: "Release date is only a year; the date needs a precise source.",
+  platform_date_before_launch: "The platform release date is before the platform launched: possibly the wrong platform.",
+  platform_date_after_era: "The platform release date is long after the platform's era: an aftermarket or late release, a reissue or a data error; the specific physical release needs evidence.",
+  other_instance_of: "Wikidata also types it as something other than a video game (for example an unlicensed or pirate game, software or a compilation).",
+  distribution_format_unclassified: "States a distribution format nobody has classified yet.",
+  distribution_non_physical: "Every distribution format stated for this platform is non-physical (digital): possibly a digital-only title on this platform.",
+  external_ids_multiple: "Carries several IGDB or MobyGames ids: possibly provider duplicates, per-platform or regional records, or distinct games merged into one item.",
+  entity_detail_pending: "Only query-snapshot fields are available; the full entity record is missing.",
+  title_collision_in_batch: "Another record in this batch has the same title key: a possible duplicate or a distinct game with the same name.",
+  external_id_shared_in_batch: "Shares an IGDB or MobyGames id with another record in this batch.",
+  catalog_title_match_same_platform: "A catalog game on the same platform has the same title.",
+  catalog_title_match_other_platform: "A catalog game on another platform has the same title.",
+  title_collision_unicode_artifact: "Collided only under the old key, which dropped a character such as \"Ⅱ\"; the titles differ.",
+  catalog_source_id_linked: "Its Wikidata id is already linked to a catalog game.",
+  many_platforms: "Stated on more than four platforms: the item may describe a franchise entry with several distinct versions.",
+  distribution_also_non_physical: "Also states a digital distribution format; that alone doesn't rule out a physical release.",
+  distribution_medium_not_platform: "States a physical medium this platform doesn't use (for example a disc for a cartridge system): the statement is about another platform's version.",
 };
 
 /**
@@ -96,19 +125,54 @@ export const CRITICAL_ERRORS = {
 };
 
 /**
- * Wikidata distribution formats (P437), classified by a person once per format, never guessed.
- * Empty until the fetched records' formats are reviewed: the dry run lists each distinct value
- * with its count, and every record stating an unclassified format is flagged for review. A
- * physical format is still not proof of a physical retail release (R-2, R-8); it only clears
- * this flag.
+ * Wikidata distribution formats (P437), classified once per format, never guessed. The labels
+ * and descriptions are the ones Wikidata returned on 2026-11-20 for the 12 formats the SNES
+ * pilot's entities state (wikidata-formats-2026-11-20T18-32-38-232Z.json, sha256 93797a67…ff1c7).
+ * A format not in this table is flagged "distribution_format_unclassified".
+ *
+ * What a classification means, and doesn't:
+ *   - "physical" says the format is a physical medium. It is not proof that this game had a
+ *     physical retail release on this platform (R-2, R-8): a statement may describe another
+ *     platform's version, a reissue or a prototype, and every specific physical release still
+ *     needs independent human evidence. It only clears the "unclassified" flag.
+ *   - "non_physical" says the format is digital. A game that also states a physical format
+ *     isn't held for it (only "distribution_also_non_physical", info): a digital re-release
+ *     says nothing against an older physical one.
+ * `media` is the medium kind, compared with the platform's own media (PLATFORM_MEDIA) only to
+ * point out statements about other platforms' versions.
  */
-export const DISTRIBUTION_FORMATS = Object.freeze({ physical: Object.freeze([]), non_physical: Object.freeze([]) });
+export const DISTRIBUTION_FORMAT_TABLE = Object.freeze({
+  Q5293: Object.freeze({ label: "floppy disk", class: "physical", media: "floppy_disk" }),
+  Q7982: Object.freeze({ label: "CD-ROM", class: "physical", media: "optical_disc" }),
+  Q34467: Object.freeze({ label: "compact disc", class: "physical", media: "optical_disc" }),
+  Q47770: Object.freeze({ label: "Blu-ray Disc", class: "physical", media: "optical_disc" }),
+  Q149757: Object.freeze({ label: "compact cassette", class: "physical", media: "tape" }),
+  Q160710: Object.freeze({ label: "read-only memory", class: "physical", media: "rom_unspecified" }),
+  Q234870: Object.freeze({ label: "optical disc", class: "physical", media: "optical_disc" }),
+  Q269415: Object.freeze({ label: "digital distribution", class: "non_physical", media: "digital" }),
+  Q633454: Object.freeze({ label: "ROM cartridge", class: "physical", media: "cartridge" }),
+  Q849572: Object.freeze({ label: "GD-ROM", class: "physical", media: "optical_disc" }),
+  Q17048824: Object.freeze({ label: "Super Nintendo Entertainment System Game Pak", class: "physical", media: "cartridge" }),
+  Q54820071: Object.freeze({ label: "digital download", class: "non_physical", media: "digital" }),
+});
+
+const formatsOfClass = (c) => Object.freeze(Object.keys(DISTRIBUTION_FORMAT_TABLE).filter((q) => DISTRIBUTION_FORMAT_TABLE[q].class === c));
+export const DISTRIBUTION_FORMATS = Object.freeze({ physical: formatsOfClass("physical"), non_physical: formatsOfClass("non_physical") });
+
+/** The physical media a platform's own retail games use ("rom_unspecified" is compatible with a cartridge system). */
+export const PLATFORM_MEDIA = {
+  Q183259: ["cartridge", "rom_unspecified"],
+  Q172742: ["cartridge", "rom_unspecified"],
+  Q135321: ["floppy_disk"],
+  Q10677: ["optical_disc"],
+};
 
 /** Flags that may indicate a critical error: an item carrying one can't be ready until a person resolves it. */
 export const CRITICAL_SIGNALS = {
   entity_detail_pending: "missing_provenance",
   title_collision_in_batch: "conflicting_duplicate_identities",
   external_id_shared_in_batch: "conflicting_identifiers",
+  external_ids_multiple: "conflicting_identifiers",
   catalog_title_match_same_platform: "conflicting_duplicate_identities",
   other_instance_of: "wrong_identity_or_type",
   distribution_format_unclassified: "physical_eligibility_unsupported",
@@ -222,6 +286,10 @@ export function entityToEntry(entity, platformQid) {
       publishers: itemIds(entity, WD.publisher),
       genres: itemIds(entity, WD.genre),
       distribution_formats: itemIds(entity, WD.distributionFormat),
+      // Each statement with its platform (P400) and distributor (P750) qualifiers, as stated.
+      distribution: statements(entity, WD.distributionFormat)
+        .map((s) => ({ format: s.mainsnak?.datavalue?.value?.id, platforms: qualifierIds(s, WD.platform), distributors: qualifierIds(s, WD.distributedBy) }))
+        .filter((d) => d.format),
       external_ids: {
         igdb: strings(entity, WD.igdbGameId),
         mobygames: strings(entity, WD.mobyGamesGameId),
@@ -245,12 +313,56 @@ export function entityToEntry(entity, platformQid) {
   if (era && onPlatform && onPlatform.value > era.lateAfter) entry.flags.push("platform_date_after_era");
   if (instanceOf.some((q) => q !== WD.videoGame)) entry.flags.push("other_instance_of");
   if (platforms.length > 4) entry.flags.push("many_platforms");
-  const formats = entry.payload.source.distribution_formats;
-  if (formats.some((q) => DISTRIBUTION_FORMATS.non_physical.includes(q))) entry.flags.push("distribution_non_physical");
-  if (formats.some((q) => !DISTRIBUTION_FORMATS.physical.includes(q) && !DISTRIBUTION_FORMATS.non_physical.includes(q))) {
-    entry.flags.push("distribution_format_unclassified");
-  }
+  entry.flags.push(...distributionFlags(entry.payload.source.distribution, platformQid));
+  const x = entry.payload.source.external_ids;
+  if (x.igdb.length > 1 || x.mobygames.length > 1) entry.flags.push("external_ids_multiple");
   return entry;
+}
+
+/**
+ * Distribution flags for one platform. A statement qualified with other platforms only is
+ * about their versions and is ignored here; an unqualified one may be about any platform.
+ *   - distribution_format_unclassified: any stated format isn't in the table.
+ *   - distribution_non_physical: every format that may apply to this platform is digital.
+ *   - distribution_also_non_physical (info): digital alongside a physical format.
+ *   - distribution_medium_not_platform (info): a physical medium this platform doesn't use.
+ * Nothing here makes a record eligible: a physical format only clears the "unclassified" flag.
+ */
+export function distributionFlags(distribution, platformQid) {
+  const flags = [];
+  const all = distribution ?? [];
+  if (all.some((d) => !DISTRIBUTION_FORMAT_TABLE[d.format])) flags.push("distribution_format_unclassified");
+  const here = all.filter((d) => !d.platforms?.length || d.platforms.includes(platformQid)).map((d) => DISTRIBUTION_FORMAT_TABLE[d.format]).filter(Boolean);
+  const physical = here.filter((f) => f.class === "physical");
+  const digital = here.filter((f) => f.class === "non_physical");
+  if (digital.length && !physical.length) flags.push("distribution_non_physical");
+  if (digital.length && physical.length) flags.push("distribution_also_non_physical");
+  const media = PLATFORM_MEDIA[platformQid];
+  if (media && physical.some((f) => !media.includes(f.media))) flags.push("distribution_medium_not_platform");
+  return flags;
+}
+
+/**
+ * Multiple IGDB or MobyGames ids on one item, with hints for the editor. The hints describe
+ * the identifiers only; they never split, merge or clear anything.
+ *   igdb_slug_variants   IGDB slugs that differ only by a "--N" suffix: likely IGDB-side duplicates.
+ *   igdb_distinct_slugs  IGDB slugs with different names: a regional title, an edition or another game.
+ *   mobygames_several    several MobyGames game ids: MobyGames often keeps per-platform or
+ *                        distinct same-name games as separate entries.
+ */
+export function externalIdConflict(externalIds) {
+  const igdb = externalIds?.igdb ?? [];
+  const moby = externalIds?.mobygames ?? [];
+  if (igdb.length < 2 && moby.length < 2) return null;
+  const hints = [];
+  if (igdb.length > 1) hints.push(new Set(igdb.map((s) => s.replace(/--\d+$/, ""))).size === 1 ? "igdb_slug_variants" : "igdb_distinct_slugs");
+  if (moby.length > 1) hints.push("mobygames_several");
+  return { igdb, mobygames: moby, hints };
+}
+
+/** The distinct distribution formats (P437, non-deprecated) the entities state, in numeric id order. */
+export function distributionFormatIds(text) {
+  return [...new Set(entityObjects(text).flatMap((e) => itemIds(e, WD.distributionFormat)))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 }
 
 /** Every entity in the input as entries for one platform, in numeric id order. */
@@ -326,7 +438,13 @@ export function b1Selection(entries, { seed = "mgd-m12c-b1-snes-1", size = 150, 
  *   create    a new, unpublished game candidate with its platform pairing.
  * Flags are added for batch collisions, shared external ids and other-platform matches.
  */
-export function dryRun({ selection, platformQid, entries, catalog }) {
+export function dryRun({ selection, platformQid, entries, catalog, review = null }) {
+  const notes = review?.records ?? {};
+  const unknownNotes = Object.keys(notes).filter((id) => !selection.ids.includes(id));
+  if (unknownNotes.length) throw new Error(`Editorial-review notes name records outside the selection: ${unknownNotes.join(", ")}`);
+  // A note must say what it is and why; "hold" must be a boolean (a missing hold never clears anything).
+  const badNotes = Object.entries(notes).filter(([, n]) => typeof n?.category !== "string" || typeof n?.hold !== "boolean" || !String(n?.reason ?? "").trim());
+  if (badNotes.length) throw new Error(`Editorial-review notes need a category, a boolean hold and a reason: ${badNotes.map(([id]) => id).join(", ")}`);
   const platformSlug = PLATFORM_ERAS[platformQid]?.slug ?? null;
   const byId = new Map(entries.map((e) => [e.external_id, e]));
   const linked = new Map();
@@ -419,12 +537,16 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
   }
   for (const it of items) {
     it.flags = [...new Set(it.flags)].sort();
+    it.note = notes[it.id] ?? null;
     // A record whose full source details are pending can never be ready (checkpoint two § 4).
     it.critical = [...new Set(it.flags.map((f) => CRITICAL_SIGNALS[f]).filter(Boolean))].sort();
+    // An editorial-review note can only add a hold; it never clears a flag or a critical signal.
     it.readiness =
       it.outcome === "held"
         ? "held"
-        : it.flags.includes("entity_detail_pending")
+        : it.note?.hold
+          ? "held_for_editor"
+          : it.flags.includes("entity_detail_pending")
           ? "pending_detail"
           : it.critical.length || it.flags.some((f) => FLAGS[f] === "exception")
             ? "needs_review"
@@ -447,25 +569,36 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
       clean: count((it) => it.outcome !== "held" && !it.flags.some((f) => FLAGS[f] === "exception")),
       readiness: {
         held: count((it) => it.readiness === "held"),
+        held_for_editor: count((it) => it.readiness === "held_for_editor"),
         pending_detail: count((it) => it.readiness === "pending_detail"),
         needs_review: count((it) => it.readiness === "needs_review"),
         ready_for_editorial_consideration: count((it) => it.readiness === "ready_for_editorial_consideration"),
       },
       possible_critical: count((it) => it.critical.length > 0),
+      external_id_conflicts: count((it) => it.flags.includes("external_ids_multiple")),
+      // Nothing here establishes a physical release: every record needs independent human evidence.
+      physical_release_evidence_required: count((it) => it.outcome !== "held"),
       releases_created: 0,
       published: 0,
     },
     flags: Object.fromEntries(Object.entries(flagCounts).sort()),
-    // Each distinct distribution format stated by the items, for a person to classify once.
+    // Each distinct distribution format stated by the items, with its classification (or null).
     distribution_formats: Object.fromEntries(
       Object.entries(
         items.reduce((acc, it) => {
           for (const q of it.entry.payload?.source?.distribution_formats ?? []) acc[q] = (acc[q] ?? 0) + 1;
           return acc;
         }, {}),
-      ).sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))),
+      )
+        .sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1)))
+        .map(([q, n]) => [q, { items: n, ...(DISTRIBUTION_FORMAT_TABLE[q] ?? { label: null, class: "unclassified", media: null }) }]),
     ),
     collision_groups: collisionGroups,
+    editorial_groups: review?.groups ?? [],
+    external_id_conflicts: items
+      .map((it) => ({ it, c: externalIdConflict(it.entry.payload?.source?.external_ids) }))
+      .filter(({ c }) => c)
+      .map(({ it, c }) => ({ id: it.id, title: it.entry.payload?.title ?? null, readiness: it.readiness, ...c, ...(it.note ? { editorial: it.note.category } : {}) })),
     items: items.map((it) => ({
       id: it.id,
       title: it.entry.payload?.title ?? null,
@@ -475,6 +608,16 @@ export function dryRun({ selection, platformQid, entries, catalog }) {
       ...(it.critical.length ? { possible_critical: it.critical } : {}),
       ...(it.entry.ignore_reason ? { reason: it.entry.ignore_reason } : {}),
       flags: it.flags,
+      // Why the record isn't ready: every exception flag's reason, then the editorial note's.
+      reasons: [
+        ...(it.entry.ignore_reason ? [`Ignored: ${it.entry.ignore_reason}.`] : []),
+        ...it.flags.filter((f) => FLAGS[f] === "exception").map((f) => FLAG_REASONS[f] ?? f),
+        ...(it.note?.reason ? [`Editorial review (${it.note.category}): ${it.note.reason}`] : []),
+      ],
+      ...(it.note ? { editorial: it.note } : {}),
+      ...(it.entry.payload?.source?.distribution?.length
+        ? { distribution: it.entry.payload.source.distribution.map((d) => ({ ...d, label: DISTRIBUTION_FORMAT_TABLE[d.format]?.label ?? null, class: DISTRIBUTION_FORMAT_TABLE[d.format]?.class ?? "unclassified" })) }
+        : {}),
       ...(it.catalog ? { catalog: it.catalog } : {}),
       ...(it.entry.payload?.source?.external_ids ? { external_ids: it.entry.payload.source.external_ids } : {}),
     })),
