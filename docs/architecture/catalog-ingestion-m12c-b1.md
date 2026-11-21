@@ -8,6 +8,7 @@
 - **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
 - **Checkpoint four:** the 150 records fetched and classified, multiple-id detection, editorial notes, and two B1-M2 fixes.
 - **Independent SQL review of 62267d6:** changes required; findings resolved in the drafts (B12 to B18).
+- **Review preparation (2026-11-21):** decisions D1 and D2, editor A, the review batch and the B1 preview ([B1: editorial review preparation](#b1-editorial-review-preparation-2026-11-21)). Awaiting the owner's review as editor B.
 - **Second SQL review of 44a1bd5:** approved for the isolated B1 stack only. Applied to B1, validated, and the 150 SNES items staged there as unpublished candidates ([B1: migrations applied and the first controlled staging](#b1-migrations-applied-and-the-first-controlled-staging-2026-11-20)).
 
 The migrations are applied to the B1 stack only, and nowhere else persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
@@ -323,7 +324,7 @@ No mutation runner ran, and B1 was neither reset nor restored.
 - **Commands:** `catalog-b1.mjs clear-wikidata`, then `catalog-b1.mjs stage`.
   - Both refuse every stack but B1.
   - Staging runs the M5b importer (`catalog-import.mjs import --entities`), connected only as `catalog_importer`. Its login was enabled with a one-time password for the run and disabled afterwards.
-- **Clearance:** B1 has its own Wikidata clearance record, against the same saved terms page as M12c-A (`dd71f104…`). Rights surviving withdrawal are **not** recorded; that is the product owner's decision before publication.
+- **Clearance:** B1 has its own Wikidata clearance record, against the same saved terms page as M12c-A (`dd71f104…`). Rights surviving withdrawal were recorded on 2026-11-21, by the owner's decision D2 (see below).
 - **What was staged:** exactly the selection.
   - Every entry carries its risk assessment (`withRiskAssessment`), bound to the snapshot hash the run was started with. The parser's flags travel inside it.
   - The 13 records the editorial notes hold were staged with a `review_reason`, so the importer kept them held: no game, no pairing. This is stricter than the earlier note that held records could enter a batch flagged. A held record now needs an editor to resolve it before it can be a candidate at all.
@@ -359,7 +360,68 @@ No mutation runner ran, and B1 was neither reset nor restored.
 1. **Editor accounts on B1.** B1 has no users. An editor A (a disposable test account with a staff role and an authenticator) creates the batch. Editor B is the product owner, as a human reviewer with their own account.
 2. **Batch creation by editor A.** The 137 candidates form the batch; the 13 held records stay out until resolved.
 3. **The census review and approval by editor B.** No agent acts as editor B.
-4. **Before publication:** decide whether to record that Wikidata's CC0 rights survive withdrawal (`private.record_provider_rights`).
+4. **Before publication:** decide whether to record that Wikidata's CC0 rights survive withdrawal (`private.record_provider_rights`). Decided and recorded on 2026-11-21 (D2).
+
+## B1: editorial review preparation (2026-11-21)
+
+Checkpoint `7bed5c0` was accepted. The owner decided D1 and D2, and B1 is now ready for the human review.
+
+### Owner decisions
+
+- **D1, the local path in B1's history:** kept as recorded.
+  - It is a contained, B1-only test-data issue. B1 isn't restored or re-imported for it, and its audit events aren't modified or deleted. B1 audit data never goes to production.
+  - **Where it is visible:** only through `get_import_runs`, `get_import_run`, `get_audit_log` and `get_account_summary`. Each needs an admin or moderator role, and B1 has only catalog editors.
+  - **Where it isn't:**
+    - No table holding runs or audit events is granted to `anon` or `authenticated`.
+    - As editor A: the run reads are refused (`not permitted`), and a member's record history has no local path.
+    - The admin imports and audit pages show editor A no data. The review packet has no local path either.
+- **D2, Wikidata's CC0 rights:** recorded on B1 with `catalog-b1.mjs record-wikidata-rights`.
+  - It is bound to the reviewed terms page (`dd71f104…`). That page states the CC0 licence for all structured data.
+  - **Scope:** CC0 structured data only, not images, cover art, third-party descriptions or other providers' metadata. A separate legal, security or provenance hold still blocks publication.
+  - Wikidata only: No-Intro's rights are unchanged.
+
+### State before the review
+
+- **Staged data:** 137 games, 137 pairings, 150 source records (13 held), and the run.
+  - Fingerprinted before and after the review preparation: unchanged.
+  - Every game and pairing is `under_review`, and none is verified or published.
+- **Editor A:** `scripts/catalog-b1-review.mjs editor-a`.
+  - A disposable `@example.test` account with a handle, the `catalog_editor` role only, and its own authenticator, enrolled and verified through Auth.
+  - Its sign-in details are outside the repository.
+- **The batch:** `ae69e5d3-e674-4ea4-bc96-662268ef2adf`, created by editor A with `create_review_batch`.
+  - 137 members: 41 flagged and 75 sampled, so 116 need an individual outcome. The other 21 are accepted with the batch on approval.
+  - Acceptance number 0, one approval required, content hash `c45d0ffa…7153`.
+  - The 13 held records have no game, so they aren't members.
+  - Editor A's own outcome and approval are refused (`own record`).
+- **The B1 preview:** `http://127.0.0.4:3004`, served by `~/.my-game-dex/b1-preview.mjs`, which is outside the repository.
+  - It serves the current build against B1 only, and refuses any other API port.
+  - It has its own loopback address because the app's auth cookie has the same name on every local stack, and browsers keep cookies per host, not per port.
+- **The review tool:** the app has no page for review batches. The owner reviews in their own terminal with `scripts/catalog-b1-review.mjs`.
+  - It signs in with the owner's password and a code from their authenticator, both typed by them.
+  - Each outcome is typed and confirmed by the owner, with no defaults, and sent through `record_batch_outcome`. Approval and rejection need a reason and the batch's first 8 characters.
+  - Every safeguard stays in the database.
+- **The review packet:** `~/.my-game-dex/catalog-pilot/m12c-b1/review-2026-11-21/b1-review-packet-ae69e5d3.md`. For every member it gives the flags with their reasons, the critical signals, the editorial notes, and links to Wikidata and the preview.
+
+### Owner instructions (editor B)
+
+1. **Account.** In your own terminal:
+   `$env:MGD_STACK = 'b1'; node scripts/catalog-b1-review.mjs reviewer-account --email <name>@example.test`
+   Choose your password at the hidden prompt.
+2. **Sign-in and MFA.** Open `http://127.0.0.4:3004`, sign in, and choose a handle. Then, under Settings → Security, add an authenticator with your own app.
+3. **Role:** `node scripts/catalog-b1-review.mjs grant-reviewer --email <name>@example.test` (catalog editor only).
+4. **Inspect.**
+   - In the preview: Admin → Catalog → search, with Games, SNES and Under review. That lists the 137.
+   - The packet links each member's page.
+5. **Review:** `node scripts/catalog-b1-review.mjs review --email <name>@example.test`.
+   - For each of the 116 members, type c (correct), i (incorrect) or x (excluded), with a critical error if there is one.
+   - Add a note. Marking a member with a critical signal correct needs evidence of at least 20 characters.
+   - Confirm each outcome with `yes`. `q` quits, and running it again resumes where you left off.
+6. **Decide.**
+   - `approve` publishes the identities and their SNES pairings, never a release. Reviewed members are recorded as individually reviewed, and the others as `batch_accepted`.
+   - `reject` closes the batch for good.
+   - Either way you type a reason and the batch's first 8 characters.
+   - The database refuses an approval while an outcome is missing, after a failed sample, or while a critical error is unresolved.
+7. **Afterwards:** `revoke-reviewer`. Check progress at any time with `status`.
 
 ## Checkpoint four: source classification and identity quality gate (2026-11-20)
 

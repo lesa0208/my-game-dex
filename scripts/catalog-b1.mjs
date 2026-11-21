@@ -13,6 +13,7 @@
  *   MGD_STACK=b1 node scripts/catalog-b1.mjs clear-wikidata --terms-file <saved Wikidata:Licensing page>
  *   MGD_STACK=b1 node scripts/catalog-b1.mjs stage --entities <entity snapshot> --selection <selection.json>
  *        --notes <editorial notes.json> --terms-file <same page> --reason "<why>"
+ *   MGD_STACK=b1 node scripts/catalog-b1.mjs record-wikidata-rights --terms-file <same page>
  *   MGD_STACK=b1 node scripts/catalog-b1.mjs report [--out <report.json>]
  *
  * - select: the deterministic 150-game selection from a saved query snapshot (the one the
@@ -38,6 +39,11 @@
  *   records the editorial notes hold stay held. It creates unpublished, unverified game
  *   candidates and their under-review platform pairings, and nothing else: no releases, no
  *   verification, no publication, no merge, no collector data.
+ * - record-wikidata-rights: the owner's decision D2 (2026-11-21), as an operator procedure
+ *   (private.record_provider_rights, as postgres): Wikidata structured data covered by CC0 and
+ *   acquired under the cleared terms page stays publishable after API access or clearance ends.
+ *   Bound to that page's hash; refused unless Wikidata is cleared against exactly those terms.
+ *   Wikidata only, and CC0 structured data only.
  * - report: what B1 holds, read only.
  *
  * Snapshots, selections and reports stay outside the repository.
@@ -357,6 +363,21 @@ async function cmdClearWikidata(o) {
   console.log(`wikidata cleared on the B1 stack against terms sha256 ${hash}`);
 }
 
+/** The owner's decision D2 (2026-11-21), recorded with the provider's surviving rights. */
+export const WIKIDATA_RIGHTS_NOTE =
+  "Owner decision D2 (2026-11-21): Wikidata structured data covered by CC0 1.0, acquired under these reviewed terms, may be retained and reused after API access or provider clearance ends. CC0 structured data only: not images, cover art, third-party descriptions or other providers' metadata. A separate legal, security or provenance hold still blocks publication.";
+
+async function cmdRecordWikidataRights(o) {
+  if (!o["terms-file"] || o["terms-file"] === true) fail("--terms-file is required: the saved Wikidata:Licensing page Wikidata is cleared against.");
+  const { container } = await b1Stack("recording Wikidata's surviving rights");
+  const page = readFileSync(o["terms-file"]);
+  const text = page.toString("utf8");
+  if (!text.includes("released into the public domain under") || !text.includes("Creative Commons CC0")) fail("That file isn't the Wikidata:Licensing page stating the CC0 dedication.");
+  const hash = sha256(page);
+  psql(container, `select private.record_provider_rights('wikidata', true, ${lit(hash)}, ${lit(WIKIDATA_RIGHTS_NOTE)});`);
+  console.log(`Wikidata's CC0 rights recorded as surviving withdrawal, for terms sha256 ${hash} only.`);
+}
+
 async function cmdStage(o) {
   for (const k of ["entities", "selection", "notes", "terms-file", "reason"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
   const { port } = await b1Stack("B1 staging");
@@ -379,6 +400,7 @@ async function cmdStage(o) {
 
 export const B1_REPORT_SQL = `begin transaction read only;
 select json_build_object(
+  'rights', (select json_object_agg(code, json_build_object('survive_withdrawal', rights_survive_withdrawal, 'terms_sha256', rights_terms_sha256, 'recorded_at', rights_recorded_at)) from private.external_providers),
   'migrations', (select count(*) from supabase_migrations.schema_migrations),
   'b1_functions', (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'
      and p.proname in ('create_review_batch', 'record_batch_outcome', 'approve_review_batch', 'reject_review_batch', 'get_review_batch',
@@ -421,9 +443,9 @@ async function cmdReport(o) {
 async function main() {
   const o = args(process.argv.slice(2));
   const commands = { select, "export-catalog": exportCatalog, "dry-run": cmdDryRun, "fetch-entities": cmdFetch, "fetch-formats": cmdFetchFormats,
-    "clear-wikidata": cmdClearWikidata, stage: cmdStage, report: cmdReport };
+    "clear-wikidata": cmdClearWikidata, "record-wikidata-rights": cmdRecordWikidataRights, stage: cmdStage, report: cmdReport };
   const command = commands[o._[0]];
-  if (!command) fail("Usage: node scripts/catalog-b1.mjs select|export-catalog|dry-run|fetch-entities|fetch-formats|clear-wikidata|stage|report [options]. See the header of this file.");
+  if (!command) fail("Usage: node scripts/catalog-b1.mjs select|export-catalog|dry-run|fetch-entities|fetch-formats|clear-wikidata|record-wikidata-rights|stage|report [options]. See the header of this file.");
   if (o.platform) platformQid(o.platform);
   try {
     await command(o);
