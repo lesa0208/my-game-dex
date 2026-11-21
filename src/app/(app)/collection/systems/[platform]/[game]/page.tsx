@@ -44,27 +44,34 @@ async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[
         <article className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#141319]">
           <div
             aria-hidden="true"
-            className="absolute inset-0 bg-[radial-gradient(50%_90%_at_20%_0%,rgb(255_176_96/0.16),transparent_70%),radial-gradient(50%_90%_at_100%_100%,rgb(139_92_246/0.18),transparent_70%)]"
+            className="absolute inset-0 bg-[radial-gradient(45%_80%_at_18%_0%,rgb(255_176_96/0.14),transparent_70%),radial-gradient(50%_90%_at_100%_100%,rgb(139_92_246/0.16),transparent_70%)]"
           />
-          <div className="relative grid gap-6 p-5 sm:grid-cols-[minmax(0,17rem)_1fr] sm:p-6">
+          <div className="relative grid items-center gap-8 p-6 sm:p-8 md:grid-cols-[minmax(0,19rem)_1fr] md:gap-10">
             {/* The copy itself, standing on a lit shelf. */}
-            <div className="relative mx-auto w-full max-w-64 sm:max-w-none">
-              <ShelfLight className="-top-2" />
-              <div className="relative px-5 pt-8 pb-2">
-                <GameMedia kind={system.media} region={game.region} slug={game.slug} title={game.title} systemLabel={system.shortName} sizes="(min-width: 640px) 230px, 60vw" priority />
+            <div className="relative mx-auto w-full max-w-72 md:max-w-none">
+              <ShelfLight />
+              <div className="relative px-6 pt-10 pb-1">
+                <GameMedia
+                  kind={system.media}
+                  region={game.region}
+                  slug={game.slug}
+                  title={game.title}
+                  systemLabel={system.shortName}
+                  sizes="(min-width: 768px) 260px, 70vw"
+                  priority
+                />
               </div>
               <ShelfBoard />
             </div>
 
             <div className="min-w-0">
-              <h1 className="text-2xl leading-tight font-semibold tracking-tight text-balance sm:text-3xl">{game.title}</h1>
-              <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="inline-block w-8">
-                  <ConsoleArt kind={system.console} sizes="40px" className="h-6 w-8" />
-                </span>
-                {system.name}
+              <p className="flex items-center gap-2 text-xs font-medium tracking-[0.16em] text-muted-foreground uppercase">
+                <ConsoleArt kind={system.console} sizes="40px" className="h-6 w-8 shrink-0" />
+                {system.shortName} · {game.year}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <h1 className="mt-2 text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl">{game.title}</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">{system.name}</p>
+              <div className="mt-5 flex flex-wrap gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-primary-solid px-3 py-1.5 text-sm font-medium text-primary-solid-foreground">
                   <BadgeCheck aria-hidden="true" className="size-4" />
                   In my collection
@@ -76,23 +83,23 @@ async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[
                   </span>
                 ) : null}
               </div>
-              <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+              <dl className="mt-6 grid max-w-md grid-cols-2 gap-2.5">
                 {[
                   { icon: CalendarDays, label: "Released", value: game.year.toString() },
                   { icon: Building2, label: "Publisher", value: game.publisher },
                   { icon: Tag, label: "Genre", value: game.genre },
                   { icon: Globe, label: "Region", value: game.region },
                 ].map(({ icon: Icon, label, value }) => (
-                  <div key={label} className="flex gap-2.5">
-                    <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary-text" />
-                    <div>
-                      <dt className="text-xs text-muted-foreground">{label}</dt>
-                      <dd className="text-sm font-medium">{value}</dd>
-                    </div>
+                  <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3.5 py-3">
+                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Icon aria-hidden="true" className="size-3.5 shrink-0 text-primary-text" />
+                      {label}
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium">{value}</dd>
                   </div>
                 ))}
               </dl>
-              <Button asChild variant="secondary" size="lg" className="mt-6">
+              <Button asChild variant="ghost" size="lg" className="mt-5 -ml-2.5 text-muted-foreground hover:text-foreground">
                 <Link href={shelfHref}>
                   <ArrowLeft aria-hidden="true" />
                   Back to the {system.shortName} shelf
@@ -103,10 +110,13 @@ async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[
         </article>
 
         <aside aria-labelledby="my-copy" className="flex flex-col gap-4">
-          <section className="rounded-2xl border border-white/10 bg-card p-5">
-            <h2 id="my-copy" className="font-semibold">
-              My copy{game.copies > 1 ? ` (1 of ${game.copies})` : ""}
-            </h2>
+          <section className="rounded-2xl border border-white/10 bg-card p-5 sm:p-6">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 id="my-copy" className="font-semibold">
+                My copy
+              </h2>
+              {game.copies > 1 ? <span className="text-xs text-muted-foreground">1 of {game.copies} copies</span> : null}
+            </div>
             <dl className="mt-4 space-y-3 text-sm">
               {[
                 ["Condition", conditionLabel(game.condition)],

@@ -217,21 +217,24 @@ function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
             <ShelfLight />
             <Link
               href={gameHref(game)}
-              className="group relative flex flex-1 flex-col items-center justify-end px-1.5 pt-6 pb-1.5 outline-none sm:px-2.5"
+              className="group relative mx-1 mt-5 mb-1 flex flex-1 flex-col items-center justify-end rounded-lg px-1 pt-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:mx-1.5 sm:px-1.5"
             >
-              <span className="relative w-full transition duration-300 group-hover:-translate-y-1.5 group-focus-visible:-translate-y-1.5 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
-                <GameMedia kind={media} region={game.region} slug={game.slug} title={game.title} systemLabel={systemLabel} sizes="(min-width: 1280px) 130px, (min-width: 768px) 16vw, 31vw" />
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute -inset-1.5 rounded-lg opacity-0 ring-2 ring-primary transition-opacity duration-300 group-hover:opacity-100 group-hover:shadow-[0_0_26px_2px_rgb(139_92_246/0.55)] group-focus-visible:opacity-100 group-focus-visible:ring-ring"
+              <span className="relative w-full transition-transform duration-300 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+                <GameMedia
+                  kind={media}
+                  region={game.region}
+                  slug={game.slug}
+                  title={game.title}
+                  systemLabel={systemLabel}
+                  sizes="(min-width: 1280px) 130px, (min-width: 768px) 16vw, 31vw"
+                  framed
+                  interactive
                 />
-                {game.favorite ? (
-                  <span className="absolute -top-2 -right-1.5 flex size-5 items-center justify-center rounded-full bg-[#1b1a22] ring-1 ring-amber-300/50">
-                    <Star aria-hidden="true" className="size-3 fill-amber-300 text-amber-300" />
-                  </span>
-                ) : null}
               </span>
-              <span className="mt-2 line-clamp-2 min-h-[2lh] w-full text-center text-[0.72rem] leading-tight font-medium text-stone-200 sm:text-xs">
+              <span className="mt-2.5 line-clamp-2 min-h-[2lh] w-full text-center text-[0.72rem] leading-snug font-medium text-balance text-stone-200 transition-colors group-hover:text-white sm:text-xs">
+                {game.favorite ? (
+                  <Star aria-hidden="true" className="mr-1 inline size-3 -translate-y-px fill-amber-300 text-amber-300" />
+                ) : null}
                 {game.title}
                 {game.favorite ? <span className="sr-only"> (favorite)</span> : null}
               </span>

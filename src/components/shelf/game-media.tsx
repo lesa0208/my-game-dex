@@ -3,7 +3,7 @@ import Image from "next/image";
 import { labelArt, type LabelMotif, type MediaKind, type Region } from "@/features/shelf/browse";
 import { cn } from "@/lib/utils";
 
-import { shellFor } from "./media-shells";
+import { frameAspect, shellFor } from "./media-shells";
 
 // A game's physical media in two layers: the system's shell, from the owner's reference
 // art (see media-shells.ts), and the game's own label laid over the shell's label recess.
@@ -84,10 +84,16 @@ function Motif({ motif, glow }: { motif: LabelMotif; glow: string }) {
   }
 }
 
+
+/** Text sized by the label's width and height, so wide and tall labels both stay legible. */
+const fit = (byWidth: number, byHeight: number) => `min(${byWidth}cqi, ${byHeight}cqb)`;
+
 /**
  * A copy's physical media, sized by its parent's width. `title` is printed on the label
  * and `systemLabel` on its bottom band. Decorative: callers give the accessible name.
- * `sizes` is the rendered width, for the image's responsive sources.
+ * `sizes` is the rendered width, for the image's responsive sources. `framed` stands it in
+ * a box shared by every shell of its kind, so regional shells line up on a shelf.
+ * `interactive` gives it a violet glow on its parent link's hover and focus.
  */
 export function GameMedia({
   kind,
@@ -97,6 +103,8 @@ export function GameMedia({
   systemLabel,
   sizes = "160px",
   priority = false,
+  framed = false,
+  interactive = false,
   className,
 }: {
   kind: MediaKind;
@@ -106,51 +114,72 @@ export function GameMedia({
   systemLabel: string;
   sizes?: string;
   priority?: boolean;
+  framed?: boolean;
+  interactive?: boolean;
   className?: string;
 }) {
   const shell = shellFor(kind, region);
   const art = labelArt(slug);
   const { label } = shell;
 
-  return (
-    <div aria-hidden="true" className={cn("relative w-full select-none", className)}>
-      <Image
-        src={shell.image}
-        alt=""
-        sizes={sizes}
-        priority={priority}
-        draggable={false}
-        className="block h-auto w-full drop-shadow-[0_8px_8px_rgb(0_0_0/0.55)]"
-      />
+  const object = (
+    <div className={cn("relative w-full media-shadow", interactive && "group-hover:media-glow group-focus-visible:media-glow")}>
+      <Image src={shell.image} alt="" sizes={sizes} priority={priority} draggable={false} className="block h-auto w-full" />
       <div
-        className="@container absolute overflow-hidden shadow-[inset_0_0_0_1px_rgb(0_0_0/0.55),inset_0_2px_6px_rgb(0_0_0/0.45)]"
+        className="absolute overflow-hidden shadow-[inset_0_0_0_1px_rgb(0_0_0/0.5),inset_0_1px_3px_rgb(0_0_0/0.45)]"
         style={{
           left: `${label.left}%`,
           top: `${label.top}%`,
           width: `${label.width}%`,
           height: `${label.height}%`,
-          borderRadius: label.radius,
+          borderRadius: shell.radius,
+          containerType: "size",
           background: `linear-gradient(160deg, ${art.from}, ${art.to})`,
         }}
       >
-        <svg viewBox="0 0 100 62" preserveAspectRatio="xMidYMax slice" className="absolute inset-0 size-full">
+        <svg viewBox="0 0 100 62" preserveAspectRatio="xMidYMax slice" className="absolute inset-0 size-full opacity-85">
           <Motif motif={art.motif} glow={art.glow} />
         </svg>
-        <div className="absolute inset-x-0 top-0 bg-linear-to-b from-black/70 via-black/35 to-transparent px-[5cqi] pt-[4cqi] pb-[8cqi]">
+        <div
+          className="absolute inset-x-0 top-0 bg-linear-to-b from-black/80 via-black/50 to-transparent"
+          style={{ padding: `${fit(4, 5)} ${fit(5, 7)} ${fit(8, 10)}` }}
+        >
           <p
-            className="line-clamp-2 text-[11cqi] leading-[1.02] font-black tracking-tight text-white uppercase italic"
-            style={{ textShadow: `0 0 6px ${art.glow}66, 0 1px 0 rgb(0 0 0 / 0.6)` }}
+            className="line-clamp-2 leading-[1.02] font-extrabold tracking-[-0.015em] text-white uppercase [text-shadow:0_1px_1px_rgb(0_0_0/0.7)]"
+            style={{ fontSize: fit(14, 27) }}
           >
             {title}
           </p>
         </div>
-        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/70 px-[5cqi] py-[1.6cqi]">
-          <span className="text-[6.5cqi] leading-none font-bold tracking-[0.12em] text-white/85 uppercase">{systemLabel}</span>
-          <span className="h-[2cqi] w-[18cqi] rounded-full" style={{ background: `linear-gradient(90deg, ${art.glow}, transparent)` }} />
+        <div
+          className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/75"
+          style={{ padding: `${fit(1.6, 2.4)} ${fit(6, 8)}` }}
+        >
+          <span className="leading-none font-bold tracking-[0.14em] text-white/80 uppercase" style={{ fontSize: fit(5.5, 10) }}>
+            {systemLabel}
+          </span>
+          <span className="rounded-full" style={{ height: fit(1.6, 3), width: fit(16, 26), background: `linear-gradient(90deg, ${art.glow}, transparent)` }} />
         </div>
-        {/* Gloss across the label, as on a printed sticker or behind a case's plastic. */}
-        <div className="pointer-events-none absolute inset-0 bg-linear-to-br from-white/18 via-transparent to-transparent" />
+        {/* A printed sticker is nearly matte; a case insert sits behind clear plastic. */}
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0",
+            shell.isCase
+              ? "bg-[linear-gradient(115deg,rgb(255_255_255/0.16)_0%,rgb(255_255_255/0.04)_28%,transparent_42%,transparent_70%,rgb(255_255_255/0.06)_100%)]"
+              : "bg-linear-to-b from-white/8 via-transparent to-black/10",
+          )}
+        />
       </div>
+    </div>
+  );
+
+  return (
+    <div
+      aria-hidden="true"
+      className={cn("w-full select-none", framed && "flex items-end", className)}
+      style={framed ? { aspectRatio: frameAspect(kind) } : undefined}
+    >
+      {object}
     </div>
   );
 }

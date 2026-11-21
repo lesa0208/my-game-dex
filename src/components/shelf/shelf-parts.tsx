@@ -56,7 +56,7 @@ export function ShelfFillers({ count, columns }: { count: number; columns: Parti
 export function ShelfLight({ className }: { className?: string }) {
   return (
     <div aria-hidden="true" className={cn("pointer-events-none absolute inset-x-0 top-0 h-full shelf-light", className)}>
-      <div className="mx-auto h-[3px] w-3/5 rounded-full bg-amber-100/90 shadow-[0_0_10px_3px_rgb(255_190_120/0.5),0_0_28px_8px_rgb(255_170_90/0.18)]" />
+      <div className="h-[2px] w-full bg-amber-100/80 shadow-[0_0_8px_2px_rgb(255_190_120/0.4),0_0_22px_6px_rgb(255_170_90/0.12)]" />
     </div>
   );
 }

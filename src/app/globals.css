@@ -224,5 +224,16 @@
 
 /* A strip light under the shelf above, and the pool of light it casts. */
 @utility shelf-light {
-  background: radial-gradient(70% 85% at 50% 0%, rgb(255 190 120 / 17%), rgb(255 190 120 / 4%) 55%, transparent 75%);
+  background: linear-gradient(180deg, rgb(255 190 120 / 11%) 0%, rgb(255 190 120 / 4%) 40%, transparent 78%);
+}
+
+/* Physical media on a shelf: a tight contact shadow and a soft cast shadow, and the
+   same with a violet edge glow when its link is hovered or focused. */
+@utility media-shadow {
+  filter: drop-shadow(0 2px 1.5px rgb(0 0 0 / 65%)) drop-shadow(0 10px 12px rgb(0 0 0 / 40%));
+  transition: filter 250ms ease;
+}
+
+@utility media-glow {
+  filter: drop-shadow(0 2px 1.5px rgb(0 0 0 / 65%)) drop-shadow(0 0 9px rgb(139 92 246 / 85%)) drop-shadow(0 10px 16px rgb(0 0 0 / 40%));
 }

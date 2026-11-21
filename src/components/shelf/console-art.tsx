@@ -31,18 +31,41 @@ const CONSOLES: Record<ConsoleKind, StaticImageData> = {
 export function ConsoleArt({
   kind,
   className,
+  style,
   sizes = "320px",
   priority = false,
 }: {
   kind: ConsoleKind;
   className?: string;
+  style?: React.CSSProperties;
   sizes?: string;
   priority?: boolean;
 }) {
   return (
     // A span, so it can sit inside text such as a paragraph.
-    <span aria-hidden="true" className={cn("relative block", className)}>
+    <span aria-hidden="true" className={cn("relative block", className)} style={style}>
       <Image src={CONSOLES[kind]} alt="" fill sizes={sizes} priority={priority} draggable={false} className="object-contain object-bottom" />
     </span>
   );
+}
+
+/** The system tile's shape: width over height (aspect-16/10 in system-tile.tsx). */
+const TILE_ASPECT = 16 / 10;
+
+/**
+ * The console's box on a system tile, as percentages of the tile, sized so every console
+ * has about the same visual area whatever its shape: a wide console isn't shrunk to a
+ * sliver, and a tall handheld doesn't tower over the name.
+ */
+export function consoleTileBox(kind: ConsoleKind) {
+  const { width, height } = CONSOLES[kind];
+  const aspect = width / height;
+  const area = 0.2; // of the tile's width squared
+  const maxHeight = 0.72 / TILE_ASPECT;
+  const maxWidth = 0.6;
+  let w = Math.sqrt(area * aspect);
+  let h = Math.sqrt(area / aspect);
+  if (h > maxHeight) [h, w] = [maxHeight, maxHeight * aspect];
+  if (w > maxWidth) [w, h] = [maxWidth, maxWidth / aspect];
+  return { width: `${(w * 100).toFixed(1)}%`, height: `${((h * TILE_ASPECT) * 100).toFixed(1)}%` };
 }
