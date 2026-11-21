@@ -186,3 +186,43 @@
   background-position: right 0.75rem center;
   background-size: 1rem 1rem;
 }
+
+/* The visual collection shelf (visual-collection-shelf). Drawn entirely in CSS: no
+   photographs or textures are downloaded. */
+
+/* The cabinet's back wall: charcoal panels with a warm wash from the lights above. */
+@utility shelf-wall {
+  background:
+    radial-gradient(140% 70% at 50% -20%, rgb(255 176 96 / 9%), transparent 62%),
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 1.6%) 0 1px, transparent 1px 160px),
+    linear-gradient(180deg, #19161f 0%, #121016 100%);
+}
+
+/* The flat top of a shelf board, lit from above. */
+@utility wood-top {
+  background:
+    repeating-linear-gradient(90deg, rgb(255 230 190 / 0%) 0 23px, rgb(255 230 190 / 7%) 23px 25px, rgb(255 230 190 / 0%) 25px 61px),
+    linear-gradient(180deg, #b07a47 0%, #8c5a30 100%);
+}
+
+/* The front edge of a shelf board: darker grain and a soft shadow below. */
+@utility wood-front {
+  background:
+    linear-gradient(180deg, rgb(255 214 160 / 28%) 0, rgb(255 214 160 / 0%) 1.5px),
+    repeating-linear-gradient(178deg, rgb(255 255 255 / 3.5%) 0 2px, rgb(0 0 0 / 7%) 2px 5px),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0%) 0 41px, rgb(0 0 0 / 12%) 41px 43px, rgb(0 0 0 / 0%) 43px 97px),
+    linear-gradient(180deg, #74472a 0%, #5a361d 55%, #3f2512 100%);
+  box-shadow: 0 10px 18px -6px rgb(0 0 0 / 70%);
+}
+
+/* The cabinet's side frame. */
+@utility wood-frame {
+  background:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 3%) 0 3px, rgb(0 0 0 / 8%) 3px 7px),
+    linear-gradient(90deg, #4f2f18, #6d4325 50%, #4a2b15);
+}
+
+/* A strip light under the shelf above, and the pool of light it casts. */
+@utility shelf-light {
+  background: radial-gradient(70% 85% at 50% 0%, rgb(255 190 120 / 17%), rgb(255 190 120 / 4%) 55%, transparent 75%);
+}

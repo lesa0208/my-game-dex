@@ -1,4 +1,4 @@
-import { CircleCheck, GitMerge, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
+import { CircleCheck, GitMerge, LayoutGrid, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -23,6 +23,7 @@ import {
 import { getCopyNumbers, getMyCollection, getMyCollectionSummary } from "@/features/collection/queries";
 import type { CollectionSummary } from "@/features/collection/types";
 import { getMyPreservedTitles } from "@/features/exclusion/queries";
+import { isShelfPreviewEnabled } from "@/features/shelf/queries";
 import { getMyRecentMergedCopies } from "@/features/merge/queries";
 
 export const metadata: Metadata = {
@@ -209,12 +210,23 @@ export default function CollectionPage({ searchParams }: PageProps<"/collection"
       <div className="p-4 md:p-0">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-semibold tracking-tight">My Collection</h1>
-          <Button asChild variant="secondary" size="lg">
-            <Link href="/explore">
-              <Plus aria-hidden="true" />
-              Add games
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* The visual shelf preview (mock data), only while seed data is enabled. */}
+            {isShelfPreviewEnabled ? (
+              <Button asChild variant="outline" size="lg">
+                <Link href="/collection/systems">
+                  <LayoutGrid aria-hidden="true" />
+                  Systems (preview)
+                </Link>
+              </Button>
+            ) : null}
+            <Button asChild variant="secondary" size="lg">
+              <Link href="/explore">
+                <Plus aria-hidden="true" />
+                Add games
+              </Link>
+            </Button>
+          </div>
         </div>
         <Suspense
           fallback={
