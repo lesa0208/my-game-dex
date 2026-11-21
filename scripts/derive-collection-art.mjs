@@ -326,6 +326,10 @@ function caseSvg({ W, H, r, hinge, rim, insert }) {
     ${tabs.join("\n    ")}
     ${clip(H * 0.28)}
     ${clip(H * 0.62)}
+    <!-- The lid's moulded inner edge: a thin light line where the clear rim meets the cover. -->
+    <rect x="${insert.x - 2.5}" y="${insert.y - 2.5}" width="${insert.w + 5}" height="${insert.h + 5}" rx="2" fill="none" stroke="#fff" stroke-opacity="0.22" stroke-width="1.2"/>
+    <!-- Light catching the top rim of the lid. -->
+    <rect x="${hinge}" y="3" width="${lid - r}" height="1.6" fill="#fff" fill-opacity="0.45"/>
     <rect y="${H - Math.round(H * 0.012)}" width="${W}" height="${Math.round(H * 0.012)}" fill="#000" fill-opacity="0.35"/>
   </g>
   <rect x="1" y="1" width="${W - 2}" height="${H - 2}" rx="${r}" fill="none" stroke="url(#edge)" stroke-width="2"/>

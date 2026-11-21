@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
+  // Development only: the route indicator sat over the sidebar's tagline.
+  devIndicators: { position: "bottom-right" },
   experimental: {
     serverActions: {
       // M11a-3: room for a 2 MB avatar and the multipart framing around it

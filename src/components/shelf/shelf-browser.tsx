@@ -22,7 +22,9 @@ import {
 import { cn } from "@/lib/utils";
 
 import { GameMedia } from "./game-media";
+import { isDiscCase } from "./media-shells";
 import { ShelfBoard, ShelfFillers, ShelfLight } from "./shelf-parts";
+import { ShelfCaption } from "./shelf-caption";
 
 type View = "shelf" | "list";
 
@@ -208,6 +210,16 @@ export function ShelfBrowser({
 
 type ViewProps = { games: readonly ShelfGame[]; media: MediaKind; systemLabel: string; gameHref: (game: ShelfGame) => string };
 
+/**
+ * How much of its bay an item fills. Cartridges are wide and short, so they keep a
+ * roomier gap; a jewel case is nearly square and its cover is the thing to look at, so
+ * it takes more of the bay's width (a few pixels of gap still part neighbours). The
+ * columns stay the same; only the gap changes, so the size follows the container.
+ */
+function bayInset(media: MediaKind) {
+  return isDiscCase(media) ? "mx-0.5 px-0.5 sm:mx-1 sm:px-0.5" : "mx-1 px-1 sm:mx-1.5 sm:px-1.5";
+}
+
 function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
   return (
     <div className="wood-frame rounded-xl p-1.5 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.8)] sm:p-2.5">
@@ -217,7 +229,10 @@ function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
             <ShelfLight />
             <Link
               href={gameHref(game)}
-              className="group relative mx-1 mt-5 mb-1 flex flex-1 flex-col items-center justify-end rounded-lg px-1 pt-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:mx-1.5 sm:px-1.5"
+              className={cn(
+                "group relative mt-5 mb-1 flex flex-1 flex-col items-center justify-end rounded-lg pt-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                bayInset(media),
+              )}
             >
               <span className="relative w-full transition-transform duration-300 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
                 <GameMedia
@@ -231,13 +246,7 @@ function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
                   interactive
                 />
               </span>
-              <span className="mt-2.5 line-clamp-2 min-h-[2lh] w-full text-center text-[0.72rem] leading-snug font-medium text-balance text-stone-200 transition-colors group-hover:text-white sm:text-xs">
-                {game.favorite ? (
-                  <Star aria-hidden="true" className="mr-1 inline size-3 -translate-y-px fill-amber-300 text-amber-300" />
-                ) : null}
-                {game.title}
-                {game.favorite ? <span className="sr-only"> (favorite)</span> : null}
-              </span>
+              <ShelfCaption title={game.title} favorite={game.favorite} />
             </Link>
             <ShelfBoard />
           </li>

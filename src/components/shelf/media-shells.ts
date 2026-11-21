@@ -50,8 +50,10 @@ const RADIUS: Record<ShellKey, string> = {
   saturn: "0.5%",
 };
 
+const CASE_KEYS: ReadonlySet<ShellKey> = new Set(["playstation", "saturn"]);
+
 function shell(key: ShellKey): Shell {
-  return { image: IMAGES[key], label: manifest.media[key].label, radius: RADIUS[key], isCase: key === "playstation" || key === "saturn" };
+  return { image: IMAGES[key], label: manifest.media[key].label, radius: RADIUS[key], isCase: CASE_KEYS.has(key) };
 }
 
 const KEYS: Record<MediaKind, readonly ShellKey[]> = {
@@ -72,6 +74,11 @@ const KEYS: Record<MediaKind, readonly ShellKey[]> = {
 export function shellFor(kind: MediaKind, region: Region): Shell {
   if (kind === "snes-cart") return shell(region === "NTSC-U" ? "snes-ntsc-u" : "snes-pal");
   return shell(KEYS[kind][0]);
+}
+
+/** Disc media in a jewel case, as opposed to a cartridge. */
+export function isDiscCase(kind: MediaKind) {
+  return kind === "ps1-case" || kind === "saturn-case";
 }
 
 /**

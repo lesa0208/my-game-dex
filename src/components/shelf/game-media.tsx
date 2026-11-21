@@ -89,6 +89,16 @@ function Motif({ motif, glow }: { motif: LabelMotif; glow: string }) {
 const fit = (byWidth: number, byHeight: number) => `min(${byWidth}cqi, ${byHeight}cqb)`;
 
 /**
+ * The label title's size: as large as the label allows, but small enough that its
+ * longest word fits the width (about 88% of it is free of padding; a bold capital is
+ * about 0.7 em wide), so a long word like CASTLEVANIA: isn't clipped mid-letter.
+ */
+function titleSize(title: string) {
+  const longest = Math.max(...title.split(/\s+/).map((word) => word.length));
+  return `min(14cqi, 27cqb, ${(88 / (longest * 0.7)).toFixed(2)}cqi)`;
+}
+
+/**
  * A copy's physical media, sized by its parent's width. `title` is printed on the label
  * and `systemLabel` on its bottom band. Decorative: callers give the accessible name.
  * `sizes` is the rendered width, for the image's responsive sources. `framed` stands it in
@@ -125,6 +135,12 @@ export function GameMedia({
   const object = (
     <div className={cn("relative w-full media-shadow", interactive && "group-hover:media-glow group-focus-visible:media-glow")}>
       <Image src={shell.image} alt="" sizes={sizes} priority={priority} draggable={false} className="block h-auto w-full" />
+      {/* Molded plastic: one soft highlight from the shelf light, kept to the shell's own
+          outline and under the label, so the print stays untouched. */}
+      <div
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(118deg,rgb(255_255_255/0.13)_0%,rgb(255_255_255/0.035)_30%,transparent_48%,transparent_78%,rgb(0_0_0/0.12)_100%)]"
+        style={{ maskImage: `url(${shell.image.src})`, maskSize: "100% 100%", WebkitMaskImage: `url(${shell.image.src})`, WebkitMaskSize: "100% 100%" }}
+      />
       <div
         className="absolute overflow-hidden shadow-[inset_0_0_0_1px_rgb(0_0_0/0.5),inset_0_1px_3px_rgb(0_0_0/0.45)]"
         style={{
@@ -146,7 +162,7 @@ export function GameMedia({
         >
           <p
             className="line-clamp-2 leading-[1.02] font-extrabold tracking-[-0.015em] text-white uppercase [text-shadow:0_1px_1px_rgb(0_0_0/0.7)]"
-            style={{ fontSize: fit(14, 27) }}
+            style={{ fontSize: titleSize(title) }}
           >
             {title}
           </p>
@@ -176,9 +192,11 @@ export function GameMedia({
   return (
     <div
       aria-hidden="true"
-      className={cn("w-full select-none", framed && "flex items-end", className)}
+      className={cn("relative w-full select-none", framed && "flex items-end", className)}
       style={framed ? { aspectRatio: frameAspect(kind) } : undefined}
     >
+      {/* Contact shadow where the object meets the shelf. */}
+      <span className="pointer-events-none absolute inset-x-[6%] bottom-0 h-[6px] translate-y-1/2 rounded-[50%] bg-black/60 blur-[3px]" />
       {object}
     </div>
   );
