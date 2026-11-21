@@ -29,8 +29,8 @@ export function SystemTile({ system }: { system: SystemWithStats }) {
       />
       <div aria-hidden="true" className="absolute inset-0 bg-linear-to-b from-white/[0.06] to-transparent" />
 
-      <div className="relative flex h-full flex-col justify-between p-4 sm:p-5">
-        <div className="max-w-[62%]">
+      <div className="relative z-10 flex h-full flex-col justify-between p-4 sm:p-5">
+        <div className="drop-shadow-[0_2px_6px_rgb(0_0_0/0.8)]">
           <p className="text-[0.7rem] font-medium tracking-[0.18em] text-muted-foreground uppercase">{system.maker}</p>
           <p
             className="mt-0.5 bg-clip-text text-2xl leading-[0.95] font-black tracking-tight text-transparent uppercase italic sm:text-[1.7rem]"
@@ -47,7 +47,8 @@ export function SystemTile({ system }: { system: SystemWithStats }) {
 
       <ConsoleArt
         kind={system.console}
-        className="absolute right-[-4%] bottom-[2%] w-[66%] drop-shadow-[0_10px_14px_rgb(0_0_0/0.6)] transition duration-300 group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+        sizes="(min-width: 1280px) 260px, (min-width: 640px) 30vw, 60vw"
+        className="absolute right-[3%] bottom-[7%] h-[62%] w-[56%] origin-bottom drop-shadow-[0_12px_14px_rgb(0_0_0/0.65)] transition duration-300 group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
       />
     </Link>
   );

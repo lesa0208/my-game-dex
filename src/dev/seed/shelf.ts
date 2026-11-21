@@ -10,8 +10,8 @@ export const shelfSystems: readonly ShelfSystem[] = [
   { slug: "n64", name: "Nintendo 64", shortName: "N64", maker: "Nintendo", released: 1996, media: "n64-cart", console: "n64", accent: ["#22c55e", "#facc15"] },
   { slug: "game-boy", name: "Game Boy", shortName: "Game Boy", maker: "Nintendo", released: 1989, media: "gb-cart", console: "gameboy", accent: ["#a3e635", "#d9f99d"] },
   { slug: "mega-drive", name: "Mega Drive / Genesis", shortName: "Mega Drive", maker: "Sega", released: 1988, media: "md-cart", console: "megadrive", accent: ["#3b82f6", "#93c5fd"] },
-  { slug: "playstation", name: "PlayStation", shortName: "PlayStation", maker: "Sony", released: 1994, media: "disc-case", console: "playstation", accent: ["#38bdf8", "#e879f9"] },
-  { slug: "saturn", name: "Sega Saturn", shortName: "Saturn", maker: "Sega", released: 1994, media: "disc-case", console: "saturn", accent: ["#64748b", "#cbd5e1"] },
+  { slug: "playstation", name: "PlayStation", shortName: "PlayStation", maker: "Sony", released: 1994, media: "ps1-case", console: "playstation", accent: ["#38bdf8", "#e879f9"] },
+  { slug: "saturn", name: "Sega Saturn", shortName: "Saturn", maker: "Sega", released: 1994, media: "saturn-case", console: "saturn", accent: ["#64748b", "#cbd5e1"] },
 ];
 
 type Row = [title: string, year: number, genre: string, publisher: string, region: Region, completeness: Completeness, condition: Condition, acquired: string, extra?: { copies?: number; favorite?: boolean; notes?: string }];

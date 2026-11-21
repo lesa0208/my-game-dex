@@ -83,7 +83,7 @@ async function SystemShelf({ params }: PageProps<"/collection/systems/[platform]
         <div className="relative grid items-end gap-4 p-5 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-6 sm:p-6">
           {/* The console on its own small shelf, under a warm lamp. */}
           <div className="relative mx-auto w-48 sm:mx-0 sm:w-full">
-            <ConsoleArt kind={system.console} className="relative drop-shadow-[0_12px_16px_rgb(0_0_0/0.7)]" />
+            <ConsoleArt kind={system.console} sizes="(min-width: 640px) 240px, 192px" priority className="aspect-[5/3] w-full drop-shadow-[0_12px_16px_rgb(0_0_0/0.7)]" />
             <ShelfBoard className="-mt-2" />
           </div>
           <div className="min-w-0">

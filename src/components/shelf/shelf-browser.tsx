@@ -220,7 +220,7 @@ function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
               className="group relative flex flex-1 flex-col items-center justify-end px-1.5 pt-6 pb-1.5 outline-none sm:px-2.5"
             >
               <span className="relative w-full transition duration-300 group-hover:-translate-y-1.5 group-focus-visible:-translate-y-1.5 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
-                <GameMedia kind={media} slug={game.slug} title={game.title} systemLabel={systemLabel} />
+                <GameMedia kind={media} region={game.region} slug={game.slug} title={game.title} systemLabel={systemLabel} sizes="(min-width: 1280px) 130px, (min-width: 768px) 16vw, 31vw" />
                 <span
                   aria-hidden="true"
                   className="pointer-events-none absolute -inset-1.5 rounded-lg opacity-0 ring-2 ring-primary transition-opacity duration-300 group-hover:opacity-100 group-hover:shadow-[0_0_26px_2px_rgb(139_92_246/0.55)] group-focus-visible:opacity-100 group-focus-visible:ring-ring"
@@ -251,7 +251,7 @@ function ListView({ games, media, systemLabel, gameHref }: ViewProps) {
       {games.map((game) => (
         <li key={game.slug} className="group relative flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/[0.03] sm:gap-4 sm:px-4">
           <div className="w-12 shrink-0 sm:w-14">
-            <GameMedia kind={media} slug={game.slug} title={game.title} systemLabel={systemLabel} />
+            <GameMedia kind={media} region={game.region} slug={game.slug} title={game.title} systemLabel={systemLabel} sizes="56px" />
           </div>
           <div className="min-w-0 flex-1">
             <Link

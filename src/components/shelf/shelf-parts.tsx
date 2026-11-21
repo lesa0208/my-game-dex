@@ -87,8 +87,8 @@ export function ShelfPreviewNotice() {
     <p className="flex items-start gap-2.5 rounded-lg border border-highlight/25 bg-highlight/5 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
       <FlaskConical aria-hidden="true" className="mt-px size-4 shrink-0 text-highlight" />
       <span>
-        <strong className="font-medium text-foreground">Visual preview.</strong> Sample games and copies with original placeholder artwork. Not your collection, not
-        catalog records, and nothing here is saved.
+        <strong className="font-medium text-foreground">Visual preview.</strong> Sample games and copies on reference console and media art, with placeholder game
+        labels. Not your collection, not catalog records, and nothing here is saved.
       </span>
     </p>
   );

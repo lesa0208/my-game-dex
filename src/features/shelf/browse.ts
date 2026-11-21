@@ -2,7 +2,7 @@
 // shelf. No imports with the "@/" alias, so `npm run shelf:test` can load it directly.
 
 /** How a system's games are physically stored, which decides how they are drawn. */
-export type MediaKind = "snes-cart" | "nes-cart" | "gb-cart" | "n64-cart" | "md-cart" | "disc-case";
+export type MediaKind = "snes-cart" | "nes-cart" | "gb-cart" | "n64-cart" | "md-cart" | "ps1-case" | "saturn-case";
 
 /** A console drawing in src/components/shelf/console-art.tsx. */
 export type ConsoleKind = "snes" | "nes" | "gameboy" | "n64" | "megadrive" | "playstation" | "saturn";
