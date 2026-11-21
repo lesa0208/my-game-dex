@@ -8,16 +8,13 @@ import { Button } from "@/components/ui/button";
 import {
   activeFilterCount,
   browseShelf,
-  COMPLETENESS,
-  completenessLabel,
-  conditionLabel,
   DEFAULT_FILTERS,
+  filterOptions,
   type MediaKind,
-  REGIONS,
   type ShelfFilters,
-  type ShelfGame,
+  type ShelfItem,
   type ShelfSort,
-  SORTS,
+  SORT_LABELS,
 } from "@/features/shelf/browse";
 import { cn } from "@/lib/utils";
 
@@ -39,32 +36,46 @@ function formatDate(iso: string) {
 const control =
   "h-10 rounded-lg border border-input bg-input/30 px-3 text-sm outline-none transition-colors hover:bg-input/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
+const NOT_RECORDED = "Not recorded";
+
+/**
+ * A system's shelf with search, sort, filters and a Shelf/List toggle, all in the
+ * browser over the items it's given: the preview's sample games or the collector's own
+ * copies. `noun` names what the items are ("games", "copies"); `sorts` are the orders
+ * offered; `favorites` shows the favourites filter and stars, for data that has them.
+ * `frame` is the shell the shelf is framed for, so mixed shells share a baseline.
+ */
 export function ShelfBrowser({
-  systemSlug,
+  items,
   systemLabel,
-  media,
-  games,
+  frame,
+  sorts,
+  favorites,
+  noun,
 }: {
-  systemSlug: string;
+  items: readonly ShelfItem[];
   systemLabel: string;
-  media: MediaKind;
-  games: readonly ShelfGame[];
+  frame: MediaKind | null;
+  sorts: readonly ShelfSort[];
+  favorites: boolean;
+  noun: { one: string; many: string };
 }) {
   const [view, setView] = useState<View>("shelf");
-  const [sort, setSort] = useState<ShelfSort>("title");
+  const [sort, setSort] = useState<ShelfSort>(sorts[0] ?? "title");
   const [filters, setFilters] = useState<ShelfFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const ids = useId();
 
-  const shown = useMemo(() => browseShelf(games, sort, filters), [games, sort, filters]);
+  const options = useMemo(() => filterOptions(items), [items]);
+  const shown = useMemo(() => browseShelf(items, sort, filters), [items, sort, filters]);
   const active = activeFilterCount(filters);
   const update = (patch: Partial<ShelfFilters>) => setFilters((current) => ({ ...current, ...patch }));
-  const gameHref = (game: ShelfGame) => `/collection/systems/${systemSlug}/${game.slug}`;
+  const count = (n: number) => `${n.toLocaleString("en")} ${n === 1 ? noun.one : noun.many}`;
 
   return (
     <section aria-labelledby={`${ids}-heading`}>
       <h2 id={`${ids}-heading`} className="sr-only">
-        Games on the {systemLabel} shelf
+        {noun.many[0].toUpperCase() + noun.many.slice(1)} on the {systemLabel} shelf
       </h2>
 
       {/* Toolbar: search, sort, filters, and the view toggle. */}
@@ -85,9 +96,9 @@ export function ShelfBrowser({
             <span className="sr-only">Sort</span>
             <ArrowDownUp aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <select value={sort} onChange={(event) => setSort(event.target.value as ShelfSort)} className={cn(control, "select-chevron appearance-none pr-9 pl-9")}>
-              {SORTS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  Sort: {option.label}
+              {sorts.map((value) => (
+                <option key={value} value={value}>
+                  Sort: {SORT_LABELS[value]}
                 </option>
               ))}
             </select>
@@ -108,7 +119,7 @@ export function ShelfBrowser({
 
         <div className="flex items-center justify-between gap-3 lg:justify-end">
           <p role="status" className="text-sm text-muted-foreground tabular-nums">
-            {shown.length === games.length ? `${games.length} games` : `Showing ${shown.length} of ${games.length} games`}
+            {shown.length === items.length ? count(items.length) : `Showing ${shown.length.toLocaleString("en")} of ${count(items.length)}`}
           </p>
           <div role="group" aria-label="View" className="flex rounded-lg border border-input bg-input/20 p-1">
             {(
@@ -140,7 +151,7 @@ export function ShelfBrowser({
           <fieldset>
             <legend className="mb-1.5 text-xs font-medium text-muted-foreground">Completeness</legend>
             <div className="flex flex-wrap gap-1.5">
-              {[{ value: "all" as const, short: "All" }, ...COMPLETENESS].map((option) => (
+              {[{ value: "all", label: "All" }, ...options.completeness].map((option) => (
                 <label
                   key={option.value}
                   className="cursor-pointer rounded-lg border border-input px-3 py-1.5 text-sm transition-colors has-checked:border-primary has-checked:bg-primary/15 has-checked:text-foreground has-focus-visible:ring-3 has-focus-visible:ring-ring hover:bg-input/40"
@@ -153,30 +164,28 @@ export function ShelfBrowser({
                     onChange={() => update({ completeness: option.value })}
                     className="sr-only"
                   />
-                  {option.short}
+                  {option.label}
                 </label>
               ))}
             </div>
           </fieldset>
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">Region</span>
-            <select
-              value={filters.region}
-              onChange={(event) => update({ region: event.target.value as ShelfFilters["region"] })}
-              className={cn(control, "select-chevron appearance-none pr-9")}
-            >
+            <select value={filters.region} onChange={(event) => update({ region: event.target.value })} className={cn(control, "select-chevron appearance-none pr-9")}>
               <option value="all">All regions</option>
-              {REGIONS.map((region) => (
-                <option key={region} value={region}>
-                  {region}
+              {options.regions.map((region) => (
+                <option key={region.value} value={region.value}>
+                  {region.label}
                 </option>
               ))}
             </select>
           </label>
-          <label className="flex h-10 cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" checked={filters.favoritesOnly} onChange={(event) => update({ favoritesOnly: event.target.checked })} className="size-4 accent-primary" />
-            Favorites only
-          </label>
+          {favorites ? (
+            <label className="flex h-10 cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={filters.favoritesOnly} onChange={(event) => update({ favoritesOnly: event.target.checked })} className="size-4 accent-primary" />
+              Favorites only
+            </label>
+          ) : null}
           {active > 0 ? (
             <Button type="button" variant="ghost" size="control" onClick={() => setFilters(DEFAULT_FILTERS)}>
               <X aria-hidden="true" />
@@ -192,23 +201,23 @@ export function ShelfBrowser({
             <span className="flex size-12 items-center justify-center rounded-lg bg-secondary">
               <SearchX aria-hidden="true" className="size-6 text-muted-foreground" />
             </span>
-            <h3 className="mt-4 font-medium">No games match</h3>
+            <h3 className="mt-4 font-medium">No {noun.many} match</h3>
             <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">Nothing on this shelf matches your search and filters.</p>
             <Button type="button" variant="secondary" size="lg" className="mt-5" onClick={() => setFilters(DEFAULT_FILTERS)}>
               Clear search and filters
             </Button>
           </div>
         ) : view === "shelf" ? (
-          <ShelfView games={shown} media={media} systemLabel={systemLabel} gameHref={gameHref} />
+          <ShelfView items={shown} frame={frame} systemLabel={systemLabel} favorites={favorites} />
         ) : (
-          <ListView games={shown} media={media} systemLabel={systemLabel} gameHref={gameHref} />
+          <ListView items={shown} frame={frame} systemLabel={systemLabel} favorites={favorites} />
         )}
       </div>
     </section>
   );
 }
 
-type ViewProps = { games: readonly ShelfGame[]; media: MediaKind; systemLabel: string; gameHref: (game: ShelfGame) => string };
+type ViewProps = { items: readonly ShelfItem[]; frame: MediaKind | null; systemLabel: string; favorites: boolean };
 
 /**
  * How much of its bay an item fills. Cartridges are wide and short, so they keep a
@@ -216,87 +225,92 @@ type ViewProps = { games: readonly ShelfGame[]; media: MediaKind; systemLabel: s
  * it takes more of the bay's width (a few pixels of gap still part neighbours). The
  * columns stay the same; only the gap changes, so the size follows the container.
  */
-function bayInset(media: MediaKind) {
-  return isDiscCase(media) ? "mx-0.5 px-0.5 sm:mx-1 sm:px-0.5" : "mx-1 px-1 sm:mx-1.5 sm:px-1.5";
+function bayInset(frame: MediaKind | null) {
+  return frame && isDiscCase(frame) ? "mx-0.5 px-0.5 sm:mx-1 sm:px-0.5" : "mx-1 px-1 sm:mx-1.5 sm:px-1.5";
 }
 
-function ShelfView({ games, media, systemLabel, gameHref }: ViewProps) {
+function ShelfView({ items, frame, systemLabel, favorites }: ViewProps) {
   return (
     <div className="wood-frame rounded-xl p-1.5 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.8)] sm:p-2.5">
       <ul className="shelf-wall grid grid-cols-3 overflow-hidden rounded-lg shadow-[inset_0_10px_24px_rgb(0_0_0/0.65)] sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
-        {games.map((game) => (
-          <li key={game.slug} className="relative flex flex-col">
+        {items.map((item) => (
+          <li key={item.key} className="relative flex flex-col">
             <ShelfLight />
             <Link
-              href={gameHref(game)}
+              href={item.href}
               className={cn(
                 "group relative mt-5 mb-1 flex flex-1 flex-col items-center justify-end rounded-lg pt-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                bayInset(media),
+                bayInset(frame),
               )}
             >
               <span className="relative w-full transition-transform duration-300 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
                 <GameMedia
-                  kind={media}
-                  region={game.region}
-                  slug={game.slug}
-                  title={game.title}
+                  media={item.media}
+                  frame={frame}
+                  seed={item.labelSeed}
+                  title={item.title}
                   systemLabel={systemLabel}
                   sizes="(min-width: 1280px) 130px, (min-width: 768px) 16vw, 31vw"
-                  framed
                   interactive
                 />
               </span>
-              <ShelfCaption title={game.title} favorite={game.favorite} />
+              <ShelfCaption title={item.title} favorite={favorites && item.favorite} />
             </Link>
             <ShelfBoard />
           </li>
         ))}
-        <ShelfFillers count={games.length} columns={SHELF_COLUMNS} />
+        <ShelfFillers count={items.length} columns={SHELF_COLUMNS} />
       </ul>
     </div>
   );
 }
 
-function ListView({ games, media, systemLabel, gameHref }: ViewProps) {
+function ListView({ items, systemLabel, favorites }: ViewProps) {
   return (
     <ul className="divide-y overflow-hidden rounded-xl border bg-card/60">
-      {games.map((game) => (
-        <li key={game.slug} className="group relative flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/[0.03] sm:gap-4 sm:px-4">
-          <div className="w-12 shrink-0 sm:w-14">
-            <GameMedia kind={media} region={game.region} slug={game.slug} title={game.title} systemLabel={systemLabel} sizes="56px" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <Link
-              href={gameHref(game)}
-              className="font-medium outline-none after:absolute after:inset-0 hover:text-primary-text focus-visible:after:rounded-lg focus-visible:after:ring-3 focus-visible:after:ring-ring focus-visible:after:ring-inset"
-            >
-              {game.title}
-            </Link>
-            {game.favorite ? (
-              <Star aria-label="Favorite" className="ml-1.5 inline size-3.5 -translate-y-px fill-amber-300 text-amber-300" />
-            ) : null}
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {game.year} · {game.publisher} · {game.genre}
+      {items.map((item) => {
+        const region = item.region ?? NOT_RECORDED;
+        const completeness = item.completeness?.short ?? NOT_RECORDED;
+        return (
+          <li key={item.key} className="group relative flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/[0.03] sm:gap-4 sm:px-4">
+            <div className="w-12 shrink-0 sm:w-14">
+              <GameMedia media={item.media} seed={item.labelSeed} title={item.title} systemLabel={systemLabel} sizes="56px" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <Link
+                href={item.href}
+                className="font-medium outline-none after:absolute after:inset-0 hover:text-primary-text focus-visible:after:rounded-lg focus-visible:after:ring-3 focus-visible:after:ring-ring focus-visible:after:ring-inset"
+              >
+                {item.title}
+              </Link>
+              {favorites && item.favorite ? <Star aria-label="Favorite" className="ml-1.5 inline size-3.5 -translate-y-px fill-amber-300 text-amber-300" /> : null}
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.details}</p>
+              {item.note || !item.media ? (
+                <p className="mt-1 flex flex-wrap gap-1.5 text-xs">
+                  {item.note ? <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5">{item.note}</span> : null}
+                  {!item.media ? <span className="rounded-md border px-1.5 py-0.5 text-muted-foreground">{item.format ?? "Format not recorded"}</span> : null}
+                </p>
+              ) : null}
+            </div>
+            <dl className="hidden shrink-0 grid-cols-4 gap-6 text-sm md:grid">
+              {[
+                ["Region", region],
+                ["Completeness", completeness],
+                ["Condition", item.condition?.label ?? NOT_RECORDED],
+                ["Acquired", item.acquired ? formatDate(item.acquired) : NOT_RECORDED],
+              ].map(([label, value]) => (
+                <div key={label} className="w-24">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className={cn("truncate", value === NOT_RECORDED && "text-muted-foreground")}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="shrink-0 rounded-md border px-2 py-0.5 text-xs text-muted-foreground md:hidden">
+              {completeness} · {region}
             </p>
-          </div>
-          <dl className="hidden shrink-0 grid-cols-4 gap-6 text-sm md:grid">
-            {[
-              ["Region", game.region],
-              ["Completeness", completenessLabel(game.completeness, true)],
-              ["Condition", conditionLabel(game.condition)],
-              ["Acquired", formatDate(game.acquired)],
-            ].map(([label, value]) => (
-              <div key={label} className="w-24">
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="truncate">{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="shrink-0 rounded-md border px-2 py-0.5 text-xs text-muted-foreground md:hidden">
-            {completenessLabel(game.completeness, true)} · {game.region}
-          </p>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }

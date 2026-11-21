@@ -15,26 +15,26 @@ export function generateStaticParams() {
   return previewParams().flatMap(({ platform, games }) => games.map((game) => ({ platform, game })));
 }
 
-export async function generateMetadata({ params }: PageProps<"/collection/systems/[platform]/[game]">): Promise<Metadata> {
+export async function generateMetadata({ params }: PageProps<"/collection/preview/[platform]/[game]">): Promise<Metadata> {
   const { platform, game } = await params;
   return { title: getPreviewGame(platform, game)?.game.title ?? "Game" };
 }
 
 const dateFormat = new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
-async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[game]">) {
+async function ShelfGame({ params }: PageProps<"/collection/preview/[platform]/[game]">) {
   const { platform, game: gameSlug } = await params;
   const found = getPreviewGame(platform, gameSlug);
   if (!found) notFound();
   const { system, game } = found;
-  const shelfHref = `/collection/systems/${system.slug}`;
+  const shelfHref = `/collection/preview/${system.slug}`;
 
   return (
     <div className="mx-auto w-full max-w-[1320px] px-4 py-4 md:px-6 md:py-6">
       <Breadcrumbs
         items={[
           { label: "My Collection", href: "/collection" },
-          { label: "Systems", href: "/collection/systems" },
+          { label: "Systems preview", href: "/collection/preview" },
           { label: system.shortName, href: shelfHref },
           { label: game.title },
         ]}
@@ -52,9 +52,8 @@ async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[
               <ShelfLight />
               <div className="relative px-6 pt-10 pb-1">
                 <GameMedia
-                  kind={system.media}
-                  region={game.region}
-                  slug={game.slug}
+                  media={{ kind: system.media, region: game.region }}
+                  seed={game.slug}
                   title={game.title}
                   systemLabel={system.shortName}
                   sizes="(min-width: 768px) 260px, 70vw"
@@ -139,7 +138,7 @@ async function ShelfGame({ params }: PageProps<"/collection/systems/[platform]/[
   );
 }
 
-export default function ShelfGamePage(props: PageProps<"/collection/systems/[platform]/[game]">) {
+export default function ShelfGamePage(props: PageProps<"/collection/preview/[platform]/[game]">) {
   return (
     <Suspense fallback={<ShelfSkeleton />}>
       <ShelfGame {...props} />

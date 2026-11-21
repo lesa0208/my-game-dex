@@ -8,7 +8,8 @@ import { frameAspect, shellFor } from "./media-shells";
 // A game's physical media in two layers: the system's shell, from the owner's reference
 // art (see media-shells.ts), and the game's own label laid over the shell's label recess.
 // The label is original, generated artwork for now; real cover art can replace it later
-// without touching the shell.
+// without touching the shell. A copy whose physical format isn't known gets a neutral
+// placeholder instead of a shell.
 
 function Motif({ motif, glow }: { motif: LabelMotif; glow: string }) {
   const stroke = { stroke: glow, strokeWidth: 1.2, fill: "none", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -98,41 +99,128 @@ function titleSize(title: string) {
   return `min(14cqi, 27cqb, ${(88 / (longest * 0.7)).toFixed(2)}cqi)`;
 }
 
+/** The game's own label: placeholder artwork with its title, and the system on a band. */
+function MediaLabel({ title, systemLabel, seed, isCase, radius, style }: { title: string; systemLabel: string; seed: string; isCase: boolean; radius: string; style: React.CSSProperties }) {
+  const art = labelArt(seed);
+  return (
+    <div
+      className="absolute overflow-hidden shadow-[inset_0_0_0_1px_rgb(0_0_0/0.5),inset_0_1px_3px_rgb(0_0_0/0.45)]"
+      style={{ ...style, borderRadius: radius, containerType: "size", background: `linear-gradient(160deg, ${art.from}, ${art.to})` }}
+    >
+      <svg viewBox="0 0 100 62" preserveAspectRatio="xMidYMax slice" className="absolute inset-0 size-full opacity-85">
+        <Motif motif={art.motif} glow={art.glow} />
+      </svg>
+      <div className="absolute inset-x-0 top-0 bg-linear-to-b from-black/80 via-black/50 to-transparent" style={{ padding: `${fit(4, 5)} ${fit(5, 7)} ${fit(8, 10)}` }}>
+        <p
+          className="line-clamp-2 leading-[1.02] font-extrabold tracking-[-0.015em] text-white uppercase [text-shadow:0_1px_1px_rgb(0_0_0/0.7)]"
+          style={{ fontSize: titleSize(title) }}
+        >
+          {title}
+        </p>
+      </div>
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/75" style={{ padding: `${fit(1.6, 2.4)} ${fit(6, 8)}` }}>
+        <span className="leading-none font-bold tracking-[0.14em] text-white/80 uppercase" style={{ fontSize: fit(5.5, 10) }}>
+          {systemLabel}
+        </span>
+        <span className="rounded-full" style={{ height: fit(1.6, 3), width: fit(16, 26), background: `linear-gradient(90deg, ${art.glow}, transparent)` }} />
+      </div>
+      {/* A printed sticker is nearly matte; a case insert sits behind clear plastic. */}
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-0",
+          isCase
+            ? "bg-[linear-gradient(115deg,rgb(255_255_255/0.16)_0%,rgb(255_255_255/0.04)_28%,transparent_42%,transparent_70%,rgb(255_255_255/0.06)_100%)]"
+            : "bg-linear-to-b from-white/8 via-transparent to-black/10",
+        )}
+      />
+    </div>
+  );
+}
+
+/** The placeholder's shape when its system has no shelf frame: a little wider than tall. */
+const PLACEHOLDER_ASPECT = 1.3;
+
 /**
- * A copy's physical media, sized by its parent's width. `title` is printed on the label
- * and `systemLabel` on its bottom band. Decorative: callers give the accessible name.
- * `sizes` is the rendered width, for the image's responsive sources. `framed` stands it in
- * a box shared by every shell of its kind, so regional shells line up on a shelf.
- * `interactive` gives it a violet glow on its parent link's hover and focus.
+ * A copy's physical media, sized by its parent's width: the shell `media` names, with the
+ * game's label over its recess. When `media` is null (the physical format isn't known)
+ * it is a plain, neutral placeholder of the shelf's shape, never a guessed shell.
+ * `title` is printed on the label and `systemLabel` on its band; `seed` picks the
+ * label artwork. Decorative: callers give the accessible name. `sizes` is the rendered
+ * width, for the image's responsive sources. `frame` stands it in a box shared by every
+ * item on the shelf, so mixed shells line up. `interactive` gives it a soft glow on its
+ * parent link's hover and focus.
  */
 export function GameMedia({
-  kind,
-  region,
-  slug,
+  media,
+  frame = null,
+  seed,
   title,
   systemLabel,
   sizes = "160px",
   priority = false,
-  framed = false,
   interactive = false,
   className,
 }: {
-  kind: MediaKind;
-  region: Region;
-  slug: string;
+  media: { kind: MediaKind; region: Region } | null;
+  frame?: MediaKind | null;
+  seed: string;
   title: string;
   systemLabel: string;
   sizes?: string;
   priority?: boolean;
-  framed?: boolean;
   interactive?: boolean;
   className?: string;
 }) {
-  const shell = shellFor(kind, region);
-  const art = labelArt(slug);
-  const { label } = shell;
+  const object = media ? (
+    <ShellObject media={media} seed={seed} title={title} systemLabel={systemLabel} sizes={sizes} priority={priority} interactive={interactive} />
+  ) : (
+    <div
+      className={cn(
+        "relative w-full rounded-[5%/6%] border border-white/12 bg-[linear-gradient(160deg,#3a3a42,#24242a_55%,#1b1b20)] media-shadow",
+        interactive && "group-hover:media-glow group-focus-visible:media-glow",
+      )}
+      style={{ aspectRatio: frame ? Math.max(frameAspect(frame), 0.75) : PLACEHOLDER_ASPECT }}
+    >
+      <div className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[linear-gradient(118deg,rgb(255_255_255/0.1)_0%,transparent_40%)]" />
+      <MediaLabel title={title} systemLabel={systemLabel} seed={seed} isCase={false} radius="3%" style={{ left: "9%", top: "9%", width: "82%", height: "74%" }} />
+    </div>
+  );
 
-  const object = (
+  return (
+    <div
+      aria-hidden="true"
+      // Which shell was drawn ("snes-cart:PAL", or "placeholder"), for the app checks.
+      data-media={media ? `${media.kind}:${media.region}` : "placeholder"}
+      className={cn("relative w-full select-none", frame && "flex items-end", className)}
+      style={frame ? { aspectRatio: frameAspect(frame) } : undefined}
+    >
+      {/* Contact shadow where the object meets the shelf. */}
+      <span className="pointer-events-none absolute inset-x-[6%] bottom-0 h-[6px] translate-y-1/2 rounded-[50%] bg-black/60 blur-[3px]" />
+      {object}
+    </div>
+  );
+}
+
+function ShellObject({
+  media,
+  seed,
+  title,
+  systemLabel,
+  sizes,
+  priority,
+  interactive,
+}: {
+  media: { kind: MediaKind; region: Region };
+  seed: string;
+  title: string;
+  systemLabel: string;
+  sizes: string;
+  priority: boolean;
+  interactive: boolean;
+}) {
+  const shell = shellFor(media.kind, media.region);
+  const { label } = shell;
+  return (
     <div className={cn("relative w-full media-shadow", interactive && "group-hover:media-glow group-focus-visible:media-glow")}>
       <Image src={shell.image} alt="" sizes={sizes} priority={priority} draggable={false} className="block h-auto w-full" />
       {/* Molded plastic: one soft highlight from the shelf light, kept to the shell's own
@@ -141,63 +229,14 @@ export function GameMedia({
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(118deg,rgb(255_255_255/0.13)_0%,rgb(255_255_255/0.035)_30%,transparent_48%,transparent_78%,rgb(0_0_0/0.12)_100%)]"
         style={{ maskImage: `url(${shell.image.src})`, maskSize: "100% 100%", WebkitMaskImage: `url(${shell.image.src})`, WebkitMaskSize: "100% 100%" }}
       />
-      <div
-        className="absolute overflow-hidden shadow-[inset_0_0_0_1px_rgb(0_0_0/0.5),inset_0_1px_3px_rgb(0_0_0/0.45)]"
-        style={{
-          left: `${label.left}%`,
-          top: `${label.top}%`,
-          width: `${label.width}%`,
-          height: `${label.height}%`,
-          borderRadius: shell.radius,
-          containerType: "size",
-          background: `linear-gradient(160deg, ${art.from}, ${art.to})`,
-        }}
-      >
-        <svg viewBox="0 0 100 62" preserveAspectRatio="xMidYMax slice" className="absolute inset-0 size-full opacity-85">
-          <Motif motif={art.motif} glow={art.glow} />
-        </svg>
-        <div
-          className="absolute inset-x-0 top-0 bg-linear-to-b from-black/80 via-black/50 to-transparent"
-          style={{ padding: `${fit(4, 5)} ${fit(5, 7)} ${fit(8, 10)}` }}
-        >
-          <p
-            className="line-clamp-2 leading-[1.02] font-extrabold tracking-[-0.015em] text-white uppercase [text-shadow:0_1px_1px_rgb(0_0_0/0.7)]"
-            style={{ fontSize: titleSize(title) }}
-          >
-            {title}
-          </p>
-        </div>
-        <div
-          className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/75"
-          style={{ padding: `${fit(1.6, 2.4)} ${fit(6, 8)}` }}
-        >
-          <span className="leading-none font-bold tracking-[0.14em] text-white/80 uppercase" style={{ fontSize: fit(5.5, 10) }}>
-            {systemLabel}
-          </span>
-          <span className="rounded-full" style={{ height: fit(1.6, 3), width: fit(16, 26), background: `linear-gradient(90deg, ${art.glow}, transparent)` }} />
-        </div>
-        {/* A printed sticker is nearly matte; a case insert sits behind clear plastic. */}
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-0",
-            shell.isCase
-              ? "bg-[linear-gradient(115deg,rgb(255_255_255/0.16)_0%,rgb(255_255_255/0.04)_28%,transparent_42%,transparent_70%,rgb(255_255_255/0.06)_100%)]"
-              : "bg-linear-to-b from-white/8 via-transparent to-black/10",
-          )}
-        />
-      </div>
-    </div>
-  );
-
-  return (
-    <div
-      aria-hidden="true"
-      className={cn("relative w-full select-none", framed && "flex items-end", className)}
-      style={framed ? { aspectRatio: frameAspect(kind) } : undefined}
-    >
-      {/* Contact shadow where the object meets the shelf. */}
-      <span className="pointer-events-none absolute inset-x-[6%] bottom-0 h-[6px] translate-y-1/2 rounded-[50%] bg-black/60 blur-[3px]" />
-      {object}
+      <MediaLabel
+        title={title}
+        systemLabel={systemLabel}
+        seed={seed}
+        isCase={shell.isCase}
+        radius={shell.radius}
+        style={{ left: `${label.left}%`, top: `${label.top}%`, width: `${label.width}%`, height: `${label.height}%` }}
+      />
     </div>
   );
 }

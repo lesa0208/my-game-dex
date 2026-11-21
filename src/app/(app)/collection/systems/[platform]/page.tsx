@@ -1,69 +1,47 @@
-import { ArrowLeft, Compass, Copy, Gamepad2, PackageCheck, Star } from "lucide-react";
+import { Copy, Gamepad2, Info, PackageCheck, PlugZap } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
-import { ConsoleArt } from "@/components/shelf/console-art";
+import { EmptyState } from "@/components/shared/empty-state";
 import { ShelfBrowser } from "@/components/shelf/shelf-browser";
-import { Breadcrumbs, Cabinet, ShelfBoard, ShelfLight, ShelfPreviewNotice, ShelfSkeleton, Stat } from "@/components/shelf/shelf-parts";
-import { Button } from "@/components/ui/button";
-import { getPreviewShelf, previewParams } from "@/features/shelf/queries";
+import { Breadcrumbs, ShelfSkeleton } from "@/components/shelf/shelf-parts";
+import { EmptyShelf, SystemHeader } from "@/components/shelf/system-header";
+import { requireViewerWithHandle } from "@/features/account/queries";
+import type { ShelfSort } from "@/features/shelf/browse";
+import { getMyShelf, SHELF_LIMIT } from "@/features/shelf/collection";
 
-export function generateStaticParams() {
-  return previewParams().map(({ platform }) => ({ platform }));
-}
+export const metadata: Metadata = {
+  title: "System shelf",
+};
 
-export async function generateMetadata({ params }: PageProps<"/collection/systems/[platform]">): Promise<Metadata> {
+/** The orders a real shelf offers: copies have no release year, and no favourites yet. */
+const COPY_SORTS: readonly ShelfSort[] = ["title", "added", "acquired", "condition"];
+const COPY_NOUN = { one: "copy", many: "copies" };
+
+async function Shelf({ params }: PageProps<"/collection/systems/[platform]">) {
   const { platform } = await params;
-  return { title: getPreviewShelf(platform)?.system.shortName ?? "System" };
-}
-
-function EmptyShelf({ name, shortName }: { name: string; shortName: string }) {
-  return (
-    <Cabinet>
-      <div className="relative">
-        <ShelfLight />
-        <div className="relative flex flex-col items-center px-6 pt-14 pb-10 text-center">
-          <span className="flex size-12 items-center justify-center rounded-lg border border-white/10 bg-black/40">
-            <Gamepad2 aria-hidden="true" className="size-6 text-primary-text" />
-          </span>
-          <h2 className="mt-4 font-medium">This shelf is waiting for its first game</h2>
-          <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
-            You haven&apos;t added any {name} games yet. Find one in the catalog, choose the release you own, and it will stand here.
-          </p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
-            <Button asChild size="lg">
-              <Link href="/explore">
-                <Compass aria-hidden="true" />
-                Find {shortName} games
-              </Link>
-            </Button>
-            <Button asChild variant="secondary" size="lg">
-              <Link href="/collection/systems">
-                <ArrowLeft aria-hidden="true" />
-                All systems
-              </Link>
-            </Button>
-          </div>
-        </div>
-        <ShelfBoard />
-        <div className="h-24" />
-        <ShelfBoard />
+  // Signed in first, so nothing is read for a visitor. The slug goes back into `next`
+  // only when it's well formed; anything else returns to the Systems page.
+  await requireViewerWithHandle(/^[a-z0-9-]{1,64}$/.test(platform) ? `/collection/systems/${platform}` : "/collection/systems");
+  const result = await getMyShelf(platform);
+  if (result === null) notFound();
+  if (!result.ok) {
+    return (
+      <div className="mt-6">
+        <EmptyState icon={PlugZap} title="This shelf isn't available">
+          It can&apos;t be loaded right now. Try again later.
+        </EmptyState>
       </div>
-    </Cabinet>
-  );
-}
+    );
+  }
 
-async function SystemShelf({ params }: PageProps<"/collection/systems/[platform]">) {
-  const { platform } = await params;
-  const shelf = getPreviewShelf(platform);
-  if (!shelf) notFound();
-  const { system, games } = shelf;
-  const [accent] = system.accent;
+  const { system, items, truncated, stats } = result.data;
+  const completeShare = stats.copies ? Math.round((stats.complete / stats.copies) * 100) : 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-4 py-4 md:px-6 md:py-6">
+    <>
       <Breadcrumbs
         items={[
           { label: "My Collection", href: "/collection" },
@@ -71,66 +49,49 @@ async function SystemShelf({ params }: PageProps<"/collection/systems/[platform]
           { label: system.shortName },
         ]}
       />
+      <SystemHeader
+        name={system.name}
+        maker={system.maker}
+        released={system.released}
+        console={system.console}
+        accent={system.accent[0]}
+        stats={[
+          { icon: Copy, value: `${stats.copies.toLocaleString("en")}${truncated ? "+" : ""}`, label: "Copies" },
+          { icon: Gamepad2, value: stats.games.toLocaleString("en"), label: "Games" },
+          { icon: PackageCheck, value: `${completeShare}%`, label: "Complete or sealed" },
+        ]}
+      />
 
-      <header className="relative mt-4 overflow-hidden rounded-2xl border border-white/10 bg-[#141319]">
-        <div
-          aria-hidden="true"
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(45% 110% at 12% 10%, rgb(255 176 96 / 0.16), transparent 70%), radial-gradient(50% 120% at 100% 0%, ${accent}33, transparent 70%)`,
-          }}
-        />
-        <div className="relative grid items-end gap-4 p-5 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-6 sm:p-6">
-          {/* The console on its own small shelf, under a warm lamp. */}
-          <div className="relative mx-auto w-48 sm:mx-0 sm:w-full">
-            <ConsoleArt kind={system.console} sizes="(min-width: 640px) 240px, 192px" priority className="aspect-[5/3] w-full drop-shadow-[0_12px_16px_rgb(0_0_0/0.7)]" />
-            <ShelfBoard className="-mt-2" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase">
-              {system.maker} · {system.released}
-            </p>
-            <h1 className="mt-1 text-2xl leading-tight font-semibold tracking-tight text-balance sm:text-3xl">{system.name}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">My Collection</p>
-            <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:flex sm:flex-wrap sm:gap-x-8">
-              {[
-                { icon: Gamepad2, value: system.stats.games.toString(), label: "Games" },
-                { icon: Copy, value: system.stats.copies.toString(), label: "Copies" },
-                { icon: Star, value: system.stats.favorites.toString(), label: "Favorites" },
-                { icon: PackageCheck, value: `${system.stats.completeShare}%`, label: "Complete in box" },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <dt className="sr-only">{stat.label}</dt>
-                  <dd>
-                    <Stat icon={stat.icon} value={stat.value} label={stat.label} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        </div>
-      </header>
-
-      <div className="mt-4">
-        <ShelfPreviewNotice />
-      </div>
+      {truncated ? (
+        <p className="mt-4 flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <span>
+            This shelf shows your first {SHELF_LIMIT.toLocaleString("en")} {system.shortName} copies by title.{" "}
+            <Link href={`/collection?platform=${system.slug}`} className="font-medium text-primary-text underline underline-offset-4">
+              See every copy in the list
+            </Link>
+          </span>
+        </p>
+      ) : null}
 
       <div className="mt-6">
-        {games.length === 0 ? (
-          <EmptyShelf name={system.name} shortName={system.shortName} />
+        {items.length === 0 ? (
+          <EmptyShelf name={system.name} shortName={system.shortName} allHref="/collection/systems" />
         ) : (
-          <ShelfBrowser systemSlug={system.slug} systemLabel={system.shortName} media={system.media} games={games} />
+          <ShelfBrowser items={items} systemLabel={system.shortName} frame={system.frame} sorts={COPY_SORTS} favorites={false} noun={COPY_NOUN} />
         )}
       </div>
-    </div>
+    </>
   );
 }
 
-/** The shelf's address is only known per request outside the prerendered systems. */
+/** One of the signed-in collector's system shelves, with every copy they have on it. */
 export default function SystemShelfPage(props: PageProps<"/collection/systems/[platform]">) {
   return (
-    <Suspense fallback={<ShelfSkeleton />}>
-      <SystemShelf {...props} />
-    </Suspense>
+    <div className="mx-auto w-full max-w-[1320px] px-4 py-4 md:px-6 md:py-6">
+      <Suspense fallback={<ShelfSkeleton />}>
+        <Shelf {...props} />
+      </Suspense>
+    </div>
   );
 }

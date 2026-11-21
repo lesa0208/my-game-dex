@@ -1,4 +1,4 @@
-import { CircleCheck, GitMerge, LayoutGrid, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
+import { CircleCheck, FlaskConical, GitMerge, LayoutGrid, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -211,15 +211,21 @@ export default function CollectionPage({ searchParams }: PageProps<"/collection"
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-semibold tracking-tight">My Collection</h1>
           <div className="flex flex-wrap gap-2">
-            {/* The visual shelf preview (mock data), only while seed data is enabled. */}
+            {/* The shelf preview on sample data, only while seed data is enabled. */}
             {isShelfPreviewEnabled ? (
-              <Button asChild variant="outline" size="lg">
-                <Link href="/collection/systems">
-                  <LayoutGrid aria-hidden="true" />
-                  Systems (preview)
+              <Button asChild variant="ghost" size="lg">
+                <Link href="/collection/preview">
+                  <FlaskConical aria-hidden="true" />
+                  Shelf preview
                 </Link>
               </Button>
             ) : null}
+            <Button asChild variant="outline" size="lg">
+              <Link href="/collection/systems">
+                <LayoutGrid aria-hidden="true" />
+                Systems
+              </Link>
+            </Button>
             <Button asChild variant="secondary" size="lg">
               <Link href="/explore">
                 <Plus aria-hidden="true" />
