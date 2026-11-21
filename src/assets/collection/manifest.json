@@ -62,22 +62,22 @@
     },
     "playstation": {
       "width": 600,
-      "height": 587,
+      "height": 532,
       "label": {
-        "left": 22.91,
-        "top": 6.32,
-        "width": 70.29,
-        "height": 86.42
+        "left": 17.92,
+        "top": 5.76,
+        "width": 76.97,
+        "height": 88.48
       }
     },
     "saturn": {
       "width": 566,
       "height": 600,
       "label": {
-        "left": 36.16,
-        "top": 6.59,
-        "width": 57.09,
-        "height": 86.83
+        "left": 25.63,
+        "top": 4.95,
+        "width": 69.12,
+        "height": 90.1
       }
     }
   }

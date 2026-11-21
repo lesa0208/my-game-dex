@@ -11,9 +11,10 @@ import snesNtscU from "@/assets/collection/media/snes-ntsc-u.webp";
 import snesPal from "@/assets/collection/media/snes-pal.webp";
 import type { MediaKind, Region } from "@/features/shelf/browse";
 
-// The physical shells, derived from the owner's references by
-// scripts/derive-collection-art.mjs, which also writes each label recess (or case
-// insert) to manifest.json as percentages of the image. A game's own artwork is a
+// The physical shells, made by scripts/derive-collection-art.mjs: cartridges derived
+// from the owner's references, disc cases drawn as exact front-view geometry around
+// their references' printed spine bands. The script also writes each label recess (or
+// case cover) to manifest.json as percentages of the image. A game's own artwork is a
 // separate layer laid over that recess.
 
 type ShellKey = keyof typeof manifest.media;

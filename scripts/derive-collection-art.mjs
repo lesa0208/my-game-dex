@@ -42,7 +42,8 @@ const CONSOLES = [
  * `keep` are regions whose own colours stay, such as a case spine's printed logos.
  * `mirror` rebuilds a strip cut off at the right edge from the shell's left edge, about
  * the vertical axis `axis`, between `from` and `to`; `notch` keeps a stepped top edge.
- * `straighten` removes a slight slant or perspective so the shell faces front (see rectify).
+ * `straighten` removes a slight shear so the shell faces front (see rectify).
+ * Disc cases are not derived from their references; see CASES.
  */
 const MEDIA = [
   {
@@ -51,7 +52,7 @@ const MEDIA = [
     label: [241, 246, 517, 261],
     plastic: "#bdbac4",
     lift: 1.12,
-    straighten: { type: "shear", k: 0.0295, cx: 511 },
+    straighten: { k: 0.0295, cx: 511 },
   },
   {
     file: "SNES_PAL_Cartridge",
@@ -72,40 +73,17 @@ const MEDIA = [
     mirror: { axis: 566.3, from: 878, to: 947, notch: true },
   },
   { file: "Sega_Mega_Drive_Genesis_Cartridge", name: "mega-drive", label: [235, 258, 609, 480], plastic: "#3a3a40", lift: 0.95, mirror: { axis: 539, from: 976, to: 1014 } },
-  {
-    file: "PlayStation_1_Case",
-    name: "playstation",
-    label: [248, 124, 680, 809],
-    plastic: "#9c9ca6",
-    lift: 1.0,
-    keep: [[100, 100, 125, 860]],
-    straighten: { type: "keystone", x0: 61, x1: 959, topLeft: 88, topRight: 136.5, bottom: 967 },
-  },
-  { file: "Sega_Saturn_Case", name: "saturn", label: [387, 106, 507, 812], plastic: "#9c9ca6", lift: 1.0, keep: [[230, 90, 160, 860]] },
 ];
 
 /**
- * Straightens a shell drawn at a slight angle, so every piece of media stands upright
- * and front-facing. Two corrections cover the references:
- * - `shear`: top and bottom edges slope equally, sides vertical. Each column shifts by
- *   k × (x − cx).
- * - `keystone`: the top edge slopes (the object recedes to one side), bottom flat, sides
- *   vertical. Each column is stretched so its top lands on `topLeft`.
- * Returns the straightened buffer and a function mapping a source point into it.
+ * Straightens a cartridge drawn with a slight shear (top and bottom edges sloping
+ * equally, sides vertical): each column shifts by k × (x − cx), so the shell stands
+ * upright and front-facing. Returns the straightened buffer and a function mapping a
+ * source point into it.
  */
-function rectify(data, spec) {
-  let toSource;
-  let forward;
-  if (spec.type === "shear") {
-    const { k, cx } = spec;
-    toSource = (x, y) => [x, y + k * (x - cx)];
-    forward = (x, y) => [x, y - k * (x - cx)];
-  } else {
-    const { x0, x1, topLeft, topRight, bottom } = spec;
-    const top = (x) => topLeft + ((x - x0) / (x1 - x0)) * (topRight - topLeft);
-    toSource = (x, y) => [x, top(x) + ((y - topLeft) / (bottom - topLeft)) * (bottom - top(x))];
-    forward = (x, y) => [x, topLeft + ((y - top(x)) / (bottom - top(x))) * (bottom - topLeft)];
-  }
+function rectify(data, { k, cx }) {
+  const toSource = (x, y) => [x, y + k * (x - cx)];
+  const forward = (x, y) => [x, y - k * (x - cx)];
   const out = Buffer.alloc(data.length);
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
@@ -269,8 +247,125 @@ async function deriveMedia(spec) {
     width: pct(lw - 2 * inset, fullW),
     height: pct(lh - 2 * inset, fullH),
   };
-  console.log(`media/${spec.name}.webp\t${out.width}x${out.height}\t${out.kb} KB${spec.mirror ? "\tright edge rebuilt" : ""}${spec.straighten ? `\tstraightened (${spec.straighten.type})` : ""}`);
+  console.log(`media/${spec.name}.webp\t${out.width}x${out.height}\t${out.kb} KB${spec.mirror ? "\tright edge rebuilt" : ""}${spec.straighten ? "\tstraightened" : ""}`);
   return [spec.name, { width: out.width, height: out.height, label }];
+}
+
+/**
+ * Disc cases. Both references draw the case in three-quarter view (a side face, the top
+ * of the case, an angled hinge), which no pixel warp can undo without inventing detail.
+ * So the case itself is drawn here as exact front-view geometry: a clear jewel case, its
+ * hinge strip on the left and the cover insert behind the lid, every edge horizontal or
+ * vertical. Only the printed spine band of each reference's cover is reused, and it is
+ * drawn flat in the original, so it is scaled uniformly, never stretched.
+ *
+ * `aspect` is the case's front, width over height: 142 × 125 mm for a PlayStation jewel
+ * case; the Saturn case keeps its reference's proportions. `band` is the printed band in
+ * source pixels.
+ */
+const CASES = [
+  { file: "PlayStation_1_Case", name: "playstation", aspect: 142 / 125, band: [124, 136, 97, 820] },
+  { file: "Sega_Saturn_Case", name: "saturn", aspect: 0.94, band: [237, 106, 144, 818] },
+];
+
+/** The case's geometry in pixels, for a front `width` px wide. */
+function caseLayout(width, aspect, [, , bw, bh]) {
+  const W = width;
+  const H = Math.round(W / aspect);
+  const r = Math.round(W * 0.012); // corner rounding
+  const hinge = Math.round(W * 0.05); // the hinge strip on the left
+  const rim = Math.round(W * 0.024); // clear lid around the insert
+  const insert = { x: hinge + Math.round(W * 0.012), y: rim, w: 0, h: H - 2 * rim };
+  insert.w = W - rim - insert.x;
+  const bandW = Math.round((insert.h * bw) / bh);
+  const label = { x: insert.x + bandW, y: insert.y, w: insert.w - bandW, h: insert.h };
+  return { W, H, r, hinge, rim, insert, bandW, label };
+}
+
+function caseSvg({ W, H, r, hinge, rim, insert }) {
+  const lid = W - hinge;
+  const knuckle = Math.round(H * 0.075);
+  const ribs = [];
+  for (let x = Math.round(W * 0.008); x < hinge - 2; x += Math.max(3, Math.round(W * 0.0065))) {
+    ribs.push(`<rect x="${x}" y="${knuckle}" width="1.4" height="${H - 2 * knuckle}" fill="#fff" fill-opacity="0.07"/>`);
+  }
+  // Tray tabs on the lid's top and bottom rims, and the clip marks on its right edge.
+  const tab = (cx, y, flip) =>
+    `<path d="M ${cx - rim * 1.5} ${y} A ${rim * 1.5} ${rim * 1.15} 0 0 ${flip ? 1 : 0} ${cx + rim * 1.5} ${y}" fill="none" stroke="#fff" stroke-opacity="0.5" stroke-width="1.8"/>`;
+  const tabs = [0.3, 0.78].flatMap((t) => [tab(hinge + lid * t, rim * 0.15, false), tab(hinge + lid * t, H - rim * 0.15, true)]);
+  const clip = (y) => `<rect x="${W - rim * 0.62}" y="${y}" width="${rim * 0.22}" height="${H * 0.1}" rx="1" fill="#fff" fill-opacity="0.28"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="lid" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#dfe1e8" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#9c9ea8" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#8a8c96" stop-opacity="0.36"/>
+    </linearGradient>
+    <linearGradient id="hinge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2c2c33"/>
+      <stop offset="0.45" stop-color="#1b1b20"/>
+      <stop offset="1" stop-color="#111114"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.75"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="body"><rect width="${W}" height="${H}" rx="${r}"/></clipPath>
+  </defs>
+  <g clip-path="url(#body)">
+    <rect width="${W}" height="${H}" fill="#121216"/>
+    <rect x="${hinge}" width="${lid}" height="${H}" fill="url(#lid)"/>
+    <rect x="${insert.x}" y="${insert.y}" width="${insert.w}" height="${insert.h}" fill="#141418"/>
+    <rect x="${insert.x}" y="${insert.y}" width="${insert.w}" height="${insert.h}" fill="none" stroke="#000" stroke-opacity="0.55" stroke-width="2"/>
+    <rect width="${hinge}" height="${H}" fill="url(#hinge)"/>
+    ${ribs.join("\n    ")}
+    <rect width="${hinge}" height="${knuckle}" fill="#b4b6c0" fill-opacity="0.35"/>
+    <rect y="${H - knuckle}" width="${hinge}" height="${knuckle}" fill="#b4b6c0" fill-opacity="0.35"/>
+    <rect x="${hinge - 1.5}" width="1.5" height="${H}" fill="#fff" fill-opacity="0.4"/>
+    ${tabs.join("\n    ")}
+    ${clip(H * 0.28)}
+    ${clip(H * 0.62)}
+    <rect y="${H - Math.round(H * 0.012)}" width="${W}" height="${Math.round(H * 0.012)}" fill="#000" fill-opacity="0.35"/>
+  </g>
+  <rect x="1" y="1" width="${W - 2}" height="${H - 2}" rx="${r}" fill="none" stroke="url(#edge)" stroke-width="2"/>
+</svg>`;
+}
+
+async function deriveCase(spec) {
+  const width = 1200;
+  const layout = caseLayout(width, spec.aspect, spec.band);
+  const { W, H, insert, bandW, label } = layout;
+  const [left, top, bw, bh] = spec.band;
+  // The band's own colours, slightly muted like the other kept print.
+  const band = await sharp(readReference("cartridges", spec.file))
+    .extract({ left, top, width: bw, height: bh })
+    .modulate({ saturation: 0.8 })
+    .resize({ width: bandW, height: insert.h, fit: "fill", kernel: "lanczos3" })
+    .png()
+    .toBuffer();
+  const svg = Buffer.from(caseSvg(layout));
+  const drawn = await sharp(svg).composite([{ input: band, left: insert.x, top: insert.y }]).png().toBuffer();
+  // The lid's clear rim over the band's edges, so the print sits behind the plastic.
+  const lidOver = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect x="${insert.x}" y="${insert.y}" width="${bandW}" height="${insert.h}" fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="2"/></svg>`,
+  );
+  const shell = await sharp(drawn).composite([{ input: lidOver }]).png().toBuffer();
+
+  const pad = Math.round(Math.max(W, H) * PAD);
+  const framed = await sharp(shell).extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  const target = join(OUT, "media", `${spec.name}.webp`);
+  const out = await write(framed, target, 600);
+  const pct = (v, total) => Math.round((v / total) * 10000) / 100;
+  const fullW = W + 2 * pad;
+  const fullH = H + 2 * pad;
+  const entry = {
+    width: out.width,
+    height: out.height,
+    label: { left: pct(label.x + pad, fullW), top: pct(label.y + pad, fullH), width: pct(label.w, fullW), height: pct(label.h, fullH) },
+  };
+  console.log(`media/${spec.name}.webp\t${out.width}x${out.height}\t${out.kb} KB\tfront-view case, band ${bandW}×${insert.h} from ${bw}×${bh} (scale ${(bandW / bw).toFixed(3)} × ${(insert.h / bh).toFixed(3)})`);
+  return [spec.name, entry];
 }
 
 mkdirSync(join(OUT, "consoles"), { recursive: true });
@@ -279,6 +374,10 @@ for (const [file, name] of CONSOLES) await deriveConsole(file, name);
 const manifest = {};
 for (const spec of MEDIA) {
   const [name, entry] = await deriveMedia(spec);
+  manifest[name] = entry;
+}
+for (const spec of CASES) {
+  const [name, entry] = await deriveCase(spec);
   manifest[name] = entry;
 }
 writeFileSync(join(OUT, "manifest.json"), `${JSON.stringify({ media: manifest }, null, 2)}\n`);
