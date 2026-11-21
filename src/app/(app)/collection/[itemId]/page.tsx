@@ -201,6 +201,21 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
               </Link>
             </p>
           ) : null}
+          {/* A copy without a release still belongs to a game the catalog publishes. */}
+          {game?.slug && claim && !preserved && gameInCatalog ? (
+            <p className="mt-2 text-sm">
+              <Link href={`/games/${game.slug}`} className="text-primary-text underline underline-offset-4">
+                See this game in the catalog
+              </Link>
+            </p>
+          ) : null}
+          {identityPlatform && !preserved ? (
+            <p className="mt-2 text-sm">
+              <Link href={`/collection/systems/${identityPlatform}`} className="text-primary-text underline underline-offset-4">
+                On your {(claim?.platform ?? release?.platform)?.short_name ?? "system"} shelf
+              </Link>
+            </p>
+          ) : null}
         </div>
       </header>
 

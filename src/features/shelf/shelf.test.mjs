@@ -16,7 +16,7 @@ import {
   shelfStats,
   titleKey,
 } from "./browse.ts";
-import { consoleFor, copyItem, copyPlatform, physicalMedia, shelfFrame } from "./copies.ts";
+import { consoleFor, copyItem, copyPlatform, gameOverview, physicalMedia, releaseMedia, shelfFrame } from "./copies.ts";
 
 // ---------------------------------------------------------------------------
 // Browsing, on the preview's sample games
@@ -256,4 +256,72 @@ test("sorting real copies puts unknown values last", () => {
   assert.deepEqual(browseShelf(shelf, "acquired", DEFAULT_FILTERS).map((i) => i.key), ["l", "k", "j"]);
   assert.deepEqual(browseShelf(shelf, "added", DEFAULT_FILTERS).map((i) => i.key), ["j", "l", "k"]);
   assert.deepEqual(browseShelf(shelf, "condition", DEFAULT_FILTERS).map((i) => i.key), ["l", "k", "j"]);
+});
+
+// ---------------------------------------------------------------------------
+// A game's catalog releases, for its page
+// ---------------------------------------------------------------------------
+
+function pickerRelease(id, platform, region, format, edition = null) {
+  return {
+    id,
+    platform: { slug: platform, name: platform.toUpperCase(), shortName: platform.toUpperCase() },
+    region: { code: region, label: region.toUpperCase() },
+    markets: [],
+    edition,
+    variantName: null,
+    localTitle: null,
+    publisherName: null,
+    format: format ? { code: format, name: format, category: "cartridge" } : null,
+    mediaCount: null,
+    mediaPlayability: null,
+    packaging: null,
+    packagingCode: "unknown",
+    identifiers: { productCode: null, barcode: null },
+    languages: null,
+    ratingLabels: null,
+    releaseDate: null,
+    components: [],
+    requirements: [],
+  };
+}
+
+const platformCount = (slug, releaseCount) => ({ slug, name: slug.toUpperCase(), shortName: slug.toUpperCase(), releaseCount });
+
+test("a game's releases are grouped by platform, each kept on its own", () => {
+  const overview = gameOverview({
+    platforms: [platformCount("playstation", 2), platformCount("snes", 3)],
+    regions: [{ code: "pal", label: "PAL", releaseCount: 3 }, { code: "ntsc-uc", label: "NTSC-U/C", releaseCount: 2 }, { code: "unknown", label: "UNKNOWN", releaseCount: 0 }],
+    releases: [
+      pickerRelease("p1", "playstation", "pal", "cd-rom"),
+      pickerRelease("p2", "playstation", "pal", "cd-rom", { name: "Platinum", kind: "reprint" }),
+      pickerRelease("s1", "snes", "unknown", "rom-cartridge"),
+      pickerRelease("s2", "snes", "ntsc-uc", "snes-game-pak-na"),
+      pickerRelease("s3", "snes", "pal", "snes-cartridge-jp-pal"),
+    ],
+  });
+  assert.deepEqual(overview.groups.map((g) => [g.platform.slug, g.releases.map((r) => r.id)]), [["playstation", ["p1", "p2"]], ["snes", ["s1", "s2", "s3"]]]);
+  assert.equal(overview.releaseCount, 5);
+  assert.deepEqual(overview.regions.map((r) => r.code), ["pal", "ntsc-uc"], "an unknown region isn't listed as a region");
+  assert.equal(overview.hero.release.id, "p1");
+  assert.equal(overview.hero.media.kind, "ps1-case");
+});
+
+test("the hero is the first release whose shell is decided, or none", () => {
+  const undecided = gameOverview({ platforms: [platformCount("snes", 1)], regions: [], releases: [pickerRelease("s1", "snes", "unknown", "rom-cartridge")] });
+  assert.equal(undecided.hero, null);
+  const later = gameOverview({
+    platforms: [platformCount("pc-engine", 1), platformCount("snes", 1)],
+    regions: [],
+    releases: [pickerRelease("h1", "pc-engine", "ntsc-j", "hucard"), pickerRelease("s1", "snes", "pal", "rom-cartridge")],
+  });
+  assert.equal(later.hero.release.id, "s1");
+  assert.deepEqual(releaseMedia(pickerRelease("x", "playstation", "unknown", "cd-rom")), { kind: "ps1-case", region: "NTSC-U" });
+});
+
+test("a game with no published release has an empty overview, not an error", () => {
+  const none = gameOverview({ platforms: [], regions: [], releases: [] });
+  assert.deepEqual(none.groups, []);
+  assert.equal(none.releaseCount, 0);
+  assert.equal(none.hero, null);
 });

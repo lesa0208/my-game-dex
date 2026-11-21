@@ -6,6 +6,7 @@
 // condition or format shows that as not recorded, and is drawn as a neutral placeholder
 // when its shell isn't decided (see physicalMedia below).
 
+import type { PickerRelease, ReleasePicker } from "../catalog/types";
 import type { CollectionEntry, CopyClaim, CopyRelease, CopyStatus } from "../collection/types";
 import type { ConsoleKind, MediaKind, Region, ShelfItem } from "./browse";
 
@@ -96,6 +97,40 @@ export function physicalMedia(platform: string, format: string | null, region: s
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// A game's catalog releases
+// ---------------------------------------------------------------------------
+
+/** The shell a catalog release is drawn in, by the same rules as a copy; null when not decided. */
+export function releaseMedia(release: Pick<PickerRelease, "platform" | "format" | "region">) {
+  return physicalMedia(release.platform.slug, release.format?.code ?? null, release.region.code === "unknown" ? null : release.region.code);
+}
+
+/**
+ * A game's published releases for its page, from the release picker read with nothing
+ * selected: grouped by platform (the catalog's platform order, each release kept on its
+ * own, never merged), the regions it was released in, and the release the page's hero
+ * is drawn from: the first one whose shell is decided, or none.
+ */
+export function gameOverview(picker: Pick<ReleasePicker, "platforms" | "regions" | "releases">) {
+  const listed = new Set(picker.platforms.map((p) => p.slug));
+  const groups = [
+    ...picker.platforms.map((platform) => ({ platform, releases: picker.releases.filter((r) => r.platform.slug === platform.slug) })),
+    // A release on a platform the summary didn't list still gets shown.
+    ...[...new Set(picker.releases.filter((r) => !listed.has(r.platform.slug)).map((r) => r.platform.slug))].map((slug) => {
+      const releases = picker.releases.filter((r) => r.platform.slug === slug);
+      return { platform: { ...releases[0].platform, releaseCount: releases.length }, releases };
+    }),
+  ].filter((group) => group.releases.length > 0);
+  const heroRelease = picker.releases.find((r) => releaseMedia(r) !== null) ?? null;
+  return {
+    groups,
+    regions: picker.regions.filter((r) => r.code !== "unknown" && r.releaseCount > 0),
+    releaseCount: picker.releases.length,
+    hero: heroRelease ? { release: heroRelease, media: releaseMedia(heroRelease)! } : null,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import type { CollectionEntry, CollectionPage } from "@/features/collection/type
 import { getMyPreservedTitles } from "@/features/exclusion/queries";
 
 import type { ConsoleKind, MediaKind, ShelfItem } from "./browse";
-import { consoleFor, copyItem, type CopyLabels, shelfFrame } from "./copies";
+import { consoleFor, copyItem, type CopyLabels, copyPlatform, shelfFrame } from "./copies";
 
 // The signed-in collector's own shelves, read with their session through the existing
 // collection functions (M6b, M12a: get_my_collection_summary, get_my_collection), which
@@ -129,6 +129,28 @@ export async function getMyShelf(slug: string): Promise<Outcome<MyShelf> | null>
     if (cursor && entries.length >= SHELF_LIMIT) truncated = true;
   } while (cursor && !truncated);
 
+  const items = await toItems(entries);
+  const games = new Set(entries.map((e) => e.game?.id ?? `copy:${e.id}`));
+  return {
+    ok: true,
+    data: {
+      system: system(platform, platform, entries.length),
+      items,
+      truncated,
+      stats: {
+        copies: entries.length,
+        games: games.size,
+        complete: entries.filter((e) => e.completeness === "complete" || e.completeness === "sealed").length,
+      },
+    },
+  };
+}
+
+/**
+ * Copies as shelf items: "Copy 2 of 3" for releases with several copies, and the title
+ * the owner recorded for a copy kept after its game left the catalog.
+ */
+async function toItems(entries: CollectionEntry[]): Promise<ShelfItem[]> {
   // Copies kept privately after their game left the catalog carry the title the owner recorded.
   const preservedIds = entries.filter((e) => e.status === "invalid" && !e.game).map((e) => e.id);
   const preservedChunks = [];
@@ -145,19 +167,34 @@ export async function getMyShelf(slug: string): Promise<Outcome<MyShelf> | null>
   const numbers = new Map(numberMaps.flatMap((map) => [...map]));
   const titles = new Map(preserved.flatMap((map) => [...map]));
 
-  const items = entries.map((entry) => copyItem(entry, { labels: LABELS, preservedTitle: titles.get(entry.id)?.title ?? null, copyNumber: numbers.get(entry.id) ?? null }));
-  const games = new Set(entries.map((e) => e.game?.id ?? `copy:${e.id}`));
-  return {
-    ok: true,
-    data: {
-      system: system(platform, platform, entries.length),
-      items,
-      truncated,
-      stats: {
-        copies: entries.length,
-        games: games.size,
-        complete: entries.filter((e) => e.completeness === "complete" || e.completeness === "sealed").length,
-      },
-    },
-  };
+  return entries.map((entry) => copyItem(entry, { labels: LABELS, preservedTitle: titles.get(entry.id)?.title ?? null, copyNumber: numbers.get(entry.id) ?? null }));
+}
+
+/** At most this many of a game's copies are listed on its page. */
+export const GAME_COPIES_LIMIT = 500;
+
+/**
+ * The signed-in collector's copies of one game, each its own item, in the collection's
+ * title order. Read through get_my_collection, which returns only the caller's copies:
+ * found by the game's title, then kept only when they are copies of this game (a search
+ * for "Starfall Odyssey" also finds "Starfall Odyssey II"). A copy kept after its game
+ * left the catalog has no game to match and isn't listed here; the collection list
+ * still shows it. Null when it can't be read.
+ */
+export async function getMyCopiesOfGame(gameId: string, title: string): Promise<{ items: ShelfItem[]; platforms: string[]; truncated: boolean } | null> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const entries: CollectionEntry[] = [];
+  let cursor: string | null = null;
+  let truncated = false;
+  do {
+    const { data, error } = await supabase.rpc("get_my_collection", { p_query: title.slice(0, 100), p_sort: "title", p_limit: PAGE, p_cursor: cursor });
+    if (error || typeof data !== "object" || data === null || !Array.isArray((data as CollectionPage).items)) return null;
+    const page = data as CollectionPage;
+    entries.push(...page.items.filter((entry) => entry.game?.id === gameId));
+    cursor = page.next_cursor;
+    if (cursor && entries.length >= GAME_COPIES_LIMIT) truncated = true;
+  } while (cursor && !truncated);
+  const platforms = [...new Set(entries.map((e) => copyPlatform(e)?.slug).filter((slug): slug is string => Boolean(slug)))];
+  return { items: await toItems(entries), platforms, truncated };
 }

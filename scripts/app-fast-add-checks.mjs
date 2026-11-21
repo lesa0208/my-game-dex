@@ -77,11 +77,14 @@ async function steps() {
   check("with another region and Not sure", first.includes("Another region") && first.includes("Not sure"));
   check("the edition waits for the region", !first.includes("3. Edition"));
 
-  const us = plain((await visitor.get(q({ platform: "snes", region: "ntsc-uc" }))).html);
-  check("a region with two releases offers their editions, with counts", us.includes("3. Edition") && us.includes("Collector's Edition") && us.includes("Standard 1"));
+  // The edition step's own choices: the page's release overview lists every edition of every region.
+  const editionStep = (html) => plain(/<nav aria-label="Edition">([\s\S]*?)<\/nav>/.exec(html)?.[1] ?? "");
+  const usHtml = (await visitor.get(q({ platform: "snes", region: "ntsc-uc" }))).html;
+  const us = plain(usHtml);
+  check("a region with two releases offers their editions, with counts", us.includes("3. Edition") && editionStep(usHtml).includes("Collector's Edition") && editionStep(usHtml).includes("Standard 1"));
   check("and another edition, or Not sure", us.includes("Another edition") && us.includes("Not sure"));
-  const jp = plain((await visitor.get(q({ platform: "snes", region: "ntsc-j" }))).html);
-  check("each region's editions are its own", !jp.includes("Collector's Edition"));
+  const jpHtml = (await visitor.get(q({ platform: "snes", region: "ntsc-j" }))).html;
+  check("each region's editions are its own", editionStep(jpHtml) !== "" && !editionStep(jpHtml).includes("Collector's Edition"));
 
   const other = await visitor.get(q({ platform: "other" }));
   const otherForm = forms(other.html).find((f) => f.names.includes("platform"));

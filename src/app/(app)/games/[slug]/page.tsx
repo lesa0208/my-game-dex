@@ -3,15 +3,17 @@ import type { Metadata } from "next";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { gameHref, ReleasePickerSkeleton, ReleasePickerView } from "@/components/catalog/release-picker";
+import { gameHref, ReleasePickerView } from "@/components/catalog/release-picker";
 import { AddClaimToCollection, AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
-import { GameOwnership, GameOwnershipSkeleton } from "@/components/collection/game-ownership";
+import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link";
-import { PageLayout } from "@/components/layout/page-layout";
+import { GameDetailsSkeleton, GameHero, PhysicalReleases } from "@/components/games/game-details";
 import { MergeReleaseLink } from "@/components/merge/merge-release-link";
 import { EmptyState } from "@/components/shared/empty-state";
-import { getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
+import { Breadcrumbs } from "@/components/shelf/shelf-parts";
+import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { type FastAddReference, fastAddHref, planFastAdd } from "@/features/collection/fast-add";
+import { gameOverview } from "@/features/shelf/copies";
 import { getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
@@ -29,8 +31,14 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const edition = first(query.edition);
 
   // The picker is public and cached; it ignores a platform or region it doesn't have
-  // for the game ("not sure", another one), which the fast add then handles.
-  const [outcome, options] = await Promise.all([getReleasePicker(slug, selection.platform, selection.region, selection.release), getSubmissionOptions()]);
+  // for the game ("not sure", another one), which the fast add then handles. The same
+  // read with nothing selected lists every release, for the page's overview.
+  const hasSelection = selection.platform || selection.region || selection.release;
+  const [outcome, everything, options] = await Promise.all([
+    getReleasePicker(slug, selection.platform, selection.region, selection.release),
+    hasSelection ? getReleasePicker(slug, null, null, null) : null,
+    getSubmissionOptions(),
+  ]);
   if (!outcome.ok) {
     if (outcome.reason === "unavailable") {
       return (
@@ -55,6 +63,10 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   // A merged game, or a link by id, goes to the game's own address.
   if (picker.game.slug !== slug) redirect(fastAddHref(picker.game.slug, { ...selection, edition }));
 
+  const all = everything?.ok && everything.data ? everything.data : picker;
+  const overview = gameOverview(all);
+  const summary = await getGameSummary(picker.game.id);
+
   const reference: FastAddReference = {
     platforms: options?.platforms.map((p) => ({ slug: p.slug, name: p.name })) ?? [],
     regions: options?.regions.filter((r) => r.code !== "unknown") ?? [],
@@ -63,54 +75,69 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const here = fastAddHref(picker.game.slug, { ...selection, edition });
   const platformIds = new Map(options?.platforms.map((p) => [p.slug, p.id]) ?? []);
 
-  // The catalog above is public and cached. Adding and ownership read the session, so
-  // they stream in on their own, and return here after signing in.
+  // The catalog is public and cached. The collector's copies and adding read the
+  // session, so they stream in on their own, and return here after signing in.
   return (
-    <ReleasePickerView
-      picker={picker}
-      plan={plan}
-      reference={reference}
-      requestedRelease={selection.release !== null}
-      renderOwnership={
-        <Suspense fallback={<GameOwnershipSkeleton />}>
-          <GameOwnership gameId={picker.game.id} title={picker.game.title} />
-        </Suspense>
-      }
-      renderAdd={(release) => (
-        <>
-          <Suspense fallback={<AddToCollectionSkeleton />}>
-            <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
+    <>
+      <Breadcrumbs items={[{ label: "Explore", href: "/explore" }, { label: picker.game.title }]} />
+      {/* One grid: on narrow screens the collector's copies come straight after the game;
+          on wide ones they stand in a column beside everything else. */}
+      <div className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 lg:col-start-1">
+          <GameHero game={picker.game} summary={summary} overview={overview} />
+        </div>
+        <aside aria-label="Your collection" className="min-w-0 empty:hidden lg:sticky lg:top-22 lg:col-start-2 lg:row-span-3 lg:row-start-1">
+          <Suspense fallback={<GameCopiesSkeleton />}>
+            <GameCopies gameId={picker.game.id} title={picker.game.title} />
           </Suspense>
-          <Suspense fallback={null}>
-            <ExcludeReleaseLink releaseId={release.id} />
-          </Suspense>
-          <Suspense fallback={null}>
-            <MergeReleaseLink releaseId={release.id} />
-          </Suspense>
-        </>
-      )}
-      renderClaim={(claim) => {
-        const platformId = platformIds.get(claim.platform);
-        return platformId ? (
-          <Suspense fallback={<AddToCollectionSkeleton />}>
-            <AddClaimToCollection gameId={picker.game.id} platformId={platformId} claim={claim} returnPath={here} />
-          </Suspense>
-        ) : (
-          <p className="text-sm text-muted-foreground">Adding isn&apos;t available right now. Try again later.</p>
-        );
-      }}
-    />
+        </aside>
+        <div className="min-w-0 lg:col-start-1">
+          <PhysicalReleases slug={picker.game.slug} title={picker.game.title} overview={overview} />
+        </div>
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
+            <ReleasePickerView
+              picker={picker}
+              plan={plan}
+              reference={reference}
+              requestedRelease={selection.release !== null}
+              showHeader={false}
+              collapseReleases={!hasSelection}
+              renderAdd={(release) => (
+                <>
+                  <Suspense fallback={<AddToCollectionSkeleton />}>
+                    <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
+                  </Suspense>
+                  <Suspense fallback={null}>
+                    <ExcludeReleaseLink releaseId={release.id} />
+                  </Suspense>
+                  <Suspense fallback={null}>
+                    <MergeReleaseLink releaseId={release.id} />
+                  </Suspense>
+                </>
+              )}
+              renderClaim={(claim) => {
+                const platformId = platformIds.get(claim.platform);
+                return platformId ? (
+                  <Suspense fallback={<AddToCollectionSkeleton />}>
+                    <AddClaimToCollection gameId={picker.game.id} platformId={platformId} claim={claim} returnPath={here} />
+                  </Suspense>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Adding isn&apos;t available right now. Try again later.</p>
+                );
+              }}
+            />
+        </div>
+      </div>
+    </>
   );
 }
 
 export default function GamePage(props: PageProps<"/games/[slug]">) {
   return (
-    <PageLayout>
-      <div className="p-4 md:p-0">
-        <Suspense fallback={<ReleasePickerSkeleton />}>
-          <GameContent {...props} />
-        </Suspense>
-      </div>
-    </PageLayout>
+    <div className="mx-auto w-full max-w-[1320px] px-4 py-4 md:px-6 md:py-6">
+      <Suspense fallback={<GameDetailsSkeleton />}>
+        <GameContent {...props} />
+      </Suspense>
+    </div>
   );
 }
