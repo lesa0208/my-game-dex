@@ -275,6 +275,11 @@ Phase 2 replaces the seed viewer with real accounts:
 
 Current plan: M10, the admin panel expansion, built in five steps and reviewed together, then its pull request, then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
 
+**Next: the visual collector experience**, starting with My Collection → Systems → Console Collection Shelf, built on mock data.
+- **Catalog ingestion (M12c-B1):** the technical pilot is complete.
+- **Editorial review and publication of staged catalog identities:** deferred and not yet validated end to end.
+- See [Suggested next steps](docs/architecture/architecture-decisions.md#suggested-next-steps).
+
 Later phases:
 
 - **Collections:** game catalog, platforms, releases, collection items, virtual shelves, wantlist

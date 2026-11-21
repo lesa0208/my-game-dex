@@ -1389,3 +1389,11 @@ M0 creates no application tables and changes no application code. It stops there
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.
 6. The SNES import pilot waits for each provider's clearance and the product owner's approval. M10 adds no importing ([M10 decision D8](#m10-decisions-the-admin-panel-expansion)).
+7. **Next product milestone: the visual collector experience.** It starts with My Collection → Systems → Console Collection Shelf.
+   - Branch from a stable `main`.
+   - Use isolated mock data and the existing frontend architecture.
+   - It must not depend on the B1 migrations or on new catalog imports.
+8. **Future, not scheduled: scalable editorial review and eventual publication of staged catalog identities.**
+   - The M12c-B1 technical ingestion pilot is complete. Its editorial approval and publication are deferred and not validated end to end ([wrap-up](catalog-ingestion-m12c-b1.md#b1-technical-pilot-wrap-up-2026-11-21)).
+   - The task: a review workflow that scales past a terminal census, then publication of the 137 B1 candidates or their successors. It keeps two human editors, recent MFA, no self-review and the sampling safeguards.
+   - It needs its own authorization, and a re-validation of the B1 migration drafts against `main`.

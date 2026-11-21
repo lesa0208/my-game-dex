@@ -2,13 +2,15 @@
 
 **Written for:** the product owner approving M12c-B1, and the engineers who will build it.
 
-**Status, 2026-11-20: approved with corrections (R-1 to R-8).** Done so far:
+**Status, 2026-11-21: technical ingestion pilot complete. Editorial approval and publication are deferred and not validated end to end** ([B1: technical pilot wrap-up](#b1-technical-pilot-wrap-up-2026-11-21)). No game is verified or published, and the B1 migrations are not in `supabase/migrations` or on `main`.
+
+Earlier status, 2026-11-20: approved with corrections (R-1 to R-8). Done:
 - **Checkpoint one:** the parser and tooling.
 - **Checkpoint two** (accepted with conditions): the isolated B1 stack, source revalidation, critical errors, and migration drafts validated on scratch.
 - **Checkpoint three:** pairing withdrawal, the Unicode recheck, and the final migration drafts with their security review.
 - **Checkpoint four:** the 150 records fetched and classified, multiple-id detection, editorial notes, and two B1-M2 fixes.
 - **Independent SQL review of 62267d6:** changes required; findings resolved in the drafts (B12 to B18).
-- **Review preparation (2026-11-21):** decisions D1 and D2, editor A, the review batch and the B1 preview ([B1: editorial review preparation](#b1-editorial-review-preparation-2026-11-21)). Awaiting the owner's review as editor B.
+- **Review preparation (2026-11-21):** decisions D1 and D2, editor A, the review batch and the B1 preview ([B1: editorial review preparation](#b1-editorial-review-preparation-2026-11-21)). The owner began as editor B (3 of 116 outcomes), then deferred the review.
 - **Second SQL review of 44a1bd5:** approved for the isolated B1 stack only. Applied to B1, validated, and the 150 SNES items staged there as unpublished candidates ([B1: migrations applied and the first controlled staging](#b1-migrations-applied-and-the-first-controlled-staging-2026-11-20)).
 
 The migrations are applied to the B1 stack only, and nowhere else persistent. The 150 entity records and their 12 distribution formats were fetched in checkpoint four.
@@ -422,6 +424,62 @@ Checkpoint `7bed5c0` was accepted. The owner decided D1 and D2, and B1 is now re
    - Either way you type a reason and the batch's first 8 characters.
    - The database refuses an approval while an outcome is missing, after a failed sample, or while a critical error is unresolved.
 7. **Afterwards:** `revoke-reviewer`. Check progress at any time with `status`.
+
+## B1: technical pilot wrap-up (2026-11-21)
+
+The product owner decided not to review the whole 116-member batch by hand. The technical pilot ends here, and product work moves to the collector experience.
+
+### What is complete
+
+The **technical ingestion pilot**:
+- source acquisition and its snapshots;
+- parsing, classification and duplicate and multiple-id detection;
+- the migration drafts and their two SQL security reviews;
+- staging through the restricted importer;
+- isolated testing on scratch and on B1 (3,897 pgTAP assertions on B1, and 786 on scratch).
+
+### What is deferred and not validated end to end
+
+**Editorial approval and publication.**
+- The review batch is open, and no human has approved or rejected it.
+- So approval, `batch_accepted` recording and identity publication have not run on real candidates. Only the database tests on scratch and B1 exercise them.
+- Nothing may treat a B1 candidate as verified.
+
+### State as left (read on 2026-11-21)
+
+| | |
+| --- | --- |
+| Wikidata source records processed | 150 |
+| Game identities staged | 137, all `under_review`, each with its SNES pairing (`under_review`) |
+| Source records held (`needs_review`, no game) | 13 |
+| Games verified or published | 0 |
+| Physical releases | 0 |
+| Review batch `ae69e5d3…` | **Open.** 116 outcomes required. **3 recorded** by the owner as editor B (2 correct, 1 incorrect with a critical error), **113 not completed**. 0 approvals |
+| Users and staff | Editor A and the owner's editor B, both `catalog_editor` with a verified authenticator |
+| Audit events | 145, append-only |
+
+### Preserved, unchanged
+
+- **On B1:** the database, the open batch and its 3 outcomes, and the audit history. Nothing was approved, rejected, verified, published, reset or deleted. The B1 stack's `reset` and `destroy` still refuse without `MGD_ALLOW_B1_RESET=1`.
+- **Outside the repository** (`~/.my-game-dex/catalog-pilot/m12c-b1/`): the source snapshots, the review packet and the reports.
+- **In the repository:**
+  - the migration drafts in [docs/proposals/m12c-b1/](../proposals/m12c-b1/), with their rollbacks, tests, inventory and SQL review;
+  - the test results recorded in this document;
+  - the tooling.
+
+The drafts stay proposals. They are not merged into `main` and not moved to `supabase/migrations`.
+
+### Resuming
+
+See [scalable editorial review](architecture-decisions.md#suggested-next-steps) in the roadmap.
+- **It needs a new authorization.** Re-validate the drafts against `main` at that time.
+- **It keeps every safeguard:**
+  - two distinct human editors, with no agent as the second;
+  - recent MFA for batch actions, and no self-review;
+  - the sample's acceptance number;
+  - publication of identities separately from physical releases;
+  - "individually verified" kept distinct from "batch accepted".
+- **It keeps the 13 held records out** until they are resolved with evidence.
 
 ## Checkpoint four: source classification and identity quality gate (2026-11-20)
 
