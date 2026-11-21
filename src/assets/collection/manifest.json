@@ -2,12 +2,12 @@
   "media": {
     "snes-ntsc-u": {
       "width": 600,
-      "height": 377,
+      "height": 368,
       "label": {
         "left": 21.6,
-        "top": 5.59,
+        "top": 6.06,
         "width": 54.15,
-        "height": 42.88
+        "height": 41.2
       }
     },
     "snes-pal": {
@@ -62,12 +62,12 @@
     },
     "playstation": {
       "width": 600,
-      "height": 584,
+      "height": 587,
       "label": {
         "left": 22.91,
-        "top": 6.87,
+        "top": 6.32,
         "width": 70.29,
-        "height": 86.04
+        "height": 86.42
       }
     },
     "saturn": {

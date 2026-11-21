@@ -42,9 +42,17 @@ const CONSOLES = [
  * `keep` are regions whose own colours stay, such as a case spine's printed logos.
  * `mirror` rebuilds a strip cut off at the right edge from the shell's left edge, about
  * the vertical axis `axis`, between `from` and `to`; `notch` keeps a stepped top edge.
+ * `straighten` removes a slight slant or perspective so the shell faces front (see rectify).
  */
 const MEDIA = [
-  { file: "SNES_NTSC_U_Cartridge", name: "snes-ntsc-u", label: [241, 246, 517, 261], plastic: "#bdbac4", lift: 1.12 },
+  {
+    file: "SNES_NTSC_U_Cartridge",
+    name: "snes-ntsc-u",
+    label: [241, 246, 517, 261],
+    plastic: "#bdbac4",
+    lift: 1.12,
+    straighten: { type: "shear", k: 0.0295, cx: 511 },
+  },
   {
     file: "SNES_PAL_Cartridge",
     name: "snes-pal",
@@ -64,9 +72,71 @@ const MEDIA = [
     mirror: { axis: 566.3, from: 878, to: 947, notch: true },
   },
   { file: "Sega_Mega_Drive_Genesis_Cartridge", name: "mega-drive", label: [235, 258, 609, 480], plastic: "#3a3a40", lift: 0.95, mirror: { axis: 539, from: 976, to: 1014 } },
-  { file: "PlayStation_1_Case", name: "playstation", label: [248, 124, 680, 809], plastic: "#9c9ca6", lift: 1.0, keep: [[100, 100, 125, 860]] },
+  {
+    file: "PlayStation_1_Case",
+    name: "playstation",
+    label: [248, 124, 680, 809],
+    plastic: "#9c9ca6",
+    lift: 1.0,
+    keep: [[100, 100, 125, 860]],
+    straighten: { type: "keystone", x0: 61, x1: 959, topLeft: 88, topRight: 136.5, bottom: 967 },
+  },
   { file: "Sega_Saturn_Case", name: "saturn", label: [387, 106, 507, 812], plastic: "#9c9ca6", lift: 1.0, keep: [[230, 90, 160, 860]] },
 ];
+
+/**
+ * Straightens a shell drawn at a slight angle, so every piece of media stands upright
+ * and front-facing. Two corrections cover the references:
+ * - `shear`: top and bottom edges slope equally, sides vertical. Each column shifts by
+ *   k × (x − cx).
+ * - `keystone`: the top edge slopes (the object recedes to one side), bottom flat, sides
+ *   vertical. Each column is stretched so its top lands on `topLeft`.
+ * Returns the straightened buffer and a function mapping a source point into it.
+ */
+function rectify(data, spec) {
+  let toSource;
+  let forward;
+  if (spec.type === "shear") {
+    const { k, cx } = spec;
+    toSource = (x, y) => [x, y + k * (x - cx)];
+    forward = (x, y) => [x, y - k * (x - cx)];
+  } else {
+    const { x0, x1, topLeft, topRight, bottom } = spec;
+    const top = (x) => topLeft + ((x - x0) / (x1 - x0)) * (topRight - topLeft);
+    toSource = (x, y) => [x, top(x) + ((y - topLeft) / (bottom - topLeft)) * (bottom - top(x))];
+    forward = (x, y) => [x, topLeft + ((y - top(x)) / (bottom - top(x))) * (bottom - topLeft)];
+  }
+  const out = Buffer.alloc(data.length);
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const [sx, sy] = toSource(x, y);
+      const yA = Math.floor(sy);
+      const f = sy - yA;
+      if (yA < 0 || yA + 1 >= SIZE) continue;
+      // Vertical-only resampling (x never moves), premultiplied so edges don't fringe.
+      const a0 = (yA * SIZE + Math.round(sx)) * 4;
+      const a1 = a0 + SIZE * 4;
+      const alpha0 = data[a0 + 3] * (1 - f);
+      const alpha1 = data[a1 + 3] * f;
+      const alpha = alpha0 + alpha1;
+      const d = (y * SIZE + x) * 4;
+      out[d + 3] = Math.round(alpha);
+      if (alpha > 0) for (let c = 0; c < 3; c++) out[d + c] = Math.round((data[a0 + c] * alpha0 + data[a1 + c] * alpha1) / alpha);
+    }
+  }
+  return { data: out, forward };
+}
+
+/** A label rectangle measured on the slanted art, as the inner rectangle once straightened. */
+function straightenRect([x, y, w, h], forward) {
+  const [, tl] = forward(x, y);
+  const [, tr] = forward(x + w, y);
+  const [, bl] = forward(x, y + h);
+  const [, br] = forward(x + w, y + h);
+  const top = Math.max(tl, tr);
+  return [x, top, w, Math.min(bl, br) - top];
+}
+
 
 function readReference(dir, file) {
   const svg = readFileSync(join(source, dir, `${file}.svg`), "utf8");
@@ -161,7 +231,10 @@ async function deriveConsole(file, name) {
 
 async function deriveMedia(spec) {
   const original = await rgba(readReference("cartridges", spec.file));
-  const data = Buffer.from(original);
+  // Straighten first, so the shell stands upright and the label recess is square to it.
+  const straight = spec.straighten ? rectify(original, spec.straighten) : null;
+  const data = straight ? straight.data : Buffer.from(original);
+  const labelRect = straight ? straightenRect(spec.label, straight.forward) : spec.label;
   if (spec.mirror) mirrorFill(data, spec.mirror);
   hardenAlpha(data, 110, 210);
   const box = bbox(data, 0);
@@ -188,7 +261,7 @@ async function deriveMedia(spec) {
   const fullW = box.width + 2 * pad;
   const fullH = box.height + 2 * pad;
   const inset = 4;
-  const [lx, ly, lw, lh] = spec.label;
+  const [lx, ly, lw, lh] = labelRect;
   const pct = (v, total) => Math.round((v / total) * 10000) / 100;
   const label = {
     left: pct(lx + inset - box.left + pad, fullW),
@@ -196,7 +269,7 @@ async function deriveMedia(spec) {
     width: pct(lw - 2 * inset, fullW),
     height: pct(lh - 2 * inset, fullH),
   };
-  console.log(`media/${spec.name}.webp\t${out.width}x${out.height}\t${out.kb} KB${spec.mirror ? "\tright edge rebuilt" : ""}`);
+  console.log(`media/${spec.name}.webp\t${out.width}x${out.height}\t${out.kb} KB${spec.mirror ? "\tright edge rebuilt" : ""}${spec.straighten ? `\tstraightened (${spec.straighten.type})` : ""}`);
   return [spec.name, { width: out.width, height: out.height, label }];
 }
 
