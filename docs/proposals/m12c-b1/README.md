@@ -2,6 +2,8 @@
 
 **Written for:** the reviewer of B1-M0, B1-M1 and B1-M2, before any of them moves to `supabase/migrations/`.
 
+**Moved, 2026-11-22 (M14a Phase 1):** the five migrations are now in `supabase/migrations/`, their rollbacks in `supabase/rollbacks/` and tests 48 to 51 in `supabase/tests/database/`, unchanged; the guard patch is applied. Open point 1 below is resolved by `20261210100400_m14a_physical_evidence_gate` (see [catalog-integration-m14a.md](../../architecture/catalog-integration-m14a.md)). This folder keeps the review record, the preflight report and the concurrency check.
+
 **Status, 2026-11-20 (after the second SQL review, of 44a1bd5):** approved for the isolated B1 stack only, and applied there from this folder unchanged. The record is in [the architecture doc](../../architecture/catalog-ingestion-m12c-b1.md#b1-migrations-applied-and-the-first-controlled-staging-2026-11-20).
 - **Before that (after the independent SQL review of 62267d6):** revised drafts for a second review. [SQL-REVIEW.md](SQL-REVIEW.md) gives each finding's verdict, change and test; [INVENTORY.md](INVENTORY.md) lists every changed object and privilege.
 - **Review of 62267d6 (changes required):** B1-M2 gains invariants B12 to B18 (concurrency, per-member self-review, recent MFA for outcomes, no resampling of rejected cohorts, a validated risk-assessment contract, publication rights, evidence for overrides, a complete content hash), RLS on the six new private tables, and B1-M0 an orphaned-key postcheck. Test 51 (45 pgTAP tests) and a two-session concurrency check are new.

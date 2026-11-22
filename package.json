@@ -51,6 +51,7 @@
     "wishlist:test": "node --experimental-strip-types --no-warnings --test src/features/wishlist/wishlist.test.mjs",
     "app:wishlist-checks": "node scripts/app-wishlist-checks.mjs",
     "app:statistics-checks": "node scripts/app-statistics-checks.mjs",
+    "app:catalog-identity-checks": "node scripts/app-catalog-identity-checks.mjs",
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",

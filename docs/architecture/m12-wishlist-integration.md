@@ -42,7 +42,10 @@ they answer 404 and My Collection hides their link.
 
 ## Adjusting for B1 when it is integrated
 
-B1 keeps its migrations in `docs/proposals/m12c-b1/` and its schema-inventory changes in
+**Done in M14a Phase 1** (local branch `m14a-b1-integration`), as described below, plus a
+physical-evidence gate: see [catalog-integration-m14a.md](catalog-integration-m14a.md).
+
+B1 kept its migrations in `docs/proposals/m12c-b1/` and its schema-inventory changes in
 `tests/schema_guard_updates.patch`, written against `main` before the wishlist. That patch
 will not apply as is. After moving the proposals into `supabase/migrations`:
 

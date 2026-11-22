@@ -322,6 +322,19 @@ test("the hero is the first release whose shell is decided, or none", () => {
 test("a game with no published release has an empty overview, not an error", () => {
   const none = gameOverview({ platforms: [], regions: [], releases: [] });
   assert.deepEqual(none.groups, []);
+  assert.deepEqual(none.platforms, []);
   assert.equal(none.releaseCount, 0);
   assert.equal(none.hero, null);
+});
+
+test("M14a: a game confirmed on a platform with no verified release keeps its platform, and nothing else", () => {
+  const identity = gameOverview({ platforms: [platformCount("snes", 0)], regions: [], releases: [] });
+  assert.deepEqual(identity.platforms.map((p) => [p.slug, p.releaseCount]), [["snes", 0]], "the platform is listed");
+  assert.deepEqual(identity.groups, [], "but no release group");
+  assert.deepEqual(identity.regions, [], "no region is implied");
+  assert.equal(identity.hero, null, "and no shell or format is drawn");
+  // With releases on one platform and only a confirmed identity on another, both platforms count.
+  const mixed = gameOverview({ platforms: [platformCount("playstation", 1), platformCount("snes", 0)], regions: [], releases: [pickerRelease("p1", "playstation", "pal", "cd-rom")] });
+  assert.deepEqual(mixed.platforms.map((p) => p.slug), ["playstation", "snes"]);
+  assert.deepEqual(mixed.groups.map((g) => g.platform.slug), ["playstation"]);
 });

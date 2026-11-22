@@ -2,6 +2,8 @@
 
 **Written for:** the product owner approving M12c-B1, and the engineers who will build it.
 
+**Status, 2026-11-22 (M14a Phase 1):** the B1 migrations are integrated with `main` on the local branch `m14a-b1-integration`, with a new physical-evidence gate: batch approval no longer publishes unsampled members. Validated on scratch only. See [catalog-integration-m14a.md](catalog-integration-m14a.md); the history below is unchanged.
+
 **Status, 2026-11-21: technical ingestion pilot complete. Editorial approval and publication are deferred and not validated end to end** ([B1: technical pilot wrap-up](#b1-technical-pilot-wrap-up-2026-11-21)). No game is verified or published, and the B1 migrations are not in `supabase/migrations` or on `main`.
 
 Earlier status, 2026-11-20: approved with corrections (R-1 to R-8). Done:

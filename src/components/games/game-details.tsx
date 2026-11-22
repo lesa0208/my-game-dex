@@ -7,7 +7,7 @@ import { ConsoleArt } from "@/components/shelf/console-art";
 import { GameMedia } from "@/components/shelf/game-media";
 import { ShelfBoard, ShelfLight } from "@/components/shelf/shelf-parts";
 import { Skeleton } from "@/components/ui/skeleton";
-import { aliasKindLabel, formatCatalogDate, gameKindLabel, languageName, regionLabel, releaseCountLabel } from "@/features/catalog/format";
+import { aliasKindLabel, formatCatalogDate, gameKindLabel, languageName, NO_VERIFIED_RELEASE, regionLabel, releaseCountLabel } from "@/features/catalog/format";
 import { packagingLabel } from "@/features/catalog/packaging";
 import type { PickerRelease, ReleasePicker } from "@/features/catalog/types";
 import { editionKey, fastAddHref } from "@/features/collection/fast-add";
@@ -22,13 +22,14 @@ type Overview = ReturnType<typeof gameOverview>;
 /** The game: front-facing media on a lit shelf, its title and the catalog's facts about it. */
 export function GameHero({ game, summary, overview }: { game: ReleasePicker["game"]; summary: string | null; overview: Overview }) {
   const hero = overview.hero;
-  const platforms = overview.groups.map((g) => g.platform);
+  // M14a: the catalog's platforms for the game, including one with no verified release yet.
+  const platforms = overview.platforms;
   const heroConsole = hero ? consoleFor(hero.release.platform.slug) : null;
   const eyebrow = [platforms.map((p) => p.shortName).join(" · "), game.firstRelease ? game.firstRelease.value.slice(0, 4) : null].filter(Boolean).join(" · ");
   const facts = [
     game.firstRelease ? { icon: CalendarDays, label: "First released", value: formatCatalogDate(game.firstRelease) } : null,
     platforms.length ? { icon: Layers, label: platforms.length === 1 ? "Platform" : "Platforms", value: platforms.map((p) => p.name).join(", ") } : null,
-    { icon: Disc3, label: "Physical releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount) : "None published yet" },
+    { icon: Disc3, label: "Physical releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount) : NO_VERIFIED_RELEASE },
     overview.regions.length ? { icon: Globe, label: overview.regions.length === 1 ? "Region" : "Regions", value: overview.regions.map((r) => regionLabel(r)).join(", ") } : null,
   ].filter((fact) => fact !== null);
 
@@ -127,10 +128,18 @@ export function PhysicalReleases({ slug, title, overview, renderAction }: { slug
         <h2 id="physical-releases" className="text-lg font-semibold tracking-tight">
           Physical releases
         </h2>
-        <p className="text-sm text-muted-foreground">{overview.releaseCount ? releaseCountLabel(overview.releaseCount) : "None published yet"}</p>
+        <p className="text-sm text-muted-foreground">{overview.releaseCount ? releaseCountLabel(overview.releaseCount) : NO_VERIFIED_RELEASE}</p>
       </div>
       {overview.groups.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">The catalog doesn&apos;t list a physical release of this game yet. You can still add your copy below, as your own record.</p>
+        <div className="mt-3 flex flex-col gap-1.5 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">{NO_VERIFIED_RELEASE}.</p>
+          <p>
+            {overview.platforms.length
+              ? `The catalog records ${title} on ${overview.platforms.map((p) => p.name).join(", ")}, but none of its editions, regions, publishers, formats or packaging yet.`
+              : "The catalog doesn't record any of this game's editions, regions, publishers, formats or packaging yet."}{" "}
+            You can still add your copy below, as your own record.
+          </p>
+        </div>
       ) : (
         <div className="mt-4 flex flex-col gap-5">
           {overview.groups.map(({ platform, releases }) => {

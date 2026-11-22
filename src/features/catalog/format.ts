@@ -84,3 +84,15 @@ export function regionLabel(region: { code: string; label: string }) {
 export function releaseCountLabel(count: number) {
   return `${count} ${count === 1 ? "release" : "releases"}`;
 }
+
+/**
+ * M14a: a published game (or a platform of one) whose physical existence has been confirmed
+ * with evidence, but which has no verified physical release in the catalog yet. Never shown
+ * as a release: no edition, region, publisher, format or packaging is implied.
+ */
+export const NO_VERIFIED_RELEASE = "No verified physical release recorded yet";
+
+/** A platform's releases on a search result, or that none is verified yet. */
+export function platformReleaseLabel(count: number) {
+  return count > 0 ? releaseCountLabel(count) : "no verified release yet";
+}
