@@ -1,5 +1,6 @@
 import { CalendarDays, ChevronRight, Disc3, Globe, Layers } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { editionText } from "@/components/catalog/release-picker";
 import { ConsoleArt } from "@/components/shelf/console-art";
@@ -119,7 +120,7 @@ function releaseFacts(release: PickerRelease) {
  * regional release, an edition and a variant are separate rows. Choosing one opens it
  * in the add steps below, with platform, region and edition already chosen.
  */
-export function PhysicalReleases({ slug, title, overview }: { slug: string; title: string; overview: Overview }) {
+export function PhysicalReleases({ slug, title, overview, renderAction }: { slug: string; title: string; overview: Overview; renderAction?: (release: PickerRelease) => ReactNode }) {
   return (
     <section aria-labelledby="physical-releases" className="rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -146,11 +147,11 @@ export function PhysicalReleases({ slug, title, overview }: { slug: string; titl
                     const edition = editionText(release.edition);
                     const facts = releaseFacts(release);
                     return (
-                      <li key={release.id}>
+                      <li key={release.id} className="flex flex-col sm:flex-row sm:items-center">
                         <Link
                           href={`${fastAddHref(slug, { platform: release.platform.slug, region: release.region.code, edition: editionKey(release.edition), release: release.id })}#choose-release`}
                           scroll={false}
-                          className="group flex items-center gap-3 px-3 py-2.5 outline-none transition-colors hover:bg-white/[0.03] focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:gap-4"
+                          className="group flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 outline-none transition-colors hover:bg-white/[0.03] focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:gap-4"
                         >
                           <div className="w-12 shrink-0 sm:w-14">
                             <GameMedia media={releaseMedia(release)} seed={release.id} title={release.localTitle ?? title} systemLabel={release.platform.shortName} sizes="56px" />
@@ -169,6 +170,7 @@ export function PhysicalReleases({ slug, title, overview }: { slug: string; titl
                             <ChevronRight aria-hidden="true" className="size-3.5" />
                           </span>
                         </Link>
+                        {renderAction ? <div className="flex shrink-0 justify-end px-3 pb-2.5 empty:hidden sm:py-2.5 sm:pl-0">{renderAction(release)}</div> : null}
                       </li>
                     );
                   })}

@@ -62,7 +62,8 @@ function copiesOf(userId) {
 }
 
 const claimForm = (html) => forms(html).find((f) => "platform_id" in f.hidden && "game_id" in f.hidden && !("item_id" in f.hidden && f.names.includes("region")));
-const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "item_id" in f.hidden);
+// The add-copy form (it carries the release's pieces), not M12 W2's "Want this release", which also names a release.
+const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "item_id" in f.hidden && "components" in f.hidden);
 
 let starfallUs;
 let starfallCe;

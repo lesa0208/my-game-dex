@@ -1,6 +1,7 @@
 import {
   Bell,
   Compass,
+  Heart,
   House,
   Library,
   type LucideIcon,
@@ -30,6 +31,8 @@ export const navigationItems: readonly NavigationItem[] = [
     icon: Library,
     inMobileNav: true,
   },
+  // M12 W2: desktop only; on mobile it is reached from My Collection.
+  { label: "Wishlist", href: "/collection/wishlist", icon: Heart, inMobileNav: false },
   { label: "Community", href: "/community", icon: Users, inMobileNav: true },
   {
     label: "Notifications",
@@ -50,4 +53,13 @@ export const navigationItems: readonly NavigationItem[] = [
 
 export function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The one item a path belongs to: the most specific match, so /collection/wishlist is
+ * Wishlist, not also My Collection. Among items without a more specific one (the mobile
+ * bar has no Wishlist), the parent still matches.
+ */
+export function activeHref(pathname: string, items: readonly NavigationItem[]): string | null {
+  return items.filter((item) => isActivePath(pathname, item.href)).sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null;
 }

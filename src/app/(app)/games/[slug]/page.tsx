@@ -10,6 +10,7 @@ import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link"
 import { GameDetailsSkeleton, GameHero, PhysicalReleases } from "@/components/games/game-details";
 import { MergeReleaseLink } from "@/components/merge/merge-release-link";
 import { EmptyState } from "@/components/shared/empty-state";
+import { GameWishlist, GameWishlistSkeleton, WantRelease } from "@/components/wishlist/game-wishlist";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
 import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { type FastAddReference, fastAddHref, planFastAdd } from "@/features/collection/fast-add";
@@ -87,12 +88,27 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
           <GameHero game={picker.game} summary={summary} overview={overview} />
         </div>
         <aside aria-label="Your collection" className="min-w-0 empty:hidden lg:sticky lg:top-22 lg:col-start-2 lg:row-span-3 lg:row-start-1">
-          <Suspense fallback={<GameCopiesSkeleton />}>
-            <GameCopies gameId={picker.game.id} title={picker.game.title} />
-          </Suspense>
+          <div className="flex flex-col gap-6">
+            <Suspense fallback={<GameCopiesSkeleton />}>
+              <GameCopies gameId={picker.game.id} title={picker.game.title} />
+            </Suspense>
+            {/* M12 W2: the collector's wishes for this game, apart from their copies. */}
+            <Suspense fallback={<GameWishlistSkeleton />}>
+              <GameWishlist gameId={picker.game.id} title={picker.game.title} releases={all.releases} returnPath={here} />
+            </Suspense>
+          </div>
         </aside>
         <div className="min-w-0 lg:col-start-1">
-          <PhysicalReleases slug={picker.game.slug} title={picker.game.title} overview={overview} />
+          <PhysicalReleases
+            slug={picker.game.slug}
+            title={picker.game.title}
+            overview={overview}
+            renderAction={(release) => (
+              <Suspense fallback={null}>
+                <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />
+              </Suspense>
+            )}
+          />
         </div>
         <div className="min-w-0 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
             <ReleasePickerView
@@ -106,6 +122,10 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
                 <>
                   <Suspense fallback={<AddToCollectionSkeleton />}>
                     <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
+                  </Suspense>
+                  {/* M12 W2: wanting this release, kept apart from adding a copy. */}
+                  <Suspense fallback={null}>
+                    <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />
                   </Suspense>
                   <Suspense fallback={null}>
                     <ExcludeReleaseLink releaseId={release.id} />

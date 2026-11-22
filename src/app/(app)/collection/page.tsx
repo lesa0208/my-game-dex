@@ -1,4 +1,4 @@
-import { CircleCheck, FlaskConical, GitMerge, LayoutGrid, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
+import { CircleCheck, FlaskConical, GitMerge, Heart, LayoutGrid, Library, Plus, PlugZap, SearchX, TimerReset, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -224,6 +224,12 @@ export default function CollectionPage({ searchParams }: PageProps<"/collection"
               <Link href="/collection/systems">
                 <LayoutGrid aria-hidden="true" />
                 Systems
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <Link href="/collection/wishlist">
+                <Heart aria-hidden="true" />
+                Wishlist
               </Link>
             </Button>
             <Button asChild variant="secondary" size="lg">

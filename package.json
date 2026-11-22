@@ -46,6 +46,8 @@
     "app:game-details-checks": "node scripts/app-game-details-checks.mjs",
     "app:fast-add-checks": "node scripts/app-fast-add-checks.mjs",
     "db:wishlist-checks": "node scripts/db-wishlist-checks.mjs",
+    "wishlist:test": "node --experimental-strip-types --no-warnings --test src/features/wishlist/wishlist.test.mjs",
+    "app:wishlist-checks": "node scripts/app-wishlist-checks.mjs",
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",

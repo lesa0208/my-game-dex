@@ -4,15 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
-import { isActivePath, navigationItems } from "@/config/navigation";
+import { activeHref, navigationItems } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 
 function SidebarNavLinks({ pathname }: { pathname: string | null }) {
+  const active = pathname === null ? null : activeHref(pathname, navigationItems);
   return (
     <nav aria-label="Main">
       <ul className="flex flex-col gap-1">
         {navigationItems.map(({ href, icon: Icon, label }) => {
-          const isActive = pathname !== null && isActivePath(pathname, href);
+          const isActive = active === href;
           return (
             <li key={href}>
               <Link

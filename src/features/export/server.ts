@@ -16,8 +16,11 @@ import {
   shapePreferences,
   shapeProfile,
   shapeSubmission,
+  shapeWish,
   SUBMISSIONS_MAX_PAGES,
   SUBMISSIONS_PAGE,
+  EXPORT_MAX_WISHES,
+  WISHLIST_PAGE,
 } from "./format";
 
 /**
@@ -127,6 +130,28 @@ export async function* exportChunks(supabase: Client, account: { id: string; ema
     yield `${last ? "," : ""}${text}`;
     last = ids[ids.length - 1];
     if (items.length < EXPORT_PAGE) break;
+  }
+  yield "],";
+
+  // M12 W2: the wishlist. The entries as stored, through the owner-only table (RLS and
+  // the owner named), and how the catalog shows each now, through get_my_wishlist,
+  // which reads only the caller's own entries. At most 10,000 of each.
+  const wishes = await allRows((a, b) =>
+    supabase.from("wishlist_items").select("id,release_id,game_id,platform_id,region_code,completeness,priority,note,created_at,updated_at").eq("owner_id", me).order("id").range(a, b),
+  );
+  if (wishes.length > EXPORT_MAX_WISHES) throw new ExportTooLarge();
+  const shown = new Map<string, Row>();
+  let cursor: string | null = null;
+  for (let page = 0; wishes.length > 0; page += 1) {
+    if (page * WISHLIST_PAGE > EXPORT_MAX_WISHES) throw new ExportTooLarge();
+    const list = must(await supabase.rpc("get_my_wishlist", { p_sort: "added", p_limit: WISHLIST_PAGE, p_cursor: cursor })) as { items?: Row[]; next_cursor?: string | null };
+    for (const item of list.items ?? []) shown.set(String(item.id), item);
+    if (!list.next_cursor) break;
+    cursor = list.next_cursor;
+  }
+  yield `${json("wishlist")}:[`;
+  for (let i = 0; i < wishes.length; i += 500) {
+    yield `${i ? "," : ""}${wishes.slice(i, i + 500).map((w) => json(shapeWish(w, shown.get(String(w.id)), reference))).join(",")}`;
   }
   yield "],";
 

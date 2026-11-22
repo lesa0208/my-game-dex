@@ -472,6 +472,8 @@ An editor excludes an out-of-scope release through a staff function. That functi
 
 Signed out, or with an ended session, every function answers `not permitted` and the table reads no rows. Staff have no read path. There's no visibility column yet: when public profiles add one, the note must stay owner-only.
 
+**In the app (M12 W2).** `/collection/wishlist` and `/collection/wishlist/[id]` require a signed-in account with a handle and read only through `get_my_wishlist` and `get_my_wishlist_item`, a page at a time. The game page reads `get_my_wishlist_for_game` once per request inside its own streamed boundary; visitors get a sign-in link and nothing of anyone's wishlist. The server actions (`src/features/wishlist/actions.ts`) call only the three write functions, never name an owner, and return fixed messages. An edit sends a target only when the collector chose a different one, so an entry whose record left the catalog keeps its original target. The platforms offered are the game's published pairings (anon read of `game_platforms`); the regions are every catalog region but `unknown`.
+
 `service_role` has no privilege on any collection table. Deleting an account through Auth still removes everything: the foreign keys cascade from `auth.users` through `profiles`, and cascades don't check the caller's privileges. This was tested through the Auth admin API.
 
 **What clients can't do, and what stops them:**
@@ -1710,7 +1712,7 @@ Recorded, not implemented. **The first two need an explicit decision before real
 
 ## Personal data export (M11a-4a)
 
-Local development only. Design: [ADR-066](architecture-decisions.md#adr-066-the-data-export-is-a-streamed-download-read-as-the-person-and-expensive-requests-are-counted-in-the-database). `POST /settings/account/export` (a route handler; `src/features/export`) answers with the signed-in person's data as one JSON file (`my-game-dex-export`, version 1).
+Local development only. Design: [ADR-066](architecture-decisions.md#adr-066-the-data-export-is-a-streamed-download-read-as-the-person-and-expensive-requests-are-counted-in-the-database). `POST /settings/account/export` (a route handler; `src/features/export`) answers with the signed-in person's data as one JSON file (`my-game-dex-export`; version 1, version 2 since M12a, version 3 since M12 W2).
 
 **What's in it.**
 - The account id and email (from the verified token), the profile and handle, and preferences.
@@ -1719,6 +1721,7 @@ Local development only. Design: [ADR-066](architecture-decisions.md#adr-066-the-
   - its status, completeness, conditions, and its recorded pieces with their condition;
   - its private details: price and currency, date acquired, storage location and notes;
   - its release (platform, region, edition, variant, local title, publisher, format, media count, packaging, languages, date, product code and barcode) and its game.
+- M12 W2: every wishlist entry, after the collection: its level, what was wanted as stored (release or game id, platform and region), priority, the lowest acceptable completeness, the private note, created and updated times, and how the catalog shows it now (`available`, `unavailable` or `platform_unavailable`, merged or duplicate, and what it shows), read through `wishlist_items` (RLS, owner named) and `get_my_wishlist`. No owner id, and nothing derived from the collection.
 - The person's catalog submissions, with status, their note, the reviewer's note and what was submitted.
 
 A copy on a release the catalog no longer shows keeps the title and platform the person may still see (`get_my_preserved_titles`); any other is marked `unavailable`.

@@ -33,6 +33,10 @@ set local role authenticated;
 select lives_ok($$select public.claim_handle('user_a')$$, 'setup: user claims a handle');
 reset role;
 
+-- The staff roles that exist before the attempts: none on a fresh database; a kept test
+-- database may hold its own staff accounts. Every attempt below must leave this unchanged.
+create temp table staff_before as select user_id, role from public.staff_roles;
+
 -- Escalation attempts
 select is(private.has_staff_role('admin'), false, 'metadata saying admin gives no staff role');
 select pg_temp.as_user('00000000-0000-0000-0000-0000000000a1', '{"app_metadata":{"role":"admin"},"user_metadata":{"role":"admin"},"staff_role":"admin","is_admin":true}');
@@ -54,7 +58,10 @@ select throws_ok($$insert into public.staff_roles (user_id, role) values ('00000
 select throws_ok($$select * from public.profiles$$, '42501', null, 'service_role has no table access to profiles');
 select throws_ok($$select * from public.user_preferences$$, '42501', null, 'service_role has no table access to preferences');
 reset role;
-select is((select count(*)::int from public.staff_roles), 0, 'no staff role exists after every attempt');
+select ok(
+  (select count(*) from public.staff_roles) = (select count(*) from staff_before)
+  and not exists (select user_id, role from public.staff_roles except select user_id, role from staff_before),
+  'no staff role was added by any attempt');
 select is((select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'staff_roles' and cmd <> 'SELECT'), 0, 'staff_roles has no write policy');
 
 -- The documented operator procedure works, and the helper reads only the table
