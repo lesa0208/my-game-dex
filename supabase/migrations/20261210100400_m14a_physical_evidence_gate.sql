@@ -1,24 +1,29 @@
--- M14a: physical existence gates game-identity publication.
+-- M14a: physical existence gates game-identity publication, and whoever confirms it never
+-- publishes it.
 --
 -- My Game Dex catalogs physical games only. B1-M1 publishes a game identity without a
--- published release only through an independently verified pairing, whose basis must say
--- physical_eligibility "confirmed" (require_pairing_basis). B1-M2's batch approval, however,
--- also verified and published unsampled, unflagged members with physical_eligibility
+-- published release only through a verified pairing whose basis says physical_eligibility
+-- "confirmed" (require_pairing_basis), checked at commit by check_publication_of. B1-M2's batch
+-- approval, however, also verified and published unsampled, unflagged members as
 -- "batch_accepted": public because a provider lists them and a sample of other members passed.
+-- And neither path kept the editor who confirmed the evidence from publishing it.
 --
--- This migration:
--- 1. Replaces approve_review_batch (same signature, grants and every safeguard): a member a
---    person reviewed and found correct is verified and published as before; an unsampled
---    member accepted with the batch gets a verified identity (game.verified_at, audited as
---    batch-accepted) and nothing else. Its pairing stays unverified and unpublished until an
---    editor confirms physical existence with evidence (verify_game_platform), and another
---    editor publishes it (publish_game_identity). The result reports both counts.
--- 2. Adds a check: a pairing's verification basis, when present, always says
---    physical_eligibility "confirmed". So every path that treats a verified pairing as enough
+-- This migration (approved by the product owner, 2026-11-22):
+-- 1. Replaces approve_review_batch (same signature, grants and every B1 safeguard). A member a
+--    person reviewed and found correct has its pairing verified, recorded as verified by that
+--    reviewer, and is published only if the approver is someone else; otherwise it awaits
+--    publish_game_identity by another editor. An unsampled member gets a verified identity
+--    (audited as batch-accepted) and nothing else: its pairing stays unverified and unpublished
+--    until an editor confirms physical existence with evidence (verify_game_platform) and
+--    another publishes it. The result reports all three counts.
+-- 2. Replaces publish_game_identity (same signature and grants): it also refuses a pairing the
+--    caller verified ("own record"), so confirming and publishing take two editors.
+-- 3. Adds a check: a pairing's verification basis, when present, always says
+--    physical_eligibility "confirmed", so every rule that treats a verified pairing as enough
 --    to publish a game without a release (the publication invariant, public reads, search,
---    exclusion's W9, withdrawal's last-platform rule) can rely on confirmed physical evidence.
+--    exclusion's W9, withdrawal's last-platform rule) rests on confirmed physical evidence.
 --
--- Physical releases are unaffected: they still need their own verification and publication.
+-- Physical releases are unaffected: they keep their own verification and publication.
 -- Rollback: supabase/rollbacks/20261210100400_m14a_physical_evidence_gate.rollback.sql.
 
 alter table public.game_platforms
@@ -45,6 +50,7 @@ declare
   v_source record;
   v_published integer := 0;
   v_awaiting integer := 0;
+  v_independent integer := 0;
   v_slug text;
   v_rows integer;
 begin
@@ -131,15 +137,17 @@ begin
 
   -- B7, as amended by M14a: verify the identity of each member reviewed correct, or unflagged
   -- and not sampled. Only a member a person reviewed and found correct has its physical
-  -- existence confirmed: its pairing is verified ("confirmed") and it is published. An unsampled
-  -- member accepted with the batch keeps a verified identity, recorded as batch-accepted, but its
-  -- pairing stays unverified and nothing of it is published, until an editor confirms its
-  -- physical existence individually (verify_game_platform, then publish_game_identity by
-  -- another editor). A provider listing it is never enough.
+  -- existence confirmed: its pairing is verified ("confirmed"), recorded as verified by that
+  -- reviewer, who confirmed the evidence. It is published only when this approver is someone
+  -- else; one the approver reviewed waits for another editor (publish_game_identity, which
+  -- refuses whoever verified the pairing). An unsampled member keeps a verified identity,
+  -- recorded as batch-accepted, and nothing else: its pairing stays unverified and nothing of it
+  -- is published, until an editor confirms its physical existence individually
+  -- (verify_game_platform) and another publishes it. A provider listing it is never enough.
   -- B12: every write is conditional on the frozen state; any miss fails the whole approval.
   for v_item in
     select i.game_id, i.platform_id, i.frozen_game_revision, g.title, g.slug, pr.provider_code, pr.external_id, pr.payload_sha256,
-           i.outcome = 'correct' as reviewed
+           i.outcome = 'correct' as reviewed, i.reviewed_by
     from private.catalog_review_batch_items i
     join public.games g on g.id = i.game_id
     join private.provider_records pr on pr.id = i.provider_record_id
@@ -163,7 +171,7 @@ begin
       v_awaiting := v_awaiting + 1;
       continue;
     end if;
-    update public.game_platforms gp set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me,
+    update public.game_platforms gp set verified_at = pg_catalog.clock_timestamp(), verified_by = v_item.reviewed_by,
       verified_game_revision = v_item.frozen_game_revision,
       verification_basis = pg_catalog.jsonb_build_object('source', v_item.provider_code, 'reference', v_item.external_id,
         'snapshot_sha256', v_item.payload_sha256,
@@ -174,7 +182,13 @@ begin
       raise exception 'batch stale' using errcode = 'P0001';
     end if;
     perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game_platform', v_item.game_id, v_reason,
-      pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch, 'acceptance', 'individually_reviewed'));
+      pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch, 'acceptance', 'individually_reviewed',
+        'confirmed_by', v_item.reviewed_by));
+    -- Separation of duties: whoever confirmed the evidence never publishes it.
+    if v_item.reviewed_by is null or v_item.reviewed_by = v_me then
+      v_independent := v_independent + 1;
+      continue;
+    end if;
     v_slug := coalesce(v_item.slug, private.assign_game_slug(v_item.title));
     update public.games g set status = 'published', slug = v_slug, submitted_by = null where g.id = v_item.game_id;
     update public.game_platforms gp set status = 'published', submitted_by = null
@@ -190,7 +204,79 @@ begin
     'batch_id', p_batch, 'import_run_id', v_batch.import_run_id, 'content_sha256', v_batch.content_sha256, 'seed', v_batch.seed,
     'items', v_batch.item_count, 'flagged', v_batch.flagged_count, 'sample_size', v_batch.sample_size,
     'acceptance_number', v_batch.acceptance_number, 'sample_incorrect', v_incorrect, 'published', v_published, 'awaiting_physical_evidence', v_awaiting,
+    'awaiting_independent_publication', v_independent,
     'approvers', (select pg_catalog.jsonb_agg(a.approver_id order by a.approved_at) from private.catalog_review_batch_approvals a where a.batch_id = p_batch)));
-  return pg_catalog.jsonb_build_object('status', 'approved', 'published', v_published, 'awaiting_physical_evidence', v_awaiting);
+  return pg_catalog.jsonb_build_object('status', 'approved', 'published', v_published, 'awaiting_physical_evidence', v_awaiting,
+    'awaiting_independent_publication', v_independent);
+end;
+$$;
+
+create or replace function public.publish_game_identity(p_game uuid, p_platforms uuid[], p_reason text, p_expected_revision bigint)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_game public.games;
+  v_platform uuid;
+  v_pair public.game_platforms;
+  v_slug text;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();                       -- I6
+  v_reason := private.require_reason(p_reason);
+  if p_expected_revision is null or p_platforms is null or pg_catalog.cardinality(p_platforms) = 0
+     or pg_catalog.cardinality(p_platforms) > 20 then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+  select * into v_game from public.games g where g.id = p_game for update;
+  if not found or v_game.status not in ('unverified', 'under_review', 'published') then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if v_game.revision <> p_expected_revision then
+    raise exception 'record changed' using errcode = 'P0001';
+  end if;
+  if private.created_by(v_me, null, array[p_game]) then       -- I4
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  -- I5: the game's verification attests this revision (a published game is already public).
+  if v_game.status <> 'published' and not private.verification_current('game', v_game.id, v_game.revision, v_game.verified_at) then
+    raise exception 'game not verified' using errcode = 'P0001';
+  end if;
+  foreach v_platform in array p_platforms loop
+    select * into v_pair from public.game_platforms gp where gp.game_id = p_game and gp.platform_id = v_platform for update;
+    if not found or v_pair.status not in ('unverified', 'under_review', 'published') then
+      raise exception 'record unavailable' using errcode = 'P0001';
+    end if;
+    if private.pairing_created_by(v_me, p_game, v_platform) then
+      raise exception 'own record' using errcode = 'P0001';
+    end if;
+    if v_pair.verified_at is null or v_pair.verified_game_revision is distinct from v_game.revision then
+      raise exception 'pairing not verified' using errcode = 'P0001';
+    end if;
+    -- M14a: whoever confirmed the pairing's physical evidence (verified it) can't also publish it.
+    if v_pair.verified_by = v_me then
+      raise exception 'own record' using errcode = 'P0001';
+    end if;
+  end loop;
+
+  -- I7: games and pairings only.
+  if v_game.status <> 'published' then
+    v_slug := coalesce(v_game.slug, private.assign_game_slug(v_game.title));
+    update public.games g set status = 'published', slug = v_slug, submitted_by = null where g.id = p_game;
+    perform private.record_catalog_audit(v_me, 'catalog_record_published', 'game', p_game, v_reason,
+      pg_catalog.jsonb_build_object('slug', v_slug, 'identity', true, 'platforms', p_platforms, 'revision', v_game.revision)
+      || private.provenance_note('game', p_game));
+  end if;
+  update public.game_platforms gp set status = 'published', submitted_by = null
+  where gp.game_id = p_game and gp.platform_id = any (p_platforms) and gp.status <> 'published';
+  foreach v_platform in array p_platforms loop
+    perform private.record_catalog_audit(v_me, 'catalog_record_published', 'game_platform', p_game, v_reason,
+      pg_catalog.jsonb_build_object('platform_id', v_platform, 'identity', true));
+  end loop;
+  return true;
 end;
 $$;

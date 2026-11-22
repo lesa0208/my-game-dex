@@ -74,18 +74,47 @@ async function rpc(owner, name, body) {
 }
 
 /**
+ * A third, temporary catalog editor for this run, in the fixture's shape (Auth fields GoTrue
+ * reads, a verified factor and a recent second-factor claim): publishing takes an editor who
+ * neither created the game nor confirmed its evidence. Removed in the clean-up.
+ */
+const PUBLISHER = "f1c5f1c5-0000-4000-8000-00000000c5c7";
+function addPublisher() {
+  psql(`begin;
+insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id, confirmation_token, recovery_token, email_change_token_new, email_change, created_at, updated_at)
+values ('${PUBLISHER}', 'authenticated', 'authenticated', 'catalog-identity-publisher@example.test', now(), '00000000-0000-0000-0000-000000000000', '', '', '', '', now(), now());
+update public.profiles set handle = 'ci_publisher', handle_changed_at = now() where id = '${PUBLISHER}';
+insert into public.staff_roles (user_id, role) values ('${PUBLISHER}', 'catalog_editor');
+insert into auth.sessions (id, user_id, aal, factor_id, created_at, updated_at) values ('${PUBLISHER}', '${PUBLISHER}', 'aal2', '${PUBLISHER}', now(), now());
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at, secret) values ('${PUBLISHER}', '${PUBLISHER}', 'fixture', 'totp', 'verified', now(), now(), '');
+insert into auth.mfa_amr_claims (id, session_id, authentication_method, created_at, updated_at) values (gen_random_uuid(), '${PUBLISHER}', 'totp', now(), now());
+commit;`);
+}
+function removePublisher() {
+  psql(`begin;
+delete from public.staff_roles where user_id = '${PUBLISHER}';
+delete from auth.users where id = '${PUBLISHER}';
+delete from private.handle_holds where kind = 'released' and handle = 'ci_publisher';
+set local session_replication_role = replica;
+delete from private.audit_events where actor_id = '${PUBLISHER}';
+commit;`);
+}
+
+/**
  * The two games, through the editor functions in one transaction: the fixture editor creates
- * each game and pairs it with the SNES; the reviewer verifies both identities, then confirms
- * the first one's physical existence with evidence and publishes it. The second keeps a
- * verified identity and an unverified pairing: what a batch-accepted member is left with.
+ * each game and pairs it with the SNES; the reviewer verifies both identities and confirms the
+ * first one's physical existence with evidence; a third editor publishes it (whoever confirmed
+ * the evidence never publishes it). The second keeps a verified identity and an unverified
+ * pairing: what a batch-accepted member is left with.
  */
 function makeGames() {
   const as = (user) => `select set_config('request.jwt.claims', jsonb_build_object('sub', '${user}', 'role', 'authenticated', 'aal', 'aal2', 'session_id', '${user}')::text, true);`;
   const rev = (title) => `(select revision from public.games where title = ${sql(title)})`;
   const gid = (title) => `(select id from public.games where title = ${sql(title)})`;
   const snes = "(select id from public.platforms where slug = 'snes')";
+  addPublisher();
   psql(`begin;
-update auth.mfa_amr_claims set created_at = now(), updated_at = now() where session_id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}');
+update auth.mfa_amr_claims set created_at = now(), updated_at = now() where session_id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}', '${PUBLISHER}');
 ${as(FIXTURE_EDITOR)}
 set local role authenticated;
 select public.create_game(${sql(CONFIRMED)}, 'game', null, null, '1994-06-01', 'day', 'M14a identity checks');
@@ -99,6 +128,9 @@ select public.verify_game(${gid(CONFIRMED)}, 'M14a identity checks', ${rev(CONFI
 select public.verify_game(${gid(AWAITING)}, 'M14a identity checks', ${rev(AWAITING)});
 select public.verify_game_platform(${gid(CONFIRMED)}, ${snes},
   '{"source": "editor", "reference": "Cartridge and box photographed; label checked", "physical_eligibility": "confirmed"}', 'M14a identity checks', ${rev(CONFIRMED)});
+reset role;
+${as(PUBLISHER)}
+set local role authenticated;
 select public.publish_game_identity(${gid(CONFIRMED)}, array[${snes}], 'M14a identity checks', ${rev(CONFIRMED)});
 reset role;
 commit;`);
@@ -283,6 +315,7 @@ try {
   if (ids.length) {
     psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${ids.map((id) => `'${id}'`).join(",")}) or target_profile_id in (${ids.map((id) => `'${id}'`).join(",")}); delete from private.request_slots where user_id in (${ids.map((id) => `'${id}'`).join(",")}); commit;`);
   }
+  removePublisher();
   removeFixture();
   check("no copies, wishes or catalog data are left behind", footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }

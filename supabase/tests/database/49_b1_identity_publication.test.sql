@@ -3,7 +3,7 @@
 -- staff session harness of 16_catalog.test.sql.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(58);
+select plan(59);
 
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
 begin
@@ -89,7 +89,8 @@ select is(pg_temp.as_user('e2', format($q$select public.verify_game(%L, 'Re-chec
   (select revision from public.games where id = pg_temp.id('g')))), 'true', 'e2 verifies the edited game');
 select is(pg_temp.publish('e2'), 'error: pairing not verified', 'the pairing''s verification of the earlier revision no longer counts');
 select is(pg_temp.verify_pair('e2', pg_temp.basis()), 'true', 'e2 verifies the pairing again');
-select is(pg_temp.publish('e2'), 'true', 'and publishes the identity');
+select is(pg_temp.publish('e2'), 'error: own record', 'but the editor who confirmed the evidence can''t publish it (M14a)');
+select is(pg_temp.publish('e3'), 'true', 'another editor publishes the identity');
 select ok((select g.status = 'published' and g.slug is not null and gp.status = 'published'
            from public.games g join public.game_platforms gp on gp.game_id = g.id where g.id = pg_temp.id('g')),
   'the game and its pairing are published');
@@ -124,8 +125,8 @@ create function pg_temp.rev() returns bigint language sql stable as $$ select re
 select is(pg_temp.as_user('e1', format($$select public.set_game_platform(%L, %L, 'B1 test')::text$$, pg_temp.id('g'), pg_temp.id('nes'))), 'true', 'the creator pairs it with the NES too');
 select is(pg_temp.as_user('e2', format($q$select public.verify_game_platform(%L, %L, %L::jsonb, 'Checked', %s)::text$q$,
   pg_temp.id('g'), pg_temp.id('nes'), pg_temp.basis(), pg_temp.rev())), 'true', 'e2 verifies the NES pairing');
-select is(pg_temp.as_user('e2', format($q$select public.publish_game_identity(%L, array[%L]::uuid[], 'NES identity', %s)::text$q$,
-  pg_temp.id('g'), pg_temp.id('nes'), pg_temp.rev())), 'true', 'and publishes it');
+select is(pg_temp.as_user('e3', format($q$select public.publish_game_identity(%L, array[%L]::uuid[], 'NES identity', %s)::text$q$,
+  pg_temp.id('g'), pg_temp.id('nes'), pg_temp.rev())), 'true', 'and e3 publishes it');
 insert into ids values ('claim', private.uuid_v7());
 insert into public.collection_items (id, owner_id, claimed_game_id, claimed_platform_id) values (pg_temp.id('claim'), pg_temp.u('c3'), pg_temp.id('g'), pg_temp.id('snes'));
 create temp table claim_before as select md5(to_jsonb(c)::text) as h from public.collection_items c where c.id = pg_temp.id('claim');

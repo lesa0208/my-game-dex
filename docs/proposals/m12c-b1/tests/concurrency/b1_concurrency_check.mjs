@@ -166,7 +166,7 @@ async function editFirst(admin, approvalFn, label) {
     await b.query("begin");
     await b.query(`update public.games set summary = 'Concurrent edit during approval' where id = $1`, [target]);
     await a.query("begin");
-    const approval = asEditor(a, "e2", `select ${approvalFn}($1, 'Concurrent approval')::text as r`, [batch]).then(
+    const approval = asEditor(a, "e3", `select ${approvalFn}($1, 'Concurrent approval')::text as r`, [batch]).then(
       (r) => ({ ok: true, value: r.rows[0].r }),
       (e) => ({ ok: false, error: e.message }),
     );
@@ -211,8 +211,8 @@ async function main() {
       const b = await connect();
       try {
         await a.query("begin");
-        const r = (await asEditor(a, "e2", `select public.approve_review_batch($1, 'Approval first')::text as r`, [batch])).rows[0].r;
-        check("approval first: the approval succeeds while it holds its locks", r === '{"status": "approved", "published": 2, "awaiting_physical_evidence": 0}', r);
+        const r = (await asEditor(a, "e3", `select public.approve_review_batch($1, 'Approval first')::text as r`, [batch])).rows[0].r;
+        check("approval first: the approval succeeds while it holds its locks", r === '{"status": "approved", "published": 2, "awaiting_physical_evidence": 0, "awaiting_independent_publication": 0}', r);
         await b.query("begin");
         const edit = b.query(`update public.games set summary = 'Edit after approval' where id = $1`, [target]).then(() => "done", (e) => `error: ${e.message}`);
         const waited = await waitForLock(admin, b.processID, "approval first");

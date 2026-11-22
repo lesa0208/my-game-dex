@@ -44,12 +44,43 @@ public because Wikidata lists them and a sample of other members passed. The M14
 the alternative the B1 SQL review left open ([README, open point 1](../proposals/m12c-b1/README.md#open-points-for-the-reviewer)):
 
 - Batch approval still verifies every accepted member's **identity**. Only members a person
-  individually reviewed and found correct are **published**.
+  individually reviewed and found correct have their physical existence confirmed: their
+  pairing is recorded as verified **by that reviewer**.
+- **Whoever confirms the evidence never publishes it.** A reviewed member is published at
+  approval only when the approver isn't its reviewer; otherwise it waits for another editor's
+  `publish_game_identity`, which refuses anyone who verified the pairing. So the real pilot
+  works with two people: editor B reviews and approves, editor A (the batch's creator)
+  publishes. A third editor can approve and publish in one step.
 - Unsampled members keep a verified identity, recorded as batch-accepted, but their pairing
   stays unverified and nothing of them is public. Each needs the individual path above.
 - A table check makes every pairing's verification basis say `"confirmed"`, so every rule that
   treats a verified pairing as enough (the publication invariant, public reads and search,
   exclusion's W9, withdrawal's last-platform rule) rests on confirmed physical evidence.
+
+Every way a game or pairing becomes public was checked: `publish_release` (through a published,
+verified physical release: unchanged), `publish_game_identity`, `approve_review_batch`, and the
+restorations (`restore_exclusion`, merges), which restore a previous status. All of them pass
+`check_publication_of` at commit, which, with the table check, allows a public pairing without a
+published release only on confirmed evidence. New pairings are always created `under_review`
+(`set_game_platform`, the importer, submissions), and withdrawal clears a pairing's
+verification; restoration returns it to review, unverified.
+
+### What counts as evidence today
+
+A pairing's `verification_basis`: `source` (1 to 60 characters), `reference` (1 to 300
+characters), `physical_eligibility: "confirmed"` (nothing else is accepted), and optionally
+`snapshot_sha256`, `note` (up to 500) and `batch_id`. It is recorded by a catalog editor who
+didn't create the game or the pairing, with a second factor verified in the last 10 minutes,
+against the game's current revision, and audited. Negative or inconclusive findings are
+recorded as batch outcomes (`incorrect` or `excluded`, final once recorded) or by withdrawing
+the pairing; they never verify anything.
+
+**Limitation for real use:** the basis is free text, and editors can't see it in the app (it has
+no client grant and no staff page shows it). In the batch path, the stored reference is the
+member's Wikidata record; the reviewer's own evidence is kept only in their optional outcome
+note. The smallest next step: require an evidence note of at least 20 characters for every
+`correct` outcome (as critical-signal members already need), carry it into the pairing's basis,
+and show each pairing's basis, verifier and date read-only on the staff game page.
 
 ## Identity publication is not release verification
 
@@ -82,12 +113,14 @@ collections and wishlists.
 
 ## Before the real editorial pilot
 
-1. Owner approval of this integration, including the gate (it changes B1-M2's approved behaviour).
-2. Choice of the two human editors (creator and reviewer, never an AI agent) and of the first
-   database to publish on.
+1. The gate's behaviour was approved by the product owner on 2026-11-22; the integration itself
+   still goes through review and merge.
+2. Choice of the two human editors (never an AI agent): one who reviews, confirms evidence and
+   approves, and another who creates the batch and publishes what the first confirmed. And the
+   first database to publish on.
 3. Applying migrations 1 to 6 to that database with the forward process, after a verified backup.
 4. Re-staging the SNES candidates there from the saved snapshot. The B1 stack keeps its own
    history and its open batch `ae69e5d3…` (3 of 116 outcomes), untouched.
-5. A way to record and review physical evidence for each game (today a basis's free-text
-   reference, through `verify_game_platform`), and staff pages for pairings and batches (B1
-   step 5). The owner reviews batches with `scripts/catalog-b1-review.mjs`.
+5. The evidence improvement above (a required evidence note carried into the basis, and the
+   basis shown on the staff game page), staff pages for pairings and batches (B1 step 5), and a
+   `publish` step in `scripts/catalog-b1-review.mjs` for the second editor (it has none today).

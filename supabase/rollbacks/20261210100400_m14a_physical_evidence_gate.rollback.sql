@@ -1,8 +1,8 @@
 -- ROLLBACK for 20261210100400_m14a_physical_evidence_gate.sql (M14a).
 --
 -- Kept outside supabase/migrations. Run as a forward migration in one transaction. Restores
--- B1-M2's approve_review_batch exactly as reviewed, and drops the physical-evidence check.
--- It refuses nothing: no row can violate the old rules.
+-- B1-M2's approve_review_batch and B1-M1's publish_game_identity exactly as reviewed, and
+-- drops the physical-evidence check. It refuses nothing: no row can violate the old rules.
 
 alter table public.game_platforms drop constraint game_platforms_physical_evidence;
 
@@ -165,5 +165,71 @@ begin
     'acceptance_number', v_batch.acceptance_number, 'sample_incorrect', v_incorrect, 'published', v_published,
     'approvers', (select pg_catalog.jsonb_agg(a.approver_id order by a.approved_at) from private.catalog_review_batch_approvals a where a.batch_id = p_batch)));
   return pg_catalog.jsonb_build_object('status', 'approved', 'published', v_published);
+end;
+$$;
+
+create or replace function public.publish_game_identity(p_game uuid, p_platforms uuid[], p_reason text, p_expected_revision bigint)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_game public.games;
+  v_platform uuid;
+  v_pair public.game_platforms;
+  v_slug text;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();                       -- I6
+  v_reason := private.require_reason(p_reason);
+  if p_expected_revision is null or p_platforms is null or pg_catalog.cardinality(p_platforms) = 0
+     or pg_catalog.cardinality(p_platforms) > 20 then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+  select * into v_game from public.games g where g.id = p_game for update;
+  if not found or v_game.status not in ('unverified', 'under_review', 'published') then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if v_game.revision <> p_expected_revision then
+    raise exception 'record changed' using errcode = 'P0001';
+  end if;
+  if private.created_by(v_me, null, array[p_game]) then       -- I4
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  -- I5: the game's verification attests this revision (a published game is already public).
+  if v_game.status <> 'published' and not private.verification_current('game', v_game.id, v_game.revision, v_game.verified_at) then
+    raise exception 'game not verified' using errcode = 'P0001';
+  end if;
+  foreach v_platform in array p_platforms loop
+    select * into v_pair from public.game_platforms gp where gp.game_id = p_game and gp.platform_id = v_platform for update;
+    if not found or v_pair.status not in ('unverified', 'under_review', 'published') then
+      raise exception 'record unavailable' using errcode = 'P0001';
+    end if;
+    if private.pairing_created_by(v_me, p_game, v_platform) then
+      raise exception 'own record' using errcode = 'P0001';
+    end if;
+    if v_pair.verified_at is null or v_pair.verified_game_revision is distinct from v_game.revision then
+      raise exception 'pairing not verified' using errcode = 'P0001';
+    end if;
+  end loop;
+
+  -- I7: games and pairings only.
+  if v_game.status <> 'published' then
+    v_slug := coalesce(v_game.slug, private.assign_game_slug(v_game.title));
+    update public.games g set status = 'published', slug = v_slug, submitted_by = null where g.id = p_game;
+    perform private.record_catalog_audit(v_me, 'catalog_record_published', 'game', p_game, v_reason,
+      pg_catalog.jsonb_build_object('slug', v_slug, 'identity', true, 'platforms', p_platforms, 'revision', v_game.revision)
+      || private.provenance_note('game', p_game));
+  end if;
+  update public.game_platforms gp set status = 'published', submitted_by = null
+  where gp.game_id = p_game and gp.platform_id = any (p_platforms) and gp.status <> 'published';
+  foreach v_platform in array p_platforms loop
+    perform private.record_catalog_audit(v_me, 'catalog_record_published', 'game_platform', p_game, v_reason,
+      pg_catalog.jsonb_build_object('platform_id', v_platform, 'identity', true));
+  end loop;
+  return true;
 end;
 $$;
