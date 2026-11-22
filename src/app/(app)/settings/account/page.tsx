@@ -63,7 +63,7 @@ async function AccountView({ searchParams }: { searchParams: PageProps<"/setting
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Download a copy of what your account holds, as a JSON file: your profile and preferences, every copy in your collection with its
-          release, condition, pieces and notes, what you paid and where you keep it, and your catalog submissions. It&apos;s for you: keep it
+          release, condition, pieces and notes, what you paid and where you keep it, your wishlist with its notes, and your catalog submissions. It&apos;s for you: keep it
           somewhere private. Follows, notifications and security records aren&apos;t in it yet, and it isn&apos;t a complete answer to a legal
           request for your data.
         </p>

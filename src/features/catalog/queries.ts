@@ -92,6 +92,27 @@ export async function getReleasePicker(
 }
 
 /**
+ * A published game's summary, as the catalog records it, or null when it has none. Read
+ * as anon like the rest of the public catalog: the column is granted to anon and RLS
+ * shows only published and merged games (M5), so nothing unpublished is ever returned.
+ */
+export async function getGameSummary(gameId: string): Promise<string | null> {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gameId)) return null;
+  const response = await fetch(`${url.replace(/\/$/, "")}/rest/v1/games?select=summary&status=eq.published&id=eq.${gameId}`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) return null;
+  const rows: unknown = await response.json().catch(() => null);
+  const summary = Array.isArray(rows) ? (rows[0] as { summary?: unknown } | undefined)?.summary : null;
+  return typeof summary === "string" && summary.trim() ? summary.trim() : null;
+}
+
+/**
  * Where an address naming a merged release should go: the release it was merged into,
  * and its game. Null for anything else, a release merged while unpublished included,
  * exactly as for an unknown id (M7b-2c D3, D14). Not cached: it's asked only for an id

@@ -150,7 +150,7 @@ commit;`);
   check("never stored or indexed", /no-store/.test(h("cache-control")) && /private/.test(h("cache-control")) && /noindex/.test(h("x-robots-tag")) && h("x-content-type-options") === "nosniff" && h("referrer-policy") === "no-referrer");
   const d = ex.data ?? {};
   // M12a: version 2, as a copy may be unidentified; every copy carries a "claim" (null when it names a release).
-  check("it names its format and ends complete", d.format === "my-game-dex-export" && d.version === 2 && d.complete === true && ex.text.trimEnd().endsWith('"complete":true}'));
+  check("it names its format and ends complete", d.format === "my-game-dex-export" && d.version === 3 && Array.isArray(d.wishlist) && d.complete === true && ex.text.trimEnd().endsWith('"complete":true}'));
   check("every copy says whether it's a claim", Array.isArray(d.collection) && d.collection.every((c) => "claim" in c && (c.claim === null) === (c.release !== null)));
   check("it says it isn't a complete legal answer, and what's left out", /not a complete answer to a legal request/.test(d.notice ?? "") && Array.isArray(d.not_included) && d.not_included.length >= 4);
   check("the account is the signed-in person", d.account?.id === a.id && d.account?.email === a.email);

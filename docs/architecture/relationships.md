@@ -446,7 +446,7 @@ Where unverified records can be used:
 | --- | --- | --- |
 | The submitter's own `collection_items` | Yes | The approved requirement |
 | Another user's `collection_items` | No | Would make a private record shared. They submit their own, and review merges them |
-| `posts`, `reviews`, `wantlist_items`, `user_favorite_games` | No | These are public or social, so it would publish unreviewed text |
+| `posts`, `reviews`, `wishlist_items`, `user_favorite_games` | No | These are public or social, so it would publish unreviewed text |
 | Search, sitemaps, trending, provider matching | No | These read published records only |
 
 When a public item points at an unverified release, other viewers see the item with a neutral "Unverified release" placeholder and nothing from the record, approved as Q7. That includes its markets and components.
@@ -488,7 +488,8 @@ Other references to an excluded release:
 | Reference | Effect |
 | --- | --- |
 | `posts.release_id` | The post stays. The release isn't readable, so it shows no catalog details. A moderator can act on the post separately |
-| `reviews.release_id`, `wantlist_items.release_id` | Stay in place and show no catalog details, for a moderator or the owner to resolve |
+| `reviews.release_id` | Stays in place and shows no catalog details, for a moderator or the owner to resolve |
+| `wishlist_items.release_id` (M12 W1) | Stays in place. Only its owner reads it, as unavailable, with the details they saw while it was published (as for a preserved copy); restoring the release makes it available again. A merged release is shown as the release it was merged into |
 
 `ON DELETE RESTRICT` prevents deleting an excluded release while records still reference it, so it can't be removed by accident.
 
@@ -498,14 +499,14 @@ Other references to an excluded release:
 erDiagram
   profiles ||--o{ collection_items : "owns"
   profiles ||--o{ shelves : "arranges"
-  profiles ||--o{ wantlist_items : "wants"
+  profiles ||--o{ wishlist_items : "wants"
   shelves ||--o{ shelf_items : "displays"
   collection_items ||--o{ shelf_items : "displayed on"
   collection_items ||--o{ collection_item_components : "includes"
   releases ||--o{ collection_items : "owned as"
-  releases ||--o{ wantlist_items : "wanted as"
-  games ||--o{ wantlist_items : "wanted as"
-  platforms ||--o{ wantlist_items : "narrows"
+  releases ||--o{ wishlist_items : "wanted as"
+  games ||--o{ wishlist_items : "wanted as"
+  platforms ||--o{ wishlist_items : "narrows"
 
   shelves {
     uuid id PK
@@ -520,7 +521,7 @@ erDiagram
     uuid owner_id FK
     text sort_rank
   }
-  wantlist_items {
+  wishlist_items {
     uuid id PK
     uuid owner_id FK
     uuid release_id FK
@@ -811,10 +812,10 @@ Storage files don't cascade with database rows. Account deletion must also remov
 | --- | --- | --- | --- |
 | `games` | `releases` (through `game_platforms`) | Restrict | Deleting history by accident must be impossible |
 | `games` | `game_genres`, `game_franchises` | Cascade | Links only |
-| `games` | `user_favorite_games`, `wantlist_items`, `reviews` | Restrict | User data depends on it. Merge instead |
+| `games` | `user_favorite_games`, `wishlist_items`, `reviews` | Restrict | User data depends on it. Merge instead |
 | `releases`, `games` | `catalog_change_requests` | Set null (as built in M7a) | A withdrawal deletes the release it made, and the request stays as history, with its snapshot |
 | `releases` | `collection_items` | Restrict | Users own physical copies of it. Merge instead |
-| `releases` | `wantlist_items`, `posts`, `reviews` | Restrict | Merge instead |
+| `releases` | `wishlist_items`, `posts`, `reviews` | Restrict | Merge instead |
 | `region_codes`, `markets`, `genres`, `franchises`, `media_formats`, `hardware_requirements` | All children | Restrict | Reference data |
 | `platforms` | `platforms`, `releases`, `hardware_requirements` | Restrict | Reference data |
 | `platforms` | `platform_names`, `platform_media_formats` | Cascade | Parts of the platform record |

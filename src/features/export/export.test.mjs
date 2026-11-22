@@ -19,7 +19,9 @@ import {
   shapePreferences,
   shapeProfile,
   shapeSubmission,
+  shapeWish,
 } from "./format.ts";
+import { rowsById } from "./paging.ts";
 
 const src = join(import.meta.dirname, "..", "..");
 const read = (...parts) => readFileSync(join(src, ...parts), "utf8");
@@ -87,6 +89,29 @@ test("an unidentified copy carries its claim, its game and no release (M12a)", (
   assert.equal(shapeCopy(item("c1"), undefined, [], l).claim, null, "an identified copy has no claim");
 });
 
+test("a wish keeps what was wanted, its priority, minimum, note and dates, and how the catalog shows it (M12 W2)", () => {
+  const l = lookups();
+  const row = { id: "w1", release_id: null, game_id: "g1", platform_id: "p1", region_code: "PAL", completeness: "complete", priority: 1, note: "Boxed only", created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-03T00:00:00Z", owner_id: "u" };
+  const shown = { id: "w1", state: "platform_unavailable", merged: false, duplicate: false, game: { id: "g1", title: "A Game", slug: "a-game" }, platform: { slug: "ps2" }, region: { code: "PAL", label: "PAL" }, release: null, owned: { copies: 2, meeting_completeness: 1 } };
+  const wish = shapeWish(row, shown, l);
+  assert.equal(wish.level, "region");
+  assert.deepEqual(wish.wanted, { release_id: null, game_id: "g1", platform: { id: "p1", slug: "ps2", name: "PlayStation 2", short_name: "PS2" }, region: { code: "PAL", label: "PAL" } });
+  assert.deepEqual(wish.priority, { value: 1, label: "high" });
+  assert.equal(wish.minimum_completeness, "complete");
+  assert.equal(wish.note, "Boxed only");
+  assert.equal(wish.created_at, "2026-11-01T00:00:00Z");
+  assert.equal(wish.updated_at, "2026-11-03T00:00:00Z");
+  assert.equal(wish.catalog.state, "platform_unavailable");
+  assert.ok(!("owner_id" in wish) && !("owned" in wish.catalog), "no owner id, and nothing derived from the collection");
+  assert.equal(shapeWish({ ...row, platform_id: null, region_code: null }, undefined, l).level, "game");
+  assert.equal(shapeWish({ ...row, region_code: null }, undefined, l).level, "platform");
+  const exact = shapeWish({ ...row, release_id: "gone", game_id: null, platform_id: null, region_code: null }, { state: "unavailable", merged: false, release: { id: "gone" } }, l);
+  assert.equal(exact.level, "release");
+  assert.equal(exact.wanted.release_id, "gone", "an excluded release is still named as wanted");
+  assert.equal(exact.catalog.state, "unavailable");
+  assert.equal(shapeWish(row, undefined, l).catalog, null, "not matched to the catalog read: said, not guessed");
+});
+
 test("statuses match the collection pages", () => {
   assert.equal(copyStatus("active", undefined, true), "unidentified");
   assert.equal(copyStatus("invalid_preserved", undefined, true), "invalid");
@@ -119,8 +144,8 @@ test("never a secret, a token, another account or an internal field", () => {
 
 test("the file names the format, says what it isn't, and is named safely", () => {
   assert.equal(EXPORT_FORMAT, "my-game-dex-export");
-  // M12a: version 2, as a copy may now be unidentified.
-  assert.equal(EXPORT_VERSION, 2);
+  // M12a: version 2, as a copy may now be unidentified. M12 W2: version 3, with the wishlist.
+  assert.equal(EXPORT_VERSION, 3);
   assert.match(EXPORT_NOTICE, /not a complete answer to a legal request/);
   assert.ok(NOT_INCLUDED.some((x) => /Notifications/.test(x)) && NOT_INCLUDED.some((x) => /never exported/.test(x)));
   const now = new Date("2026-11-18T23:59:00Z");
@@ -143,10 +168,51 @@ test("the export reads only as the person: no secret key, no Auth Admin, no id f
   assert.match(route, /const userId = auth\?\.claims\?\.sub;/);
   assert.doesNotMatch(route, /request\.(formData|json|text)\(|searchParams\.get|nextUrl\.searchParams/);
   // Every collection read names the owner, on top of RLS.
-  for (const table of ["collection_items", "collection_item_private", "collection_item_components"]) {
+  for (const table of ["collection_items", "collection_item_private", "collection_item_components", "wishlist_items"]) {
     assert.match(server, new RegExp(`from\\("${table}"\\)[^;]*\\.eq\\("owner_id", me\\)`), table);
   }
   assert.match(route, /"Cache-Control": "private, no-store, max-age=0"/);
   assert.match(route, /"X-Robots-Tag": "noindex/);
   assert.match(route, /take_request_slot", \{ p_kind: "data_export" \}/);
+});
+
+// The wishlist rows are read by key, not by offset (integration review of M12 W2).
+const table = (n) => Array.from({ length: n }, (_, i) => ({ id: `w${String(i).padStart(6, "0")}` }));
+const pager = (rows, onPage = () => {}) => {
+  let calls = 0;
+  const page = async (after, size) => {
+    onPage(calls++, rows);
+    return rows.filter((r) => after === null || r.id > after).slice(0, size);
+  };
+  return { page, calls: () => calls };
+};
+const tooLarge = () => new Error("too large");
+
+test("an entry removed between pages doesn't make another be skipped", async () => {
+  const rows = table(2500);
+  const all = rows.map((r) => r.id);
+  // After the first page, the person removes an entry that page already held.
+  const { page } = pager(rows, (call, live) => call === 1 && live.splice(10, 1));
+  const out = (await rowsById(page, 1000, 10_000, tooLarge)).map((r) => r.id);
+  assert.equal(out.length, 2500);
+  assert.equal(new Set(out).size, 2500);
+  assert.deepEqual(out, all);
+});
+
+test("the wishlist pager stops at a short page, takes exactly the limit and refuses more", async () => {
+  const exact = pager(table(2000));
+  assert.equal((await rowsById(exact.page, 1000, 10_000, tooLarge)).length, 2000);
+  assert.equal(exact.calls(), 3);
+  assert.equal((await rowsById(pager(table(10_000)).page, 1000, 10_000, tooLarge)).length, 10_000);
+  await assert.rejects(rowsById(pager(table(10_001)).page, 1000, 10_000, tooLarge), /too large/);
+  assert.deepEqual(await rowsById(pager([]).page, 1000, 10_000, tooLarge), []);
+});
+
+test("the export reads the wishlist rows by id, never by offset", () => {
+  const server = read("features", "export", "server.ts");
+  const start = server.indexOf('from("wishlist_items")');
+  const block = server.slice(start, server.indexOf("EXPORT_MAX_WISHES", start));
+  assert.match(block, /\.order\("id"\)\.limit\(size\)/);
+  assert.match(block, /query\.gt\("id", after\)/);
+  assert.doesNotMatch(block, /\.range\(/);
 });

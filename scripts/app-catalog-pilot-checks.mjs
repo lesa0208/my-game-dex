@@ -67,7 +67,7 @@ function choices(html, slug) {
   for (const m of html.matchAll(new RegExp(`href="/games/${slug}\\?([^"]*)"`, "g"))) out.push(Object.fromEntries(new URLSearchParams(decode(m[1]))));
   return out;
 }
-const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "item_id" in f.hidden);
+const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "item_id" in f.hidden && "components" in f.hidden);
 const claimForm = (html) => forms(html).find((f) => "platform_id" in f.hidden && "game_id" in f.hidden && !("item_id" in f.hidden && f.names.includes("region")));
 
 async function collector() {

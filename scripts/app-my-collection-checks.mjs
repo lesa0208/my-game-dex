@@ -480,7 +480,7 @@ async function regressions() {
   check("the game page stays public, with sign-in to add", game.response.status === 200 && game.html.includes("Sign in to add to your collection"));
   const user = await collector();
   const page = await user.browser.get(`/games/starfall-odyssey?release=${starfall}`);
-  const form = formWith(page.html, "release_id");
+  const form = forms(page.html).find((f) => "release_id" in f.hidden && "components" in f.hidden);
   await user.browser.submit(`/games/starfall-odyssey?release=${starfall}`, form, {});
   check("adding from the game page still works", copiesOf(user.id, starfall) === 1);
   check("and the copy appears in My Collection", rowIds((await user.browser.get("/collection")).html).length === 1);

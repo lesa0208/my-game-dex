@@ -26,7 +26,9 @@ insert into approved_relation_grants values ('game_aliases', 'anon'), ('game_ali
 -- M6b: owner-only collections. Signed-in users only, under owner-only RLS; no anon
 -- or service_role access. Test 21 asserts the column grants.
 insert into approved_relation_grants values
-  ('collection_items', 'authenticated'), ('collection_item_private', 'authenticated'), ('collection_item_components', 'authenticated');
+  ('collection_items', 'authenticated'), ('collection_item_private', 'authenticated'), ('collection_item_components', 'authenticated'),
+  -- M12 W1: the owner reads their own wishlist rows (the export); writes go through functions.
+  ('wishlist_items', 'authenticated');
 create temp table approved_function_grants (fn text, grantee text);
 insert into approved_function_grants values
   ('claim_handle(text)', 'authenticated'),
@@ -145,6 +147,10 @@ insert into approved_function_grants values
   -- identity changes and history, "Owned: Yes", and preserved claims.
   ('add_unidentified_copy(uuid,uuid,uuid,text,text,text,jsonb)', 'authenticated'), ('set_my_copy_identity(uuid,jsonb)', 'authenticated'),
   ('get_my_copy_history(uuid)', 'authenticated'), ('get_my_game_ownership(uuid)', 'authenticated'), ('get_my_owned_games(uuid[])', 'authenticated'), ('get_my_preserved_claim(uuid)', 'authenticated'),
+  -- M12 W1: the wishlist. Definers that check the caller themselves: signed in, a live
+  -- session, and an active account to add or edit.
+  ('add_wishlist_item(uuid,jsonb,jsonb)', 'authenticated'), ('update_wishlist_item(uuid,jsonb)', 'authenticated'), ('remove_wishlist_item(uuid)', 'authenticated'),
+  ('get_my_wishlist(text,text,text,integer,text,integer,text)', 'authenticated'), ('get_my_wishlist_for_game(uuid)', 'authenticated'), ('get_my_wishlist_item(uuid)', 'authenticated'),
   -- M7b-2b: excluding (editors) and restoring (administrators); each function checks
   -- the caller's staff role. Owners read what their preserved copies are on.
   ('get_exclusion_preview(uuid)', 'authenticated'), ('exclude_release(uuid,text,text,text,text,boolean,boolean)', 'authenticated'),

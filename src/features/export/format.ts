@@ -3,15 +3,20 @@
  * page's messages. Pure, so it can be tested without a server. src/features/export/server.ts
  * reads the data, as the person, and streams what this shapes.
  *
- * Format "my-game-dex-export", version 2 (M12a: a copy may be unidentified, with status
- * "unidentified" or "invalid", a null release and a "claim"): one JSON object, written in this key order:
+ * Format "my-game-dex-export", version 3 (M12a, version 2: a copy may be unidentified,
+ * with status "unidentified" or "invalid", a null release and a "claim"; M12 W2,
+ * version 3: the wishlist): one JSON object, written in this key order:
  *   format, version, exported_at, notice, account, profile, preferences, authenticators,
- *   collection (an array), submissions (an array), not_included, complete (true, last).
+ *   collection (an array), wishlist (an array), submissions (an array), not_included,
+ *   complete (true, last).
  * A file without "complete": true at the end was cut off and is incomplete.
  */
 
 export const EXPORT_FORMAT = "my-game-dex-export";
-export const EXPORT_VERSION = 2;
+export const EXPORT_VERSION = 3;
+/** Wishlist entries per page of get_my_wishlist (its own maximum); W1 allows 10,000 an account. */
+export const WISHLIST_PAGE = 100;
+export const EXPORT_MAX_WISHES = 10_000;
 /** Copies read per page (each page is four bounded reads). PostgREST returns up to 1,000 rows. */
 export const EXPORT_PAGE = 200;
 /** The database's ceiling per account (M6): a loop that passes it is refused rather than run on. */
@@ -161,6 +166,48 @@ function claimOf(item: Row, lookups: Lookups): Row {
     region: code ? { code, label: lookups.regions.get(code)?.label ?? null } : null,
     edition_kind: item.claimed_edition_kind ?? null,
     edition_name: item.claimed_edition_name ?? null,
+  };
+}
+
+const WISH_PRIORITIES: Record<number, string> = { 1: "high", 2: "normal", 3: "low" };
+
+/**
+ * M12 W2: one wishlist entry. "wanted" is what the person chose, as stored (the record
+ * ids, and the platform and region by name): it never changes unless they change it.
+ * "catalog" is how the catalog shows it now, from get_my_wishlist (W1): "available",
+ * "unavailable" (its record left the catalog) or "platform_unavailable", whether a merge
+ * moved it to another record ("merged"), and what it shows. Null when the entry
+ * couldn't be matched to that read (added or changed while exporting).
+ * minimum_completeness is the lowest the person would accept, not a copy they own.
+ */
+export function shapeWish(row: Row, shown: Row | undefined, lookups: Pick<Lookups, "platforms" | "regions">): Row {
+  const region = str(row.region_code);
+  const level = row.release_id != null ? "release" : row.platform_id != null && region ? "region" : row.platform_id != null ? "platform" : "game";
+  return {
+    id: row.id,
+    level,
+    wanted: {
+      release_id: row.release_id ?? null,
+      game_id: row.game_id ?? null,
+      platform: row.platform_id == null ? null : { id: row.platform_id, ...(platformOf(lookups as Lookups, row.platform_id) ?? {}) },
+      region: region ? { code: region, label: lookups.regions.get(region)?.label ?? null } : null,
+    },
+    priority: typeof row.priority === "number" ? { value: row.priority, label: WISH_PRIORITIES[row.priority] ?? null } : null,
+    minimum_completeness: row.completeness ?? null,
+    note: row.note ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    catalog: shown
+      ? {
+          state: shown.state ?? null,
+          merged: shown.merged === true,
+          duplicate: shown.duplicate === true,
+          game: shown.game ?? null,
+          platform: shown.platform ?? null,
+          region: shown.region ?? null,
+          release: shown.release ?? null,
+        }
+      : null,
   };
 }
 

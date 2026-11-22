@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
-import { isActivePath, navigationItems } from "@/config/navigation";
+import { activeHref, navigationItems } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 
 const mobileItems = navigationItems.filter((item) => item.inMobileNav);
 
 function MobileNavLinks({ pathname }: { pathname: string | null }) {
+  const active = pathname === null ? null : activeHref(pathname, mobileItems);
   return (
     <nav
       aria-label="Main"
@@ -17,7 +18,7 @@ function MobileNavLinks({ pathname }: { pathname: string | null }) {
     >
       <ul className="grid grid-cols-5">
         {mobileItems.map(({ href, icon: Icon, label, shortLabel }) => {
-          const isActive = pathname !== null && isActivePath(pathname, href);
+          const isActive = active === href;
           return (
             <li key={href}>
               <Link

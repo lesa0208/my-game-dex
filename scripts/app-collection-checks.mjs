@@ -22,6 +22,7 @@ import {
   check,
   createUser,
   deleteUsers,
+  forms,
   formWith,
   psql,
   readSession,
@@ -40,7 +41,8 @@ const SLUG = "starfall-odyssey";
 const release = (code) => psql(`select id from public.releases where product_code = '${code}';`);
 const copies = (userId, releaseId) => Number(psql(`select count(*) from public.collection_items where owner_id = '${userId}' and release_id = '${releaseId}';`));
 const page = (releaseId) => `/games/${SLUG}?release=${releaseId}`;
-const addForm = (html) => formWith(html, "release_id");
+// The add-copy form (it carries the release's pieces), not M12 W2's "Want this release".
+const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "components" in f.hidden);
 const text = (html) => html.replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&");
 
 /** A UUIDv7 for a given time. */

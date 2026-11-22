@@ -56,7 +56,7 @@ function Chips({ label, items }: { label: string; items: { key: string; text: st
 }
 
 /** "Greatest Hits (Reprint)": the kind is added when the name doesn't already say it. */
-function editionText(edition: PickerRelease["edition"]) {
+export function editionText(edition: PickerRelease["edition"]) {
   if (!edition) return null;
   const kind = edition.kind && edition.kind !== "standard" ? editionKindLabel(edition.kind) : null;
   if (!edition.name) return kind;
@@ -116,6 +116,18 @@ function ReleaseCard({ release, href, selected, varying }: { release: PickerRele
         ))}
       </dl>
     </Link>
+  );
+}
+
+function ReleaseList({ releases, selectedId, varying, href }: { releases: PickerRelease[]; selectedId: string | null; varying: Set<string>; href: (release: PickerRelease) => string }) {
+  return (
+    <ul aria-label="Releases" className="mt-3 flex flex-col gap-2">
+      {releases.map((release) => (
+        <li key={release.id}>
+          <ReleaseCard release={release} selected={selectedId === release.id} varying={varying} href={href(release)} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -198,7 +210,9 @@ type Href = Partial<{ platform: string | null; region: string | null; edition: s
  * `renderClaim` adds an unidentified copy with what they know. `renderOwnership` shows
  * what the signed-in owner already has. Those three read the session, so they're
  * rendered apart from this public view. `requestedRelease` is set when the address
- * named a release that isn't shown.
+ * named a release that isn't shown. `showHeader` is off when the page draws the game's
+ * own header above the steps. `collapseReleases` folds the full release list away, for a
+ * page that already lists every release and where nothing has been chosen yet.
  */
 export function ReleasePickerView({
   picker,
@@ -208,6 +222,8 @@ export function ReleasePickerView({
   renderClaim,
   renderOwnership,
   requestedRelease = false,
+  showHeader = true,
+  collapseReleases = false,
 }: {
   picker: ReleasePicker;
   plan: FastAddPlan<PickerRelease>;
@@ -216,6 +232,8 @@ export function ReleasePickerView({
   renderClaim?: (claim: ClaimChoice) => ReactNode;
   renderOwnership?: ReactNode;
   requestedRelease?: boolean;
+  showHeader?: boolean;
+  collapseReleases?: boolean;
 }) {
   const { game } = picker;
   const meta = [game.firstRelease ? formatCatalogDate(game.firstRelease) : null, gameKindLabel(game.kind)].filter(Boolean);
@@ -271,28 +289,30 @@ export function ReleasePickerView({
 
   return (
     <article>
-      <header className="flex gap-4">
-        <CatalogCover className="w-20 md:w-28" />
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-pretty">{game.title}</h1>
-          {meta.length ? <p className="mt-1 text-sm text-muted-foreground">{meta.join(" · ")}</p> : null}
-          {game.aliases.length ? (
-            <ul aria-label="Other titles" className="mt-2 flex flex-col gap-0.5 text-sm">
-              {game.aliases.map((alias) => (
-                <li key={`${alias.title}-${alias.languageCode}-${alias.regionCode}`}>
-                  <span className="text-muted-foreground">{aliasKindLabel(alias.kind)}: </span>
-                  {alias.title}
-                  {alias.languageCode ? <span className="text-muted-foreground"> · {languageName(alias.languageCode)}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </header>
+      {showHeader ? (
+        <header className="flex gap-4">
+          <CatalogCover className="w-20 md:w-28" />
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold tracking-tight text-pretty">{game.title}</h1>
+            {meta.length ? <p className="mt-1 text-sm text-muted-foreground">{meta.join(" · ")}</p> : null}
+            {game.aliases.length ? (
+              <ul aria-label="Other titles" className="mt-2 flex flex-col gap-0.5 text-sm">
+                {game.aliases.map((alias) => (
+                  <li key={`${alias.title}-${alias.languageCode}-${alias.regionCode}`}>
+                    <span className="text-muted-foreground">{aliasKindLabel(alias.kind)}: </span>
+                    {alias.title}
+                    {alias.languageCode ? <span className="text-muted-foreground"> · {languageName(alias.languageCode)}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </header>
+      ) : null}
 
       {renderOwnership}
 
-      <section aria-labelledby="choose-release" className="mt-6 flex flex-col gap-5">
+      <section aria-labelledby="choose-release" className={cn("flex flex-col gap-5", showHeader && "mt-6")}>
         <h2 id="choose-release" className="text-base font-semibold">
           Add to your collection
         </h2>
@@ -434,7 +454,16 @@ export function ReleasePickerView({
           <p className="text-sm text-muted-foreground">Choose the platform, region and edition you have, or pick your release below.</p>
         ) : null}
 
-        {shown.length ? (
+        {shown.length && collapseReleases && !outcome ? (
+          // The page lists every release above; here they stay one click away until a choice narrows them.
+          <details className="rounded-lg border p-3">
+            <summary className="cursor-pointer text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring">
+              <span id="catalog-releases">Releases in the catalog</span>
+              <span className="font-normal text-muted-foreground"> · {shown.length}, with every detail</span>
+            </summary>
+            <ReleaseList releases={shown} selectedId={null} varying={varying} href={(release) => href({ platform: release.platform.slug, region: release.region.code, edition: editionKey(release.edition), release: release.id })} />
+          </details>
+        ) : shown.length ? (
           <section aria-labelledby="catalog-releases" className="flex flex-col gap-2">
             <h3 id="catalog-releases" className="text-sm font-medium">
               {outcome?.kind === "choose" ? "Matching releases" : "Releases in the catalog"}
