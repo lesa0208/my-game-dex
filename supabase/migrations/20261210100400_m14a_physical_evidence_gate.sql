@@ -28,7 +28,7 @@
 
 alter table public.game_platforms
   add constraint game_platforms_physical_evidence
-  check (verification_basis is null or verification_basis ->> 'physical_eligibility' = 'confirmed');
+  check (verification_basis is null or (verification_basis ->> 'physical_eligibility' = 'confirmed') is true);
 
 create or replace function public.approve_review_batch(p_batch uuid, p_reason text)
 returns jsonb
@@ -254,7 +254,8 @@ begin
     if private.pairing_created_by(v_me, p_game, v_platform) then
       raise exception 'own record' using errcode = 'P0001';
     end if;
-    if v_pair.verified_at is null or v_pair.verified_game_revision is distinct from v_game.revision then
+    if v_pair.verified_at is null or v_pair.verified_by is null
+       or v_pair.verified_game_revision is distinct from v_game.revision then
       raise exception 'pairing not verified' using errcode = 'P0001';
     end if;
     -- M14a: whoever confirmed the pairing's physical evidence (verified it) can't also publish it.
