@@ -1,0 +1,1077 @@
+{
+  "entities": {
+    "Q1001": {
+      "type": "item",
+      "id": "Q1001",
+      "lastrevid": 2001,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Starfall Saga"
+        },
+        "ja": {
+          "language": "ja",
+          "value": "ズクスの星"
+        }
+      },
+      "aliases": {
+        "en": [
+          {
+            "language": "en",
+            "value": "Starfall Saga"
+          }
+        ]
+      },
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1992-03-10T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          },
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1991-12-01T00:00:00Z",
+                  "precision": 10,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q999001"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ],
+        "P5794": [
+          {
+            "mainsnak": {
+              "property": "P5794",
+              "datavalue": {
+                "value": "zqx-starfall-saga",
+                "type": "string"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P11688": [
+          {
+            "mainsnak": {
+              "property": "P11688",
+              "datavalue": {
+                "value": "9001",
+                "type": "string"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P178": [
+          {
+            "mainsnak": {
+              "property": "P178",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q500001"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P123": [
+          {
+            "mainsnak": {
+              "property": "P123",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q500002"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ]
+      }
+    },
+    "Q1002": {
+      "type": "item",
+      "id": "Q1002",
+      "lastrevid": 2002,
+      "labels": {
+        "mul": {
+          "language": "mul",
+          "value": "Zqx Lantern Moon"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1993-01-01T00:00:00Z",
+                  "precision": 9,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1003": {
+      "type": "item",
+      "id": "Q1003",
+      "lastrevid": 2003,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Harbor Lights"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999001"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1994-05-05T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q999001"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1004": {
+      "type": "item",
+      "id": "Q1004",
+      "lastrevid": 2004,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Soundtrack Collection"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999100"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1995-02-02T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1005": {
+      "type": "item",
+      "id": "Q1005",
+      "lastrevid": 2005,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Copper Gate"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999101"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1989-04-04T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1006": {
+      "type": "item",
+      "id": "Q1006",
+      "lastrevid": 2006,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Starfall Saga Deluxe"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1996-06-06T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ],
+        "P5794": [
+          {
+            "mainsnak": {
+              "property": "P5794",
+              "datavalue": {
+                "value": "zqx-starfall-saga",
+                "type": "string"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ]
+      }
+    },
+    "Q1007": {
+      "type": "item",
+      "id": "Q1007",
+      "lastrevid": 2007,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Starfall Saga"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1997-07-07T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1008": {
+      "type": "item",
+      "id": "Q1008",
+      "lastrevid": 2008,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Quiet Orchard"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1990-01-01T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "deprecated",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1009": {
+      "type": "item",
+      "id": "Q1009",
+      "lastrevid": 2009,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Linked Legend"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1993-09-09T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1010": {
+      "type": "item",
+      "id": "Q1010",
+      "lastrevid": 2010,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Duplicate Drift"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+1994-10-10T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Q1011": {
+      "id": "Q1011",
+      "missing": ""
+    },
+    "Q1012": {
+      "type": "item",
+      "id": "Q1012",
+      "lastrevid": 2012,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Zqx Late Bloom"
+        }
+      },
+      "aliases": {},
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "property": "P31",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999001"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999002"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999003"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "property": "P400",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "id": "Q999004"
+                },
+                "type": "wikibase-entityid"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+2005-05-05T00:00:00Z",
+                  "precision": 11,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal",
+            "qualifiers": {
+              "P400": [
+                {
+                  "property": "P400",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "snaktype": "value"
+                }
+              ]
+            }
+          },
+          {
+            "mainsnak": {
+              "property": "P577",
+              "datavalue": {
+                "value": {
+                  "time": "+2003-01-01T00:00:00Z",
+                  "precision": 9,
+                  "timezone": 0,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "snaktype": "value"
+            },
+            "rank": "normal"
+          }
+        ]
+      }
+    }
+  },
+  "success": 1
+}

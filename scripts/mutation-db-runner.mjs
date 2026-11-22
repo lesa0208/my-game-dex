@@ -3,9 +3,13 @@
  * this applies the violation to the local stack, runs the tests, records the result
  * and resets the database.
  *
- *   node scripts/db-mutation-checks.mjs [--suite m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|m7b2c|m8|all] [--out results.json] [--log run.log] [--artifacts dir] [--only name|#N,...]
- *   node scripts/db-mutation-checks.mjs --recover
- *   node scripts/db-mutation-checks.mjs --self-test offline|database|all
+ *   MGD_MUTATION_TESTING=1 MGD_STACK=scratch node scripts/mutation-db-runner.mjs --suite <m2|m3|m4|m4b|m5a|m5b|m5c|m6|m7a|m7b1|m7b2a|m7b2b|m7b2c|m8|all> [--out results.json] [--log run.log] [--artifacts dir] [--only name|#N,...]
+ *   node scripts/mutation-db-runner.mjs --recover
+ *   node scripts/mutation-db-runner.mjs --self-test offline     (no opt-in needed)
+ *   MGD_MUTATION_TESTING=1 MGD_STACK=scratch node scripts/mutation-db-runner.mjs --self-test database|all
+ *
+ * Destructive: a run resets the stack. It refuses unless MGD_MUTATION_TESTING=1, a named
+ * suite and MGD_STACK=scratch are all given (lib/mutation-guard.mjs).
  *
  * About two minutes per violation. Local only. Progress goes to the terminal and,
  * unbuffered, to the log file. Don't pipe the output through a filter: that can
@@ -32,6 +36,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { suites } from "./security-mutations.mjs";
+import { requireMutationOptIn } from "./lib/mutation-guard.mjs";
 import { stackConfigPath, stackStatus, workdirArgs } from "./lib/stack.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -755,6 +760,9 @@ async function databaseSelfTests(directory) {
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // Before anything else (no log, lock or stack call): destructive runs need an explicit
+  // opt-in, a named suite and the scratch stack. See lib/mutation-guard.mjs.
+  requireMutationOptIn({ kind: "db" });
   if (process.argv[2] === "--self-test-child") {
     await selfTestChild(process.argv[3], process.argv[4]);
     return 0;

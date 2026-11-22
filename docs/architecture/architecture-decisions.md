@@ -455,8 +455,8 @@ Each adapter is one module, for example `src/features/catalog/providers/<code>/`
 
 | Provider | Finding | Status |
 | --- | --- | --- |
-| IGDB | Secondary sources say commercial use requires a partnership ([IGDB's post](https://medium.com/igdb/igdb-api-v4-is-coming-6ba97874edbc), [Twitch developer forum](https://discuss.dev.twitch.com/t/commercial-use-of-igdb-api/23567)) | Confirm directly |
-| MobyGames | No commercial pricing or terms found | Unknown |
+| IGDB | Re-checked in M12c-B0 (2026-11-20, [API docs](https://api-docs.igdb.com/)). Commercial use and daily CSV dumps go through a partnership (partner@igdb.com). Its partnership FAQ allows storing and serving data, and keeping it after termination. The Twitch Developer Services Agreement it points to limits caching to 24 hours and requires deletion on termination ([catalog-acquisition-m12c-b0.md](catalog-acquisition-m12c-b0.md)) | **Written confirmation** of the governing partnership terms needed; the product owner has written |
+| MobyGames | M12c-B0: paid commercial tiers and release data (countries, product codes) reported, but its pages block automated access, so nothing is verified ([catalog-acquisition-m12c-b0.md](catalog-acquisition-m12c-b0.md)) | Written enquiry |
 | ScreenScraper | Re-checked in M12c-A (2026-11-19, [webapi2](https://www.screenscraper.fr/webapi2.php)): the API may be built only into "applications entièrement gratuites" (completely free applications), otherwise only with the team's prior authorisation and conditions. Developer credentials come through its forum; per-user quotas depend on level and donations. The site footer names CC BY-NC-SA 4.0, and its media is credited to third parties ([catalog-pilot-m12c.md](catalog-pilot-m12c.md#sources-and-licensing)) | **Not usable** without a written commercial licence, which still wouldn't clear third-party images |
 | TheGamesDB | Re-checked in M12c-A (2026-11-19): no published terms of use, licence or attribution rules on the site or API pages. API keys need a signed-in account; allowances and their increase aren't documented in readable form. The GPL-3.0 on its GitHub covers the site code, not the data | **Held** until its staff confirm commercial use, local storage, attribution and image rights in writing |
 
@@ -1389,3 +1389,11 @@ M0 creates no application tables and changes no application code. It stops there
 4. Sign-in and server sessions are connected locally (M6a, [ADR-048](#adr-048-web-sessions-are-handled-only-on-the-server)). Sign-up and password reset wait for the public-authentication blockers.
 5. Settle the gates above: guidelines before catalog approval, retention, D12 and legal review before real user data, and D15 before catalog art.
 6. The SNES import pilot waits for each provider's clearance and the product owner's approval. M10 adds no importing ([M10 decision D8](#m10-decisions-the-admin-panel-expansion)).
+7. **Next product milestone: the visual collector experience.** It starts with My Collection → Systems → Console Collection Shelf.
+   - Branch from a stable `main`.
+   - Use isolated mock data and the existing frontend architecture.
+   - It must not depend on the B1 migrations or on new catalog imports.
+8. **Future, not scheduled: scalable editorial review and eventual publication of staged catalog identities.**
+   - The M12c-B1 technical ingestion pilot is complete. Its editorial approval and publication are deferred and not validated end to end ([wrap-up](catalog-ingestion-m12c-b1.md#b1-technical-pilot-wrap-up-2026-11-21)).
+   - The task: a review workflow that scales past a terminal census, then publication of the 137 B1 candidates or their successors. It keeps two human editors, recent MFA, no self-review and the sampling safeguards.
+   - It needs its own authorization, and a re-validation of the B1 migration drafts against `main`.

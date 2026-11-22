@@ -1,0 +1,883 @@
+-- PROPOSAL (M12c-B1, B1-M2, part 2): not a migration until reviewed and moved to supabase/migrations.
+--
+-- Frozen review batches for game identities: risk-based validation, reproducible sampling,
+-- explicit human approval and audit history. Requires B1-M1 (pairing verification and
+-- identity publication) and part 1 (audit actions).
+--
+-- Invariants (tested in 50_b1_review_batches.test.sql):
+--   B1  Membership is frozen at creation: items can't be added, removed or changed after the
+--       creating transaction, except the outcome fields while the batch is open.
+--   B2  The sample is reproducible: the seed is drawn after the content is frozen, and the
+--       sample is the unflagged members in sha256(seed || game id) order. The sample size is
+--       computed in the database for the batch's actual unflagged count (hypergeometric).
+--   B3  Every flagged and every sampled member has a human outcome before approval.
+--   B4  Approval is refused: by the batch's creator; by anyone who created one of its games
+--       or pairings; without recent MFA; if the sample's incorrect count exceeds the acceptance
+--       number; if any critical error is unresolved; if a sampled (unflagged) member has a
+--       critical error (the validators missed one: reject, fix, re-batch); if any member's
+--       revision changed after freezing, or its game or pairing left review (B10).
+--   B5  A rejected batch is never reopened or resampled. Its members can join a new batch with
+--       a new seed. No automatic acceptance ever follows a failed sample.
+--   B6  Batches above the policy's size need a second, different approver (A-4); the pilot
+--       needs one.
+--   B7  Approval publishes identities only: games and their pairings. It never creates,
+--       verifies or publishes a release.
+--   B8  Every step writes an audit row naming the editor, the batch, its content hash, source
+--       run, seed, sample, findings and decision. Audit rows are never edited.
+--   B9  Findings only become more conservative: a recorded outcome changes only from incorrect
+--       to excluded, a recorded critical error is never cleared, and nothing changes once an
+--       approval is recorded. A sampled member that isn't correct (incorrect or excluded) is a
+--       sample error.
+--   B10 Members are only records still in review: a withdrawn (excluded) or rejected pairing
+--       never joins a batch, and a member whose game or pairing left review makes it stale.
+--   B11 Each published pairing's provenance is its frozen source record (provider, id, payload
+--       hash). Physical eligibility is "confirmed" only for a member a person found correct;
+--       an unsampled member is "batch_accepted".
+--
+-- Added after the independent SQL review of 62267d6 (findings 1 to 7):
+--   B12 Approval locks every member game and pairing (in id order) before its stale check, and
+--       each publication write is conditional on the frozen revision and review status: a
+--       member changed by a concurrent transaction fails the whole approval (finding 1).
+--   B13 No self-review of a member: the creator or submitter of a member's game, or the creator
+--       of its pairing, records no outcome for it (finding 2). Recording an outcome needs a
+--       recent second factor, like every other step (finding 3).
+--   B14 A member of a rejected batch joins a new batch only after a verifiable change: its game
+--       revision moved (an audited edit with its reason) or a new source record was staged. A
+--       new seed alone is never a change, so a failed cohort can't be resampled (finding 4).
+--   B15 Every member's source record carries a valid risk assessment (contract
+--       "mgd-risk-assessment", version 1): known flags only, critical signals that match the
+--       flags, and provenance tying it to the record and its snapshot. A missing or invalid
+--       assessment refuses the whole batch; it never becomes an unflagged member (finding 5).
+--   B16 Publication needs the right to publish each member's source: its provider cleared
+--       against the terms the record was imported under, or rights recorded as surviving a
+--       withdrawal of clearance for those terms (finding 6). Checked at creation and, under a
+--       share lock on the provider, at approval.
+--   B17 Overriding a critical signal (a flagged member found "correct") needs recorded evidence:
+--       a note of at least 20 characters, kept with the outcome and its audit row.
+--   B18 The content hash covers the complete frozen state: run, platform, each member's game,
+--       revision, pairing status, source record, payload hash, risk assessment and flags.
+--
+-- RLS is enabled, with no policies, on the four new tables: defense in depth. They are in the
+-- private schema with no client grants; editors act only through the SECURITY DEFINER
+-- functions below, which run as the table owner and check the caller.
+--
+-- Rollback (….rollback.sql) is a forward migration that removes the functions. It is not a
+-- complete schema reversal: the tables, the provider-rights columns and the enum values stay as
+-- review history; nothing that was published is unpublished.
+
+-- 1. Policy (one row).
+create table private.catalog_review_policy (
+  id boolean primary key default true check (id),
+  tolerable_error numeric not null default 0.02 check (tolerable_error > 0 and tolerable_error < 0.5),
+  confidence numeric not null default 0.95 check (confidence >= 0.8 and confidence < 1),
+  acceptance_number integer not null default 0 check (acceptance_number between 0 and 5),
+  second_approval_above integer not null default 1000 check (second_approval_above > 0),
+  updated_at timestamptz not null default now()
+);
+insert into private.catalog_review_policy default values;
+
+-- 2. Batches, items and approvals.
+create table private.catalog_review_batches (
+  id uuid primary key default gen_random_uuid(),
+  import_run_id uuid not null references private.import_runs (id) on delete restrict,
+  platform_id uuid not null references public.platforms (id) on delete restrict,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  reason text not null check (char_length(reason) between 1 and 500),
+  item_count integer not null check (item_count between 1 and 5000),
+  content_sha256 text not null check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  seed uuid not null,
+  flagged_count integer not null check (flagged_count >= 0),
+  sample_size integer not null check (sample_size >= 0),
+  acceptance_number integer not null check (acceptance_number >= 0),
+  tolerable_error numeric not null,
+  confidence numeric not null,
+  required_approvals integer not null check (required_approvals between 1 and 2),
+  status text not null default 'open' check (status in ('open', 'approved', 'rejected')),
+  decided_at timestamptz,
+  decision_reason text check (char_length(decision_reason) between 1 and 500),
+  check ((status = 'open') = (decided_at is null)),
+  check ((status = 'open') = (decision_reason is null))
+);
+
+create table private.catalog_review_batch_items (
+  batch_id uuid not null references private.catalog_review_batches (id) on delete restrict,
+  game_id uuid not null references public.games (id) on delete restrict,
+  platform_id uuid not null,
+  provider_record_id uuid references private.provider_records (id) on delete restrict,
+  frozen_game_revision bigint not null,
+  -- Exception flags (reviewed individually) and info flags (shown only), kept apart (B15).
+  flags text[] not null default '{}',
+  info_flags text[] not null default '{}',
+  critical_flags text[] not null default '{}',
+  sampled boolean not null default false,
+  outcome text check (outcome in ('correct', 'incorrect', 'excluded')),
+  critical_error text check (critical_error in ('wrong_identity_or_type', 'wrong_platform', 'physical_eligibility_unsupported',
+    'distinct_games_merged', 'conflicting_duplicate_identities', 'conflicting_identifiers', 'missing_provenance')),
+  reviewed_by uuid references public.profiles (id) on delete set null,
+  note text check (char_length(note) <= 1000),
+  recorded_at timestamptz,
+  primary key (batch_id, game_id),
+  check ((outcome is null) = (recorded_at is null)),
+  check (critical_error is null or outcome in ('incorrect', 'excluded')),
+  check (not (sampled and cardinality(flags) > 0))
+);
+create index catalog_review_batch_items_game_idx on private.catalog_review_batch_items (game_id);
+
+create table private.catalog_review_batch_approvals (
+  batch_id uuid not null references private.catalog_review_batches (id) on delete restrict,
+  approver_id uuid not null references public.profiles (id) on delete restrict,
+  approved_at timestamptz not null default now(),
+  reason text not null check (char_length(reason) between 1 and 500),
+  primary key (batch_id, approver_id)
+);
+
+revoke all on private.catalog_review_policy, private.catalog_review_batches, private.catalog_review_batch_items,
+  private.catalog_review_batch_approvals from public, anon, authenticated, service_role;
+alter table private.catalog_review_policy enable row level security;
+alter table private.catalog_review_batches enable row level security;
+alter table private.catalog_review_batch_items enable row level security;
+alter table private.catalog_review_batch_approvals enable row level security;
+
+-- 2b. The right to publish a source (B16). The importer requires clearance against the run's
+-- terms on every call (M5b); publication rechecks it. Some licences survive the end of a
+-- clearance or partnership (CC0, irrevocable grants): an operator records that, for the exact
+-- terms reviewed, and records imported under those terms stay publishable. Without it, records
+-- are publishable only while the provider is cleared against the terms they were imported under.
+alter table private.external_providers
+  add column rights_survive_withdrawal boolean not null default false,
+  add column rights_terms_sha256 text check (rights_terms_sha256 ~ '^[0-9a-f]{64}$'),
+  add column rights_note text check (char_length(rights_note) between 1 and 500),
+  add column rights_recorded_at timestamptz,
+  add constraint external_providers_rights_recorded check (
+    not rights_survive_withdrawal or (rights_terms_sha256 is not null and rights_note is not null and rights_recorded_at is not null));
+
+-- For operators working in SQL, like record_provider_clearance. Surviving rights can only be
+-- recorded while the provider is cleared against the same terms.
+create function private.record_provider_rights(p_code text, p_survives boolean, p_terms_sha256 text, p_note text)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_note text := private.require_reason(p_note);
+  v_provider private.external_providers;
+begin
+  if p_survives is null then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+  select * into v_provider from private.external_providers p where p.code = p_code for update;
+  if not found then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if p_survives and (not v_provider.commercial_use_cleared or p_terms_sha256 is distinct from v_provider.terms_sha256) then
+    raise exception 'terms not cleared' using errcode = 'P0001';
+  end if;
+  update private.external_providers p set
+    rights_survive_withdrawal = p_survives,
+    rights_terms_sha256 = case when p_survives then p_terms_sha256 end,
+    rights_note = case when p_survives then v_note end,
+    rights_recorded_at = case when p_survives then pg_catalog.now() end
+  where p.code = p_code;
+  perform private.record_audit(null, 'catalog_provider_cleared', null, v_note,
+    pg_catalog.jsonb_build_object('provider', p_code, 'rights_survive_withdrawal', p_survives, 'terms_sha256', p_terms_sha256));
+end;
+$$;
+
+-- Raises unless records imported under p_terms_sha256 may be published now. A share lock on the
+-- provider row, so a clearance change waits for an approval in progress and vice versa.
+create function private.require_publication_rights(p_provider text, p_terms_sha256 text)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_provider private.external_providers;
+begin
+  select * into v_provider from private.external_providers p where p.code = p_provider for share;
+  if not found or p_terms_sha256 is null then
+    raise exception 'provider not cleared' using errcode = 'P0001';
+  end if;
+  if v_provider.commercial_use_cleared and v_provider.terms_sha256 = p_terms_sha256 then
+    return;
+  end if;
+  if v_provider.rights_survive_withdrawal and v_provider.rights_terms_sha256 = p_terms_sha256 then
+    return;
+  end if;
+  raise exception 'provider not cleared' using errcode = 'P0001';
+end;
+$$;
+revoke all on function private.record_provider_rights(text, boolean, text, text), private.require_publication_rights(text, text)
+  from public, anon, authenticated, service_role;
+
+-- 3. Immutability (B1, B5, B8).
+create function private.guard_review_batch()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'review batches are kept' using errcode = 'check_violation';
+  end if;
+  if old.status <> 'open' then
+    raise exception 'a decided batch can''t change' using errcode = 'check_violation';
+  end if;
+  if (pg_catalog.to_jsonb(new) - array['status', 'decided_at', 'decision_reason'])
+     is distinct from (pg_catalog.to_jsonb(old) - array['status', 'decided_at', 'decision_reason']) then
+    raise exception 'a batch''s content is frozen' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+create trigger guard_review_batch before update or delete on private.catalog_review_batches
+  for each row execute function private.guard_review_batch();
+
+create function private.guard_review_batch_item()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_batch private.catalog_review_batches;
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'review batches are kept' using errcode = 'check_violation';
+  end if;
+  select * into v_batch from private.catalog_review_batches b where b.id = new.batch_id;
+  if tg_op = 'INSERT' then
+    -- Members are added only in the transaction that creates the batch.
+    if v_batch.created_at <> pg_catalog.now() then
+      raise exception 'a batch''s membership is frozen' using errcode = 'check_violation';
+    end if;
+    return new;
+  end if;
+  if v_batch.status <> 'open' then
+    raise exception 'a decided batch can''t change' using errcode = 'check_violation';
+  end if;
+  if (pg_catalog.to_jsonb(new) - array['outcome', 'critical_error', 'reviewed_by', 'note', 'recorded_at'])
+     is distinct from (pg_catalog.to_jsonb(old) - array['outcome', 'critical_error', 'reviewed_by', 'note', 'recorded_at']) then
+    raise exception 'a batch''s membership is frozen' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+create trigger guard_review_batch_item before insert or update or delete on private.catalog_review_batch_items
+  for each row execute function private.guard_review_batch_item();
+
+create function private.guard_review_batch_approval()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  raise exception 'approvals are kept as recorded' using errcode = 'check_violation';
+end;
+$$;
+create trigger guard_review_batch_approval before update or delete on private.catalog_review_batch_approvals
+  for each row execute function private.guard_review_batch_approval();
+
+-- 4. The sample size for the actual lot (B2): the smallest n such that a lot of p_lot items
+-- with ceil(p_tolerable * p_lot) errors gives at most p_c errors in the sample with
+-- probability at most 1 - p_confidence (hypergeometric, exact). The whole lot (a census)
+-- when no smaller n does.
+create function private.ln_choose(p_n integer, p_k integer)
+returns double precision
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v double precision := 0;
+  i integer;
+begin
+  if p_k < 0 or p_k > p_n then
+    return '-Infinity';
+  end if;
+  for i in 1 .. least(p_k, p_n - p_k) loop
+    v := v + pg_catalog.ln((p_n - least(p_k, p_n - p_k) + i)::double precision / i);
+  end loop;
+  return v;
+end;
+$$;
+
+create function private.hypergeometric_cdf(p_c integer, p_n integer, p_lot integer, p_defects integer)
+returns double precision
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v double precision := 0;
+  k integer;
+  v_total double precision := private.ln_choose(p_lot, p_n);
+begin
+  for k in 0 .. p_c loop
+    if k <= p_defects and p_n - k <= p_lot - p_defects and p_n - k >= 0 then
+      v := v + pg_catalog.exp(private.ln_choose(p_defects, k) + private.ln_choose(p_lot - p_defects, p_n - k) - v_total);
+    end if;
+  end loop;
+  return v;
+end;
+$$;
+
+create function private.review_sample_size(p_lot integer, p_tolerable numeric, p_confidence numeric, p_c integer)
+returns integer
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_defects integer;
+  v_lo integer := 0;
+  v_hi integer := p_lot;
+  v_mid integer;
+begin
+  if p_lot is null or p_lot <= 0 then
+    return 0;
+  end if;
+  v_defects := greatest(1, pg_catalog.ceil(p_tolerable * p_lot)::integer);
+  -- The acceptance probability falls as n grows; find the first n at or below 1 - confidence.
+  while v_lo < v_hi loop
+    v_mid := (v_lo + v_hi) / 2;
+    if private.hypergeometric_cdf(p_c, v_mid, p_lot, v_defects) <= 1 - p_confidence then
+      v_hi := v_mid;
+    else
+      v_lo := v_mid + 1;
+    end if;
+  end loop;
+  return v_lo;
+end;
+$$;
+
+revoke all on function private.guard_review_batch(), private.guard_review_batch_item(), private.guard_review_batch_approval(),
+  private.ln_choose(integer, integer), private.hypergeometric_cdf(integer, integer, integer, integer),
+  private.review_sample_size(integer, numeric, numeric, integer) from public, anon, authenticated, service_role;
+
+-- 5. Flags. They come from the source record's risk assessment (B15) and from checks here.
+-- Every flag the parser can emit has a kind: "exception" (the member is reviewed individually,
+-- never sampled or batch accepted) or "info" (shown only). A flag with no kind is unknown, and
+-- an assessment carrying one is invalid: an unknown flag never passes silently. The parser's
+-- FLAGS (scripts/wikidata-entities.mjs) must equal this list; a test enforces it.
+create function private.review_flag_kind(p_flag text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_flag in ('mul_label_only', 'no_release_date', 'year_precision_only', 'platform_date_before_launch', 'platform_date_after_era',
+                    'other_instance_of', 'distribution_format_unclassified', 'distribution_non_physical', 'external_ids_multiple',
+                    'entity_detail_pending', 'title_collision_in_batch', 'external_id_shared_in_batch', 'catalog_title_match_same_platform')
+      then 'exception'
+    when p_flag in ('catalog_title_match_other_platform', 'title_collision_unicode_artifact', 'catalog_source_id_linked', 'many_platforms',
+                    'distribution_also_non_physical', 'distribution_medium_not_platform')
+      then 'info'
+  end
+$$;
+
+-- Flags that may point to a critical error (checkpoint two § 4).
+create function private.review_critical_signal(p_flag text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case p_flag
+    when 'entity_detail_pending' then 'missing_provenance'
+    when 'title_collision_in_batch' then 'conflicting_duplicate_identities'
+    when 'external_id_shared_in_batch' then 'conflicting_identifiers'
+    when 'external_ids_multiple' then 'conflicting_identifiers'
+    when 'catalog_title_match_same_platform' then 'conflicting_duplicate_identities'
+    when 'other_instance_of' then 'wrong_identity_or_type'
+    when 'platform_date_before_launch' then 'wrong_platform'
+    when 'platform_date_after_era' then 'physical_eligibility_unsupported'
+    when 'distribution_format_unclassified' then 'physical_eligibility_unsupported'
+    when 'distribution_non_physical' then 'physical_eligibility_unsupported'
+  end
+$$;
+-- B15: what is wrong with a source record's risk assessment (empty when it's valid). The
+-- contract, written by the importer's parser into payload.risk_assessment:
+--   { "contract": "mgd-risk-assessment", "version": 1,
+--     "assessor": "<parser>", "assessor_version": "<version>",
+--     "source": { "provider": <record's provider>, "external_id": <record's id>,
+--                 "revision": <the source's revision number>, "snapshot_sha256": <its run's snapshot hash> },
+--     "flags": [<known flags, no duplicates>], "critical": [<exactly the critical signals of those flags>] }
+-- and payload.source must be present (the full source detail, not a query row).
+create function private.review_risk_problems(p_record private.provider_records)
+returns text[]
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  a jsonb := p_record.payload -> 'risk_assessment';
+  v_snapshot text;
+  v_problems text[] := '{}';
+  v_flags text[];
+  v_critical text[];
+begin
+  if a is null or pg_catalog.jsonb_typeof(a) <> 'object' then
+    return array['risk assessment missing'];
+  end if;
+  if a ->> 'contract' is distinct from 'mgd-risk-assessment' or a -> 'version' is distinct from '1'::jsonb then
+    v_problems := v_problems || 'unsupported contract or version'::text;
+  end if;
+  if pg_catalog.btrim(coalesce(a ->> 'assessor', '')) = '' or pg_catalog.btrim(coalesce(a ->> 'assessor_version', '')) = '' then
+    v_problems := v_problems || 'assessor missing'::text;
+  end if;
+  if pg_catalog.jsonb_typeof(a -> 'flags') is distinct from 'array' or pg_catalog.jsonb_typeof(a -> 'critical') is distinct from 'array'
+     or exists (select 1 from pg_catalog.jsonb_array_elements(a -> 'flags') e where pg_catalog.jsonb_typeof(e) <> 'string')
+     or exists (select 1 from pg_catalog.jsonb_array_elements(a -> 'critical') e where pg_catalog.jsonb_typeof(e) <> 'string') then
+    return v_problems || 'flags malformed'::text;
+  end if;
+  v_flags := array(select pg_catalog.jsonb_array_elements_text(a -> 'flags'));
+  v_critical := array(select pg_catalog.jsonb_array_elements_text(a -> 'critical'));
+  if cardinality(v_flags) <> (select count(distinct f) from pg_catalog.unnest(v_flags) f) then
+    v_problems := v_problems || 'duplicate flag'::text;
+  end if;
+  if exists (select 1 from pg_catalog.unnest(v_flags) f where private.review_flag_kind(f) is null) then
+    v_problems := v_problems || 'unknown flag'::text;
+  end if;
+  if cardinality(v_critical) <> (select count(distinct c) from pg_catalog.unnest(v_critical) c)
+     or array(select distinct c from pg_catalog.unnest(v_critical) c order by c)
+        is distinct from array(select distinct s from (select private.review_critical_signal(f) as s from pg_catalog.unnest(v_flags) f) x
+                               where s is not null order by s) then
+    v_problems := v_problems || 'critical signals don''t match the flags'::text;
+  end if;
+  select r.source_sha256 into v_snapshot from private.import_runs r where r.id = p_record.import_run_id;
+  if a #>> '{source,provider}' is distinct from p_record.provider_code or a #>> '{source,external_id}' is distinct from p_record.external_id
+     or a #>> '{source,snapshot_sha256}' is distinct from v_snapshot or pg_catalog.jsonb_typeof(a #> '{source,revision}') is distinct from 'number'
+     or pg_catalog.jsonb_typeof(p_record.payload -> 'source') is distinct from 'object' then
+    v_problems := v_problems || 'provenance incomplete'::text;
+  end if;
+  return v_problems;
+end;
+$$;
+revoke all on function private.review_flag_kind(text), private.review_critical_signal(text), private.review_risk_problems(private.provider_records)
+  from public, anon, authenticated, service_role;
+
+-- 6. Editor functions.
+create function public.create_review_batch(p_run uuid, p_platform uuid, p_reason text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_policy private.catalog_review_policy;
+  v_batch uuid := gen_random_uuid();
+  v_seed uuid;
+  v_count integer;
+  v_flagged integer;
+  v_sample integer;
+  v_hash text;
+  v_unchanged integer;
+  v_invalid integer;
+  v_source record;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();
+  v_reason := private.require_reason(p_reason);
+  select * into v_policy from private.catalog_review_policy;
+  if not exists (select 1 from private.import_runs r where r.id = p_run)
+     or not exists (select 1 from public.platforms p where p.id = p_platform) then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+
+  -- The run's game candidates on the platform: unpublished, unverified, paired with the
+  -- platform, and not in another open batch. One row per game, with its source record.
+  -- (Working tables of this call only: dropped first, so two batches in one transaction work.)
+  drop table if exists pg_temp.b1_candidates;
+  drop table if exists pg_temp.b1_members;
+  drop table if exists pg_temp.b1_flags;
+  create temp table b1_candidates on commit drop as
+  select distinct on (g.id) g.id as game_id, g.revision, gp.status::text as pairing_status, pr.id as provider_record_id,
+         pr.provider_code, pr.payload, pr.payload_sha256, src.terms_sha256 as source_terms_sha256, g.search_key,
+         g.first_release_date, g.first_release_precision
+  from private.import_run_records rr
+  join private.provider_records pr on pr.id = rr.provider_record_id
+  join private.import_runs src on src.id = pr.import_run_id
+  join public.games g on g.id = pr.matched_game_id
+  join public.game_platforms gp on gp.game_id = g.id and gp.platform_id = p_platform
+  where rr.import_run_id = p_run and pr.entity_type = 'game'
+    -- Only records still in review: a withdrawn (excluded) or rejected pairing never joins.
+    and g.status in ('unverified', 'under_review') and g.verified_at is null and gp.status in ('unverified', 'under_review')
+    and not exists (select 1 from private.catalog_review_batch_items i join private.catalog_review_batches b on b.id = i.batch_id
+                    where i.game_id = g.id and b.status = 'open')
+  order by g.id, pr.created_at desc;
+
+  -- B14: a member of a rejected batch comes back only after a verifiable change. Same revision
+  -- and same source record means nothing changed; a new seed alone is no remediation.
+  create temp table b1_members on commit drop as
+  select c.* from b1_candidates c
+  where not exists (select 1 from private.catalog_review_batch_items i join private.catalog_review_batches b on b.id = i.batch_id
+                    where b.status = 'rejected' and i.game_id = c.game_id and i.platform_id = p_platform
+                      and i.frozen_game_revision = c.revision and i.provider_record_id is not distinct from c.provider_record_id);
+  select (select count(*) from b1_candidates) - (select count(*) from b1_members), (select count(*) from b1_members)
+  into v_unchanged, v_count;
+  if v_count = 0 and v_unchanged > 0 then
+    raise exception 'unchanged since rejection' using errcode = 'P0001';
+  end if;
+  if v_count = 0 or v_count > 5000 then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+
+  -- B15: every member's risk assessment is valid, or there is no batch.
+  select count(*) into v_invalid from b1_members m join private.provider_records pr on pr.id = m.provider_record_id
+  where cardinality(private.review_risk_problems(pr)) > 0;
+  if v_invalid > 0 then
+    raise exception 'risk assessment invalid' using errcode = 'P0001',
+      detail = pg_catalog.format('%s member(s) have a missing or invalid risk assessment', v_invalid);
+  end if;
+
+  -- B16: the right to publish each source, as imported.
+  for v_source in select distinct m.provider_code, m.source_terms_sha256 from b1_members m order by 1, 2 loop
+    perform private.require_publication_rights(v_source.provider_code, v_source.source_terms_sha256);
+  end loop;
+
+  -- Flags: the assessment's, and checks here (dates, title and external-id collisions in the
+  -- batch, title matches with the catalog on the platform). Split by kind (B15).
+  create temp table b1_flags on commit drop as
+  select m.game_id, x.all_flags,
+         array(select f from pg_catalog.unnest(x.all_flags) f where private.review_flag_kind(f) = 'exception' order by f) as flags,
+         array(select f from pg_catalog.unnest(x.all_flags) f where private.review_flag_kind(f) = 'info' order by f) as info_flags
+  from b1_members m
+  cross join lateral (select array(select distinct f from (
+           select pg_catalog.jsonb_array_elements_text(m.payload #> '{risk_assessment,flags}') as f
+           union all select 'no_release_date' where m.first_release_date is null
+           union all select 'year_precision_only' where m.first_release_precision = 'year'
+           union all select 'title_collision_in_batch' where exists (select 1 from b1_members o where o.game_id <> m.game_id and o.search_key = m.search_key)
+           union all select 'external_id_shared_in_batch' where exists (
+             select 1 from b1_members o
+             cross join lateral (select v from (
+               select 'igdb:' || pg_catalog.jsonb_array_elements_text(case when pg_catalog.jsonb_typeof(o.payload #> '{source,external_ids,igdb}') = 'array' then o.payload #> '{source,external_ids,igdb}' else '[]' end) as v
+               union all select 'mobygames:' || pg_catalog.jsonb_array_elements_text(case when pg_catalog.jsonb_typeof(o.payload #> '{source,external_ids,mobygames}') = 'array' then o.payload #> '{source,external_ids,mobygames}' else '[]' end)) ov) oids
+             where o.game_id <> m.game_id and oids.v in (
+               select 'igdb:' || pg_catalog.jsonb_array_elements_text(case when pg_catalog.jsonb_typeof(m.payload #> '{source,external_ids,igdb}') = 'array' then m.payload #> '{source,external_ids,igdb}' else '[]' end)
+               union all select 'mobygames:' || pg_catalog.jsonb_array_elements_text(case when pg_catalog.jsonb_typeof(m.payload #> '{source,external_ids,mobygames}') = 'array' then m.payload #> '{source,external_ids,mobygames}' else '[]' end)))
+           union all select 'catalog_title_match_same_platform' where exists (
+             select 1 from public.games c join public.game_platforms cp on cp.game_id = c.id and cp.platform_id = p_platform
+             where c.id <> m.game_id and c.search_key = m.search_key and c.status not in ('merged', 'rejected', 'excluded')
+               and not exists (select 1 from b1_members o where o.game_id = c.id))
+         ) y where f is not null order by f) as all_flags) x;
+  select count(*) into v_flagged from b1_flags f where cardinality(f.flags) > 0;
+
+  -- B1, B18: the complete frozen content and its hash, before the seed exists.
+  select pg_catalog.encode(extensions.digest(
+           'mgd-review-batch:2|run:' || p_run::text || '|platform:' || p_platform::text || '|' ||
+           pg_catalog.string_agg(pg_catalog.concat_ws(':', m.game_id::text, m.revision::text, m.pairing_status, m.provider_record_id::text,
+             m.payload_sha256, pg_catalog.md5((m.payload -> 'risk_assessment')::text),
+             pg_catalog.array_to_string(f.flags, ','), pg_catalog.array_to_string(f.info_flags, ',')), '|' order by m.game_id), 'sha256'), 'hex')
+  into v_hash from b1_members m join b1_flags f on f.game_id = m.game_id;
+
+  v_sample := private.review_sample_size(v_count - v_flagged, v_policy.tolerable_error, v_policy.confidence, v_policy.acceptance_number);
+  v_seed := gen_random_uuid();   -- B2: drawn after the content is frozen.
+
+  insert into private.catalog_review_batches (id, import_run_id, platform_id, created_by, reason, item_count, content_sha256, seed,
+    flagged_count, sample_size, acceptance_number, tolerable_error, confidence, required_approvals)
+  values (v_batch, p_run, p_platform, v_me, v_reason, v_count, v_hash, v_seed, v_flagged, v_sample, v_policy.acceptance_number,
+    v_policy.tolerable_error, v_policy.confidence, case when v_count > v_policy.second_approval_above then 2 else 1 end);
+
+  insert into private.catalog_review_batch_items (batch_id, game_id, platform_id, provider_record_id, frozen_game_revision, flags, info_flags, critical_flags, sampled)
+  select v_batch, m.game_id, p_platform, m.provider_record_id, m.revision, f.flags, f.info_flags,
+         array(select distinct s from (select private.review_critical_signal(x) as s from pg_catalog.unnest(f.all_flags) x) y where s is not null order by s),
+         cardinality(f.flags) = 0 and m.game_id in (
+           select u.game_id from b1_members u join b1_flags uf on uf.game_id = u.game_id
+           where cardinality(uf.flags) = 0
+           order by pg_catalog.encode(extensions.digest(v_seed::text || u.game_id::text, 'sha256'), 'hex')
+           limit v_sample)
+  from b1_members m join b1_flags f on f.game_id = m.game_id;
+
+  perform private.record_audit(v_me, 'catalog_batch_created', null, v_reason, pg_catalog.jsonb_build_object(
+    'batch_id', v_batch, 'import_run_id', p_run, 'platform_id', p_platform, 'items', v_count, 'flagged', v_flagged,
+    'sample_size', v_sample, 'acceptance_number', v_policy.acceptance_number, 'tolerable_error', v_policy.tolerable_error,
+    'confidence', v_policy.confidence, 'content_sha256', v_hash, 'seed', v_seed, 'unchanged_since_rejection', v_unchanged));
+  return v_batch;
+end;
+$$;
+
+create function public.record_batch_outcome(p_batch uuid, p_game uuid, p_outcome text, p_critical_error text, p_note text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_batch private.catalog_review_batches;
+  v_item private.catalog_review_batch_items;
+  v_note text := nullif(pg_catalog.btrim(p_note), '');
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();                                          -- B13 (finding 3)
+  if p_outcome is null or p_outcome not in ('correct', 'incorrect', 'excluded')
+     or (p_critical_error is not null and p_outcome = 'correct') or pg_catalog.char_length(coalesce(p_note, '')) > 1000 then
+    raise exception 'invalid changes' using errcode = '22023';
+  end if;
+  select * into v_batch from private.catalog_review_batches b where b.id = p_batch for update;
+  if not found or v_batch.status <> 'open' then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  if v_batch.created_by = v_me then
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  -- B9: outcomes are final once any approval is recorded, so every approver approves the same findings.
+  if exists (select 1 from private.catalog_review_batch_approvals a where a.batch_id = p_batch) then
+    raise exception 'batch approval started' using errcode = 'P0001';
+  end if;
+  select * into v_item from private.catalog_review_batch_items i where i.batch_id = p_batch and i.game_id = p_game for update;
+  if not found or not (v_item.sampled or cardinality(v_item.flags) > 0) then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  -- B13 (finding 2): no self-review of a member. The game's creator or submitter (catalog record
+  -- origins, which also record submissions), its current submitter, and the pairing's creator.
+  if private.created_by(v_me, null, array[p_game])
+     or private.pairing_created_by(v_me, p_game, v_item.platform_id)
+     or exists (select 1 from public.games g where g.id = p_game and g.submitted_by = v_me)
+     or exists (select 1 from public.game_platforms gp where gp.game_id = p_game and gp.platform_id = v_item.platform_id and gp.submitted_by = v_me) then
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  -- B17: overriding a critical signal needs recorded evidence.
+  if p_outcome = 'correct' and cardinality(v_item.critical_flags) > 0 and pg_catalog.char_length(coalesce(v_note, '')) < 20 then
+    raise exception 'evidence required' using errcode = 'P0001';
+  end if;
+  -- B9: a recorded finding only becomes more conservative. A member found incorrect can still be
+  -- excluded, but never changed to correct, and a recorded critical error is never cleared or
+  -- replaced. To undo a mistaken finding, reject the batch and review a new one.
+  if v_item.outcome is not null
+     and not (v_item.outcome = 'incorrect' and p_outcome = 'excluded'
+              and (v_item.critical_error is null or v_item.critical_error is not distinct from p_critical_error)) then
+    raise exception 'outcome recorded' using errcode = 'P0001';
+  end if;
+  update private.catalog_review_batch_items i set outcome = p_outcome, critical_error = p_critical_error,
+    reviewed_by = v_me, note = v_note, recorded_at = pg_catalog.clock_timestamp()
+  where i.batch_id = p_batch and i.game_id = p_game;
+  -- The audit log requires a reason: the outcome itself, with the reviewer's note (the evidence) in the metadata.
+  perform private.record_audit(v_me, 'catalog_batch_outcome_recorded', null, 'Batch review outcome: ' || p_outcome, pg_catalog.jsonb_build_object(
+    'batch_id', p_batch, 'game_id', p_game, 'outcome', p_outcome, 'critical_error', p_critical_error, 'sampled', v_item.sampled,
+    'flags', v_item.flags, 'critical_flags', v_item.critical_flags, 'note', v_note));
+  return true;
+end;
+$$;
+
+create function public.approve_review_batch(p_batch uuid, p_reason text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_batch private.catalog_review_batches;
+  v_missing integer;
+  v_incorrect integer;
+  v_critical integer;
+  v_sample_critical integer;
+  v_stale integer;
+  v_approvals integer;
+  v_item record;
+  v_source record;
+  v_published integer := 0;
+  v_slug text;
+  v_rows integer;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();
+  v_reason := private.require_reason(p_reason);
+  select * into v_batch from private.catalog_review_batches b where b.id = p_batch for update;
+  if not found or v_batch.status <> 'open' then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  -- B4: independence.
+  if v_batch.created_by = v_me
+     or private.created_by(v_me, null, (select pg_catalog.array_agg(i.game_id) from private.catalog_review_batch_items i where i.batch_id = p_batch))
+     or exists (select 1 from private.catalog_review_batch_items i where i.batch_id = p_batch and private.pairing_created_by(v_me, i.game_id, i.platform_id))
+     or exists (select 1 from private.catalog_review_batch_items i join public.games g on g.id = i.game_id
+                where i.batch_id = p_batch and g.submitted_by = v_me) then
+    raise exception 'own record' using errcode = 'P0001';
+  end if;
+  if exists (select 1 from private.catalog_review_batch_approvals a where a.batch_id = p_batch and a.approver_id = v_me) then
+    raise exception 'already approved' using errcode = 'P0001';
+  end if;
+
+  -- A sampled member that isn't correct is a sample error whether it was marked incorrect or
+  -- excluded: excluding it doesn't make the validators' miss go away (B4).
+  select count(*) filter (where (i.sampled or cardinality(i.flags) > 0) and i.outcome is null),
+         count(*) filter (where i.sampled and i.outcome <> 'correct'),
+         count(*) filter (where i.critical_error is not null and i.outcome = 'incorrect'),
+         count(*) filter (where i.sampled and i.critical_error is not null)
+  into v_missing, v_incorrect, v_critical, v_sample_critical
+  from private.catalog_review_batch_items i where i.batch_id = p_batch;
+  if v_missing > 0 then
+    raise exception 'batch not reviewed' using errcode = 'P0001';                 -- B3
+  end if;
+  if v_incorrect > v_batch.acceptance_number or v_sample_critical > 0 then
+    raise exception 'sample failed' using errcode = 'P0001';                      -- B4, B5
+  end if;
+  if v_critical > 0 then
+    raise exception 'critical errors unresolved' using errcode = 'P0001';         -- B4
+  end if;
+
+  -- B12 (finding 1): lock every member game, then every member pairing, in id order, before
+  -- checking them. A concurrent edit either finishes first (and the check below sees it) or
+  -- waits for this transaction. Deterministic order, so two approvals can't deadlock.
+  perform 1 from public.games g
+  where g.id in (select i.game_id from private.catalog_review_batch_items i where i.batch_id = p_batch)
+  order by g.id for update;
+  perform 1 from public.game_platforms gp
+  join private.catalog_review_batch_items i on i.game_id = gp.game_id and i.platform_id = gp.platform_id and i.batch_id = p_batch
+  order by gp.game_id, gp.platform_id for update of gp;
+
+  select count(*) into v_stale
+  from private.catalog_review_batch_items i
+  left join public.games g on g.id = i.game_id
+  left join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
+  -- A member is stale if its game changed (any edit, status change or pairing withdrawal moves
+  -- the revision), or its game or pairing is no longer in review.
+  where i.batch_id = p_batch and (g.id is null or gp.game_id is null or g.revision <> i.frozen_game_revision
+                                  or g.status not in ('unverified', 'under_review') or g.verified_at is not null
+                                  or gp.status not in ('unverified', 'under_review'));
+  if v_stale > 0 then
+    raise exception 'batch stale' using errcode = 'P0001';                        -- B4: revision invalidation
+  end if;
+
+  -- B16 (finding 6): the right to publish each member's source, rechecked now, under a share
+  -- lock on the provider, so withdrawn clearance after staging stops the approval.
+  for v_source in
+    select distinct pr.provider_code, src.terms_sha256
+    from private.catalog_review_batch_items i
+    join private.provider_records pr on pr.id = i.provider_record_id
+    join private.import_runs src on src.id = pr.import_run_id
+    where i.batch_id = p_batch and (i.outcome = 'correct' or (i.outcome is null and cardinality(i.flags) = 0 and not i.sampled))
+    order by 1, 2
+  loop
+    perform private.require_publication_rights(v_source.provider_code, v_source.terms_sha256);
+  end loop;
+
+  insert into private.catalog_review_batch_approvals (batch_id, approver_id, reason) values (p_batch, v_me, v_reason);
+  select count(*) into v_approvals from private.catalog_review_batch_approvals a where a.batch_id = p_batch;
+  if v_approvals < v_batch.required_approvals then
+    perform private.record_audit(v_me, 'catalog_batch_approval_recorded', null, v_reason, pg_catalog.jsonb_build_object(
+      'batch_id', p_batch, 'approvals', v_approvals, 'required', v_batch.required_approvals));
+    return pg_catalog.jsonb_build_object('status', 'awaiting_approval', 'approvals', v_approvals, 'required', v_batch.required_approvals);
+  end if;
+
+  -- B7: publish identities: each member reviewed correct, or unflagged and not sampled.
+  -- Provenance is the frozen member's own source record. Physical eligibility is "confirmed" for
+  -- a member a person reviewed and found correct, and "batch_accepted" for an unsampled member
+  -- accepted with the batch's passing sample: never presented as an individual check.
+  -- B12: every write is conditional on the frozen state; any miss fails the whole approval.
+  for v_item in
+    select i.game_id, i.platform_id, i.frozen_game_revision, g.title, g.slug, pr.provider_code, pr.external_id, pr.payload_sha256,
+           i.outcome = 'correct' as reviewed
+    from private.catalog_review_batch_items i
+    join public.games g on g.id = i.game_id
+    join private.provider_records pr on pr.id = i.provider_record_id
+    where i.batch_id = p_batch and (i.outcome = 'correct' or (i.outcome is null and cardinality(i.flags) = 0 and not i.sampled))
+    order by i.game_id
+  loop
+    -- The game row has no basis column, so its audit row says how it was accepted: a batch-accepted
+    -- record is never recorded as individually reviewed.
+    update public.games g set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me
+    where g.id = v_item.game_id and g.revision = v_item.frozen_game_revision
+      and g.status in ('unverified', 'under_review') and g.verified_at is null;
+    get diagnostics v_rows = row_count;
+    if v_rows <> 1 then
+      raise exception 'batch stale' using errcode = 'P0001';
+    end if;
+    perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game', v_item.game_id, v_reason,
+      pg_catalog.jsonb_build_object('revision', v_item.frozen_game_revision, 'batch_id', p_batch,
+        'acceptance', case when v_item.reviewed then 'individually_reviewed' else 'batch_accepted' end));
+    update public.game_platforms gp set verified_at = pg_catalog.clock_timestamp(), verified_by = v_me,
+      verified_game_revision = v_item.frozen_game_revision,
+      verification_basis = pg_catalog.jsonb_build_object('source', v_item.provider_code, 'reference', v_item.external_id,
+        'snapshot_sha256', v_item.payload_sha256,
+        'physical_eligibility', case when v_item.reviewed then 'confirmed' else 'batch_accepted' end, 'batch_id', p_batch::text)
+    where gp.game_id = v_item.game_id and gp.platform_id = v_item.platform_id and gp.status in ('unverified', 'under_review');
+    get diagnostics v_rows = row_count;
+    if v_rows <> 1 then
+      raise exception 'batch stale' using errcode = 'P0001';
+    end if;
+    perform private.record_catalog_audit(v_me, 'catalog_record_verified', 'game_platform', v_item.game_id, v_reason,
+      pg_catalog.jsonb_build_object('platform_id', v_item.platform_id, 'batch_id', p_batch,
+        'acceptance', case when v_item.reviewed then 'individually_reviewed' else 'batch_accepted' end));
+    v_slug := coalesce(v_item.slug, private.assign_game_slug(v_item.title));
+    update public.games g set status = 'published', slug = v_slug, submitted_by = null where g.id = v_item.game_id;
+    update public.game_platforms gp set status = 'published', submitted_by = null
+    where gp.game_id = v_item.game_id and gp.platform_id = v_item.platform_id;
+    perform private.record_catalog_audit(v_me, 'catalog_record_published', 'game', v_item.game_id, v_reason,
+      pg_catalog.jsonb_build_object('slug', v_slug, 'identity', true, 'platforms', pg_catalog.jsonb_build_array(v_item.platform_id), 'batch_id', p_batch));
+    v_published := v_published + 1;
+  end loop;
+
+  update private.catalog_review_batches b set status = 'approved', decided_at = pg_catalog.now(), decision_reason = v_reason
+  where b.id = p_batch;
+  perform private.record_audit(v_me, 'catalog_batch_approved', null, v_reason, pg_catalog.jsonb_build_object(
+    'batch_id', p_batch, 'import_run_id', v_batch.import_run_id, 'content_sha256', v_batch.content_sha256, 'seed', v_batch.seed,
+    'items', v_batch.item_count, 'flagged', v_batch.flagged_count, 'sample_size', v_batch.sample_size,
+    'acceptance_number', v_batch.acceptance_number, 'sample_incorrect', v_incorrect, 'published', v_published,
+    'approvers', (select pg_catalog.jsonb_agg(a.approver_id order by a.approved_at) from private.catalog_review_batch_approvals a where a.batch_id = p_batch)));
+  return pg_catalog.jsonb_build_object('status', 'approved', 'published', v_published);
+end;
+$$;
+
+create function public.reject_review_batch(p_batch uuid, p_reason text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid;
+  v_reason text;
+  v_batch private.catalog_review_batches;
+begin
+  v_me := private.begin_catalog_edit();
+  perform private.require_recent_mfa();
+  v_reason := private.require_reason(p_reason);
+  select * into v_batch from private.catalog_review_batches b where b.id = p_batch for update;
+  if not found or v_batch.status <> 'open' then
+    raise exception 'record unavailable' using errcode = 'P0001';
+  end if;
+  update private.catalog_review_batches b set status = 'rejected', decided_at = pg_catalog.now(), decision_reason = v_reason
+  where b.id = p_batch;
+  perform private.record_audit(v_me, 'catalog_batch_rejected', null, v_reason, pg_catalog.jsonb_build_object(
+    'batch_id', p_batch, 'content_sha256', v_batch.content_sha256, 'seed', v_batch.seed,
+    'outcomes', (select pg_catalog.jsonb_object_agg(coalesce(i.outcome, 'pending'), n) from (
+      select i.outcome, count(*) as n from private.catalog_review_batch_items i where i.batch_id = p_batch group by i.outcome) i)));
+  return true;
+end;
+$$;
+
+create function public.get_review_batch(p_batch uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform private.require_active_staff('catalog_editor');
+  return (
+    select pg_catalog.jsonb_build_object(
+      'id', b.id, 'status', b.status, 'items', b.item_count, 'flagged', b.flagged_count, 'sample_size', b.sample_size,
+      'acceptance_number', b.acceptance_number, 'tolerable_error', b.tolerable_error, 'confidence', b.confidence,
+      'required_approvals', b.required_approvals, 'content_sha256', b.content_sha256, 'seed', b.seed, 'created_at', b.created_at,
+      'members', (select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+          'game_id', i.game_id, 'title', g.title, 'flags', i.flags, 'info_flags', i.info_flags, 'critical_flags', i.critical_flags, 'sampled', i.sampled,
+          'outcome', i.outcome, 'critical_error', i.critical_error) order by g.title, i.game_id), '[]')
+        from private.catalog_review_batch_items i join public.games g on g.id = i.game_id where i.batch_id = b.id))
+    from private.catalog_review_batches b where b.id = p_batch);
+end;
+$$;
+
+revoke all on function public.create_review_batch(uuid, uuid, text), public.record_batch_outcome(uuid, uuid, text, text, text),
+  public.approve_review_batch(uuid, text), public.reject_review_batch(uuid, text), public.get_review_batch(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.create_review_batch(uuid, uuid, text), public.record_batch_outcome(uuid, uuid, text, text, text),
+  public.approve_review_batch(uuid, text), public.reject_review_batch(uuid, text), public.get_review_batch(uuid)
+  to authenticated;

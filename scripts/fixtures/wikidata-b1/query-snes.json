@@ -1,0 +1,213 @@
+{
+  "head": {
+    "vars": [
+      "item",
+      "itemLabel",
+      "date",
+      "precision",
+      "aliases"
+    ]
+  },
+  "results": {
+    "bindings": [
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1001"
+        },
+        "itemLabel": {
+          "value": "Zqx Starfall Saga"
+        },
+        "date": {
+          "value": "1991-12-01T00:00:00Z"
+        },
+        "precision": {
+          "value": "10"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1002"
+        },
+        "itemLabel": {
+          "value": "Zqx Lantern Moon"
+        },
+        "date": {
+          "value": "1993-01-01T00:00:00Z"
+        },
+        "precision": {
+          "value": "9"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1004"
+        },
+        "itemLabel": {
+          "value": "Zqx Soundtrack Collection"
+        },
+        "date": {
+          "value": "1995-02-02T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1005"
+        },
+        "itemLabel": {
+          "value": "Zqx Copper Gate"
+        },
+        "date": {
+          "value": "1989-04-04T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1006"
+        },
+        "itemLabel": {
+          "value": "Zqx Starfall Saga Deluxe"
+        },
+        "date": {
+          "value": "1996-06-06T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1007"
+        },
+        "itemLabel": {
+          "value": "Zqx Starfall Saga"
+        },
+        "date": {
+          "value": "1997-07-07T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1008"
+        },
+        "itemLabel": {
+          "value": "Zqx Quiet Orchard"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1009"
+        },
+        "itemLabel": {
+          "value": "Zqx Linked Legend"
+        },
+        "date": {
+          "value": "1993-09-09T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1010"
+        },
+        "itemLabel": {
+          "value": "Zqx Duplicate Drift"
+        },
+        "date": {
+          "value": "1994-10-10T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1012"
+        },
+        "itemLabel": {
+          "value": "Zqx Late Bloom"
+        },
+        "date": {
+          "value": "2003-01-01T00:00:00Z"
+        },
+        "precision": {
+          "value": "9"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1013"
+        },
+        "itemLabel": {
+          "value": "Zqx Unselected Garden"
+        },
+        "date": {
+          "value": "1995-03-03T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      },
+      {
+        "item": {
+          "value": "http://www.wikidata.org/entity/Q1014"
+        },
+        "itemLabel": {
+          "value": "Zqx Spare Comet"
+        },
+        "date": {
+          "value": "1996-04-04T00:00:00Z"
+        },
+        "precision": {
+          "value": "11"
+        },
+        "aliases": {
+          "value": ""
+        }
+      }
+    ]
+  }
+}

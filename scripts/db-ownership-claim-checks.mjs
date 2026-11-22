@@ -208,6 +208,8 @@ delete from private.catalog_verifications where game_id = any (array[${games.map
   or release_id in (select id from public.releases where game_id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]));
 delete from public.releases where game_id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]);
 delete from public.game_platforms where game_id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]);
+-- Their import title keys too: replica mode runs no cascade (until 2026-11-20 they were left behind).
+delete from private.game_title_keys where game_id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]);
 delete from public.games where id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]);
 delete from private.audit_events where actor_id in ('${editor}', '${admin}') or target_profile_id in ('${collector}', '${editor}', '${admin}');
 delete from private.handle_holds where handle like '${tag}\\_%';
@@ -215,7 +217,8 @@ commit;`);
   const left = psql(`select (select count(*) from public.games where slug like '${tag}-%') + (select count(*) from auth.users where email like '${tag}%')
     + (select count(*) from private.catalog_record_origins o where not exists (select 1 from public.games g where g.id = o.game_id) and not exists (select 1 from public.releases r where r.id = o.release_id))
     + (select count(*) from private.catalog_verifications v where not exists (select 1 from public.games g where g.id = v.game_id) and not exists (select 1 from public.releases r where r.id = v.release_id))
-    + (select count(*) from private.handle_holds where handle like '${tag}\\_%');`);
+    + (select count(*) from private.handle_holds where handle like '${tag}\\_%')
+    + (select count(*) from private.game_title_keys k where k.game_id = any (array[${games.map((g) => `'${g}'`).join(", ") || "null"}]::uuid[]));`);
   check("synthetic records removed", left === "0", left);
 }
 

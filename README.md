@@ -70,8 +70,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run app:editing-checks` | After a build, test catalog editing in the running app against the local stack: who reaches the pages, creating games and releases, no self-review, a change ending a verification, step-up without replay, catalog metadata, and that no page names a creator (M10c) |
 | `npm run app:reference-checks` | After a build, test the Reference, Imports and System sections and the reclassification queue in the running app: who reaches each page, what each shows, that only resolving a queue item writes, and that no page shows a key, address, lease or raw source data (M10d) |
 | `npm run app:a11y-checks` | After a build, test `/admin` and Settings → Security in a real browser with JavaScript (Edge, or Chrome; `A11Y_BROWSER=chrome` picks it): access and navigation for each role, TOTP enrollment, step-up without replay, keyboard focus, and axe-core accessibility and sideways scrolling at phone and desktop widths |
-| `npm run db:mutation` | Prove the tests detect real violations, one suite or all (see [Local database](#local-database)) |
-| `npm run mutation:campaign` | Run several mutation suites unattended. `-- --dry-run` checks readiness and runs nothing |
+| `MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run db:mutation -- --suite <name>` | Prove the tests detect real violations of one suite, on the disposable scratch stack only (see [Local database](#local-database)). Destructive: it resets the stack it runs on. Without the opt-in, a named suite and `MGD_STACK=scratch` it refuses and changes nothing |
+| `MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run mutation:campaign` | Run several mutation suites unattended, on scratch only. `-- --dry-run` checks readiness and runs nothing, without the opt-in |
+| `npm run mutation:guard-test` | Offline: the mutation runners refuse without the opt-in, and no ordinary `*-checks.mjs` suite resets a stack or applies violations (also in CI) |
 
 Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks` and `app:a11y-checks`.
 
@@ -109,7 +110,7 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 13. **MFA checks** in `scripts/db-mfa-checks.mjs`, with real TOTP sessions from the local Auth: live session and factor checks, stale and signed-out tokens, freshness, factor maturity and its ledger.
 14. **Ownership checks** in `scripts/db-ownership-checks.mjs`: the staff matrix through the API, transfers, succession and recovery, with forced races and the refusal rate limit.
 
-`npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
+`npm run db:mutation` separately proves the tests detect real violations, by applying each one in `scripts/security-mutations.mjs` in turn. It takes a few hours, so run it for security changes, not every commit. It is destructive and never part of an ordinary test run: it is named `scripts/mutation-db-runner.mjs` (outside the `*-checks.mjs` pattern) and refuses unless `MGD_MUTATION_TESTING=1`, `--suite <name>` and `MGD_STACK=scratch` are all given. Start scratch first with `MGD_TEST_STACK=scratch npm run test-stack:start`. The app runner (`npm run app:mutation`) needs the opt-in and `--set <name>`. `supabase/benchmarks/` holds repeatable measurements, and always rolls back.
 
 It stops at the first failed stage and prints a summary. A failing test names the check that failed.
 
@@ -129,6 +130,7 @@ npm run test-stack:stop                         # keeps its data; test-stack:des
 - **Separate everything.** `scripts/test-stack.mjs` generates `.supabase-test/` (git-ignored) from `supabase/config.toml` on every start and reset: a different project id, every port moved up by 1000, and Studio, analytics and the edge runtime off. It copies `supabase/migrations/` and `supabase/tests/` there. Its containers, volumes and network are named after the test project, so nothing is shared with the development stack.
 - **One selector.** Every script reads the project, container, CLI arguments and status from `scripts/lib/stack.mjs`. `MGD_STACK=test` selects the test stack; without it, scripts use the development stack as before. Each refuses a config that names the wrong project, a status that isn't on a loopback address, or an API port that doesn't belong to the selected stack.
 - **A disposable clean stack (M12c-A).** The test stack may hold records worth keeping, such as the human-reviewed catalog pilot. To run every suite on an empty database without resetting it, use a third stack. `MGD_TEST_STACK=scratch node scripts/test-stack.mjs start` creates project `my-game-dex-scratch` in `.supabase-scratch/` (git-ignored), with every port moved up by 2000. Run against it with `MGD_STACK=scratch` (for example `MGD_STACK=scratch node scripts/db.mjs verify`), then remove its containers and volumes with `MGD_TEST_STACK=scratch node scripts/test-stack.mjs destroy`.
+- **The persistent B1 ingestion-test stack (M12c-B1).** `MGD_TEST_STACK=b1 node scripts/test-stack.mjs start` creates project `my-game-dex-b1` in `.supabase-b1/` (git-ignored), with every port moved up by 3000 (API 57321, database 57322, Mailpit 57324). Select it with `MGD_STACK=b1`. It keeps B1 import batches and their review history, so `reset` and `destroy` refuse unless `MGD_ALLOW_B1_RESET=1` is set, and B1 tools call `requireStack("b1")` so they can't reach development or the M12c-A test stack.
 - **Protecting the development stack.** `npm run test-stack:protect-dev` creates `~/.my-game-dex/protect-dev-stack`. While it exists, every check, fixture, benchmark and mutation script, and `db:reset`, `db:test` and `db:verify`, refuse the development stack unless `MGD_ALLOW_DEV_STACK=1` is set. Starting, stopping and using the development stack in the app aren't affected.
 - **The app under test** is the production build, started by each app check on its own port with the test stack's URL, publishable key and secret key (for invitations, M11a-1), so `.env.local` (the development stack's) isn't used.
 - **Invitations (M11a-1)** work on the test stack, which uses `supabase/templates/invite.html` for the invitation email (sent to its Mailpit). `MGD_TEST_SIGNUP=off npm run test-stack:reset` (after a `test-stack:stop`) makes it invite-only, as a hosted project will be: `[auth] enable_signup = false`, the email provider left on. The development stack's configuration is unchanged, so `/admin/invitations` there says invitations aren't available unless the server is given `SUPABASE_SECRET_KEY` and the template. Real invitations, SMTP and hosted settings are [pre-beta launch tasks](docs/architecture/security-rls.md#production-launch-prerequisites-m8). A lost authenticator is handled by the [operator runbook](docs/operations/lost-authenticator-runbook.md).
@@ -272,6 +274,11 @@ Phase 2 replaces the seed viewer with real accounts:
 5. **Light mode:** deferred, not planned for the initial release (ADR-056)
 
 Current plan: M10, the admin panel expansion, built in five steps and reviewed together, then its pull request, then the collector-facing milestones the product owner plans: Collection Shelves, Game Details, Wishlist and Discovery. Internationalization was cancelled; the application is English-only.
+
+**Next: the visual collector experience**, starting with My Collection → Systems → Console Collection Shelf, built on mock data.
+- **Catalog ingestion (M12c-B1):** the technical pilot is complete.
+- **Editorial review and publication of staged catalog identities:** deferred and not yet validated end to end.
+- See [Suggested next steps](docs/architecture/architecture-decisions.md#suggested-next-steps).
 
 Later phases:
 

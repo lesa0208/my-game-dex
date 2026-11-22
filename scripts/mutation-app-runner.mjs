@@ -1,12 +1,12 @@
 /**
  * M11a-2 and M11a-3: proves the app checks detect real violations of the password and
  * session rules (set m11a2) and of the avatar and profile rules (set m11a3), which live in
- * the app's code rather than the database (db-mutation-checks.mjs covers the database).
+ * the app's code rather than the database (mutation-db-runner.mjs covers the database).
  * For each violation: change one source file, build, run its suite (which must fail),
  * restore the file, and check it's byte-for-byte the original.
  *
- *   MGD_STACK=test node scripts/app-mutation-checks.mjs [--set m11a2|m11a3|m11a4a|m12b] [--log file] [--only name,...]
- *   node scripts/app-mutation-checks.mjs --recover
+ *   MGD_MUTATION_TESTING=1 MGD_STACK=test node scripts/mutation-app-runner.mjs --set m11a2|m11a3|m11a4a|m12b [--log file] [--only name,...]
+ *   node scripts/mutation-app-runner.mjs --recover
  *
  * Opens and closes with a clean baseline (a build and a passing suite). About four
  * minutes per violation. The build replaces .next, so stop any `next start` serving it
@@ -20,6 +20,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { requireMutationOptIn } from "./lib/mutation-guard.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const journal = join(homedir(), ".my-game-dex", "app-mutation-recovery", "journal.json");
@@ -288,6 +290,8 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     recover();
     process.exit(0);
   }
+  // Destructive (edits source files, rebuilds .next): an explicit opt-in and a named set.
+  requireMutationOptIn({ kind: "app" });
   if (process.env.MGD_STACK !== "test") throw new Error("Run against the test stack: MGD_STACK=test.");
   if (existsSync(journal)) throw new Error("A journal from an interrupted run exists. Run --recover first.");
   const only = argument("--only")?.split(",");
