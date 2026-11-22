@@ -61,7 +61,7 @@ reset role;
 select ok(
   (select count(*) from public.staff_roles) = (select count(*) from staff_before)
   and not exists (select user_id, role from public.staff_roles except select user_id, role from staff_before),
-  'no staff role was added by any attempt');
+  'the staff roles are unchanged: none added, removed or changed by any attempt');
 select is((select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'staff_roles' and cmd <> 'SELECT'), 0, 'staff_roles has no write policy');
 
 -- The documented operator procedure works, and the helper reads only the table

@@ -667,6 +667,21 @@ async function performance() {
   const started = Date.now();
   const filtered = await big.browser.get(`${WISHLIST}?q=tessaly&sort=title`);
   check("a search over all of them, sorted by title, also loads in under 2 seconds", listed(filtered.html).length === 30 && Date.now() - started < 2000, `${Date.now() - started} ms`);
+
+  // The export of the same list: three pages of stored rows (read by id, past PostgREST's
+  // 1,000-row page) and thirty of catalog states. Every stored entry exactly once.
+  const exportStarted = Date.now();
+  const exported = await download(big);
+  const exportMs = Date.now() - exportStarted;
+  console.log(`  ${total} wishes: exported in ${exportMs} ms`);
+  const storedIds = psql(`select id from public.wishlist_items where owner_id = ${sql(big.id)} order by id;`).split("\n").filter(Boolean);
+  const exportedIds = (exported.data?.wishlist ?? []).map((w) => w.id);
+  check(
+    `the export of all ${total.toLocaleString("en")} has every stored wish exactly once, in id order, each with its catalog state`,
+    exported.data?.complete === true && exportedIds.length === storedIds.length && exportedIds.every((id, i) => id === storedIds[i]) && exported.data.wishlist.every((w) => w.catalog !== null),
+    `${exportedIds.length} of ${storedIds.length}`,
+  );
+  check("and finishes in under 10 seconds", exportMs < 10_000, `${exportMs} ms`);
 }
 
 // ---------------------------------------------------------------------------

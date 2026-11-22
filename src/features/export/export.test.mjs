@@ -21,6 +21,7 @@ import {
   shapeSubmission,
   shapeWish,
 } from "./format.ts";
+import { rowsById } from "./paging.ts";
 
 const src = join(import.meta.dirname, "..", "..");
 const read = (...parts) => readFileSync(join(src, ...parts), "utf8");
@@ -167,10 +168,51 @@ test("the export reads only as the person: no secret key, no Auth Admin, no id f
   assert.match(route, /const userId = auth\?\.claims\?\.sub;/);
   assert.doesNotMatch(route, /request\.(formData|json|text)\(|searchParams\.get|nextUrl\.searchParams/);
   // Every collection read names the owner, on top of RLS.
-  for (const table of ["collection_items", "collection_item_private", "collection_item_components"]) {
+  for (const table of ["collection_items", "collection_item_private", "collection_item_components", "wishlist_items"]) {
     assert.match(server, new RegExp(`from\\("${table}"\\)[^;]*\\.eq\\("owner_id", me\\)`), table);
   }
   assert.match(route, /"Cache-Control": "private, no-store, max-age=0"/);
   assert.match(route, /"X-Robots-Tag": "noindex/);
   assert.match(route, /take_request_slot", \{ p_kind: "data_export" \}/);
+});
+
+// The wishlist rows are read by key, not by offset (integration review of M12 W2).
+const table = (n) => Array.from({ length: n }, (_, i) => ({ id: `w${String(i).padStart(6, "0")}` }));
+const pager = (rows, onPage = () => {}) => {
+  let calls = 0;
+  const page = async (after, size) => {
+    onPage(calls++, rows);
+    return rows.filter((r) => after === null || r.id > after).slice(0, size);
+  };
+  return { page, calls: () => calls };
+};
+const tooLarge = () => new Error("too large");
+
+test("an entry removed between pages doesn't make another be skipped", async () => {
+  const rows = table(2500);
+  const all = rows.map((r) => r.id);
+  // After the first page, the person removes an entry that page already held.
+  const { page } = pager(rows, (call, live) => call === 1 && live.splice(10, 1));
+  const out = (await rowsById(page, 1000, 10_000, tooLarge)).map((r) => r.id);
+  assert.equal(out.length, 2500);
+  assert.equal(new Set(out).size, 2500);
+  assert.deepEqual(out, all);
+});
+
+test("the wishlist pager stops at a short page, takes exactly the limit and refuses more", async () => {
+  const exact = pager(table(2000));
+  assert.equal((await rowsById(exact.page, 1000, 10_000, tooLarge)).length, 2000);
+  assert.equal(exact.calls(), 3);
+  assert.equal((await rowsById(pager(table(10_000)).page, 1000, 10_000, tooLarge)).length, 10_000);
+  await assert.rejects(rowsById(pager(table(10_001)).page, 1000, 10_000, tooLarge), /too large/);
+  assert.deepEqual(await rowsById(pager([]).page, 1000, 10_000, tooLarge), []);
+});
+
+test("the export reads the wishlist rows by id, never by offset", () => {
+  const server = read("features", "export", "server.ts");
+  const start = server.indexOf('from("wishlist_items")');
+  const block = server.slice(start, server.indexOf("EXPORT_MAX_WISHES", start));
+  assert.match(block, /\.order\("id"\)\.limit\(size\)/);
+  assert.match(block, /query\.gt\("id", after\)/);
+  assert.doesNotMatch(block, /\.range\(/);
 });

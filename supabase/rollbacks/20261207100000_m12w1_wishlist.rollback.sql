@@ -23,6 +23,9 @@ begin
   if to_regclass('public.wishlist_items') is null then
     raise exception 'wishlist rollback: public.wishlist_items doesn''t exist; nothing to roll back';
   end if;
+  -- Held until the transaction ends, so no entry can be added between this count and the
+  -- drop below (the guard would otherwise pass and the new entry be discarded unseen).
+  lock table public.wishlist_items in access exclusive mode;
   select count(*) into v_entries from public.wishlist_items;
   if v_entries > 0 and coalesce(current_setting('mgd.discard_wishlists', true), '') <> 'yes' then
     raise exception 'wishlist rollback refused: % wishlist entries exist. Export them, then set mgd.discard_wishlists = ''yes'' to discard them.', v_entries;

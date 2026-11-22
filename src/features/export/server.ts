@@ -22,6 +22,7 @@ import {
   EXPORT_MAX_WISHES,
   WISHLIST_PAGE,
 } from "./format";
+import { rowsById } from "./paging";
 
 /**
  * Reads the signed-in person's data and yields it as JSON text, a page at a time
@@ -136,10 +137,18 @@ export async function* exportChunks(supabase: Client, account: { id: string; ema
   // M12 W2: the wishlist. The entries as stored, through the owner-only table (RLS and
   // the owner named), and how the catalog shows each now, through get_my_wishlist,
   // which reads only the caller's own entries. At most 10,000 of each.
-  const wishes = await allRows((a, b) =>
-    supabase.from("wishlist_items").select("id,release_id,game_id,platform_id,region_code,completeness,priority,note,created_at,updated_at").eq("owner_id", me).order("id").range(a, b),
+  // Paged by id, as the collection is, so an entry removed during the export can't make
+  // another be skipped.
+  const wishes = await rowsById(
+    async (after, size) => {
+      let query = supabase.from("wishlist_items").select("id,release_id,game_id,platform_id,region_code,completeness,priority,note,created_at,updated_at").eq("owner_id", me).order("id").limit(size);
+      if (after) query = query.gt("id", after);
+      return must(await query) as Row[];
+    },
+    1000,
+    EXPORT_MAX_WISHES,
+    () => new ExportTooLarge(),
   );
-  if (wishes.length > EXPORT_MAX_WISHES) throw new ExportTooLarge();
   const shown = new Map<string, Row>();
   let cursor: string | null = null;
   for (let page = 0; wishes.length > 0; page += 1) {
