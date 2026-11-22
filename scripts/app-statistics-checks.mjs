@@ -273,6 +273,8 @@ async function navigation() {
   const o = people.owner;
   const collection = await o.browser.get("/collection");
   check("My Collection links to Statistics", resolveSegments(collection.html).includes(`href="${STATS}"`));
+  // The same collection summary My Collection shows: 13 copies on the same 5 systems.
+  check("My Collection's total and platforms agree with the statistics (13 copies on 5)", has(plain(collection.html), "13 copies Physical copies on 5 platforms") && has(people.ownerText, "13 Physical copies") && has(people.ownerText, "5 Systems"));
   const page = await o.browser.get(STATS);
   check("Statistics links back to My Collection", resolveSegments(page.html).includes('href="/collection"'));
   const shelf = await o.browser.get("/collection/systems/snes");
