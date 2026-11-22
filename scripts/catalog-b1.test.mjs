@@ -397,7 +397,7 @@ test("every exception flag has a reason an editor can read", () => {
 });
 
 test("the batch migration maps every flag to the same possible critical error as the parser", () => {
-  const sql = readFileSync(new URL("../docs/proposals/m12c-b1/20261210100300_m12c_b1_m2_review_batches.sql", import.meta.url), "utf8");
+  const sql = readFileSync(new URL("../supabase/migrations/20261210100300_m12c_b1_m2_review_batches.sql", import.meta.url), "utf8");
   const body = sql.slice(sql.indexOf("create function private.review_critical_signal"), sql.indexOf("revoke all on function private.review_critical_signal"));
   const mapped = Object.fromEntries([...body.matchAll(/when '([a-z_]+)' then '([a-z_]+)'/g)].map((m) => [m[1], m[2]]));
   assert.deepEqual(mapped, CRITICAL_SIGNALS);
@@ -416,7 +416,7 @@ test("a record whose entity detail is pending is never ready, whatever else it s
 // The risk-assessment contract with batch creation (SQL review of 62267d6, finding 5)
 // ---------------------------------------------------------------------------
 
-const B1_DIR = new URL("../docs/proposals/m12c-b1/", import.meta.url);
+const B1_DIR = new URL("../supabase/migrations/", import.meta.url);
 const m2Sql = () => readFileSync(new URL("20261210100300_m12c_b1_m2_review_batches.sql", B1_DIR), "utf8");
 const SNAP = "5b1e2d0a3c4f69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
 
@@ -448,7 +448,7 @@ test("an entry's risk assessment follows the contract the batch validates", () =
 });
 
 test("the end-to-end pgTAP test stages exactly what the parser produces", () => {
-  const sql = readFileSync(new URL("tests/51_b1_review_hardening.test.sql", B1_DIR), "utf8");
+  const sql = readFileSync(new URL("../supabase/tests/database/51_b1_review_hardening.test.sql", import.meta.url), "utf8");
   const block = sql.slice(sql.indexOf("-- BEGIN parser-payload"), sql.indexOf("-- END parser-payload"));
   const literal = JSON.parse(/\$p\$(\{.*\})\$p\$/.exec(block)[1]);
   const e = parseWikidataEntities(fixture("entities-response.json"), SNES).find((x) => x.external_id === "Q1005");
