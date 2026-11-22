@@ -18,6 +18,8 @@
  * too, because the database may need attention. Rerun the remaining suites with
  * --steps.
  */
+// Before every other import: the opt-in check (see lib/mutation-opt-in-campaign.mjs).
+import "./lib/mutation-opt-in-campaign.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

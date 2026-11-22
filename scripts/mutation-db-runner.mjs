@@ -29,6 +29,8 @@
  * exact mutation recorded. Anything else is a conflict: the run stops, and nothing is
  * overwritten.
  */
+// Before every other import: the opt-in check (see lib/mutation-opt-in-db.mjs).
+import "./lib/mutation-opt-in-db.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
