@@ -51,7 +51,6 @@ The design has 57 tables: the 26 requested and 31 supporting tables. Each suppor
 | `genres`, `game_genres`, `franchises`, `game_franchises` | The Game Details milestone (M10 decision D6) |
 | `catalog_images` | The cover-art decision (D15, legal review) |
 | `shelves`, `shelf_items` | The Collection Shelves milestone |
-| `wantlist_items` | The Wishlist milestone |
 | `user_favorite_games` | Profile editing, not scheduled |
 | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `achievements`, `user_achievements` | Social features, not scheduled |
 | `conversations`, `conversation_members`, `messages` | Messaging, not scheduled |
@@ -63,7 +62,7 @@ The private tables from M7 and M8 (exclusions, merges, the Owner, transfers, rec
 | --- | --- | --- |
 | User system | `profiles`, `user_preferences`, `user_favorite_games`, `follows`, `blocked_users` | `staff_roles`, `handle_holds` |
 | Gaming catalog | `platforms`, `games`, `game_platforms`, `releases`, `genres`, `franchises` | `region_codes`, `markets`, `platform_names`, `media_formats`, `platform_media_formats`, `packaging_types`, `hardware_requirements`, `release_markets`, `release_components`, `release_hardware_requirements`, `game_relations`, `game_aliases`, `game_genres`, `game_franchises`, `catalog_images`, `catalog_change_requests` |
-| Collection system | `collection_items`, `shelves`, `shelf_items`, `wantlist_items` | `collection_item_private`, `collection_item_components` |
+| Collection system | `collection_items`, `shelves`, `shelf_items`, `wishlist_items` | `collection_item_private`, `collection_item_components` |
 | Social system | `posts`, `post_images`, `comments`, `likes`, `bookmarks`, `reviews`, `notifications` | `achievements`, `user_achievements` |
 | Messaging | `conversations`, `conversation_members`, `messages` | None |
 | Moderation | `reports` | `private.audit_events` (M4) |
@@ -1010,29 +1009,57 @@ A reference to a collection item, never a copy of its data. One item can sit on 
 - **Indexes:** `(shelf_id, sort_rank)`; `(collection_item_id, owner_id)`; `(owner_id, shelf_id)`
 - **Timestamps:** `created_at`, `updated_at`
 
-### `wantlist_items`
+### `wishlist_items` (M12 W1)
 
-**Planned, not built.** Planned for the Wishlist milestone, after M10.
+**Built in M12 W1** (`20261207100000_m12w1_wishlist.sql`; rollback in `supabase/rollbacks/`). Planned as `wantlist_items`; renamed with the M12 Wishlist decisions. A collector's private list of physical games they want. An entry points at the catalog and copies nothing from it.
 
-A user can want one exact release, or a game on any platform or one platform.
+Four levels of want, from loose to exact:
+
+| Level | Stored | Example |
+| --- | --- | --- |
+| A | `game_id` | Chrono Trigger, any physical version |
+| B | `game_id`, `platform_id` | Chrono Trigger on Super Nintendo |
+| B+ | `game_id`, `platform_id`, `region_code` | Resident Evil 2 on PlayStation, PAL |
+| C | `release_id` | One exact catalog release; its region, edition and every other detail come from the release |
 
 | Column | Type | Null | Notes |
 | --- | --- | --- | --- |
-| `id` | `uuid` | No | |
+| `id` | `uuid` | No | Chosen by the client: a UUIDv7 made within the last 24 hours (5 minutes ahead allowed), which makes adding idempotent |
 | `owner_id` | `uuid` | No | |
-| `release_id` | `uuid` | Yes | Exact release |
-| `game_id` | `uuid` | Yes | Any release of this game |
-| `platform_id` | `uuid` | Yes | Narrows `game_id` to one platform |
-| `minimum_completeness` | `completeness` | Yes | |
-| `priority` | `smallint` | No | 1 to 5. Default 3 |
-| `visibility` | `visibility_level` | No | Default `private` (Q4). Independent of `collection_visibility`, so a wantlist can be public with a private collection |
+| `release_id` | `uuid` | Yes | Level C. Nothing else is set with it |
+| `game_id` | `uuid` | Yes | Levels A, B and B+ |
+| `platform_id` | `uuid` | Yes | Levels B and B+. A platform the catalog lists for the game (a published pairing) when added |
+| `region_code` | `text` | Yes | Level B+. Any code in `region_codes` except `unknown`, not only those the game has a release in. Needs a platform |
+| `completeness` | `completeness` | Yes | The lowest the collector would accept; null for any. Order, lowest first: loose, incomplete, complete, sealed. A copy whose completeness isn't recorded meets no minimum |
+| `priority` | `smallint` | No | 1 high, 2 normal (default), 3 low |
+| `note` | `text` | Yes | Private, 1 to 500 characters, stored tidied (NFC, `\n` line breaks, no other control characters, trimmed) |
 
 - **Primary key:** `id`
-- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)`, `game_id` → `games(id)`, `platform_id` → `platforms(id)`, all on delete restrict
-- **Unique:** partial unique `(owner_id, release_id)` where `release_id` is not null; `NULLS NOT DISTINCT (owner_id, game_id, platform_id)` where `game_id` is not null
-- **Indexes:** `(owner_id, priority, created_at DESC)`; `release_id`; `(game_id, platform_id)`; `platform_id`
-- **Timestamps:** `created_at`, `updated_at`
-- **Constraints:** `CHECK (num_nonnulls(release_id, game_id) = 1)`; `CHECK (platform_id IS NULL OR game_id IS NOT NULL)`. Policy allows published games and releases only
+- **Foreign keys:** `owner_id` → `profiles(id)` on delete cascade; `release_id` → `releases(id)`, `game_id` → `games(id)`, `platform_id` → `platforms(id)`, `region_code` → `region_codes(code)`, all on delete restrict
+- **Unique:** one entry per exact target per collector: partial unique `(owner_id, release_id)` where `release_id` is not null; `NULLS NOT DISTINCT (owner_id, game_id, platform_id, region_code)` where `release_id` is null. Different targets for the same game coexist ("any version" beside specific entries)
+- **Indexes:** `(owner_id, created_at DESC, id DESC)`; partial `release_id`, `game_id`, `platform_id`
+- **Timestamps:** `created_at` (never changes), `updated_at`
+- **Constraints:** a release entry sets nothing else, a game entry needs its game; a region needs a platform; the region isn't `unknown`; priority 1 to 3; the note's tidy form
+- **Triggers:** the UUIDv7 check and the limit of 10,000 entries per collector (under a per-owner lock); id, owner and `created_at` never change; `updated_at`
+- **No `visibility` yet:** entries are private until public profiles exist, and the note stays owner-only then too
+- **Not audited:** a personal preference, not a catalog decision
+
+**Writes:** only through `add_wishlist_item`, `update_wishlist_item` and `remove_wishlist_item` (see [security-rls.md](security-rls.md#wishlist-m12-w1)). An add needs a published game (and pairing, for a platform) or a published release, locked `FOR SHARE` in the catalog's order, so it and an exclusion or merge of its target are serialized. Adding a target already on the wishlist returns the existing entry. Owning a copy never removes an entry.
+
+**Catalog changes are resolved when read, never written onto an entry**, so `merge_release`, `exclude_release` and `restore_exclusion` are unchanged:
+
+| Change | Release entry | Game entry |
+| --- | --- | --- |
+| Release or game merged | Shown as the release it was merged into, marked `merged` | Shown as the game it was merged into, marked `merged` |
+| Release, or the game, excluded | `unavailable`, shown as the owner saw it; the game's link only while it's published | `unavailable`, shown as the owner saw it, no link |
+| Pairing excluded (the game stays) | | `platform_unavailable` |
+| Restored | Available again | Available again |
+| Two entries now show one target | Both kept, each marked `duplicate` | Both kept, each marked `duplicate` |
+| Account deleted | Entries deleted | Entries deleted |
+
+Nothing a wishlist references can be deleted (restrict), and published records are never deleted or unpublished (M5), so no catalog change strands an entry.
+
+**Reads:** `get_my_wishlist` (search, platform, region and priority filters; priority, added or title sort; keyset pages), `get_my_wishlist_for_game` and `get_my_wishlist_item`. Each entry reports how many of the owner's copies match it and aren't preserved (a release entry: copies of the release; a game entry: copies of any of the game's releases and unidentified copies of it, on the platform and in the region it names), and how many of those meet its completeness.
 
 There's deliberately no maximum price. On a publicly visible row it would show sellers what a buyer will pay. If needed later, it belongs in a private table like `collection_item_private`.
 

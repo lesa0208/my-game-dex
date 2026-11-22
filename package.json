@@ -45,6 +45,7 @@
     "app:shelf-checks": "node scripts/app-shelf-checks.mjs",
     "app:game-details-checks": "node scripts/app-game-details-checks.mjs",
     "app:fast-add-checks": "node scripts/app-fast-add-checks.mjs",
+    "db:wishlist-checks": "node scripts/db-wishlist-checks.mjs",
     "submissions:test": "node --experimental-strip-types --no-warnings --test src/features/submissions/submissions.test.mjs",
     "app:submission-checks": "node scripts/app-submission-checks.mjs",
     "review:test": "node --experimental-strip-types --no-warnings --test src/features/review/review.test.mjs",
@@ -72,7 +73,8 @@
     "app:reference-checks": "node scripts/app-reference-checks.mjs",
     "app:a11y-checks": "node scripts/app-a11y-checks.mjs",
     "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs",
-    "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs"
+    "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs",
+    "db:wishlist-benchmark": "node scripts/db-wishlist-benchmark.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

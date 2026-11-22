@@ -426,7 +426,7 @@ Approved as D5, with changes: submissions are marked unverified and can't become
 | Users can't approve anything, including their own | `status` has no client grant. Only staff functions change it, after checking the `catalog_editor` role |
 | Nothing auto-approves | Approval has one path, the staff function. No job, threshold or provider sync calls it |
 | A user can attach only their own submissions | `can_use_release()` in the `collection_items` policies. **This check is required because foreign keys ignore RLS**, so anyone who knew a record's ID could otherwise attach to it |
-| Unverified records can't reach public content | `posts`, `reviews`, `wantlist_items` and `user_favorite_games` policies allow published records only |
+| Unverified records can't reach public content | `posts`, `reviews`, `wishlist_items` and `user_favorite_games` policies allow published records only |
 | A published row doesn't reveal its submitter | `submitted_by` is cleared on approval and a `CHECK` enforces that. Otherwise a catalog entry for a rare release would reveal who owns it, even with a private collection. The credit stays in the staff-only `catalog_change_requests` |
 | Duplicate checks don't reveal other submissions | Global uniqueness applies to published records only |
 | Submitted images stay private | Held in the private `catalog-submissions` bucket until approved |
@@ -457,7 +457,20 @@ An editor excludes an out-of-scope release through a staff function. That functi
 | `collection_item_private` | **No grant** | R, D: own. I, U: own, active account | All but timestamps | All except keys and timestamps |
 | `collection_item_components` | **No grant** | R, D: own. I, U: own, active account | `item_id`, `owner_id`, `kind`, `label`, `condition` | `condition` |
 | `shelves`, `shelf_items` | Deferred (D3) | | | |
-| `wantlist_items` | Later (L1). R: entry is `public`, default `private` | R: `public`, or `followers` with an accepted follow and no block, or own. I, U, D: own, published records only | | `minimum_completeness`, `priority`, `visibility` |
+| `wishlist_items` | **No grant** | R: own, live session (the only grant). I, U, D: none; through the [wishlist functions](#wishlist-m12-w1) only | None | None |
+
+#### Wishlist (M12 W1)
+
+**Private, owner-only.** `wishlist_items` has one policy: the owner reads their own rows through a live session (`owner_id = auth.uid()` and `session_is_live()`). `authenticated` has `SELECT` only, for the personal data export; `anon` and `service_role` have nothing. No client can insert, update or delete a row: every write goes through a `SECURITY DEFINER` function with an empty `search_path`, which checks the caller itself.
+
+| Function | Signed in, live session | Active account | Notes |
+| --- | --- | --- | --- |
+| `add_wishlist_item(id, target, details)` | Required | Required | Published targets only, locked `FOR SHARE`. A retry, or a target already wanted, returns the existing entry. Another collector's id is a plain `request conflict` |
+| `update_wishlist_item(item, changes)` | Required | Required | Own entries only (`item unavailable` otherwise). A new target must be published; an unchanged one isn't rechecked |
+| `remove_wishlist_item(item)` | Required | Not required | A suspended collector can still remove entries |
+| `get_my_wishlist`, `get_my_wishlist_for_game`, `get_my_wishlist_item` | Required | Not required | Own entries only. Definers so an entry whose record left the catalog still shows its owner what they saw, as preserved copies do (M7b-2b) |
+
+Signed out, or with an ended session, every function answers `not permitted` and the table reads no rows. Staff have no read path. There's no visibility column yet: when public profiles add one, the note must stay owner-only.
 
 `service_role` has no privilege on any collection table. Deleting an account through Auth still removes everything: the foreign keys cascade from `auth.users` through `profiles`, and cascades don't check the caller's privileges. This was tested through the Auth admin API.
 

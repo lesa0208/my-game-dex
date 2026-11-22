@@ -83,7 +83,7 @@ select is(
 select is(
   (select array_agg(p.oid::regprocedure::text collate "C" order by p.oid::regprocedure::text collate "C") from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname in ('public', 'private') and p.prosecdef),
   array[
-    'accept_follow_request(uuid)', 'accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'approve_submission(uuid,integer,bigint,bigint,text,text)',
+    'accept_follow_request(uuid)', 'accept_ownership_transfer(uuid)', 'account_deletion_blocked(uuid)', 'add_game_alias(uuid,text,game_alias_kind,text,text,text)', 'add_wishlist_item(uuid,jsonb,jsonb)', 'approve_submission(uuid,integer,bigint,bigint,text,text)',
     'block_user(uuid)', 'can_review_submissions()', 'cancel_follow_request(uuid)', 'cancel_owner_recovery(uuid,text)', 'cancel_ownership_transfer(uuid,text)', 'claim_handle(text)', 'complete_my_password_setup()',
     'confirm_owner_recovery(uuid)', 'create_account_invitation(text,text)', 'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)',
     'delete_notification(uuid)', 'exclude_release(uuid,text,text,text,text,boolean,boolean)', 'find_account_by_handle(text)', 'get_account_invitations(integer,uuid)', 'get_account_summary(text)',
@@ -92,7 +92,7 @@ select is(
     'get_following(uuid,integer,timestamp with time zone,uuid)', 'get_game_record(uuid)', 'get_import_providers()', 'get_import_run(uuid)', 'get_import_run_records(uuid,text,integer,integer)',
     'get_import_runs(integer,uuid,text,text)', 'get_merge(uuid)', 'get_merge_candidates(uuid)', 'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_admin_access()',
     'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_my_copy_history(uuid)', 'get_my_factor_status()', 'get_my_game_ownership(uuid)', 'get_my_merged_submission(uuid)', 'get_my_notifications(integer,uuid)', 'get_my_onboarding()', 'get_my_owned_games(uuid[])', 'get_my_preserved_claim(uuid)', 'get_my_preserved_release(uuid)',
-    'get_my_preserved_titles(uuid[])', 'get_my_submission(uuid)', 'get_ownership_status()', 'get_profile_counts(uuid)', 'get_received_follow_requests(integer,timestamp with time zone,uuid)',
+    'get_my_preserved_titles(uuid[])', 'get_my_submission(uuid)', 'get_my_wishlist(text,text,text,integer,text,integer,text)', 'get_my_wishlist_for_game(uuid)', 'get_my_wishlist_item(uuid)', 'get_ownership_status()', 'get_profile_counts(uuid)', 'get_received_follow_requests(integer,timestamp with time zone,uuid)',
     'get_release_picker(text,text,text,uuid)', 'get_release_record(uuid)', 'get_sent_follow_requests(integer,timestamp with time zone,uuid)', 'get_staff_overview()', 'get_submission_queue(text,uuid,integer)',
     'get_submission_review(uuid)', 'get_system_status()', 'get_unread_notification_count()', 'grant_staff_role(uuid,staff_role,text)', 'invitation_delivery_plan(uuid)', 'invitation_revocation_target(uuid)',
     'list_catalog_platforms()', 'mark_notifications_read(uuid)', 'merge_release(uuid,uuid,text,text,text,text[],boolean)', 'my_catalog_submissions(uuid,integer)', 'my_submission_for_release(uuid)',
@@ -104,13 +104,13 @@ select is(
     'private.protect_owner_admin_role()', 'private.protect_owner_profile()', 'private.protect_owner_status()', 'private.record_copy_identity_change()', 'private.require_active_user()', 'private.require_verified_user()', 'private.session_is_live()', 'private.sync_catalog_verification()',
     'private.totp_factor_count(uuid,interval)', 'private.validate_display_name()', 'publish_release(uuid,text,bigint)', 'reconcile_invitation(uuid)', 'record_invitation_delivery(uuid,text,text)',
     'register_my_verified_factors()', 'register_succession_document(text,text)', 'reject_follow_request(uuid)', 'reject_submission(uuid,integer,text,text)', 'relink_my_copy(uuid,uuid)', 'remove_follower(uuid)',
-    'remove_game_alias(uuid,text)', 'request_follow(uuid)', 'request_invitation_resend(uuid,text)', 'request_invitation_revocation(uuid,text)', 'request_submission_changes(uuid,integer,text,text)',
+    'remove_game_alias(uuid,text)', 'remove_wishlist_item(uuid)', 'request_follow(uuid)', 'request_invitation_resend(uuid,text)', 'request_invitation_revocation(uuid,text)', 'request_submission_changes(uuid,integer,text,text)',
     'resolve_catalog_review(uuid,text)', 'resolve_merged_release(uuid)', 'restore_exclusion(uuid,integer,text)', 'resubmit_my_submission(uuid,text)', 'retry_invitation_revocation(uuid)',
     'revoke_staff_role(uuid,staff_role,text)', 'search_accounts(text,integer)', 'search_catalog(text,text[],integer,text)', 'search_catalog_records(text,text,text,text,integer,text)', 'set_account_status(uuid,account_status,text)',
     'set_avatar_path(uuid,text)', 'set_catalog_field_lock(text,uuid,text,boolean,text)', 'set_game_platform(uuid,uuid,text)', 'set_game_relation(uuid,uuid,game_relation_type,smallint,text,text)', 'set_my_copy_identity(uuid,jsonb)',
     'set_owner_successor(uuid,text)', 'set_release_components(uuid,jsonb,text)', 'set_release_markets(uuid,text[],text)', 'set_release_requirements(uuid,jsonb,text)', 'start_ownership_transfer(uuid,text)',
     'start_submission_review(uuid,integer,text)', 'submit_game(text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_game_once(uuid,text,game_kind,integer,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release(uuid,text,text,text,jsonb,jsonb,text,boolean)', 'submit_release_once(uuid,uuid,text,text,text,jsonb,jsonb,text,boolean)', 'take_request_slot(text)',
-    'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)', 'verify_game(uuid,text,bigint)', 'verify_release(uuid,text,bigint)',
+    'unblock_user(uuid)', 'unfollow(uuid)', 'update_game(uuid,jsonb,text)', 'update_my_submission(uuid,jsonb)', 'update_release(uuid,jsonb,text)', 'update_wishlist_item(uuid,jsonb)', 'verify_game(uuid,text,bigint)', 'verify_release(uuid,text,bigint)',
     'withdraw_my_submission(uuid)'
   ],
   'only the expected functions are SECURITY DEFINER'
