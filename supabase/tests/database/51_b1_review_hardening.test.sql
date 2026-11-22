@@ -124,7 +124,7 @@ select is(pg_temp.outcome('e3', 'own', pg_temp.g('Zqx Own Game'), 'excluded', nu
 select is(pg_temp.outcome('e2', 'own', pg_temp.g('Zqx Own Game'), 'correct', null), 'true', 'an independent editor records it');
 select is(pg_temp.outcome('e2', 'own', pg_temp.g('Zqx Own Pairing'), 'correct', null), 'true', 'and the other');
 select is(pg_temp.approve('e3', 'own'), 'error: own record', 'e3 can''t approve either');
-select is(pg_temp.approve('e2', 'own'), '{"status": "approved", "published": 2}', 'the independent editor approves');
+select is(pg_temp.approve('e2', 'own'), '{"status": "approved", "published": 2, "awaiting_physical_evidence": 0}', 'the independent editor approves');
 
 -- ---------------------------------------------------------------------------
 -- Finding 3: an outcome needs aal2 and a recent verification.
@@ -253,7 +253,7 @@ select throws_ok($$select private.record_provider_rights('wikidata', true, encod
   'P0001', 'terms not cleared', 'surviving rights are recorded only for the terms that are cleared');
 select private.record_provider_rights('wikidata', true, encode(digest('terms', 'sha256'), 'hex'), 'CC0 1.0: the public-domain dedication is irrevocable');
 select private.record_provider_clearance('wikidata', false, null, null, 'Partnership ended');
-select is(pg_temp.approve('e2', 'lic'), '{"status": "approved", "published": 1}',
+select is(pg_temp.approve('e2', 'lic'), '{"status": "approved", "published": 1, "awaiting_physical_evidence": 0}',
   'rights recorded as surviving for those terms keep the records publishable after clearance ends');
 
 -- ---------------------------------------------------------------------------

@@ -212,7 +212,7 @@ async function main() {
       try {
         await a.query("begin");
         const r = (await asEditor(a, "e2", `select public.approve_review_batch($1, 'Approval first')::text as r`, [batch])).rows[0].r;
-        check("approval first: the approval succeeds while it holds its locks", r === '{"status": "approved", "published": 2}', r);
+        check("approval first: the approval succeeds while it holds its locks", r === '{"status": "approved", "published": 2, "awaiting_physical_evidence": 0}', r);
         await b.query("begin");
         const edit = b.query(`update public.games set summary = 'Edit after approval' where id = $1`, [target]).then(() => "done", (e) => `error: ${e.message}`);
         const waited = await waitForLock(admin, b.processID, "approval first");

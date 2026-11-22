@@ -2,7 +2,7 @@
 -- sampling, human approval and audit (invariants B1 to B8). One rolled-back transaction.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(54);
+select plan(58);
 
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
 begin
@@ -153,7 +153,7 @@ select is(pg_temp.approve('e2', pg_temp.b('a')), 'error: batch stale', 'a member
 rollback to savepoint stale;
 
 select is(pg_temp.approve('e1', pg_temp.b('a')), 'error: own record', 'the batch''s creator can''t approve it');
-select is(pg_temp.approve('e2', pg_temp.b('a')), '{"status": "approved", "published": 6}', 'an independent editor approves: six identities published');
+select is(pg_temp.approve('e2', pg_temp.b('a')), '{"status": "approved", "published": 6, "awaiting_physical_evidence": 0}', 'an independent editor approves: six identities, each reviewed by a person, published');
 select ok((select count(*) = 6 from public.games where title like 'Zqx Batch %' and status = 'published')
           and (select count(*) = 2 from public.games where title like 'Zqx Batch %' and status <> 'published'),
   'the excluded duplicate and odd kind stay unpublished');
@@ -185,7 +185,7 @@ select is(pg_temp.approve('e2', pg_temp.b('s')), '{"status": "awaiting_approval"
 select is(pg_temp.approve('e2', pg_temp.b('s')), 'error: already approved', 'the same editor can''t be the second approver (B6)');
 select is(pg_temp.as_user('e3', format($q$select public.record_batch_outcome(%L, %L, 'excluded', null, 'late change')::text$q$, pg_temp.b('s'), pg_temp.g('Zqx Pair One'))),
   'error: batch approval started', 'once an approval is recorded, the findings can''t change (B9)');
-select is(pg_temp.approve('e3', pg_temp.b('s')), '{"status": "approved", "published": 2}', 'a different editor completes the approval');
+select is(pg_temp.approve('e3', pg_temp.b('s')), '{"status": "approved", "published": 2, "awaiting_physical_evidence": 0}', 'a different editor completes the approval');
 
 
 -- B9 to B11. A policy that samples part of a small lot: 45% tolerable error at 80% confidence
@@ -244,7 +244,8 @@ select is(pg_temp.as_stale_actor('e2', format($q$select public.approve_review_ba
   'approval needs a recent verification (B4)');
 update auth.mfa_amr_claims set created_at = now(), updated_at = now() where session_id = pg_temp.u('e2');
 select is(pg_temp.approve('c4', pg_temp.b('q')), 'error: not permitted', 'a collector can''t approve a batch');
-select is(pg_temp.approve('e2', pg_temp.b('q')), '{"status": "approved", "published": 6}', 'an independent editor approves it');
+select is(pg_temp.approve('e2', pg_temp.b('q')), '{"status": "approved", "published": 2, "awaiting_physical_evidence": 4}',
+  'an independent editor approves it: the two members a person confirmed are published, the four unsampled ones await physical evidence (M14a)');
 select ok((select bool_and(gp.verification_basis ->> 'physical_eligibility' = 'confirmed'
                            and gp.verification_basis ->> 'reference' = pr.external_id and gp.verification_basis ->> 'snapshot_sha256' = pr.payload_sha256)
            from private.catalog_review_batch_items i
@@ -252,22 +253,42 @@ select ok((select bool_and(gp.verification_basis ->> 'physical_eligibility' = 'c
            join private.provider_records pr on pr.id = i.provider_record_id
            where i.batch_id = pg_temp.b('q') and i.sampled),
   'a member a person found correct is confirmed, with its source record''s id and hash (B11)');
-select ok((select count(*) = 4 and bool_and(gp.verification_basis ->> 'physical_eligibility' = 'batch_accepted')
+select ok((select count(*) = 4 and bool_and(g.verified_at is not null and g.status = 'under_review' and gp.status = 'under_review'
+                                            and gp.verified_at is null and gp.verification_basis is null)
            from private.catalog_review_batch_items i
+           join public.games g on g.id = i.game_id
            join public.game_platforms gp on gp.game_id = i.game_id and gp.platform_id = i.platform_id
            where i.batch_id = pg_temp.b('q') and not i.sampled),
-  'an unsampled member is recorded as accepted with the batch, not as individually confirmed (B11)');
-select ok((select count(*) = 8 and count(*) filter (where e.metadata ->> 'acceptance' = 'batch_accepted') = 8
+  'an unsampled member keeps a verified identity, but its pairing stays unverified and nothing of it is published: a provider listing is never physical evidence (B11, M14a)');
+select ok((select count(*) = 4 and count(*) filter (where e.metadata ->> 'acceptance' = 'batch_accepted') = 4 and bool_and(e.metadata ->> 'entity' = 'game')
            from private.audit_events e
            join private.catalog_review_batch_items i on i.game_id::text = e.metadata ->> 'id'
            where e.action = 'catalog_record_verified' and e.metadata ->> 'batch_id' = pg_temp.b('q')::text and i.batch_id = pg_temp.b('q') and not i.sampled),
-  'the verification audit rows of unsampled members say "batch_accepted", for the game and the pairing alike (B11)');
+  'the verification audit rows of unsampled members say "batch_accepted", for the identity only: no pairing of theirs is verified (B11, M14a)');
 select ok((select bool_and(e.metadata ->> 'acceptance' = 'individually_reviewed')
            from private.audit_events e
            join private.catalog_review_batch_items i on i.game_id::text = e.metadata ->> 'id'
            where e.action = 'catalog_record_verified' and e.metadata ->> 'batch_id' = pg_temp.b('q')::text and i.batch_id = pg_temp.b('q') and i.sampled),
   'a member a person found correct is recorded as individually reviewed (B11)');
 select is(pg_temp.approve('e3', pg_temp.b('q')), 'error: record unavailable', 'a decided batch can''t be approved again');
+
+-- M14a: physical existence is confirmed one game at a time, with evidence, before publication.
+select throws_ok(format($q$update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = 1,
+    verification_basis = '{"source": "wikidata", "reference": "Q1", "physical_eligibility": "batch_accepted"}' where game_id = %L$q$,
+    pg_temp.u('e2'), (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1)),
+  '23514', null, 'no pairing can carry anything but confirmed physical evidence (M14a)');
+select is(pg_temp.as_user('e3', format($q$select public.verify_game_platform(%L, (select id from public.platforms where slug = 'snes'),
+    '{"source": "editor", "reference": "Cartridge, box and manual photographed; label and product code checked", "physical_eligibility": "confirmed"}', 'Physical copy checked', %s)::text$q$,
+    (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1),
+    (select g.revision from public.games g where g.id = (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1)))),
+  'true', 'another editor confirms one awaiting member''s physical existence, with evidence (M14a)');
+select is(pg_temp.as_user('e2', format($q$select public.publish_game_identity(%L, array[(select id from public.platforms where slug = 'snes')], 'Physical existence confirmed', %s)::text$q$,
+    (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1),
+    (select g.revision from public.games g where g.id = (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1)))),
+  'true', 'then its identity is published, through the individual path (M14a)');
+select is((select count(*)::integer from private.catalog_review_batch_items i join public.games g on g.id = i.game_id
+           where i.batch_id = pg_temp.b('q') and not i.sampled and g.status = 'published'), 1,
+  'the other three stay unpublished until their own evidence (M14a)');
 
 select * from finish();
 rollback;
