@@ -3,7 +3,7 @@
 -- is in 50 and 51. One rolled-back transaction, with test 49's staff session harness.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(20);
+select plan(26);
 
 create function pg_temp.claims(p_user uuid) returns jsonb language plpgsql as $mfa$
 begin
@@ -76,6 +76,14 @@ select is(pg_temp.publish('e2', 'snes'), 'error: own record', 'the editor who co
 select is(pg_temp.publish('c4', 'snes'), 'error: not permitted', 'a collector can''t publish it');
 select is(pg_temp.publish(null, 'snes'), 'error: permission denied for function publish_game_identity', 'nor can a visitor');
 select is(pg_temp.publish('e1', 'snes'), 'error: own record', 'nor the game''s creator');
+-- If the original verifier account was removed, its FK can SET NULL. An absent
+-- verifier cannot count as a second independent person for a new publication.
+savepoint m14a_missing_verifier;
+update public.game_platforms set verified_by = null
+where game_id = pg_temp.id('g') and platform_id = pg_temp.id('snes');
+select is(pg_temp.publish('e3', 'snes'), 'error: pairing not verified',
+  'a missing verifier cannot authorize identity publication');
+rollback to savepoint m14a_missing_verifier;
 select is(pg_temp.publish('e3', 'snes'), 'true', 'a second editor publishes it');
 select ok((select g.status = 'published' and gp.status = 'published' and gp.verified_by = pg_temp.u('e2') from public.games g join public.game_platforms gp on gp.game_id = g.id
            where g.id = pg_temp.id('g') and gp.platform_id = pg_temp.id('snes')), 'the game and its SNES pairing are public, on e2''s evidence');
@@ -99,7 +107,32 @@ select throws_ok(format($$update public.game_platforms set verified_at = now(), 
     verification_basis = '{"source": "editor", "reference": "Unclear photo", "physical_eligibility": "inconclusive"}' where game_id = %L and platform_id = %L$$,
     pg_temp.u('e2'), pg_temp.rev(), pg_temp.id('g'), pg_temp.id('nes')),
   '23514', null, 'an inconclusive basis can''t be stored, even by the database owner');
-select is(pg_temp.as_user(null, format($$select string_agg(p.slug, ',' order by p.slug) from public.game_platforms gp join public.platforms p on p.id = gp.platform_id where gp.game_id = %L$$, pg_temp.id('g'))),
+-- A CHECK must reject false AND unknown, not only false. These writes supply every
+-- other verification field, so the evidence field itself is what the CHECK tests.
+select throws_ok(format($update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = %s,
+    verification_basis = '{"source": "editor", "reference": "Unclear photo"}' where game_id = %L and platform_id = %L$,
+    pg_temp.u('e2'), pg_temp.rev(), pg_temp.id('g'), pg_temp.id('nes')),
+  '23514', null, 'a non-NULL basis missing physical_eligibility is rejected');
+select throws_ok(format($update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = %s,
+    verification_basis = '{"source": "editor", "reference": "Unclear photo", "physical_eligibility": null}' where game_id = %L and platform_id = %L$,
+    pg_temp.u('e2'), pg_temp.rev(), pg_temp.id('g'), pg_temp.id('nes')),
+  '23514', null, 'JSON null physical_eligibility is rejected');
+select throws_ok(format($update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = %s,
+    verification_basis = '{"source": "editor", "reference": "Unclear photo", "physical_eligibility": "assumed"}' where game_id = %L and platform_id = %L$,
+    pg_temp.u('e2'), pg_temp.rev(), pg_temp.id('g'), pg_temp.id('nes')),
+  '23514', null, 'incorrect physical_eligibility is rejected');
+select ok((select verification_basis is null and verified_at is null from public.game_platforms
+           where game_id = pg_temp.id('g') and platform_id = pg_temp.id('nes')),
+  'an unverified pairing may keep its entire verification basis SQL NULL');
+savepoint m14a_confirmed_basis;
+update public.game_platforms set verified_at = now(), verified_by = pg_temp.u('e2'), verified_game_revision = pg_temp.rev(),
+    verification_basis = '{"source": "editor", "reference": "Cartridge and box photographed", "physical_eligibility": "confirmed"}'
+where game_id = pg_temp.id('g') and platform_id = pg_temp.id('nes');
+select ok((select verification_basis ->> 'physical_eligibility' = 'confirmed' from public.game_platforms
+           where game_id = pg_temp.id('g') and platform_id = pg_temp.id('nes')),
+  'a valid confirmed verification basis is accepted');
+rollback to savepoint m14a_confirmed_basis;
+select is(pg_temp.as_user(null, format($select string_agg(p.slug, ',' order by p.slug) from public.game_platforms gp join public.platforms p on p.id = gp.platform_id where gp.game_id = %L$, pg_temp.id('g'))),
   'snes', 'a visitor sees only the evidenced SNES pairing');
 
 select * from finish();
