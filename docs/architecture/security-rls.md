@@ -1674,7 +1674,7 @@ Local development only: reset emails go to Mailpit on the isolated test stack. N
 
 **What "signed out" means for a token already issued (demonstrated, not assumed).** After a reset, a change or signing out everywhere, no other device can refresh (`refresh_token_not_found`) and Auth refuses its access token (`session_not_found`). **But the access token itself stays valid until it expires (`jwt_expiry`, an hour at most)**: tokens are signed with ES256 and verified without asking Auth, so the app (`getClaims`) and the database accept it for ordinary reads and collector writes (`db-password-checks` blocks another account with one). Staff functions refuse it at once, because `mfa_session_ok` requires the session's row in `auth.sessions`. The pages said "can keep working for up to an hour". Making collector access end at once would mean checking the session in `is_active_user`, a change to the shared helper not made here. *(Since the M11a session-revocation checkpoint, the database refuses such a token at once for the person's own data: see [Ended sessions](#ended-sessions-m11a).)*
 
-**Tests.** `password:test` (8): the recovery rules, input, messages, the template, and that no password code uses the secret key. `db-password-checks` (40) drives real Auth: the reset answers, single use, expiry, replacement, bans, aal1 refused and the step-up, the day-old session, the other sessions, and what an ended session's access token can still do. `app:password-checks` (114) drives the pages over HTTP with Mailpit: generic answers with timing, GET without spending, the POST, cross-site refusals, the mark, session confusion, interrupted and expired resets, the authenticator path, changing with and without one, and both kinds of sign-out. `app:a11y-checks` covers every new page and state, with keyboard. 10 app mutations (`scripts/app-mutation-checks.mjs`).
+**Tests.** `password:test` (8): the recovery rules, input, messages, the template, and that no password code uses the secret key. `db-password-checks` (40) drives real Auth: the reset answers, single use, expiry, replacement, bans, aal1 refused and the step-up, the day-old session, the other sessions, and what an ended session's access token can still do. `app:password-checks` (114) drives the pages over HTTP with Mailpit: generic answers with timing, GET without spending, the POST, cross-site refusals, the mark, session confusion, interrupted and expired resets, the authenticator path, changing with and without one, and both kinds of sign-out. `app:a11y-checks` covers every new page and state, with keyboard. 10 app mutations (`scripts/mutation-app-runner.mjs`).
 
 ## Profile editing and avatars (M11a-3)
 
@@ -2208,6 +2208,30 @@ The indexing result above predates M2: signed-out clients can no longer read tha
 ## Testing the real policies
 
 M0 to M3 have this in place. `npm run db:mutation` also applies each violation in `scripts/security-mutations.mjs` to the local stack, and fails if one can't be applied, isn't detected, passes a suite expected to fail, or if a subprocess times out or exits abnormally.
+
+### Mutation runners need an explicit opt-in (2026-11-20)
+
+**What happened.** During M12c-B1 checkpoint four, a shell loop meant to run the ordinary database suites (`for f in scripts/db-*-checks.mjs`) also started the database mutation runner. The runner was named `scripts/db-mutation-checks.mjs`, like an ordinary suite.
+- **Why it could run.** Started with no arguments, it selected every suite (`--suite` defaulted to `all`), and it resets the stack it targets with `supabase db reset`.
+- **What stopped it.** The loop had set `MGD_STACK=scratch`, and the run stopped before applying anything, because the combined "all" selection failed the runner's own name-uniqueness check.
+- **What it touched.** Nothing changed except two log files in `~/.my-game-dex/mutation-recovery/my-game-dex-scratch/`. Nothing protected the M12c-A or B1 stacks: `MGD_STACK=test` or `b1` would have been reset.
+
+**Corrective action.**
+- **Renamed.** The runners are now `scripts/mutation-db-runner.mjs` and `scripts/mutation-app-runner.mjs`, and the npm script is `app:mutation`. No `*-checks.mjs` pattern matches them.
+- **One guard, called first.** `scripts/lib/mutation-guard.mjs` runs before anything else in both runners and the campaign: before a log, a lock or a stack call. A run needs all of these:
+  - `MGD_MUTATION_TESTING=1`;
+  - an explicit selection: `--suite <name>` (or `--self-test database|all`) for the database runner, `--set <name>` for the app runner;
+  - for the database runner and the campaign, `MGD_STACK=scratch`. The disposable stack is the only one they may reset; development, M12c-A and B1 are refused.
+- **What stays open.** `--recover`, `--self-test offline` and `mutation:campaign -- --dry-run` need no opt-in, because they restore, touch only a temporary workspace, or run nothing. The offline self-test's interrupted child is allowed only on its own `mutation-selftest-*` folder under the system temporary directory.
+
+**Tests.** `npm run mutation:guard-test` (`scripts/mutation-guard.test.mjs`, offline, also in CI) has 9 tests. They check that:
+- the guard refuses each missing condition and every non-scratch stack;
+- recovery and the offline self-test stay available;
+- no `scripts/*-checks.mjs` file references mutation tooling or resets a stack;
+- the old file names are gone;
+- each runner, started as in the accident (no arguments, no opt-in), refuses without writing a log or touching a recovery directory.
+
+The runner's own offline self-tests still pass (32 of 32).
 
 For each step:
 

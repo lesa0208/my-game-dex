@@ -127,6 +127,10 @@ export function gameOverview(picker: Pick<ReleasePicker, "platforms" | "regions"
   const heroRelease = picker.releases.find((r) => releaseMedia(r) !== null) ?? null;
   return {
     groups,
+    // M14a: every platform the catalog publishes the game on, with or without a verified
+    // release on it (a game whose physical existence was confirmed before any release was
+    // catalogued), then any platform only a release names.
+    platforms: [...picker.platforms, ...groups.map((g) => g.platform).filter((p) => !listed.has(p.slug))],
     regions: picker.regions.filter((r) => r.code !== "unknown" && r.releaseCount > 0),
     releaseCount: picker.releases.length,
     hero: heroRelease ? { release: heroRelease, media: releaseMedia(heroRelease)! } : null,

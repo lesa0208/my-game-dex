@@ -28,12 +28,13 @@ they answer 404 and My Collection hides their link.
   functions granted to `authenticated` only. It changes no existing object, so it can be
   applied to a database with data, and removing the app code alone leaves only an unused
   table.
-- **Not applied anywhere persistent except the local test stack.** Development, M12c-A, the B1
-  stack and every hosted database have no wishlist. Apply it with the normal forward process
-  (`supabase migration up` / `db push`), never a reset.
-- **Order.** Its timestamp is earlier than every B1 proposal (`20261210…`). Merge it before B1.
-  If B1's migrations ever reach a shared database first, re-timestamp this migration (it is
-  recorded only on the local test stack) instead of pushing out of order with `--include-all`.
+- **Where it is applied** (updated 2026-11-22): merged into `main` (PR #19) and applied with
+  the forward process (`supabase migration up`, never a reset) to the local test stack, which
+  holds the M12c-A pilot, and to the local development database, after a verified backup. The
+  B1 stack and every hosted database have no wishlist.
+- **Order.** Its timestamp is earlier than every B1 proposal (`20261210…`), and it is now
+  recorded on two databases, so it can no longer be re-timestamped: B1's migrations must come
+  after it, as their timestamps already do.
 - **Rollback**, `supabase/rollbacks/20261207100000_m12w1_wishlist.rollback.sql`: a forward
   script that locks the table, then refuses while any entry exists unless
   `mgd.discard_wishlists = 'yes'` is set in the same transaction. Wishlists are collectors'
@@ -41,7 +42,10 @@ they answer 404 and My Collection hides their link.
 
 ## Adjusting for B1 when it is integrated
 
-B1 keeps its migrations in `docs/proposals/m12c-b1/` and its schema-inventory changes in
+**Done in M14a Phase 1** (local branch `m14a-b1-integration`), as described below, plus a
+physical-evidence gate: see [catalog-integration-m14a.md](catalog-integration-m14a.md).
+
+B1 kept its migrations in `docs/proposals/m12c-b1/` and its schema-inventory changes in
 `tests/schema_guard_updates.patch`, written against `main` before the wishlist. That patch
 will not apply as is. After moving the proposals into `supabase/migrations`:
 

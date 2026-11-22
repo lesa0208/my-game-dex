@@ -1,0 +1,38 @@
+{
+  "format": "mgd-catalog-identifiers",
+  "stack": "fixture",
+  "games": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "title": "Zqx Linked Legend",
+      "status": "published",
+      "platforms": [
+        "snes"
+      ],
+      "titles": [],
+      "wikidata": [
+        "Q1009"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "title": "Zqx Duplicate Drift",
+      "status": "under_review",
+      "platforms": [
+        "snes"
+      ],
+      "titles": [],
+      "wikidata": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "title": "Zqx Late Bloom",
+      "status": "published",
+      "platforms": [
+        "playstation"
+      ],
+      "titles": [],
+      "wikidata": []
+    }
+  ]
+}

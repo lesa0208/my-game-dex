@@ -1,23 +1,25 @@
 /**
  * Runs several mutation suites one after another, unattended, through
- * db-mutation-checks.mjs. Everything each suite prints goes to its own log file; the
+ * mutation-db-runner.mjs. Everything each suite prints goes to its own log file; the
  * terminal shows only each violation's result, the baselines and each suite's total.
  * The full test output of a violation that fails or survives is saved, one file each;
  * the output of violations detected as expected is discarded. A short summary is
  * written at the end, and its location is recorded in `latest.txt`.
  *
- *   npm run mutation:campaign                      the approved M7b-2b campaign
+ *   MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run mutation:campaign   the approved M7b-2b campaign
  *   npm run mutation:campaign -- --dry-run         checks and prints the plan, runs nothing
  *   npm run mutation:campaign -- --steps m6,m7b1   only these suites, in this order
  *   npm run mutation:campaign -- --dir <path>      where to write, instead of a new folder
  *
  * A step is a suite name, or `suite:violation name` for one violation of it, or
  * `suite:#5+#22` for violations by position (as numbered in failure file names). Local
- * only, like db-mutation-checks.mjs, which also refuses anything but the local stack.
+ * only, like mutation-db-runner.mjs, which also refuses anything but the local stack.
  * If a suite stops (rather than reporting undetected violations), the campaign stops
  * too, because the database may need attention. Rerun the remaining suites with
  * --steps.
  */
+// Before every other import: the opt-in check (see lib/mutation-opt-in-campaign.mjs).
+import "./lib/mutation-opt-in-campaign.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -25,7 +27,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { suites } from "./security-mutations.mjs";
+import { requireMutationOptIn } from "./lib/mutation-guard.mjs";
 import { stackStatus } from "./lib/stack.mjs";
+
+// Before anything is written: a campaign runs the destructive database runner, so it needs
+// the same explicit opt-in and the scratch stack (--dry-run runs nothing and needs neither).
+requireMutationOptIn({ kind: "campaign" });
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_STEPS = ["m7b2b", "m7b2a", "m6", "m7b1", "m5a:game published without a physical release"];
@@ -89,7 +96,7 @@ function preflight() {
 function runStep(step) {
   return new Promise((resolveStep) => {
     const name = step.only ? `${step.suite}-only` : step.suite;
-    const args = ["scripts/db-mutation-checks.mjs", "--suite", step.suite, "--log", join(directory, `${name}.log`), "--out", join(directory, `${name}.json`), "--artifacts", failures];
+    const args = ["scripts/mutation-db-runner.mjs", "--suite", step.suite, "--log", join(directory, `${name}.log`), "--out", join(directory, `${name}.json`), "--artifacts", failures];
     if (step.only) args.push("--only", picks(step).join(","));
     const child = spawn(process.execPath, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
     let buffer = "";

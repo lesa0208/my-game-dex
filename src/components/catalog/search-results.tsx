@@ -4,7 +4,7 @@ import { Suspense } from "react";
 
 import { CatalogCover } from "@/components/games/catalog-cover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { firstReleaseYear, gameKindLabel, regionLabel, releaseCountLabel } from "@/features/catalog/format";
+import { firstReleaseYear, gameKindLabel, NO_VERIFIED_RELEASE, platformReleaseLabel, regionLabel } from "@/features/catalog/format";
 import type { GameResult, ReleaseResult, SearchResult } from "@/features/catalog/types";
 
 /** M12b: the signed-in user's copies per game for this page of results, read once for the page. */
@@ -54,11 +54,15 @@ function GameResultCard({ item, owned }: { item: GameResult; owned?: OwnedGames 
             {item.matched.source === "alias" ? "Also known as" : "Released as"} <span className="text-foreground">{item.matched.title}</span>
           </p>
         ) : null}
+        {/* M14a: a game confirmed to exist physically, with no verified release catalogued yet. */}
+        {item.platforms.length > 0 && item.platforms.every((platform) => platform.releaseCount === 0) ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">{NO_VERIFIED_RELEASE}.</p>
+        ) : null}
         <ul aria-label="Platforms" className="mt-2 flex flex-wrap gap-1.5">
           {item.platforms.map((platform) => (
             <li key={platform.slug} className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
               <span title={platform.name}>{platform.shortName}</span>
-              <span className="text-muted-foreground"> · {releaseCountLabel(platform.releaseCount)}</span>
+              <span className="text-muted-foreground"> · {platformReleaseLabel(platform.releaseCount)}</span>
             </li>
           ))}
         </ul>
