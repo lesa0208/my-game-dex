@@ -32,6 +32,7 @@
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs review --email <name>@example.test
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs approve --email <name>@example.test
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs reject --email <name>@example.test
+ *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs publish --email <name>@example.test --game <game id>
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs revoke-reviewer --email <name>@example.test
  *
  * - reviewer-account / reviewer-password: the reviewer's own B1 account; the password is typed
@@ -47,9 +48,18 @@
  *   outcome needs the reviewer's own evidence of physical existence, 20 to 500 characters
  *   (M14c-1), which approval carries into the pairing's verification basis.
  * - approve / reject: the reviewer's decision on the whole batch, with their reason, confirmed
- *   by typing the batch's first 8 characters. Approval publishes identities only (games and
- *   their SNES pairings): never a release. Reviewed members are recorded as individually
- *   reviewed ("confirmed"), the others as "batch_accepted".
+ *   by typing the batch's first 8 characters. First it shows what approving would do, as the
+ *   database predicts it (get_batch_approval_preview, M14c-3): approval (M14a, M14c-1) verifies
+ *   the identities, confirms physical existence only for members found correct with evidence,
+ *   publishes those unless the final approver reviewed them (they then wait for another editor),
+ *   and leaves unsampled members verified as identities only, unpublished. Never a release.
+ * - publish (M14c-3): a second, independent editor publishes a game's confirmed platform
+ *   identities (publish_game_identity). It signs in as that editor, shows each platform's
+ *   evidence and whether they may publish it (get_game_pairing_evidence), and publishes only
+ *   the platforms they type, with their reason, confirmed by typing the game's first 8
+ *   characters, at the revision they were shown. Whoever confirmed a platform's evidence, or
+ *   created the record, is refused by the database. It reports the database's answer as given.
+ *   One game at a time, never a batch's whole list; never run against B1 by an agent.
  * - revoke-reviewer: removes the role when the review is over.
  *
  * Nothing here writes a catalog row as postgres. postgres only gives the disposable editor A
@@ -64,6 +74,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 import { elevate, totp } from "./lib/mfa-session.mjs";
+import { choosePlatforms, confirmsGame, describePairings, printable, reportPublish, verifiedAt } from "./lib/publish-plan.mjs";
 import { dbContainer, stackName, stackStatus } from "./lib/stack.mjs";
 import { DISTRIBUTION_FORMAT_TABLE, FLAG_REASONS } from "./wikidata-entities.mjs";
 
@@ -569,6 +580,44 @@ async function cmdReview(o) {
   }
 }
 
+/**
+ * M14c-3: a second, independent editor publishes a game's confirmed platform identities. One
+ * game, the platforms they type, their reason, and the game's first 8 characters; the database
+ * decides. Never run by an agent: every answer is typed by the editor.
+ */
+async function cmdPublish(o) {
+  const email = reviewerEmail(o);
+  requireTerminal();
+  const game = typeof o.game === "string" ? o.game.trim().toLowerCase() : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(game)) fail("--game must be a game's id.");
+  const holder = { session: await ownerSession(email) };
+  const read = await rpc(holder.session, "get_game_pairing_evidence", { p_game: game });
+  if (!read.ok) fail(`Refused: ${read.error}. Nothing was published.`);
+  if (!read.data) fail("No such game. Nothing was published.");
+  // Printed text from the catalog: control characters removed, so it can't rewrite the terminal.
+  const title = printable(psql(`select title from public.games where id = ${lit(game)};`));
+  console.log(`\n${title} (${game.slice(0, 8)}), revision ${read.data.game.revision}, ${read.data.game.status}${read.data.game.identity_verified ? ", identity verified" : ""}.`);
+  for (const p of describePairings(read.data)) console.log(`  ${p.slug}: ${p.name}, ${p.status}; ${p.physical}; ${p.standing}.`);
+  const chosen = choosePlatforms(await ask("Platforms to publish (their short names, comma-separated; empty to stop): "), read.data);
+  if (chosen.error) fail(chosen.error);
+  const why = await ask("Your reason (recorded in the audit log): ");
+  if (!why) fail("A reason is required. Nothing was published.");
+  console.log(`Publishing makes ${title} public on ${chosen.slugs.join(", ")} as an identity: "No verified physical release recorded yet". No release is created.`);
+  if (!confirmsGame(await ask(`Type the game's first 8 characters (${game.slice(0, 8)}) to publish: `), game)) fail("That didn't match. Nothing was published.");
+  const ids = chosen.slugs.map((slug) => psql(`select id from public.platforms where slug = ${lit(slug)};`));
+  if (ids.some((id) => !id)) fail("A platform wasn't found. Nothing was published.");
+  // At the revision the editor was shown: if the game changed since, the database refuses.
+  // At the evidence the editor was shown: refused if a platform was confirmed again since.
+  const seenAt = verifiedAt(read.data, chosen.slugs);
+  const result = reportPublish(await withRecentMfa(holder, "publish_game_identity_as_seen", {
+    p_game: game, p_platforms: ids, p_reason: why, p_expected_revision: read.data.game.revision, p_expected_verified_at: seenAt,
+  }));
+  console.log(result.message);
+  const after = await rpc(holder.session, "get_game_pairing_evidence", { p_game: game });
+  if (after.ok && after.data) for (const p of describePairings(after.data)) console.log(`  ${p.slug}: ${p.status}.`);
+  if (!result.ok) process.exit(1);
+}
+
 async function decide(o, fn) {
   const email = reviewerEmail(o);
   requireTerminal();
@@ -576,17 +625,30 @@ async function decide(o, fn) {
   const s = batchSummary(b.id);
   console.log(JSON.stringify(s, null, 2));
   if (fn === "approve_review_batch") {
-    console.log(`\nApproving publishes ${s.items} game identities and their SNES pairings, unless the database refuses: members you reviewed are recorded as individually reviewed, the other ${s.items - s.need_outcome} as batch accepted. No release is created.`);
     if (s.pending) fail(`${s.pending} members still need an outcome. Run review first.`);
   } else {
     console.log("\nRejecting closes the batch for good: its unchanged members can't be batched again without a real change (an audited edit or a new source record). Nothing is published.");
   }
   const holder = { session: await ownerSession(email) };
+  if (fn === "approve_review_batch") {
+    // M14c-3: what approving would do, as the database predicts it for this editor. Approval rechecks everything.
+    const p = await rpc(holder.session, "get_batch_approval_preview", { p_batch: b.id, p_limit: 1 });
+    if (!p.ok || !p.data) fail(`The approval preview was refused: ${p.error ?? "no batch"}. Nothing was changed.`);
+    const c = p.data.counts;
+    holder.seenApprovals = p.data.approvals.recorded;
+    console.log(`\n${p.data.approvals.recorded} of ${p.data.approvals.required} approvals recorded. ${p.data.final
+      ? `If you approve, and the database agrees when it checks again: ${c.publish} published as identities; ${c.await_publication} confirmed and left for another editor to publish (you reviewed them); ${c.reviewer_gone ?? 0} confirmed without a verifier (their reviewer's account is gone), which nobody can publish until they are confirmed again; ${c.identity_only} verified as identities only, unpublished, waiting for physical evidence; ${c.not_accepted} unchanged.`
+      : "Your approval would be recorded, and the batch stays open: nothing is verified or published until the last approval."} No release is created.`);
+  }
   const why = await ask("Your reason (recorded in the audit log): ");
   if (!why) fail("A reason is required. Nothing was changed.");
   const confirm = await ask(`Type the batch's first 8 characters (${b.id.slice(0, 8)}) to ${fn === "approve_review_batch" ? "approve" : "reject"} it: `);
   if (confirm !== b.id.slice(0, 8)) fail("That didn't match. Nothing was changed.");
-  const r = await withRecentMfa(holder, fn, { p_batch: b.id, p_reason: why });
+  // M14c-3: an approval is sent with the approvals this editor was shown, and refused ("batch
+  // changed") if another was recorded meanwhile, so nobody's approval is final without their seeing it.
+  const r = fn === "approve_review_batch"
+    ? await withRecentMfa(holder, "approve_review_batch_as_seen", { p_batch: b.id, p_reason: why, p_expected_approvals: holder.seenApprovals })
+    : await withRecentMfa(holder, fn, { p_batch: b.id, p_reason: why });
   console.log(r.ok ? `Done: ${JSON.stringify(r.data)}` : `Refused: ${r.error}. Nothing was changed.`);
   console.log(JSON.stringify(batchSummary(b.id), null, 2));
 }
@@ -595,7 +657,7 @@ const o = args(process.argv.slice(2));
 const commands = {
   "editor-a": cmdEditorA, "create-batch": cmdCreateBatch, status: cmdStatus, packet: cmdPacket,
   "reviewer-account": cmdReviewerAccount, "reviewer-password": cmdReviewerPassword, "grant-reviewer": cmdGrantReviewer, "revoke-reviewer": cmdRevokeReviewer,
-  review: cmdReview, approve: (x) => decide(x, "approve_review_batch"), reject: (x) => decide(x, "reject_review_batch"),
+  review: cmdReview, approve: (x) => decide(x, "approve_review_batch"), reject: (x) => decide(x, "reject_review_batch"), publish: cmdPublish,
 };
 const command = commands[o._[0]];
 if (!command) fail(`Usage: MGD_STACK=b1 node scripts/catalog-b1-review.mjs ${Object.keys(commands).join("|")}. See the header of this file.`);
