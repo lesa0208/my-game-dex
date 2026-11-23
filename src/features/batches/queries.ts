@@ -183,3 +183,21 @@ export function getReviewBatchMember(batch: string, game: string) {
   if (!UUID.test(batch) || !UUID.test(game)) return Promise.resolve({ ok: true, data: null } as Loaded<MemberContext | null>);
   return rpc<MemberContext>("get_review_batch_member", { p_batch: batch, p_game: game });
 }
+
+export type ApprovalEffect = "publish" | "await_publication" | "reviewer_gone" | "confirm" | "identity_only" | "not_accepted" | "pending";
+
+export type ApprovalPreview = {
+  batch: { id: string; status: string; content_sha256: string; items: number };
+  approvals: { recorded: number; required: number };
+  final: boolean;
+  counts: Record<ApprovalEffect, number>;
+  evidence_missing: number;
+  members: { game: { id: string; title: string }; effect: ApprovalEffect; reviewer: Person; evidence_missing: boolean }[];
+  sources: { provider: string; provider_name: string | null; cleared: boolean }[];
+};
+
+/** What approving the batch now would do, as the database predicts it (M14c-3). Null when there's no batch. */
+export function getBatchApprovalPreview(id: string) {
+  if (!UUID.test(id)) return Promise.resolve({ ok: true, data: null } as Loaded<ApprovalPreview | null>);
+  return rpc<ApprovalPreview>("get_batch_approval_preview", { p_batch: id, p_limit: 50 });
+}

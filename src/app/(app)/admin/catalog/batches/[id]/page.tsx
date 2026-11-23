@@ -5,11 +5,12 @@ import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
 import { BatchStatusPill, Callout, CategoryPill, CriticalErrorText, FilterLinks, Hash, OutcomePill, Pager, personText, ReviewProgress } from "@/components/admin/batch-review";
+import { BatchDecisions } from "@/components/admin/batch-decisions";
 import { Facts, RecordSection, StatusBadge } from "@/components/admin/records";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
-import { APPROVE_BLOCKS, blockerText, flagLabel, MEMBER_FILTERS, memberFilter, type MemberFilter, percent, REVIEW_BLOCKS } from "@/features/batches/form";
-import { getReviewBatchOverview, listReviewBatchMembers, type BatchOverview, type MemberSummary } from "@/features/batches/queries";
+import { APPROVE_BLOCKS, blockerText, decisionMessage, decisionNotice, flagLabel, MEMBER_FILTERS, memberFilter, type MemberFilter, percent, REVIEW_BLOCKS } from "@/features/batches/form";
+import { getBatchApprovalPreview, getReviewBatchOverview, listReviewBatchMembers, type BatchOverview, type MemberSummary } from "@/features/batches/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { formatWhen } from "@/features/submissions/display";
@@ -125,7 +126,14 @@ async function BatchView({ params, searchParams }: { params: PageProps<"/admin/c
   const rawFilter = param(search.filter);
   const filter = rawFilter ? memberFilter(rawFilter) : o.status === "open" && o.counts.pending ? "needs_review" : "all";
   const after = param(search.after);
-  const members = await listReviewBatchMembers(o.id, filter, after);
+  const [members, preview] = await Promise.all([listReviewBatchMembers(o.id, filter, after), o.status === "open" ? getBatchApprovalPreview(o.id) : null]);
+  // After a decision: a fixed notice, from bounded numbers in the URL; or a fixed error's code.
+  const count = (name: string) => {
+    const v = param(search[name]);
+    return v && /^\d{1,6}$/.test(v) ? Number(v) : null;
+  };
+  const notice = decisionNotice({ notice: param(search.notice), n: count });
+  const error = decisionMessage(param(search.error));
   const path = `/admin/catalog/batches/${o.id}`;
   const filterHref = (f: MemberFilter, a?: string | null) => `${path}?filter=${f}${a ? `&after=${a}` : ""}`;
   const short = o.id.slice(0, 8);
@@ -144,6 +152,14 @@ async function BatchView({ params, searchParams }: { params: PageProps<"/admin/c
             {o.platform.name} · {o.counts.items.toLocaleString("en")} members · created {formatWhen(o.created_at)} by {personText(o.creator)}
           </p>
         </header>
+        {notice ? (
+          <p role="status" className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-medium">
+            {notice}
+          </p>
+        ) : null}
+        <div role="alert" aria-live="assertive">
+          {error ? <Callout tone="problem" title="Nothing was changed">{error}</Callout> : null}
+        </div>
         <Callout title="An accepted identity isn't a physical game">
           Accepting a member&apos;s identity from {o.source.provider_name ?? o.source.provider} is not proof that a physical copy exists. Members you find
           correct carry your evidence of physical existence; unsampled members are never confirmed physically by this batch, and no member gets a
@@ -178,7 +194,6 @@ async function BatchView({ params, searchParams }: { params: PageProps<"/admin/c
                 {o.approvals.by.length ? ` · ${o.approvals.by.map((a) => `${personText(a.person)} ${formatDay(a.at)}`).join(", ")}` : ""}
               </p>
               {o.you.approve && o.status === "open" ? <p className="text-sm text-muted-foreground">{APPROVE_BLOCKS[o.you.approve]}</p> : null}
-              <p className="text-xs text-muted-foreground">Approving and rejecting batches will be done here in a later release.</p>
             </div>
           </RecordSection>
 
@@ -224,6 +239,8 @@ async function BatchView({ params, searchParams }: { params: PageProps<"/admin/c
             ]}
           />
         </RecordSection>
+
+        <BatchDecisions overview={o} preview={preview && preview.ok ? preview.data : null} recentMfa={access.recentMfa} path={path} />
 
         <section aria-labelledby="members-title" className="flex flex-col gap-3">
           <h2 id="members-title" className="text-base font-semibold">

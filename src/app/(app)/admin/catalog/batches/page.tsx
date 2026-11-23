@@ -103,7 +103,11 @@ async function BatchesView({ searchParams }: { searchParams: PageProps<"/admin/c
       </p>
       <Callout title="An accepted identity isn't a physical game">
         A source listing a game on a platform is not proof that a physical copy exists. A member is published only after an editor confirms its
-        physical existence with evidence, and another editor publishes it. Approving and rejecting batches isn&apos;t done on these pages yet.
+        physical existence with evidence, and another editor publishes it, from the{" "}
+        <Link href="/admin/catalog/publication" className={linkClass}>
+          publication queue
+        </Link>
+        .
       </Callout>
       <FilterLinks
         label="Filter batches by status"

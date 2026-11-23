@@ -303,3 +303,124 @@ export function batchTone(status: string): "good" | "warning" | "problem" | "neu
 export function percent(value: number): string {
   return `${(value * 100).toLocaleString("en", { maximumFractionDigits: 2 })}%`;
 }
+
+// ---------------------------------------------------------------------------
+// Approving and rejecting a batch (M14c-3).
+// ---------------------------------------------------------------------------
+
+export type Decision = "approve" | "reject";
+
+/** Every message the decision forms can show, by a fixed code (as OUTCOME_MESSAGES). */
+export const DECISION_MESSAGES = {
+  reason: "Give a reason for the record. Other catalog staff can see it.",
+  reason_long: "The reason can be up to 500 characters.",
+  confirm_id: "Type the batch's first 8 characters exactly, to confirm.",
+  acknowledge: "Confirm that you've read what this does.",
+  changed: "This batch changed since you opened it: an outcome or an approval was recorded, or it was decided. Reload the page and check it again.",
+  not_permitted: "Only active catalog editors with a verified session can decide batches.",
+  reauthenticate: "Deciding a batch needs a recent verification with your authenticator.",
+  unavailable: "This batch is closed, so it can't be approved or rejected. Reload the page.",
+  own_record: "You created this batch or one of its members, so another editor approves it.",
+  already_approved: "You have already approved this batch. It needs another editor's approval.",
+  not_reviewed: "Some members still need their individual review. The batch wasn't approved.",
+  sample_failed: "The sample failed, so the batch can't be approved. Reject it.",
+  critical: "A critical error is marked incorrect, so the batch can't be approved.",
+  evidence: "A member found correct has no qualifying evidence note, so the batch can't be approved. Reject it, and review it again.",
+  stale: "A member changed since the batch was frozen, or left review, so the batch can't be approved. Reject it.",
+  rights: "A source isn't cleared for publication under the terms it was imported with, so the batch can't be approved.",
+  failed: "The batch couldn't be decided. Nothing was changed. Try again.",
+} as const;
+export type DecisionMessage = keyof typeof DECISION_MESSAGES;
+
+/** The database's fixed errors for approve_review_batch and reject_review_batch, as message codes. */
+export function decisionErrorCode(message: unknown): DecisionMessage {
+  const codes: Record<string, DecisionMessage> = {
+    "not permitted": "not_permitted",
+    "reauthentication required": "reauthenticate",
+    "record unavailable": "unavailable",
+    "own record": "own_record",
+    "already approved": "already_approved",
+    "batch not reviewed": "not_reviewed",
+    "sample failed": "sample_failed",
+    "critical errors unresolved": "critical",
+    "evidence required": "evidence",
+    "batch stale": "stale",
+    "provider not cleared": "rights",
+    "reason required": "reason",
+    "batch changed": "changed",
+    changed: "changed",
+  };
+  return typeof message === "string" && Object.hasOwn(codes, message) ? codes[message] : "failed";
+}
+
+/** A decision message for a code from the URL; unknown codes show nothing. */
+export function decisionMessage(code: string | null): string | null {
+  return code && Object.hasOwn(DECISION_MESSAGES, code) ? DECISION_MESSAGES[code as DecisionMessage] : null;
+}
+
+/**
+ * The decision form, read: a reason (typed, kept in the audit log), the batch's first 8
+ * characters typed exactly, and the acknowledgement box. Nothing is preselected, and the
+ * database decides everything else when it runs.
+ */
+export function readDecision(read: (name: string) => string, batchId: string): { value: { reason: string } } | { error: DecisionMessage } {
+  const reason = read("reason").replace(/\s+/g, " ").trim();
+  if (!reason) return { error: "reason" };
+  if (reason.length > 500) return { error: "reason_long" };
+  if (read("confirm_id").trim() !== batchId.slice(0, 8)) return { error: "confirm_id" };
+  if (read("acknowledge") !== "on") return { error: "acknowledge" };
+  return { value: { reason } };
+}
+
+/** What approving would do to members, as get_batch_approval_preview names it. */
+export const EFFECT_LABELS: Record<string, string> = {
+  publish: "Confirmed and published",
+  await_publication: "Confirmed, waiting for another editor to publish",
+  reviewer_gone: "Confirmed without a verifier: can't be published until confirmed again",
+  confirm: "Confirmed at the final approval",
+  identity_only: "Identity verified only: no physical evidence, not published",
+  not_accepted: "Not accepted: nothing changes",
+  pending: "Needs its review first",
+};
+
+export const EFFECT_DETAILS: Record<string, string> = {
+  publish: "Found correct with evidence by another editor. Its identity is verified, its physical existence on the platform confirmed with the reviewer's evidence, and it becomes public as an identity, with no physical release.",
+  await_publication: "Found correct, and you reviewed it. Its identity is verified and its physical existence confirmed, but whoever confirmed the evidence never publishes it: another editor publishes it from the publication queue.",
+  reviewer_gone: "Found correct, but its reviewer's account has since been deleted. Its identity is verified and its pairing marked confirmed with no verifier, which publication refuses: an editor has to confirm its physical existence again before anyone can publish it.",
+  confirm: "Found correct. This approval isn't the final one, so nothing is verified yet. At the final approval it is confirmed, and published unless the final approver reviewed it.",
+  identity_only: "Not flagged and not sampled, so nobody checked it individually. At the final approval its identity is verified, but its pairing stays unconfirmed and unpublished until an editor confirms its physical existence with evidence.",
+  not_accepted: "Found incorrect or excluded. Approval leaves it as it is.",
+  pending: "It needs its individual review, so the batch can't be approved yet.",
+};
+
+/** Approval's result, as approve_review_batch returns it, for the notice after it. */
+export type ApprovalResult =
+  | { status: "awaiting_approval"; approvals: number; required: number }
+  | { status: "approved"; published: number; awaiting_physical_evidence: number; awaiting_independent_publication: number };
+
+/** The notice after a decision, from the URL's numbers (bounded); unknown values show nothing. */
+export function decisionNotice(params: { notice: string | null; n: (name: string) => number | null }): string | null {
+  const count = (name: string) => {
+    const v = params.n(name);
+    return v === null ? null : v.toLocaleString("en");
+  };
+  switch (params.notice) {
+    case "approval_recorded": {
+      const a = count("approvals");
+      const r = count("required");
+      return a && r ? `Your approval is recorded: ${a} of ${r} approvals. The batch is still open; nothing is verified or published until the last approval.` : null;
+    }
+    case "approved": {
+      const p = count("published");
+      const e = count("awaiting_evidence");
+      const i = count("awaiting_publication");
+      return p && e && i
+        ? `Approved. ${p} published as identities; ${i} confirmed and waiting for another editor to publish; ${e} verified as identities only, waiting for physical evidence.`
+        : null;
+    }
+    case "rejected":
+      return "Rejected. The batch is closed for good; its outcomes and audit history are kept, and its games and source records are unchanged.";
+    default:
+      return null;
+  }
+}
