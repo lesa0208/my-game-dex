@@ -538,11 +538,11 @@ test("the importer's --entities dry run stages the selection without a database"
   }
 });
 
-test("B1 staging and its clearance refuse every stack but B1", () => {
+test("B1 staging and its clearance refuse every stack but the editorial ones (B1, and the M15 pilot)", () => {
   for (const command of [["clear-wikidata", "--terms-file", "x"], ["stage", "--entities", "x", "--selection", "x", "--notes", "x", "--terms-file", "x", "--reason", "x"], ["report"]]) {
-    for (const stack of ["scratch", "test"]) {
+    for (const stack of ["scratch", "test", "dev"]) {
       assert.throws(() => execFileSync(process.execPath, [new URL("./catalog-b1.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"), ...command], { stdio: "pipe", env: { ...process.env, MGD_STACK: stack } }),
-        (error) => /runs only on the B1 stack/.test(error.stderr.toString()), `${command[0]} on ${stack}`);
+        (error) => /writes only to an editorial stack|isn't prepared/.test(error.stderr.toString()), `${command[0]} on ${stack}`);
     }
   }
 });
