@@ -121,6 +121,9 @@ insert into approved_function_grants values
   -- M14c-2: the review-batch reads. Each checks the caller itself.
   ('list_review_batches(text,text,uuid,integer)', 'authenticated'), ('get_review_batch_overview(uuid)', 'authenticated'),
   ('list_review_batch_members(uuid,text,uuid,integer)', 'authenticated'), ('get_review_batch_member(uuid,uuid)', 'authenticated'),
+  -- M14c-3: the approval preview and the publication queue. Each checks the caller itself.
+  ('get_batch_approval_preview(uuid,integer)', 'authenticated'), ('list_publication_queue(text,text,timestamp with time zone,uuid,uuid,integer)', 'authenticated'),
+  ('approve_review_batch_as_seen(uuid,text,integer)', 'authenticated'), ('publish_game_identity_as_seen(uuid,uuid[],text,bigint,timestamp with time zone[])', 'authenticated'),
   -- M5b: the editor review queue.
   ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
   -- M5c: editor aliases, and the public search, which anyone may call.
