@@ -1347,8 +1347,8 @@ Results on the local stack, with CLI 3.0.0. All need repeating on a hosted proje
 | PostgreSQL version and extensions | **17.11.** `citext`, `pg_trgm` and `pgtap` are available |
 | UUID generation | `private.uuid_v7()` tested. No built-in `uuidv7()` |
 | Grants and RLS behavior | **Differed from the design's assumption.** New tables were fully exposed. M0 corrects this, and tests enforce it |
-| Migration dependencies | Every migration, M0 to M10e and the M10 integration review, applies in order to an empty database: `npm run db:verify` starts from a fresh reset |
-| Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`; the database, HTTP and browser suites run locally |
+| Migration dependencies | Every migration, M0 to M10e and the M10 integration review, applies in order to an empty database: `npm run db:verify` starts from a fresh reset, and since M14b CI replays every migration on a fresh scratch stack for each pull request and checks the applied versions against the files |
+| Secret handling | `npm run secrets:check`, `secrets:bundle`, and a pre-commit hook. CI runs the secret scan, its tests, typecheck, lint and the build on pull requests to `main`, and (M14b) the migrations, every pgTAP file and the 23 database suites on a disposable scratch stack; the HTTP and browser app suites run locally |
 | Reproducible workflow | `npm run db:verify` |
 
 **Gates that must be met along the way:**

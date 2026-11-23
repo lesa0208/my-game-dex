@@ -34,7 +34,9 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `npm run seed:art` | Regenerate the placeholder artwork in `public/seed/` |
 | `npm run db:start` / `db:stop` | Start or stop the local Supabase stack |
 | `npm run db:reset` | Recreate the local database and apply all migrations |
-| `npm run db:test` | Run database tests against the running stack |
+| `npm run db:test` | Check the migrations, then run pgTAP and the 23 database suites against the running stack |
+| `npm run db:pgtap` / `db:suites` | The same in two parts: migrations and every pgTAP file, then the suites (as CI runs them; see [Continuous integration](#continuous-integration-m14b)) |
+| `npm run db:report-test` | Offline: test the check that every pgTAP file ran and passed (also in CI) |
 | `npm run db:verify` | Start, reset, migrate and test, in one command |
 | `npm run test-stack:start` / `test-stack:stop` | Start or stop the isolated test stack (see [The isolated test stack](#the-isolated-test-stack-m11a-0)) |
 | `npm run test-stack:run -- <script>` | Run any npm script against the isolated test stack |
@@ -74,7 +76,7 @@ Open [http://localhost:3000](http://localhost:3000). No environment variables ar
 | `MGD_MUTATION_TESTING=1 MGD_STACK=scratch npm run mutation:campaign` | Run several mutation suites unattended, on scratch only. `-- --dry-run` checks readiness and runs nothing, without the opt-in |
 | `npm run mutation:guard-test` | Offline: the mutation runners refuse without the opt-in, and no ordinary `*-checks.mjs` suite resets a stack or applies violations (also in CI) |
 
-Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes, and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks` and `app:a11y-checks`.
+Run `typecheck`, `lint` and `build` before committing, plus `db:verify` for database changes (CI also runs the database tests on every pull request; see [Continuous integration](#continuous-integration-m14b)), and `app:auth-checks`, `app:collection-checks` or `app:my-collection-checks` for changes to sign-in, sessions or the collection. Changes to staff, MFA or `/admin` also need `app:admin-checks` and `app:a11y-checks`.
 
 ## Local database
 
@@ -115,6 +117,45 @@ That starts the stack, resets the database, applies `supabase/migrations/`, and 
 It stops at the first failed stage and prints a summary. A failing test names the check that failed.
 
 To add a migration, run `npx supabase migration new <name>`, then `npm run db:verify`. A new table needs RLS, explicit grants and policies in the same migration, plus an entry in the approved lists in `03_schema_guards.test.sql`. See [Explicit grants](docs/architecture/security-rls.md#explicit-grants).
+
+### Continuous integration (M14b)
+
+Every pull request into `main` runs two jobs in `.github/workflows/ci.yml`. Both must pass before merging.
+
+- **checks:** secret scans, typecheck, lint, the mutation-guard and pgTAP-report unit tests, the build and a bundle scan.
+- **database:** on a fresh GitHub-hosted Ubuntu runner, `MGD_TEST_STACK=scratch node scripts/test-stack.mjs start` creates the disposable scratch stack, which replays every migration from an empty database. `db:pgtap` then checks that every migration file was applied, in order, and runs every pgTAP file. `db:suites` runs the 23 database suites (API, identity, authorization and RLS, audit, notifications, catalog, imports, releases, claims, wishlist, search, collection, submissions, review, relink, exclusion, merge, Owner, MFA, ownership, invitations, passwords and sessions). The last step destroys the stack even after a failure, and fails if a container or volume is left.
+
+The database job sets `MGD_EXPECT_STACK=scratch`, so `db.mjs` refuses any other stack, and it checks that the scratch database is the only one running. It uses no repository secrets and no hosted project. Its token is read-only, the CLI's output passes through the redactor, and nothing is uploaded.
+
+**It fails on:**
+
+- a migration that doesn't apply (the stack won't start);
+- a migration file that wasn't applied, or was applied out of order;
+- a pgTAP file that aborts (for example a syntax error) or fails an assertion;
+- a file that didn't run, or a skipped or todo assertion;
+- a file in `supabase/tests/database/` not named `NN_name.test.sql`;
+- fewer files or assertions than `PGTAP_BASELINE` in `scripts/lib/pgtap-report.mjs` (53 files and 4,127 assertions). Raise it when you add tests; lowering it is a reviewed decision.
+- a failing suite.
+
+**To reproduce a failure locally**, run the same commands:
+
+```bash
+MGD_TEST_STACK=scratch node scripts/test-stack.mjs start
+MGD_TEST_STACK=scratch MGD_EXPECT_STACK=scratch node scripts/test-stack.mjs run db:pgtap
+MGD_TEST_STACK=scratch MGD_EXPECT_STACK=scratch node scripts/test-stack.mjs run db:suites
+MGD_TEST_STACK=scratch node scripts/test-stack.mjs destroy
+```
+
+In PowerShell, set the variables first: `$env:MGD_TEST_STACK = "scratch"; $env:MGD_EXPECT_STACK = "scratch"`. Scratch copies `supabase/migrations/` and `supabase/tests/` only when it starts, so destroy and start it again after changing them.
+
+**Still run locally, not in CI:**
+
+- the browser and HTTP app suites (`app:*-checks`, which need a production build, and Edge or Chrome for accessibility);
+- the catalog pilot and shelf suites on the test stack;
+- upgrades onto existing data and rollbacks;
+- the mutation runners.
+
+A database PR needs both jobs green. Changes to the app or to security also need the relevant app suites from the list above.
 
 ### The isolated test stack (M11a-0)
 

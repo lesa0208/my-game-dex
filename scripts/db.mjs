@@ -3,13 +3,17 @@
  * or with MGD_STACK=test the isolated test stack (scripts/lib/stack.mjs). Resetting and
  * testing refuse a protected development stack.
  *
- *   node scripts/db.mjs start | stop | status | reset | test | verify
+ *   node scripts/db.mjs start | stop | status | reset | migrations | pgtap | suites | test | verify
+ *
+ * test and verify check that every migration file is applied in order and that every pgTAP
+ * file ran and passed (M14b, scripts/lib/pgtap-report.mjs), then run the 23 API suites.
+ * CI runs test on a disposable scratch stack (.github/workflows/ci.yml).
  *
  * All CLI output passes through a redactor, because the CLI prints local keys
  * and connection strings when non-interactive.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +21,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 
 import { redact } from "./lib/redact.mjs";
-import { guardDevStack, stackName, workdirArgs } from "./lib/stack.mjs";
+import { checkPgtapReport } from "./lib/pgtap-report.mjs";
+import { dbContainer, guardDevStack, requireStack, stackDir, stackName, workdirArgs } from "./lib/stack.mjs";
 
 export { redact };
 
@@ -29,17 +34,67 @@ function requireDocker() {
   }
 }
 
-function runCli(args) {
+function runCli(args, { capture = false } = {}) {
+  let output = "";
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args, ...workdirArgs], {
       cwd: root,
       env: { ...process.env, NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stdout.on("data", (chunk) => process.stdout.write(redact(chunk.toString())));
-    child.stderr.on("data", (chunk) => process.stderr.write(redact(chunk.toString())));
-    child.on("close", (code) => resolve(code ?? 1));
+    const relay = (stream) => (chunk) => {
+      const text = redact(chunk.toString());
+      if (capture) output += text;
+      stream.write(text);
+    };
+    child.stdout.on("data", relay(process.stdout));
+    child.stderr.on("data", relay(process.stderr));
+    child.on("close", (code) => resolve(capture ? { code: code ?? 1, output } : (code ?? 1)));
   });
+}
+
+/**
+ * M14b: every migration file in this stack's supabase/migrations is applied, in order, and
+ * nothing else is. A migration that fails stops the stack from starting; this also catches
+ * one that was never picked up (a misnamed file) or a database built from other files.
+ */
+function checkMigrations() {
+  const files = readdirSync(join(stackDir, "supabase", "migrations")).filter((name) => name.endsWith(".sql")).sort();
+  const misnamed = files.filter((name) => !/^\d{14}_[a-z0-9_]+\.sql$/.test(name));
+  const result = spawnSync("docker", ["exec", dbContainer, "psql", "-U", "postgres", "-X", "-At", "-v", "ON_ERROR_STOP=1", "-c",
+    "select version from supabase_migrations.schema_migrations order by version"], { encoding: "utf8" });
+  if (result.status !== 0) {
+    console.error(`Couldn't read the applied migrations from ${dbContainer}.`);
+    return 1;
+  }
+  const applied = result.stdout.split(/\r?\n/).filter(Boolean);
+  const expected = files.map((name) => name.slice(0, 14));
+  const problems = misnamed.map((name) => `${name} isn't named <14-digit version>_<name>.sql`);
+  if (applied.join() !== expected.join()) {
+    const missing = expected.filter((v) => !applied.includes(v));
+    const extra = applied.filter((v) => !expected.includes(v));
+    problems.push(`applied migrations differ from the files: ${missing.length} not applied (${missing.slice(0, 5).join(", ")}), ${extra.length} not in the files (${extra.slice(0, 5).join(", ")})`);
+  }
+  if (problems.length) {
+    for (const problem of problems) console.error(`Migrations: ${problem}`);
+    return 1;
+  }
+  console.log(`Migrations: all ${files.length} files applied in order (latest ${expected.at(-1)}).`);
+  return 0;
+}
+
+/** M14b: pg_prove's own result, then a check that every test file ran and passed in full. */
+async function runPgtap() {
+  const { code, output } = await runCli(["test", "db"], { capture: true });
+  const files = readdirSync(join(stackDir, "supabase", "tests", "database"));
+  const { errors, files: ran, assertions } = checkPgtapReport(output, files);
+  for (const error of errors) console.error(`pgTAP: ${error}`);
+  if (code !== 0 || errors.length) {
+    console.error(`pgTAP failed (exit ${code}, ${errors.length} problem${errors.length === 1 ? "" : "s"}).`);
+    return 1;
+  }
+  console.log(`pgTAP: all ${ran} files ran and passed, ${assertions} assertions.`);
+  return 0;
 }
 
 function runNode(script) {
@@ -54,7 +109,8 @@ const steps = {
   stop: () => runCli(["stop"]),
   status: () => runCli(["status"]),
   reset: () => runCli(["db", "reset"]),
-  pgtap: () => runCli(["test", "db"]),
+  migrations: async () => checkMigrations(),
+  pgtap: runPgtap,
   smoke: () => runNode("db-smoke.mjs"),
   identity: () => runNode("db-identity-checks.mjs"),
   authorization: () => runNode("db-authorization-checks.mjs"),
@@ -96,22 +152,28 @@ async function runSteps(names) {
 
 async function main() {
   const command = process.argv[2];
+  const suites = ["smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "releases", "claims", "wishlist", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"];
   const plans = {
     start: ["start"],
     stop: ["stop"],
     status: ["status"],
     reset: ["reset"],
-    test: ["pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "releases", "claims", "wishlist", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
-    verify: ["start", "reset", "pgtap", "smoke", "identity", "authorization", "audit", "notifications", "catalog", "imports", "releases", "claims", "wishlist", "search", "collection", "submissions", "review", "relink", "exclusion", "merge", "owner", "mfa", "ownership", "invitations", "passwords", "sessions"],
+    migrations: ["migrations"],
+    pgtap: ["migrations", "pgtap"],
+    suites,
+    test: ["migrations", "pgtap", ...suites],
+    verify: ["start", "reset", "migrations", "pgtap", ...suites],
   };
   if (!plans[command]) {
-    console.error("Usage: node scripts/db.mjs start|stop|status|reset|test|verify");
+    console.error("Usage: node scripts/db.mjs start|stop|status|reset|migrations|pgtap|suites|test|verify");
     process.exit(2);
   }
   if (!existsSync(cli)) {
     console.error("Supabase CLI not found. Run npm ci.");
     process.exit(1);
   }
+  // M14b: CI sets MGD_EXPECT_STACK=scratch, so nothing here can run against another stack.
+  if (process.env.MGD_EXPECT_STACK) requireStack(process.env.MGD_EXPECT_STACK, `db:${command}`);
   requireDocker();
   if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`);
   console.log(`Stack: ${stackName}`);

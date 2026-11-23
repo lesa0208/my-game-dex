@@ -1,12 +1,15 @@
-# Fast checks for pull requests into main. Database tests need Docker and the local
-# Supabase stack, so they stay local: run `npm run db:verify` before opening a PR.
+# Checks for pull requests into main:
+#   checks    typecheck, lint, build, secret scans and unit tests of the CI tooling
+#   database  a disposable Supabase scratch stack built from an empty database: every
+#             migration replayed in order, every pgTAP file, then the 23 database suites (M14b).
+#             It never reaches a hosted project or another local stack, and needs no secrets.
 name: CI
 
 on:
   pull_request:
     branches: [main]
 
-# Read-only token: the job only needs to check out the code.
+# Read-only token: the jobs only need to check out the code.
 permissions:
   contents: read
 
@@ -53,8 +56,63 @@ jobs:
       - name: Mutation runners refuse without an explicit opt-in
         run: npm run mutation:guard-test
 
+      - name: Test the pgTAP report check
+        run: npm run db:report-test
+
       - name: Build
         run: npm run build
 
       - name: Scan browser bundles for secrets
         run: npm run secrets:bundle
+
+  database:
+    name: Database (fresh migrations, pgTAP and database suites)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      # Only the disposable scratch stack: test-stack.mjs generates .supabase-scratch/ (project
+      # "my-game-dex-scratch", ports plus 2000), and db.mjs refuses any other stack.
+      MGD_TEST_STACK: scratch
+      MGD_EXPECT_STACK: scratch
+      NO_COLOR: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (including the pinned Supabase CLI)
+        run: npm ci
+
+      - name: Turn off Supabase CLI telemetry
+        run: node node_modules/supabase/dist/supabase.js telemetry disable
+
+      - name: Create the scratch stack and replay every migration from an empty database
+        run: node scripts/test-stack.mjs start
+
+      - name: Confirm the target is the scratch project, and the only stack
+        run: |
+          grep -qx 'project_id = "my-game-dex-scratch"' .supabase-scratch/supabase/config.toml
+          dbs="$(docker ps --format '{{.Names}}' | grep '^supabase_db_' || true)"
+          echo "Database containers: $dbs"
+          test "$dbs" = "supabase_db_my-game-dex-scratch"
+
+      - name: Migrations applied in order, and every pgTAP file
+        run: node scripts/test-stack.mjs run db:pgtap
+
+      - name: Database suites (API, authorization, RLS, catalog, publication and accounts)
+        run: node scripts/test-stack.mjs run db:suites
+
+      - name: Destroy the scratch stack
+        if: always()
+        run: |
+          node scripts/test-stack.mjs destroy || true
+          left="$(docker ps -aq --filter name=my-game-dex-scratch | wc -l) containers, $(docker volume ls -q --filter name=my-game-dex-scratch | wc -l) volumes"
+          echo "Left behind: $left"
+          test "$left" = "0 containers, 0 volumes"
