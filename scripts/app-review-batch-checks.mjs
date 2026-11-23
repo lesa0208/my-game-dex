@@ -214,10 +214,20 @@ async function batchPage() {
   check("its sampling policy and required reviews", text.includes("45% tolerable error at 80% confidence; acceptance number 0") && text.includes(`Required reviews ${2 + M.sampled.length}`));
   check("its blockers, assessed by the database", text.includes(`${2 + M.sampled.length} members still need their individual review.`));
   check("that it says identity acceptance isn't physical proof", text.includes("is not proof that a physical copy exists"));
-  check("and offers no approval, rejection or publication: no form acts on the batch",
-    forms(resolveSegments(page.html)).every((f) => !Object.values(f.hidden).includes(B) && !f.names.includes("reason")) &&!page.html.includes("approve_review_batch") && !page.html.includes("reject_review_batch"));
+  // M14c-3: while reviews are pending the database would refuse an approval, so no approval form
+  // is offered; rejection is offered, apart (app:publication-checks tests both).
+  const batchForms = forms(resolveSegments(page.html));
+  check("with reviews pending, it offers no approval form, and rejection apart",
+    !batchForms.some((f) => f.id === "approve-batch") && batchForms.some((f) => f.id === "reject-batch" && f.hidden.decision === "reject")
+      && plain(page.html).includes("The database would refuse an approval now"));
   // The member links in the list, in page order (a streamed page holds each once, after resolving).
-  const first = (html) => [...new Set([...resolveSegments(html).matchAll(/href="\/admin\/catalog\/batches\/[^/"]+\/members\/([0-9a-f-]{36})"/g)].map((m) => m[1]))];
+  // Only the members list itself (since M14c-3 the approval preview also links members).
+  const first = (html) => {
+    const page = resolveSegments(html);
+    const start = page.indexOf('aria-label="Batch members"');
+    const list = start < 0 ? "" : page.slice(start, page.indexOf("</ol>", start));
+    return [...new Set([...list.matchAll(/href="\/admin\/catalog\/batches\/[^/"]+\/members\/([0-9a-f-]{36})"/g)].map((m) => m[1]))];
+  };
   const pending = first(page.html);
   check("by default it lists members awaiting review, the critical one first", pending[0] === M.critical && pending.length === 2 + M.sampled.length,
     `${pending.length} ${pending[0] === M.critical}`);

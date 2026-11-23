@@ -1539,6 +1539,16 @@ Catalog editors and administrators can search every game and release, open a rea
 - **People by handle.** The batch's creator, reviewers and approvers, by handle or "you", as staff history names actors (the M14c-1 exception). No email address or account id.
 - **Source records allow-listed.** Only fields of a fixed shape and length from a payload; never the raw payload. Links to a source are built only from a Wikidata item id and a revision number. Provider text is rendered as text.
 
+### Approval preview and publication queue (M14c-3)
+
+`get_batch_approval_preview` and `list_publication_queue` (migration `20261213100000`) are read-only predictions for the approval and publication forms ([catalog-publishing-m14c3.md](catalog-publishing-m14c3.md)). The writers are unchanged: `approve_review_batch`, `reject_review_batch` and `publish_game_identity`, each called with the editor's own session.
+
+- **Who.** `require_active_staff('catalog_editor')`; `EXECUTE` for `authenticated` only. The helpers `identity_publication_block` and `identity_publication_own` are owner only.
+- **Bounded.** The queue: 1 to 100 rows a page, a three-part cursor (all or none). The preview: 1 to 200 members of each effect.
+- **People by handle.** Reviewers and verifiers, as staff history names actors. No email address or account id.
+- **Never a decision.** Both say what the database would do now; the writers check everything again, under their own locks, and decide.
+- **What the editor saw.** `approve_review_batch_as_seen` and `publish_game_identity_as_seen` (`EXECUTE` for `authenticated` only) call the unchanged writers only if the approvals recorded, or each pairing's evidence time, are still what the editor was shown, checked under the writers' own locks.
+
 ### What history shows (D4)
 
 History is a view of `private.audit_events` built from two allow-lists, so a new kind of event or a new metadata key never appears until it is added on purpose.

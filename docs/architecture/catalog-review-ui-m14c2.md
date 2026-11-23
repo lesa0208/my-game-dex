@@ -202,7 +202,6 @@ always rendered as text, never as markup.
 
 ## Left for M14c-3
 
-Approving and rejecting batches in the UI (with the second approver above the policy's size), the
-independent publication of confirmed identities, the CLI `publish` step, and choosing the human
-editors and the database to publish on. The open B1 batch `ae69e5d3…` is unchanged; under M14c-1
-it can't be approved and would be rejected and reviewed again.
+Done in M14c-3 ([catalog-publishing-m14c3.md](catalog-publishing-m14c3.md)): approving and rejecting batches in
+the UI, independent publication and its queue, and the CLI `publish` step. The real pilot's
+prerequisites are listed there.
