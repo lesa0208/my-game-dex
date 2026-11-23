@@ -116,6 +116,8 @@ insert into approved_function_grants values
   ('create_review_batch(uuid,uuid,text)', 'authenticated'), ('record_batch_outcome(uuid,uuid,text,text,text)', 'authenticated'),
   ('approve_review_batch(uuid,text)', 'authenticated'), ('reject_review_batch(uuid,text)', 'authenticated'), ('get_review_batch(uuid)', 'authenticated'),
   ('get_pairing_withdrawal_preview(uuid,uuid)', 'authenticated'), ('withdraw_game_platform(uuid,uuid,text,bigint)', 'authenticated'), ('restore_game_platform(uuid,text,bigint)', 'authenticated'),
+  -- M14c-1: the staff evidence read. It checks the caller itself.
+  ('get_game_pairing_evidence(uuid)', 'authenticated'),
   -- M5b: the editor review queue.
   ('get_catalog_review_queue(integer)', 'authenticated'), ('resolve_catalog_review(uuid,text)', 'authenticated'),
   -- M5c: editor aliases, and the public search, which anyone may call.

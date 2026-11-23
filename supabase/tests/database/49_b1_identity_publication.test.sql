@@ -57,7 +57,7 @@ select is(pg_temp.as_user('e1', format($$select public.set_game_platform(%L, %L,
 select is((select creator_id from private.catalog_pairing_origins where game_id = pg_temp.id('g')), pg_temp.u('e1'), 'the pairing''s creator is recorded');
 
 create function pg_temp.basis() returns text language sql as $$
-  select '{"source": "wikidata", "reference": "Q999001", "physical_eligibility": "confirmed"}' $$;
+  select '{"source": "wikidata", "reference": "Q999001", "physical_eligibility": "confirmed", "note": "Cartridge and box photographed; label checked against the listing"}' $$;
 grant execute on function pg_temp.basis() to authenticated;
 create function pg_temp.verify_pair(p_actor text, p_basis text) returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.verify_game_platform(%L, %L, %L::jsonb, 'Checked the source', %s)::text$q$,

@@ -54,7 +54,7 @@ create function pg_temp.rev() returns bigint language sql stable as $$ select re
 grant execute on function pg_temp.rev() to authenticated;
 create function pg_temp.verify_pair(p_actor text, p_platform text, p_eligibility text) returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.verify_game_platform(%L, %L, %L::jsonb, 'Checked a copy', %s)::text$q$, pg_temp.id('g'), pg_temp.id(p_platform),
-    jsonb_build_object('source', 'editor', 'reference', 'Cartridge and box photographed', 'physical_eligibility', p_eligibility)::text, pg_temp.rev())) $$;
+    jsonb_build_object('source', 'editor', 'reference', 'Cartridge and box photographed', 'physical_eligibility', p_eligibility, 'note', 'Cartridge and box photographed; label checked against the listing')::text, pg_temp.rev())) $$;
 create function pg_temp.publish(p_actor text, p_platform text) returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.publish_game_identity(%L, array[%L]::uuid[], 'Physical existence confirmed', %s)::text$q$,
     pg_temp.id('g'), pg_temp.id(p_platform), pg_temp.rev())) $$;
@@ -146,7 +146,7 @@ select ok((select verification_basis is null and verified_at is null from public
            where game_id = pg_temp.id('g') and platform_id = pg_temp.id('nes')),
   'an unverified pairing may keep its entire verification basis SQL NULL');
 select is(pg_temp.then_undo(format($$update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = %s,
-    verification_basis = '{"source": "editor", "reference": "Cartridge and box photographed", "physical_eligibility": "confirmed"}' where game_id = %L and platform_id = %L$$,
+    verification_basis = '{"source": "editor", "reference": "Cartridge and box photographed", "physical_eligibility": "confirmed", "note": "Cartridge and box photographed; label checked against the listing"}' where game_id = %L and platform_id = %L$$,
     pg_temp.u('e2'), pg_temp.rev(), pg_temp.id('g'), pg_temp.id('nes')),
     format($$select verification_basis ->> 'physical_eligibility' from public.game_platforms where game_id = %L and platform_id = %L$$, pg_temp.id('g'), pg_temp.id('nes'))),
   'confirmed', 'a valid confirmed verification basis is accepted');

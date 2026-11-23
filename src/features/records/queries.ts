@@ -163,6 +163,63 @@ export function getGameRecord(id: string) {
   return record<GameRecord>("get_game_record", "p_game", id);
 }
 
+/**
+ * A pairing's physical evidence for staff (M14c-1), from get_game_pairing_evidence: what its
+ * verification rests on, who confirmed it (by handle), its review batches, and whether its
+ * identity could be published now. Catalog editors and administrators only.
+ */
+export type PairingState = "unconfirmed" | "confirmed" | "published_identity" | "published_with_release" | "closed";
+export type PublicationBlock =
+  | "published"
+  | "game_unavailable"
+  | "pairing_unavailable"
+  | "game_not_verified"
+  | "physical_evidence_unconfirmed"
+  | "verifier_gone"
+  | "evidence_outdated";
+export type PairingEvidence = {
+  platform: Platform;
+  status: string;
+  state: PairingState;
+  physical: {
+    source: string | null;
+    reference: string | null;
+    note: string | null;
+    snapshot_sha256: string | null;
+    batch_id: string | null;
+    verified_at: string;
+    verified_game_revision: number | null;
+    current: boolean;
+    verifier: { handle: string | null; you: boolean };
+  } | null;
+  releases: { total: number; published: number };
+  batches: {
+    id: string;
+    status: "open" | "approved" | "rejected";
+    created_at: string;
+    decided_at: string | null;
+    sampled: boolean;
+    flagged: boolean;
+    outcome: "correct" | "incorrect" | "excluded" | null;
+    recorded_at: string | null;
+  }[];
+  publication: { eligible: boolean; reason: PublicationBlock | null; you_may_publish: boolean; your_reason: "you_confirmed" | "you_created" | null };
+};
+export type GamePairingEvidence = {
+  game: { id: string; status: string; revision: number; identity_verified: boolean };
+  pairings: PairingEvidence[];
+};
+
+/** A game's pairings with their physical evidence: null when there's no such game. */
+export async function getGamePairingEvidence(id: string): Promise<Outcome<GamePairingEvidence | null>> {
+  if (!UUID.test(id)) return { ok: true, data: null };
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { ok: false, reason: "unavailable" };
+  const { data, error } = await supabase.rpc("get_game_pairing_evidence", { p_game: id });
+  if (error) return failure(error);
+  return { ok: true, data: typeof data === "object" && data !== null ? (data as GamePairingEvidence) : null };
+}
+
 /** One release for staff: null when there's none. */
 export function getReleaseRecord(id: string) {
   return record<ReleaseRecord>("get_release_record", "p_release", id);

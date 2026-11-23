@@ -13,7 +13,7 @@
  */
 
 /** Raise these when tests are added; lowering them is a reviewed decision, never a fix. */
-export const PGTAP_BASELINE = { files: 53, assertions: 4127 };
+export const PGTAP_BASELINE = { files: 54, assertions: 4211 };
 
 const TEST_FILE = /^\d{2}_[a-z0-9_]+\.test\.sql$/;
 
