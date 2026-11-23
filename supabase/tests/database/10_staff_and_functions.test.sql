@@ -96,7 +96,7 @@ select is(
     'create_account_invitation(text,text)', 'create_game(text,game_kind,text,text,date,date_precision,text)', 'create_release(uuid,uuid,text,text,jsonb,text)', 'create_review_batch(uuid,uuid,text)', 'delete_notification(uuid)',
     'exclude_release(uuid,text,text,text,text,boolean,boolean)', 'find_account_by_handle(text)', 'get_account_invitations(integer,uuid)', 'get_account_summary(text)', 'get_admin_overview()',
     'get_audit_log(integer,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone)', 'get_catalog_record_history(text,uuid,integer,uuid)', 'get_catalog_review_queue(integer)', 'get_exclusion(uuid)', 'get_exclusion_preview(uuid)',
-    'get_exclusions(text,uuid,integer)', 'get_follow_state(uuid)', 'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)', 'get_game_record(uuid)',
+    'get_exclusions(text,uuid,integer)', 'get_follow_state(uuid)', 'get_followers(uuid,integer,timestamp with time zone,uuid)', 'get_following(uuid,integer,timestamp with time zone,uuid)', 'get_game_pairing_evidence(uuid)', 'get_game_record(uuid)',
     'get_import_providers()', 'get_import_run(uuid)', 'get_import_run_records(uuid,text,integer,integer)', 'get_import_runs(integer,uuid,text,text)', 'get_merge(uuid)',
     'get_merge_candidates(uuid)', 'get_merge_preview(uuid,uuid)', 'get_merges(uuid,integer)', 'get_my_account()', 'get_my_admin_access()',
     'get_my_blocks(integer,timestamp with time zone,uuid)', 'get_my_copy_history(uuid)', 'get_my_factor_status()', 'get_my_game_ownership(uuid)', 'get_my_merged_submission(uuid)',

@@ -91,7 +91,9 @@ end $f$;
 create function pg_temp.batch(p_tag text, p_actor text default 'e1') returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.create_review_batch(%L, %L, 'Hardening batch')::text$q$, pg_temp.run(p_tag), pg_temp.snes())) $$;
 create function pg_temp.outcome(p_actor text, p_tag text, p_game uuid, p_outcome text, p_critical text, p_note text default null) returns text language sql as $$
-  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, %L)::text$q$, pg_temp.b(p_tag), p_game, p_outcome, p_critical, p_note)) $$;
+  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, %L)::text$q$, pg_temp.b(p_tag), p_game, p_outcome, p_critical,
+    -- M14c-1: a correct outcome carries the reviewer's evidence note unless a test gives its own.
+    coalesce(p_note, case when p_outcome = 'correct' then 'Cartridge and box photographed; label checked against the listing' end))) $$;
 create function pg_temp.approve(p_actor text, p_tag text) returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.approve_review_batch(%L, 'Reviewed')::text$q$, pg_temp.b(p_tag))) $$;
 

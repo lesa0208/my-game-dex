@@ -126,8 +126,10 @@ rollback to savepoint frozen;
 
 -- B3, B4: independence and completeness.
 create function pg_temp.outcome(p_actor text, p_title text, p_outcome text, p_critical text) returns text language sql as $$
-  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, 'B1 test')::text$q$,
-    pg_temp.b('a'), pg_temp.g(p_title), p_outcome, p_critical)) $$;
+  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, %L)::text$q$,
+    pg_temp.b('a'), pg_temp.g(p_title), p_outcome, p_critical,
+    -- M14c-1: a correct outcome carries the reviewer's evidence note.
+    case when p_outcome = 'correct' then 'Cartridge and box photographed; label checked against the listing' else 'B1 test' end)) $$;
 create function pg_temp.approve(p_actor text, p_batch uuid) returns text language sql as $$
   select pg_temp.as_user(p_actor, format($q$select public.approve_review_batch(%L, 'Reviewed')::text$q$, p_batch)) $$;
 select is(pg_temp.approve('e2', pg_temp.b('a')), 'error: batch not reviewed', 'approval waits for every flagged and sampled outcome');
@@ -174,7 +176,7 @@ select is(pg_temp.outcome('e2', 'Zqx Batch Undated', 'incorrect', null), 'error:
 -- B5: a failed sample is never accepted.
 select pg_temp.make_run('f', '[{"title": "Zqx Fail One", "date": "1992-02-01"}, {"title": "Zqx Fail Two", "date": "1992-02-02"}]');
 insert into b values ('f', pg_temp.as_user('e1', format($$select public.create_review_batch(%L, (select id from public.platforms where slug = 'snes'), 'Second batch')::text$$, pg_temp.run('f')))::uuid);
-select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, null)::text$q$, pg_temp.b('f'), pg_temp.g('Zqx Fail One')));
+select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, 'Cartridge and box photographed; label checked against the listing')::text$q$, pg_temp.b('f'), pg_temp.g('Zqx Fail One')));
 select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'incorrect', null, 'wrong date')::text$q$, pg_temp.b('f'), pg_temp.g('Zqx Fail Two')));
 select is(pg_temp.approve('e2', pg_temp.b('f')), 'error: sample failed', 'an incorrect sampled member beyond the acceptance number fails the sample');
 select is(pg_temp.as_user('e2', format($q$select public.reject_review_batch(%L, 'Sample failed')::text$q$, pg_temp.b('f'))), 'true', 'the batch is rejected');
@@ -184,7 +186,7 @@ select is(pg_temp.approve('e3', pg_temp.b('f')), 'error: record unavailable', 'a
 update private.catalog_review_policy set second_approval_above = 1;
 select pg_temp.make_run('s', '[{"title": "Zqx Pair One", "date": "1992-03-01"}, {"title": "Zqx Pair Two", "date": "1992-03-02"}]');
 insert into b values ('s', pg_temp.as_user('e1', format($$select public.create_review_batch(%L, (select id from public.platforms where slug = 'snes'), 'Third batch')::text$$, pg_temp.run('s')))::uuid);
-select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, null)::text$q$, pg_temp.b('s'), g)) from unnest(array[pg_temp.g('Zqx Pair One'), pg_temp.g('Zqx Pair Two')]) g;
+select pg_temp.as_user('e2', format($q$select public.record_batch_outcome(%L, %L, 'correct', null, 'Cartridge and box photographed; label checked against the listing')::text$q$, pg_temp.b('s'), g)) from unnest(array[pg_temp.g('Zqx Pair One'), pg_temp.g('Zqx Pair Two')]) g;
 select is(pg_temp.approve('e2', pg_temp.b('s')), '{"status": "awaiting_approval", "required": 2, "approvals": 1}', 'a large batch waits for a second approver');
 select is(pg_temp.approve('e2', pg_temp.b('s')), 'error: already approved', 'the same editor can''t be the second approver (B6)');
 select is(pg_temp.as_user('e3', format($q$select public.record_batch_outcome(%L, %L, 'excluded', null, 'late change')::text$q$, pg_temp.b('s'), pg_temp.g('Zqx Pair One'))),
@@ -198,7 +200,8 @@ update private.catalog_review_policy set second_approval_above = 1000, tolerable
 create function pg_temp.sampled(p_tag text) returns uuid[] language sql stable as $$
   select array_agg(game_id order by game_id) from private.catalog_review_batch_items where batch_id = pg_temp.b(p_tag) and sampled $$;
 create function pg_temp.outcome_in(p_actor text, p_tag text, p_game uuid, p_outcome text, p_critical text) returns text language sql as $$
-  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, null)::text$q$, pg_temp.b(p_tag), p_game, p_outcome, p_critical)) $$;
+  select pg_temp.as_user(p_actor, format($q$select public.record_batch_outcome(%L, %L, %L, %L, %L)::text$q$, pg_temp.b(p_tag), p_game, p_outcome, p_critical,
+    case when p_outcome = 'correct' then 'Cartridge and box photographed; label checked against the listing' end)) $$;
 create function pg_temp.as_stale_actor(p_actor text, p_sql text) returns text language plpgsql as $t$
 declare r text;
 begin
@@ -284,11 +287,11 @@ select is(pg_temp.approve('e3', pg_temp.b('q')), 'error: record unavailable', 'a
 
 -- M14a: physical existence is confirmed one game at a time, with evidence, before publication.
 select throws_ok(format($q$update public.game_platforms set verified_at = now(), verified_by = %L, verified_game_revision = 1,
-    verification_basis = '{"source": "wikidata", "reference": "Q1", "physical_eligibility": "batch_accepted"}' where game_id = %L$q$,
+    verification_basis = '{"source": "wikidata", "reference": "Q1", "physical_eligibility": "batch_accepted", "note": "Listed by Wikidata; no copy was checked"}' where game_id = %L$q$,
     pg_temp.u('e2'), (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1)),
-  '23514', null, 'no pairing can carry anything but confirmed physical evidence (M14a)');
+  '23514', 'new row for relation "game_platforms" violates check constraint "game_platforms_physical_evidence"', 'no pairing can carry anything but confirmed physical evidence (M14a)');
 select is(pg_temp.as_user('e3', format($q$select public.verify_game_platform(%L, (select id from public.platforms where slug = 'snes'),
-    '{"source": "editor", "reference": "Cartridge, box and manual photographed; label and product code checked", "physical_eligibility": "confirmed"}', 'Physical copy checked', %s)::text$q$,
+    '{"source": "editor", "reference": "Cartridge, box and manual photographed; label and product code checked", "physical_eligibility": "confirmed", "note": "Cartridge and box photographed; label checked against the listing"}', 'Physical copy checked', %s)::text$q$,
     (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1),
     (select g.revision from public.games g where g.id = (select i.game_id from private.catalog_review_batch_items i where i.batch_id = pg_temp.b('q') and not i.sampled order by i.game_id limit 1)))),
   'true', 'another editor confirms one awaiting member''s physical existence, with evidence (M14a)');
