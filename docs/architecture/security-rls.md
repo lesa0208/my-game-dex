@@ -62,7 +62,7 @@ These are accepted for M0 and stay open until each is resolved:
 | **Default privileges are per role** | `supabase_admin` keeps permissive defaults in `public`, which `postgres` can't change | Application objects must be created only by `postgres`, through migrations. The ownership guard detects others when tests run, not at creation |
 | **Guards cover named schemas only** | They inspect `public` and `private` | Add any future application schema to the guards in the same migration that creates it |
 | **Supabase-managed schemas stay untouched** | `postgres` keeps permissive defaults in `storage`, and no guard covers that schema | Never create application objects in `auth`, `storage`, `realtime` or other managed schemas, and don't alter their defaults |
-| **Secret scanning isn't in CI** | The pre-commit hook is per clone and can be skipped | Add `secrets:check` and `secrets:bundle` to CI when CI exists |
+| **Secret scanning isn't in CI** (resolved) | The pre-commit hook is per clone and can be skipped | Done: CI runs `secrets:check`, `secrets:test` and `secrets:bundle` on every pull request into `main` |
 | **Extension functions are callable by `anon`** | `anon` has USAGE on `extensions`, and extension functions are executable by `PUBLIC`. They're platform-owned, and aren't API endpoints because `extensions` isn't an exposed schema | Accepted. Keep extensions out of `public`, and keep `extensions` out of the exposed schemas |
 | **Enum types are usable by `PUBLIC`** | This reveals only labels that are public anyway | Accepted. Don't put sensitive values in enum labels |
 | **The migration role is powerful** | `postgres` isn't a superuser, but it can bypass RLS and create roles, as Supabase provides it | Accepted. Keep its credentials out of the application |
@@ -2235,8 +2235,8 @@ The runner's own offline self-tests still pass (32 of 32).
 
 For each step:
 
-1. **Policy matrix tests in CI.** For each table, act as `anon`, the owner, a stranger, a pending follower, an accepted follower, a blocked user and staff, then assert allowed and denied actions.
-2. **Schema guard tests in CI.** Fail the build if any `public` table lacks RLS, if `anon` has a grant on a table not on the approved list, or if a `SECURITY DEFINER` function lacks a fixed `search_path`.
+1. **Policy matrix tests in CI.** (Since M14b the authorization, identity, catalog and other database suites, and every pgTAP file, run in CI on a disposable scratch stack; see the README's Continuous integration section.) For each table, act as `anon`, the owner, a stranger, a pending follower, an accepted follower, a blocked user and staff, then assert allowed and denied actions.
+2. **Schema guard tests in CI.** (Since M14b: `03_schema_guards` and the inventories in `01` and `10` run in CI.) Fail the build if any `public` table lacks RLS, if `anon` has a grant on a table not on the approved list, or if a `SECURITY DEFINER` function lacks a fixed `search_path`.
 3. **Performance tests.** Run `EXPLAIN` on feed and collection queries with realistic data. Supabase's guidance is to wrap `auth.uid()` as `(select auth.uid())`, index the filtered columns, and scope policies with `TO authenticated` where possible ([Supabase RLS performance](https://supabase.com/docs/guides/database/postgres/row-level-security)). Helpers taking per-row values can't be cached this way, so they need measuring.
 4. **Run Supabase's security advisor** before each release.
 
