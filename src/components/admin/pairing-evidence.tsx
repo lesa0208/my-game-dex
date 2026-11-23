@@ -1,3 +1,6 @@
+import Link from "next/link";
+
+import { linkClass } from "@/components/admin/admin-frame";
 import { Facts, StatusBadge } from "@/components/admin/records";
 import { formatDay } from "@/features/collection/details";
 import type { PairingEvidence, PairingState, PublicationBlock } from "@/features/records/queries";
@@ -65,7 +68,10 @@ function Batches({ batches }: { batches: PairingEvidence["batches"] }) {
     <ul className="flex flex-col gap-1">
       {batches.map((b) => (
         <li key={b.id}>
-          <code className="text-xs">{b.id.slice(0, 8)}</code> · {BATCH_STATUSES[b.status]}
+          <Link href={`/admin/catalog/batches/${b.id}`} className={linkClass}>
+            <code className="text-xs">{b.id.slice(0, 8)}</code>
+          </Link>{" "}
+          · {BATCH_STATUSES[b.status]}
           {b.decided_at ? ` ${formatDay(b.decided_at)}` : ""} ·{" "}
           {b.outcome
             ? `reviewed individually, ${OUTCOMES[b.outcome]}${b.recorded_at ? ` ${formatDay(b.recorded_at)}` : ""}`

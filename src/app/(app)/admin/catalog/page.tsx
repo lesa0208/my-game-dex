@@ -35,6 +35,10 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
         <Link href="/admin/catalog/search" className="text-primary-text underline underline-offset-4">
           Catalog records
         </Link>{" "}
+        {/* M14c-2: frozen batches of imported identities, reviewed member by member. */}
+        <Link href="/admin/catalog/batches" className="text-primary-text underline underline-offset-4">
+          Review batches
+        </Link>{" "}
         {/* M12c-A: records an editor created don't come through here; they wait in review for a second editor. */}
         <Link href="/admin/catalog/search?kind=releases&status=under_review" className="text-primary-text underline underline-offset-4">
           Releases in review
