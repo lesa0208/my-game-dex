@@ -30,6 +30,14 @@
  * It keeps B1 batches and their review history, so reset and destroy refuse unless
  * MGD_ALLOW_B1_RESET=1 is also set.
  *
+ * MGD_TEST_STACK=pilot selects the persistent SNES pilot stack (M15): project "my-game-dex-pilot"
+ * in .supabase-pilot/, every port moved up by 4000, sign-up always off (accounts are created for
+ * real editors by the operator tools only), and Auth's links pointing at the pilot preview
+ * (http://127.0.0.5:3005). It is created only at checkpoint P1: start refuses to create it unless
+ * MGD_CREATE_PILOT=1. run refuses it: it is never a test target. reset and destroy refuse while
+ * ~/.my-game-dex/protect-pilot-stack exists (written by protect-pilot right after P1), and
+ * otherwise unless MGD_ALLOW_PILOT_RESET=1.
+ *
  * MGD_TEST_SIGNUP=off at start or reset makes the test stack invite-only, as a hosted
  * project will be: [auth] enable_signup = false, with the email provider left on (turning
  * that off also blocks password sign-in and recovery; M11a-0).
@@ -46,36 +54,68 @@ const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 const VARIANTS = {
   test: { project: "my-game-dex-test", offset: 1000, dir: ".supabase-test", persistent: false },
   scratch: { project: "my-game-dex-scratch", offset: 2000, dir: ".supabase-scratch", persistent: false },
-  b1: { project: "my-game-dex-b1", offset: 3000, dir: ".supabase-b1", persistent: true },
+  b1: { project: "my-game-dex-b1", offset: 3000, dir: ".supabase-b1", persistent: true, allowReset: "MGD_ALLOW_B1_RESET" },
+  // M15: real editorial decisions. Invite-only, its own preview origin, never a test target.
+  pilot: {
+    project: "my-game-dex-pilot", offset: 4000, dir: ".supabase-pilot", persistent: true, allowReset: "MGD_ALLOW_PILOT_RESET",
+    marker: join(homedir(), ".my-game-dex", "protect-pilot-stack"), signup: false, seed: false, site: "http://127.0.0.5:3005", testTarget: false,
+  },
 };
+export { VARIANTS };
 const STACK = process.env.MGD_TEST_STACK ?? "test";
-if (!Object.hasOwn(VARIANTS, STACK)) throw new Error('MGD_TEST_STACK may only be "scratch" or "b1".');
+if (!Object.hasOwn(VARIANTS, STACK)) throw new Error('MGD_TEST_STACK may only be "scratch", "b1" or "pilot".');
 const TEST_PROJECT_ID = VARIANTS[STACK].project;
 const OFFSET = VARIANTS[STACK].offset;
 const dir = join(root, VARIANTS[STACK].dir);
 
-/** A persistent stack's data is review history: resetting or destroying it needs an explicit yes. */
-function guardPersistent(command) {
-  if (VARIANTS[STACK].persistent && process.env.MGD_ALLOW_B1_RESET !== "1") {
-    throw new Error(`Refusing to ${command} the ${STACK} stack: it keeps import batches and their review history. Set MGD_ALLOW_B1_RESET=1 to confirm.`);
+/**
+ * A persistent stack's data is review history: resetting or destroying it needs an explicit yes,
+ * and for the pilot also no protection marker (a separately authorized recovery removes it first).
+ */
+export function guardPersistent(command, variant = VARIANTS[STACK], name = STACK, env = process.env, markerExists = existsSync) {
+  if (!variant.persistent) return;
+  if (variant.marker && markerExists(variant.marker)) {
+    throw new Error(`Refusing to ${command} the ${name} stack: it is protected (${variant.marker} exists). Recovery is a separately authorized procedure (docs/architecture/catalog-pilot-m15.md).`);
   }
+  if (env[variant.allowReset] !== "1") {
+    throw new Error(`Refusing to ${command} the ${name} stack: it keeps import batches and their review history. Set ${variant.allowReset}=1 to confirm.`);
+  }
+}
+
+/** The pilot is created once, at checkpoint P1, by an explicit request; never as a side effect. */
+export function guardCreate(name = STACK, env = process.env, prepared = existsSync(join(dir, "supabase", "config.toml"))) {
+  if (name === "pilot" && !prepared && env.MGD_CREATE_PILOT !== "1") {
+    throw new Error("Refusing to create the pilot stack: it is created only at checkpoint P1, with the product owner's approval. Set MGD_CREATE_PILOT=1 then.");
+  }
+}
+
+/** The pilot is never a test target: no npm script runs against it through this tool. */
+export function guardRun(variant = VARIANTS[STACK], name = STACK) {
+  if (variant.testTarget === false) throw new Error(`Refusing: the ${name} stack is never a test target. Its tools run directly (docs/architecture/catalog-pilot-m15.md).`);
 }
 const target = join(dir, "supabase");
 const PORT_KEYS = new Set(["port", "shadow_port", "inspector_port"]);
 const DISABLED = new Set(["studio", "analytics", "edge_runtime"]);
 
-/** The test config: the development config with a new project id, moved ports and fewer services. */
-export function testConfig(source, { signup = true } = {}) {
+/**
+ * The test config: the development config with a new project id, moved ports and fewer services.
+ * With `site` (the pilot), Auth's links (site_url and the allowed redirects) go to that origin.
+ * With `seed: false` (the pilot), no seed file is ever loaded.
+ */
+export function testConfig(source, { signup = true, project = TEST_PROJECT_ID, offset = OFFSET, site = null, seed = true } = {}) {
   let section = "";
   const config = source
     .split("\n")
     .map((line) => {
       const header = /^\[([^\]]+)\]\s*$/.exec(line);
       if (header) section = header[1];
-      if (/^project_id\s*=/.test(line)) return `project_id = "${TEST_PROJECT_ID}"`;
+      if (/^project_id\s*=/.test(line)) return `project_id = "${project}"`;
       const setting = /^(\w+)\s*=\s*(\d+)\s*$/.exec(line);
-      if (setting && PORT_KEYS.has(setting[1])) return `${setting[1]} = ${Number(setting[2]) + OFFSET}`;
+      if (setting && PORT_KEYS.has(setting[1])) return `${setting[1]} = ${Number(setting[2]) + offset}`;
+      if (site && section === "auth" && /^site_url\s*=/.test(line)) return `site_url = "${site}"`;
+      if (site && section === "auth" && /^additional_redirect_urls\s*=/.test(line)) return `additional_redirect_urls = ["${site}"]`;
       if (DISABLED.has(section) && /^enabled\s*=/.test(line)) return "enabled = false";
+      if (!seed && section === "db.seed" && /^enabled\s*=/.test(line)) return "enabled = false";
       if (section === "auth" && /^enable_signup\s*=/.test(line)) return `enable_signup = ${signup}`;
       return line;
     })
@@ -86,8 +126,9 @@ export function testConfig(source, { signup = true } = {}) {
 }
 
 function prepare() {
-  const signup = process.env.MGD_TEST_SIGNUP !== "off";
-  const config = testConfig(readFileSync(join(root, "supabase", "config.toml"), "utf8"), { signup });
+  const variant = VARIANTS[STACK];
+  const signup = variant.signup ?? process.env.MGD_TEST_SIGNUP !== "off";
+  const config = testConfig(readFileSync(join(root, "supabase", "config.toml"), "utf8"), { signup, site: variant.site ?? null, seed: variant.seed ?? true });
   if (!config.includes(`project_id = "${TEST_PROJECT_ID}"`)) throw new Error("The generated config doesn't name the test project.");
   mkdirSync(target, { recursive: true });
   writeFileSync(
@@ -130,6 +171,7 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case "start":
+      guardCreate();
       prepare();
       return supabase(["start"]);
     case "stop":
@@ -146,6 +188,7 @@ async function main() {
       if (!existsSync(target)) return 0;
       return supabase(["stop", "--no-backup"]);
     case "run":
+      guardRun();
       if (!existsSync(target)) throw new Error("The test stack isn't prepared. Run npm run test-stack:start.");
       return runNpm(rest[0], rest.slice(1));
     case "protect-dev": {
@@ -155,8 +198,15 @@ async function main() {
       console.log("The development stack is protected: destructive scripts now refuse it unless MGD_ALLOW_DEV_STACK=1.");
       return 0;
     }
+    case "protect-pilot": {
+      if (STACK !== "pilot") throw new Error("protect-pilot needs MGD_TEST_STACK=pilot.");
+      mkdirSync(join(VARIANTS.pilot.marker, ".."), { recursive: true });
+      writeFileSync(VARIANTS.pilot.marker, "Reset and destroy refuse the pilot stack while this file exists. Removing it is part of a separately authorized recovery.\n");
+      console.log("The pilot stack is protected: reset and destroy now refuse it.");
+      return 0;
+    }
     default:
-      console.error("Usage: node scripts/test-stack.mjs start|stop|status|reset|destroy|run <npm script>|protect-dev");
+      console.error("Usage: node scripts/test-stack.mjs start|stop|status|reset|destroy|run <npm script>|protect-dev|protect-pilot");
       return 2;
   }
 }

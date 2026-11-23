@@ -175,7 +175,8 @@ async function main() {
   // M14b: CI sets MGD_EXPECT_STACK=scratch, so nothing here can run against another stack.
   if (process.env.MGD_EXPECT_STACK) requireStack(process.env.MGD_EXPECT_STACK, `db:${command}`);
   requireDocker();
-  if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`);
+  // M15: the pilot stack is never reset or tested; only its read-only migration check may run on it.
+  if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`, { editorial: command === "migrations" });
   console.log(`Stack: ${stackName}`);
   process.exit(await runSteps(plans[command]));
 }

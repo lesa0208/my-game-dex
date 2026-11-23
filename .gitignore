@@ -54,3 +54,4 @@ pilot-reevaluation-*.json
 /.supabase-test/
 /.supabase-scratch/
 /.supabase-b1/
+/.supabase-pilot/

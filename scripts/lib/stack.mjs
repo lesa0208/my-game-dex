@@ -13,6 +13,11 @@
  *                   "my-game-dex-b1", ports plus 3000. It keeps B1 import batches and their
  *                   human review history, apart from development, the M12c-A test stack and
  *                   scratch (MGD_TEST_STACK=b1 node scripts/test-stack.mjs start|stop|status)
+ *   MGD_STACK=pilot the persistent SNES pilot stack (M15): .supabase-pilot/, project
+ *                   "my-game-dex-pilot", ports plus 4000. It will keep the first real, human
+ *                   editorial decisions, so every script refuses it by default (below), and only
+ *                   the editorial tools (catalog-b1.mjs, catalog-b1-review.mjs, the pilot preview
+ *                   and backups) may reach it.
  *
  * Every script reads the project, container, CLI arguments and status from here, so
  * none can mix the two. Both stacks must answer on a loopback address, and each must
@@ -22,6 +27,12 @@
  * anything that asks for the stack's status through stackStatus() (every check, fixture
  * and mutation script) refuses the development stack unless MGD_ALLOW_DEV_STACK=1. The
  * development stack can still be started, stopped and used by the app.
+ *
+ * Protection for the pilot stack (M15): it is never a test target. guardDevStack(), and so
+ * stackStatus(), refuse it unless the caller is an editorial tool and says so ({ editorial: true }),
+ * so no check, fixture, suite, benchmark or mutation script can write to it, whatever MGD_STACK
+ * says. Resetting or destroying it also needs ~/.my-game-dex/protect-pilot-stack to be absent
+ * and MGD_ALLOW_PILOT_RESET=1 (scripts/test-stack.mjs).
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -38,6 +49,7 @@ export const TEST_PROJECT_ID = "my-game-dex-test";
 export const TEST_PORT_OFFSET = 1000;
 export const SCRATCH_PROJECT_ID = "my-game-dex-scratch";
 export const B1_PROJECT_ID = "my-game-dex-b1";
+export const PILOT_PROJECT_ID = "my-game-dex-pilot";
 
 /** Every local stack: its project id, its directory (the CLI's --workdir) and its port offset. */
 export const STACKS = {
@@ -45,9 +57,41 @@ export const STACKS = {
   test: { project: TEST_PROJECT_ID, dir: ".supabase-test", offset: TEST_PORT_OFFSET },
   scratch: { project: SCRATCH_PROJECT_ID, dir: ".supabase-scratch", offset: 2000 },
   b1: { project: B1_PROJECT_ID, dir: ".supabase-b1", offset: 3000 },
+  pilot: { project: PILOT_PROJECT_ID, dir: ".supabase-pilot", offset: 4000 },
 };
 export const DEV_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-dev-stack");
+export const PILOT_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-pilot-stack");
 
+/** The development API port; every stack's is this plus its offset. */
+export const BASE_API_PORT = 54321;
+
+/**
+ * The stacks the editorial tools (catalog-b1.mjs, catalog-b1-review.mjs) may write to, each with
+ * its own API port, preview address and local working folder. Nothing else is an editorial target:
+ * not development, not the test stack, not scratch.
+ *   b1     the historical B1 pilot, exactly as before M15 (its disposable editor A included)
+ *   pilot  the M15 SNES pilot: real people only, so no disposable editor, and its sources pinned
+ */
+export const EDITORIAL_STACKS = Object.freeze({
+  b1: Object.freeze({ apiPort: BASE_API_PORT + STACKS.b1.offset, preview: "http://127.0.0.4:3004", work: "m12c-b1", disposableEditor: true, label: "B1" }),
+  pilot: Object.freeze({ apiPort: BASE_API_PORT + STACKS.pilot.offset, preview: "http://127.0.0.5:3005", work: "m15-pilot", disposableEditor: false, label: "pilot" }),
+});
+
+/**
+ * The editorial stack a tool may write to: one of EDITORIAL_STACKS, named explicitly. Pure, so it
+ * can be tested without a stack: `name` and `project` are what the caller resolved.
+ */
+export function editorialTarget(name, project, label = "this tool") {
+  if (!name) throw new Error(`Refusing: ${label} needs an explicit stack: MGD_STACK=b1 or MGD_STACK=pilot.`);
+  if (!Object.hasOwn(EDITORIAL_STACKS, name)) {
+    throw new Error(`Refusing: ${label} writes only to an editorial stack (MGD_STACK=b1 or MGD_STACK=pilot), not "${name}".`);
+  }
+  if (project !== STACKS[name].project) throw new Error(`Refusing: the ${name} stack's config names project "${project}", not "${STACKS[name].project}".`);
+  return { name, ...EDITORIAL_STACKS[name] };
+}
+
+/** What MGD_STACK asked for, before the development default, for tools that need an explicit choice. */
+export const explicitStack = process.env.MGD_STACK ?? null;
 const requested = process.env.MGD_STACK ?? "dev";
 if (!Object.hasOwn(STACKS, requested)) {
   throw new Error(`MGD_STACK must be one of ${Object.keys(STACKS).map((k) => `"${k}"`).join(", ")}, not "${requested}".`);
@@ -65,7 +109,9 @@ if (!existsSync(stackConfigPath)) {
       ? `Missing ${stackConfigPath}.`
       : stackName === "test"
         ? "The test stack isn't prepared. Run npm run test-stack:start."
-        : `The ${stackName} stack isn't prepared. Run MGD_TEST_STACK=${stackName} node scripts/test-stack.mjs start.`,
+        : stackName === "pilot"
+          ? "The pilot stack doesn't exist yet. It is created only at checkpoint P1, with the product owner's approval (docs/architecture/catalog-pilot-m15.md)."
+          : `The ${stackName} stack isn't prepared. Run MGD_TEST_STACK=${stackName} node scripts/test-stack.mjs start.`,
   );
 }
 export const stackConfig = readFileSync(stackConfigPath, "utf8");
@@ -91,8 +137,17 @@ export function requireStack(name, label = "this tool") {
   }
 }
 
-/** Throws if destructive work would target the protected development stack. */
-export function guardDevStack(label = "this script") {
+/**
+ * Throws if work would target a protected stack: the development stack while it's protected, or
+ * the pilot stack, which only editorial tools may reach (`editorial: true`).
+ */
+export function guardDevStack(label = "this script", { editorial = false } = {}) {
+  if (stackName === "pilot" && !editorial) {
+    throw new Error(
+      `Refusing to run ${label} against the pilot stack: it keeps real editorial decisions and is never a test target. ` +
+        "Only the editorial tools (catalog-b1.mjs, catalog-b1-review.mjs, the pilot preview and backups) may use it.",
+    );
+  }
   if (stackName === "dev" && existsSync(DEV_PROTECTION_MARKER) && process.env.MGD_ALLOW_DEV_STACK !== "1") {
     throw new Error(
       `Refusing to run ${label} against the protected development stack (${DEV_PROTECTION_MARKER} exists). ` +
@@ -117,8 +172,8 @@ export function assertStackStatus(status) {
  * The running stack's status (URLs and local development keys), checked to be this
  * stack, after the development-stack guard. Keys are never printed by callers.
  */
-export function stackStatus({ label } = {}) {
-  guardDevStack(label);
+export function stackStatus({ label, editorial = false } = {}) {
+  guardDevStack(label, { editorial });
   let status;
   try {
     status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json", ...workdirArgs], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
