@@ -59,6 +59,28 @@ export function snapshotPlan(checkpoint, date = new Date(), volumeExists = () =>
   return { volume: name };
 }
 
+/** Every file a dump's manifest must list, by suffix. */
+export const DUMP_FILES = Object.freeze(["created.txt", "dump", "roles.sql", "toc.txt", "fingerprint.txt", "security.txt", "schemas.txt", "migrations.txt"]);
+
+/**
+ * A manifest's [hash, name] pairs, refused unless it lists exactly this backup's files: plain
+ * names beside it (no folder, no ..), each once, and every one of DUMP_FILES. Pure, for tests.
+ */
+export function manifestEntries(text, manifestName) {
+  if (!/^pilot-[a-z]+-\d{8}T\d{6}Z\.sha256$/.test(manifestName)) throw new Error("That isn't a pilot backup manifest.");
+  const base = manifestName.slice(0, -".sha256".length);
+  const entries = text.split(/\r?\n/).filter(Boolean).map((line) => {
+    const m = /^([0-9a-f]{64}) \*([A-Za-z0-9._-]+)$/.exec(line);
+    if (!m || !m[2].startsWith(`${base}.`)) throw new Error(`Malformed manifest line: ${line.slice(0, 80)}`);
+    return [m[1], m[2]];
+  });
+  const names = entries.map(([, name]) => name);
+  if (new Set(names).size !== names.length) throw new Error("The manifest lists a file twice.");
+  const missing = DUMP_FILES.filter((suffix) => !names.includes(`${base}.${suffix}`));
+  if (missing.length) throw new Error(`The manifest is incomplete: no ${missing.join(", ")}.`);
+  return entries;
+}
+
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
 
 function args(argv) {
@@ -79,8 +101,12 @@ async function pilot() {
   return stack;
 }
 
-const docker = (argv, input) => execFileSync("docker", argv, { input, encoding: input === undefined ? undefined : "utf8", maxBuffer: 1024 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, MSYS_NO_PATHCONV: "1" } });
-const psqlFile = (container, file) => docker(["exec", "-i", container, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q"], readFileSync(file, "utf8")).toString();
+/**
+ * Runs docker; always returns a Buffer. `input` is passed as bytes (a Buffer is sent unchanged:
+ * a dump is binary, and re-encoding it as text would corrupt it).
+ */
+const docker = (argv, input) => execFileSync("docker", argv, { input, maxBuffer: 1024 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, MSYS_NO_PATHCONV: "1" } });
+const psqlFile = (container, file) => docker(["exec", "-i", container, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1"], readFileSync(file)).toString();
 const sqlDir = join(import.meta.dirname, "sql", "integrity");
 
 function inventories(container) {
@@ -88,7 +114,7 @@ function inventories(container) {
     fingerprint: psqlFile(container, join(sqlDir, "fingerprint.sql")),
     security: psqlFile(container, join(sqlDir, "security.sql")),
     schemas: psqlFile(container, join(sqlDir, "schemas.sql")),
-    migrations: docker(["exec", container, "psql", "-U", "postgres", "-X", "-At", "-c",
+    migrations: docker(["exec", container, "psql", "-U", "postgres", "-X", "-At", "-v", "ON_ERROR_STOP=1", "-c",
       "select version||' '||name||' '||md5(array_to_string(statements, E'\\n')) from supabase_migrations.schema_migrations order by version"]).toString(),
   };
 }
@@ -108,7 +134,7 @@ async function cmdDump(o) {
   write("created.txt", `${new Date().toISOString()}\n`);
   write("dump", docker(["exec", container, "pg_dump", "-U", "supabase_admin", "-d", "postgres", "-Fc"]));
   write("roles.sql", docker(["exec", container, "pg_dumpall", "-U", "supabase_admin", "--roles-only", "--no-role-passwords"]));
-  write("toc.txt", docker(["exec", "-i", container, "pg_restore", "-l"], readFileSync(`${plan.base}.dump`, "latin1")).toString());
+  write("toc.txt", docker(["exec", "-i", container, "pg_restore", "-l"], readFileSync(`${plan.base}.dump`)).toString());
   for (const [name, content] of Object.entries(inventories(container))) write(`${name}.txt`, content);
   write("sha256", `${Object.entries(files).map(([name, hash]) => `${hash} *${name}`).join("\n")}\n`);
   console.log(`Pilot backup ${basename(plan.base)}: ${Object.keys(files).length} files in ${BACKUP_DIR}, dump sha256 ${files[basename(plan.dump)]}`);
@@ -125,8 +151,9 @@ async function cmdSnapshot(o) {
   const plan = snapshotPlan(o.checkpoint, new Date(), (name) => volumes.includes(name));
   const before = inventories(stack.dbContainer);
   const cli = (command) => execFileSync(process.execPath, [stack.cli, command, ...stack.workdirArgs], { cwd: stack.root, stdio: ["ignore", "ignore", "inherit"] });
-  cli("stop");
+  let failure = null;
   try {
+    cli("stop");
     const control = docker(["run", "--rm", "-v", `${PILOT_VOLUME}:/d:ro`, "--entrypoint", "pg_controldata", POSTGRES_IMAGE, "/d"]).toString();
     if (!/Database cluster state:\s+shut down\b/.test(control)) throw new Error("PostgreSQL didn't shut down cleanly. Nothing was copied.");
     if (docker(["run", "--rm", "-v", `${PILOT_VOLUME}:/d:ro`, "alpine", "sh", "-c", "test -e /d/postmaster.pid && echo present || echo absent"]).toString().trim() !== "absent") {
@@ -140,9 +167,16 @@ async function cmdSnapshot(o) {
     mkdirSync(BACKUP_DIR, { recursive: true });
     writeFileSync(join(BACKUP_DIR, `${plan.volume}.txt`), `Volume ${plan.volume}, copied from ${PILOT_VOLUME} at ${new Date().toISOString()} with the pilot stopped.\n${control.split("\n").filter((l) => /cluster state|system identifier|REDO location/.test(l)).join("\n")}\n${copy}`, { flag: "wx", mode: 0o600 });
     console.log(`Snapshot ${plan.volume}: identical to the source (contents, owner, mode, time).`);
-  } finally {
-    cli("start");
+  } catch (error) {
+    failure = error;
   }
+  // Always restart, and report both errors when the restart fails too: neither hides the other.
+  try {
+    cli("start");
+  } catch (error) {
+    throw new Error(`${failure ? `${failure.message} Then the restart failed too` : "The restart failed"}: ${error.message}. Start it yourself: MGD_TEST_STACK=pilot node scripts/test-stack.mjs start.`);
+  }
+  if (failure) throw failure;
   const after = inventories(stack.dbContainer);
   if (after.fingerprint !== before.fingerprint || after.migrations !== before.migrations) throw new Error("After the restart the pilot's data or migrations differ. Stop, and investigate.");
   console.log("The pilot is running again, with the same migrations and data.");
@@ -151,9 +185,9 @@ async function cmdSnapshot(o) {
 function cmdVerify(o) {
   if (!o.manifest || o.manifest === true) throw new Error("--manifest <file.sha256> is required.");
   const dirName = join(o.manifest, "..");
+  const entries = manifestEntries(readFileSync(o.manifest, "utf8"), basename(o.manifest));
   let bad = 0;
-  for (const line of readFileSync(o.manifest, "utf8").split(/\r?\n/).filter(Boolean)) {
-    const [hash, name] = line.split(" *");
+  for (const [hash, name] of entries) {
     if (sha256(readFileSync(join(dirName, name))) !== hash) {
       bad += 1;
       console.log(`DIFFERS ${name}`);

@@ -33,17 +33,19 @@
  * MGD_TEST_STACK=pilot selects the persistent SNES pilot stack (M15): project "my-game-dex-pilot"
  * in .supabase-pilot/, every port moved up by 4000, sign-up always off (accounts are created for
  * real editors by the operator tools only), and Auth's links pointing at the pilot preview
- * (http://127.0.0.5:3005). It is created only at checkpoint P1: start refuses to create it unless
- * MGD_CREATE_PILOT=1. run refuses it: it is never a test target. reset and destroy refuse while
- * ~/.my-game-dex/protect-pilot-stack exists (written by protect-pilot right after P1), and
- * otherwise unless MGD_ALLOW_PILOT_RESET=1.
+ * (http://127.0.0.5:3005), and no seed. It is created only at checkpoint P1: start refuses to
+ * create it unless MGD_CREATE_PILOT=1, and refuses a config whose database volume is gone. A
+ * restart never regenerates it: it is refused if this checkout's config or migrations differ from
+ * the pilot's. run refuses it: it is never a test target. reset and destroy refuse while
+ * ~/.my-game-dex/protect-pilot-stack exists (written when the pilot is created, and by
+ * protect-pilot), and otherwise unless MGD_ALLOW_PILOT_RESET=1.
  *
  * MGD_TEST_SIGNUP=off at start or reset makes the test stack invite-only, as a hosted
  * project will be: [auth] enable_signup = false, with the email provider left on (turning
  * that off also blocks password sign-in and recovery; M11a-0).
  */
-import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -82,10 +84,55 @@ export function guardPersistent(command, variant = VARIANTS[STACK], name = STACK
   }
 }
 
-/** The pilot is created once, at checkpoint P1, by an explicit request; never as a side effect. */
-export function guardCreate(name = STACK, env = process.env, prepared = existsSync(join(dir, "supabase", "config.toml"))) {
-  if (name === "pilot" && !prepared && env.MGD_CREATE_PILOT !== "1") {
-    throw new Error("Refusing to create the pilot stack: it is created only at checkpoint P1, with the product owner's approval. Set MGD_CREATE_PILOT=1 then.");
+/**
+ * The pilot is created once, at checkpoint P1, by an explicit request; never as a side effect.
+ * What exists is its database volume, not its generated config: a config whose volume was deleted
+ * (destroy, a Docker prune, a lost disk) is not a pilot to restart, and recreating it is a
+ * separately authorized recovery. Returns "create", "restart" or, for other stacks, "prepare".
+ */
+export function guardCreate(name = STACK, env = process.env, { configExists, volumeExists } = {}) {
+  if (name !== "pilot") return "prepare";
+  const create = env.MGD_CREATE_PILOT === "1";
+  if (volumeExists && create) throw new Error("Refusing: the pilot stack already exists. Unset MGD_CREATE_PILOT to restart it.");
+  if (volumeExists && !configExists) {
+    throw new Error("Refusing: the pilot's database volume exists but its config doesn't. Restoring the config is part of a separately authorized recovery (docs/architecture/catalog-pilot-m15.md).");
+  }
+  if (volumeExists) return "restart";
+  if (configExists && !create) {
+    throw new Error("Refusing: the pilot's config exists but its database volume doesn't (it was deleted). Recreating it is a separately authorized recovery (docs/architecture/catalog-pilot-m15.md).");
+  }
+  if (!create) throw new Error("Refusing to create the pilot stack: it is created only at checkpoint P1, with the product owner's approval. Set MGD_CREATE_PILOT=1 then.");
+  return "create";
+}
+
+/**
+ * A restart of the pilot never changes it: the config this checkout would generate and its
+ * migrations must equal the pilot's own, or the restart is refused (migrating or reconfiguring the
+ * pilot is a separate, authorized activation). Maps are file name → contents. Pure, for tests.
+ */
+export function driftProblems({ existingConfig, generatedConfig, existingMigrations, repoMigrations }) {
+  const problems = [];
+  const body = (text) => text.replace(/\r\n/g, "\n").split("\n").filter((line) => !line.startsWith("# GENERATED") && !line.startsWith("# Sign-up:")).join("\n");
+  if (body(existingConfig) !== body(generatedConfig)) problems.push("this checkout's supabase/config.toml would change the pilot's config");
+  const names = new Set([...Object.keys(existingMigrations), ...Object.keys(repoMigrations)]);
+  for (const name of [...names].sort()) {
+    if (!Object.hasOwn(repoMigrations, name)) problems.push(`the pilot has ${name}, which this checkout doesn't`);
+    else if (!Object.hasOwn(existingMigrations, name)) problems.push(`this checkout has ${name}, which the pilot doesn't`);
+    else if (existingMigrations[name] !== repoMigrations[name]) problems.push(`${name} differs`);
+  }
+  return problems;
+}
+
+const readMigrations = (folder) => Object.fromEntries(
+  (existsSync(folder) ? readdirSync(folder) : []).filter((n) => n.endsWith(".sql")).sort().map((n) => [n, readFileSync(join(folder, n), "utf8")]),
+);
+
+function volumeExists(name) {
+  try {
+    execFileSync("docker", ["volume", "inspect", name], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -125,11 +172,16 @@ export function testConfig(source, { signup = true, project = TEST_PROJECT_ID, o
   return `${config}\n`;
 }
 
-function prepare() {
+function generatedConfig() {
   const variant = VARIANTS[STACK];
   const signup = variant.signup ?? process.env.MGD_TEST_SIGNUP !== "off";
   const config = testConfig(readFileSync(join(root, "supabase", "config.toml"), "utf8"), { signup, site: variant.site ?? null, seed: variant.seed ?? true });
   if (!config.includes(`project_id = "${TEST_PROJECT_ID}"`)) throw new Error("The generated config doesn't name the test project.");
+  return { signup, config };
+}
+
+function prepare() {
+  const { signup, config } = generatedConfig();
   mkdirSync(target, { recursive: true });
   writeFileSync(
     join(target, "config.toml"),
@@ -139,6 +191,12 @@ function prepare() {
     rmSync(join(target, name), { recursive: true, force: true });
     cpSync(join(root, "supabase", name), join(target, name), { recursive: true });
   }
+}
+
+function protectPilot() {
+  mkdirSync(join(VARIANTS.pilot.marker, ".."), { recursive: true });
+  writeFileSync(VARIANTS.pilot.marker, "Reset and destroy refuse the pilot stack while this file exists. Removing it is part of a separately authorized recovery.\n");
+  console.log("The pilot stack is protected: reset and destroy now refuse it.");
 }
 
 function assertTestProject() {
@@ -170,10 +228,27 @@ function runNpm(script, extra) {
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
-    case "start":
-      guardCreate();
+    case "start": {
+      const configExists = existsSync(join(target, "config.toml"));
+      const mode = guardCreate(STACK, process.env, { configExists, volumeExists: STACK === "pilot" && volumeExists(`supabase_db_${TEST_PROJECT_ID}`) });
+      if (mode === "restart") {
+        const problems = driftProblems({
+          existingConfig: readFileSync(join(target, "config.toml"), "utf8"),
+          generatedConfig: generatedConfig().config,
+          existingMigrations: readMigrations(join(target, "migrations")),
+          repoMigrations: readMigrations(join(root, "supabase", "migrations")),
+        });
+        if (problems.length) {
+          throw new Error(`Refusing to restart the pilot from this checkout: ${problems.join("; ")}. Restart it from the checkout it was created from; migrating or reconfiguring it is a separate, authorized activation.`);
+        }
+        return supabase(["start"]);
+      }
       prepare();
-      return supabase(["start"]);
+      const code = await supabase(["start"]);
+      // The pilot is protected from the moment it exists: reset and destroy refuse it at once.
+      if (mode === "create" && code === 0) protectPilot();
+      return code;
+    }
     case "stop":
       if (!existsSync(target)) return 0;
       return supabase(["stop"]);
@@ -200,9 +275,7 @@ async function main() {
     }
     case "protect-pilot": {
       if (STACK !== "pilot") throw new Error("protect-pilot needs MGD_TEST_STACK=pilot.");
-      mkdirSync(join(VARIANTS.pilot.marker, ".."), { recursive: true });
-      writeFileSync(VARIANTS.pilot.marker, "Reset and destroy refuse the pilot stack while this file exists. Removing it is part of a separately authorized recovery.\n");
-      console.log("The pilot stack is protected: reset and destroy now refuse it.");
+      protectPilot();
       return 0;
     }
     default:

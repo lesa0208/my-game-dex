@@ -176,6 +176,11 @@ async function main() {
   if (process.env.MGD_EXPECT_STACK) requireStack(process.env.MGD_EXPECT_STACK, `db:${command}`);
   requireDocker();
   // M15: the pilot stack is never reset or tested; only its read-only migration check may run on it.
+  // It is started only by test-stack.mjs, which refuses to recreate it or change it on a restart.
+  if (stackName === "pilot" && command === "start") {
+    console.error("Refusing: start the pilot with MGD_TEST_STACK=pilot node scripts/test-stack.mjs start (it checks the pilot exists and is unchanged).");
+    process.exit(1);
+  }
   if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`, { editorial: command === "migrations" });
   console.log(`Stack: ${stackName}`);
   process.exit(await runSteps(plans[command]));

@@ -308,15 +308,25 @@ async function cmdCreateBatch(o) {
   console.log(`Batch ${id} created by ${TARGET.disposableEditor ? "editor A" : "you"}.`);
   console.log(JSON.stringify(batchSummary(id), null, 2));
 
-  console.log("\nNo self-review, and no admin data for the batch's creator (each attempt is refused and changes nothing):");
   const who = TARGET.disposableEditor ? "editor A" : "the batch's creator";
   const flagged = readJson(`select json_build_object('g', game_id) from private.catalog_review_batch_items where batch_id = ${lit(id)} and cardinality(flags) > 0 order by game_id limit 1;`);
-  const checks = [
-    ["record_batch_outcome by the batch's creator", await rpc(session, "record_batch_outcome", { p_batch: id, p_game: flagged.g, p_outcome: "correct", p_critical_error: null, p_note: `${who} trying to review their own batch` })],
-    ["approve_review_batch by the batch's creator", await rpc(session, "approve_review_batch", { p_batch: id, p_reason: `${who} trying to approve their own batch` })],
+  const checks = [];
+  if (TARGET.disposableEditor) {
+    // B1 only: attempted writes by the disposable editor A. On the pilot these would be a real
+    // person's session writing without their decision if a safeguard regressed, so only the read
+    // checks run there (the write refusals are proven on B1, scratch and in pgTAP).
+    console.log("\nNo self-review, and no admin data for the batch's creator (each attempt is refused and changes nothing):");
+    checks.push(
+      ["record_batch_outcome by the batch's creator", await rpc(session, "record_batch_outcome", { p_batch: id, p_game: flagged.g, p_outcome: "correct", p_critical_error: null, p_note: `${who} trying to review their own batch` })],
+      ["approve_review_batch by the batch's creator", await rpc(session, "approve_review_batch", { p_batch: id, p_reason: `${who} trying to approve their own batch` })],
+    );
+  } else {
+    console.log("\nNo admin data for the batch's creator (each read is refused):");
+  }
+  checks.push(
     [`get_import_runs (admin only) as ${who}`, await rpc(session, "get_import_runs", {})],
     [`get_import_run (admin only) as ${who}`, await rpc(session, "get_import_run", { p_run: run.id })],
-  ];
+  );
   for (const [label, r] of checks) console.log(`  ${label}: ${r.ok ? "ALLOWED (unexpected)" : `refused (${r.error})`}`);
   const history = await rpc(session, "get_catalog_record_history", { p_entity: "game", p_id: flagged.g });
   const leaks = JSON.stringify(history.data ?? "").match(/[A-Za-z]:\\\\|\\\\Users\\\\|\/Users\//g);

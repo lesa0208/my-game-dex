@@ -41,9 +41,14 @@ project ids are checked to collide with no other stack (`scripts/pilot-stack.tes
   `migrations` check: `db:reset`, `db:test`, `db:pgtap`, `db:verify` and the suites refuse it.
   `test-stack.mjs run` refuses it. The mutation runners already accept only scratch.
 - **Created only on request.** `test-stack.mjs start` refuses to create the pilot unless
-  `MGD_CREATE_PILOT=1`. Once created it restarts normally.
-- **The marker.** `MGD_TEST_STACK=pilot node scripts/test-stack.mjs protect-pilot` writes
-  `~/.my-game-dex/protect-pilot-stack`. While it exists, `reset` and `destroy` (which deletes the
+  `MGD_CREATE_PILOT=1`. What counts as existing is its database volume: a config whose volume
+  was deleted (by `destroy`, a Docker prune or a lost disk) is refused, not rebuilt, and so is a
+  volume without its config. `db.mjs start` refuses the pilot.
+- **A restart changes nothing.** A restart doesn't regenerate the pilot's config or copy
+  migrations: it is refused if this checkout's `supabase/config.toml` or migrations differ from
+  the pilot's. Restart it from the checkout it was created from.
+- **The marker.** Creating the pilot writes `~/.my-game-dex/protect-pilot-stack` as soon as it
+  starts (`MGD_TEST_STACK=pilot node scripts/test-stack.mjs protect-pilot` writes it again). While it exists, `reset` and `destroy` (which deletes the
   volumes) refuse, whatever the environment says. Without it they still need
   `MGD_ALLOW_PILOT_RESET=1`; B1's `MGD_ALLOW_B1_RESET` doesn't count.
 - **Nothing rewrites it.** No tool here runs `db reset`, `migration repair`, `migration up`, a seed,
@@ -59,7 +64,9 @@ project ids are checked to collide with no other stack (`scripts/pilot-stack.tes
 - **No automatic people.** On the pilot `editor-a` refuses, and addresses ending in
   `@example.test` are refused. Every decision command needs an interactive terminal, the editor's
   own password and authenticator code, a typed reason and a typed confirmation. Nothing stores or
-  types an editor's credentials.
+  types an editor's credentials. On the pilot, `create-batch` doesn't run B1's refused-write
+  probes (a self-review and a self-approval attempt) with the real creator's session: only its
+  read checks. Staging accepts `--platform snes` only.
 
 ## The source files (verified read-only, 2026-11-23)
 
@@ -72,7 +79,9 @@ project ids are checked to collide with no other stack (`scripts/pilot-stack.tes
 | formats | `~/.my-game-dex/catalog-snapshots/2026-11-20/wikidata-formats-2026-11-20T18-32-38-232Z.json` | `93797a67…bff1c7` |
 | **refused** | `wikidata-entities-snes-2026-11-20T14-11-04-475Z.json` (the superseded first fetch) | `4e87b22e…6d8cd` |
 
-The full hashes are in `scripts/lib/pilot-sources.mjs`. The 34 editorial notes are a person's
+The full hashes are in `scripts/lib/pilot-sources.mjs`. `stage` checks the entities, selection,
+notes and terms; the formats snapshot isn't one of its inputs and is pinned for the record (it is
+what the distribution-format table was built from). The 34 editorial notes are a person's
 recommendations, not decisions: staging uses them only to hold 13 records out of the batch. Every
 outcome is still recorded by a reviewer. An older saved licensing page
 (`sources/2026-11-09/terms/`) has a different hash and is refused.
@@ -99,8 +108,9 @@ MGD_STACK=pilot node scripts/catalog-b1-review.mjs grant-editor --email <their a
 ```
 
 Grant both editors before the batch exists: `grant-editor` refuses an account that created a
-batch or catalog records. The address stays on this computer: the pilot sends no mail, and
-accounts are created already confirmed. No agent registers, signs in as or acts for an editor.
+batch or catalog records. The address stays on this computer: accounts are created already
+confirmed, and the only mail the pilot can send (a password reset) goes to its own local Mailpit
+on port 58324. No agent registers, signs in as or acts for an editor.
 
 **The Owner.** No catalog function checks the Owner record (`private.platform_owner`, M8): review,
 approval and publication need `catalog_editor`, a recent second factor and the rights record.
@@ -133,7 +143,11 @@ npm run pilot:backup -- snapshot --checkpoint <name>   # stops the pilot only, c
 npm run pilot:backup -- verify --manifest <file.sha256>
 ```
 
-Dumps go to `~/.my-game-dex/backups/pilot/` with owner-only permissions. The inventories are the
+Dumps go to `~/.my-game-dex/backups/pilot/`, created with mode 600 (owner-only on macOS and
+Linux; on Windows the folder inherits the user profile's permissions). `verify` refuses a
+manifest that is incomplete, lists a file twice or names a file outside its backup. Stop the
+preview before a snapshot: the tool compares the data before the stop and after the restart, and
+a sign-in in between shows as a difference. The inventories are the
 integrity queries used for every development activation (`scripts/sql/integrity/`).
 
 ## Recovery (separately authorized)
@@ -158,11 +172,11 @@ only with the product owner's explicit authorization for that restore, naming th
 From a clean checkout of `main` (not the development checkout, whose server on port 3000 keeps
 running):
 
-1. `MGD_CREATE_PILOT=1 MGD_TEST_STACK=pilot node scripts/test-stack.mjs start`
+1. `MGD_CREATE_PILOT=1 MGD_TEST_STACK=pilot node scripts/test-stack.mjs start` (it writes the
+   marker once the stack is up).
 2. `MGD_STACK=pilot node scripts/db.mjs migrations`: every migration applied, none pending.
-3. `MGD_TEST_STACK=pilot node scripts/test-stack.mjs protect-pilot`
-4. `npm run pilot:backup -- dump --checkpoint empty`, then `snapshot --checkpoint empty`.
-5. `npm run build`, then `npm run pilot:preview` (it refuses unless the API is the pilot's).
+3. `npm run pilot:backup -- dump --checkpoint empty`, then `snapshot --checkpoint empty`.
+4. `npm run build`, then `npm run pilot:preview` (it refuses unless the API is the pilot's).
 
 Then, each with its own authorization: the rights decision for the pilot, clearance
 (`clear-wikidata --terms-file … --decision …`), staging (`stage` with the pinned files and a reason),
@@ -170,6 +184,19 @@ Then, each with its own authorization: the rights decision for the pilot, cleara
 (`create-batch --email <editor A>`, typed by A) and a `batch` checkpoint; B's review in
 Admin → Catalog and a `reviewed` checkpoint; B's approval and an `approved` checkpoint; A's
 publications and a `published` checkpoint.
+
+**Known limits of this tooling (to settle before P1):**
+
+- **Signing keys.** Every local stack uses the Supabase CLI's default JWT secret and default API
+  keys, so development's secret key would be accepted by the pilot's API if someone pointed it at
+  port 58321. The tools never do (each reads the URL and keys of the stack it checked together),
+  but isolation is by address, not by credential. Giving the pilot its own signing keys needs a
+  rehearsal on scratch first; until then, the operator keeps `.env.local` pointed at development.
+- **Not yet rehearsed:** a real `dump` and `snapshot` (that `pg_dump` runs as `supabase_admin` in
+  the container, and `pg_controldata` as the image's entry point). Rehearse both on a disposable
+  copy before the `empty` checkpoint.
+- `scripts/catalog-import-role.mjs` (the importer login switch `stage` uses) has no stack guard of
+  its own; it predates M15 and is reached on the pilot only through `stage`.
 
 **Still open before P1:** the product owner's P0 decisions (where the pilot runs, the rights
 decision for it, who editors A and B are, the pilot size), and a second real person with local

@@ -430,6 +430,8 @@ async function cmdStage(o) {
   const { port, target } = await b1Stack("staging");
   // The pilot stages only its verified, pinned files; B1 keeps its own workflow.
   await requirePilotSources(target, { entities: o.entities, selection: o.selection, notes: o.notes, terms: o["terms-file"] });
+  // The pilot is the SNES pilot: its pinned sources are SNES, so no other platform.
+  if (target.name === "pilot" && (o.platform ?? "snes") !== "snes") fail("Refusing: the pilot stages SNES only (--platform snes). Nothing was changed.");
   const fetchedAt = JSON.parse(readFileSync(o.entities, "utf8")).fetched_at;
   if (!fetchedAt || Number.isNaN(Date.parse(fetchedAt))) fail("The entity snapshot has no fetched_at time.");
   const password = randomBytes(24).toString("base64url");
