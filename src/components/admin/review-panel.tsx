@@ -15,6 +15,7 @@ const NOTICES: Record<string, string> = {
   saved: "Saved.",
   verified: "Verified.",
   published: "Published.",
+  identity_published: "Published as an identity. No physical release was created.",
   alias_added: "The other title is added.",
   alias_removed: "The other title is removed.",
   relation_saved: "The relation is saved.",

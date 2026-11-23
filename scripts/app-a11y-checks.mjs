@@ -61,6 +61,8 @@ const EVIDENCE_GAMES = [`Zqx A11y Evidence Confirmed ${process.pid}`, `Zqx A11y 
 const hasEvidenceRead = () => psql("select count(*) from pg_proc where proname = 'get_game_pairing_evidence';") === "1";
 /** M14c-2: the review-batch reads (20261212100000_m14c2_review_batch_reads). Their pages are audited with data in app:review-batch-checks. */
 const hasBatchReads = () => psql("select count(*) from pg_proc where proname = 'list_review_batches';") === "1";
+/** M14c-3: the publication queue (20261213100000_m14c3_publication_reads). Approval and publication are audited with data in app:publication-checks. */
+const hasPublicationQueue = () => psql("select count(*) from pg_proc where proname = 'list_publication_queue';") === "1";
 
 // ---------------------------------------------------------------------------
 // Redaction: secrets seen during the run, and anything shaped like one
@@ -436,6 +438,7 @@ try {
   ok("setup: an import run with a queued reclassification", /^[0-9a-f-]{36}$/.test(importRun) && /^[0-9a-f-]{36}$/.test(importRecord));
   CATALOG_PAGES.push(["reclassification queue", "/admin/catalog/reclassifications"]);
   if (hasBatchReads()) CATALOG_PAGES.push(["review batches", "/admin/catalog/batches"], ["review batches, filtered", "/admin/catalog/batches?status=all&platform=snes"]);
+  if (hasPublicationQueue()) CATALOG_PAGES.push(["publication queue", "/admin/catalog/publication"], ["publication queue, all", "/admin/catalog/publication?state=all"]);
   const REFERENCE_PAGES = [
     ["reference summary", "/admin/reference"],
     ["platforms", "/admin/reference/platforms"],

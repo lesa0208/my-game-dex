@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
+import { IdentityPublication } from "@/components/admin/identity-publication";
 import { PairingEvidenceList } from "@/components/admin/pairing-evidence";
 import { Facts, HistoryList, RecordSection, StatusBadge } from "@/components/admin/records";
 import { editable, EditNotice, ReviewPanel } from "@/components/admin/review-panel";
@@ -14,6 +15,7 @@ import { aliasKindLabel, formatCatalogDate, gameKindLabel, languageName } from "
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { recordFieldLabel, recordStatusLabel, searchHref } from "@/features/records/form";
+import { publishMessage } from "@/features/publication/form";
 import { getGamePairingEvidence, getGameRecord, getRecordHistory } from "@/features/records/queries";
 import { requestStatusLabel } from "@/features/review/form";
 import { formatWhen } from "@/features/submissions/display";
@@ -158,6 +160,10 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
             <p className="text-sm text-muted-foreground">It isn&apos;t paired with a platform yet.</p>
           )}
         </RecordSection>
+
+        {evidence.ok && evidence.data && evidence.data.pairings.length ? (
+          <IdentityPublication evidence={evidence.data} recentMfa={access.recentMfa} path={path} error={publishMessage(param(search.error))} />
+        ) : null}
 
         <RecordSection id="game-releases" title={`Releases (${g.release_count.toLocaleString("en")})`}>
           {g.releases.length ? (

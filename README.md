@@ -134,7 +134,7 @@ The database job sets `MGD_EXPECT_STACK=scratch`, so `db.mjs` refuses any other 
 - a pgTAP file that aborts (for example a syntax error) or fails an assertion;
 - a file that didn't run, or a skipped or todo assertion;
 - a file in `supabase/tests/database/` not named `NN_name.test.sql`;
-- fewer files or assertions than `PGTAP_BASELINE` in `scripts/lib/pgtap-report.mjs` (55 files and 4,326 assertions). Raise it when you add tests; lowering it is a reviewed decision.
+- fewer files or assertions than `PGTAP_BASELINE` in `scripts/lib/pgtap-report.mjs` (56 files and 4,432 assertions). Raise it when you add tests; lowering it is a reviewed decision.
 - a failing suite.
 
 **To reproduce a failure locally**, run the same commands:
