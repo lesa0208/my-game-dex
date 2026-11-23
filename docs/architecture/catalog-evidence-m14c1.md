@@ -103,9 +103,10 @@ no email address, account id or other person appears. The public game page is un
   states, and that a collector, a visitor, the public page and direct API calls see none of it;
   `app:a11y-checks` audits both review states with axe at phone and desktop widths.
 
-## Left for M14c-2
+## Left for M14c-2 and M14c-3
 
-Staff pages for review batches and pairings (B1 step 5), a `publish` step in
-`scripts/catalog-b1-review.mjs` for the second editor, and choosing the two human editors and
-the database to publish on. No ScreenScraper integration and no artwork: artwork rights are kept
+Staff pages for review batches and recording outcomes: done in M14c-2
+([catalog-review-ui-m14c2.md](catalog-review-ui-m14c2.md)). Left for M14c-3: approving and rejecting
+batches and publishing in the UI, a `publish` step in `scripts/catalog-b1-review.mjs` for the second
+editor, and choosing the two human editors and the database to publish on. No ScreenScraper integration and no artwork: artwork rights are kept
 apart from evidence of physical existence.

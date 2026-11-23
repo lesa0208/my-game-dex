@@ -1530,6 +1530,15 @@ Catalog editors and administrators can search every game and release, open a rea
 - **One named person, by handle.** An exception to "No people" above, made for this read: the pairing's verifier is shown by handle ("A former staff member" once the account is gone), as staff history already names actors. No email address, account id or other person.
 - **Evidence is required where it is written.** `verify_game_platform` and batch approval store a basis only with an evidence note (20 to 500 characters, 10 of them letters or digits), and the check `game_platforms_physical_evidence_note` refuses any other.
 
+### Review batches for staff (M14c-2)
+
+`list_review_batches`, `get_review_batch_overview`, `list_review_batch_members` and `get_review_batch_member` (migration `20261212100000`) give the admin review pages bounded, paginated reads of the review batches, their members and their source records ([catalog-review-ui-m14c2.md](catalog-review-ui-m14c2.md)). Read-only: outcomes are still recorded only through `record_batch_outcome`, with the editor's own session.
+
+- **Who.** `require_active_staff('catalog_editor')`, as above. `EXECUTE` for `authenticated` only; none for `anon`, `service_role` or `PUBLIC`. Their private helpers are owner only. The batch tables keep RLS with no policies and no client grants.
+- **Bounded.** 1 to 100 rows a page; cursors that aren't a row are refused. Per member, at most 20 conflicts of a kind, 20 batches and 10 outcomes.
+- **People by handle.** The batch's creator, reviewers and approvers, by handle or "you", as staff history names actors (the M14c-1 exception). No email address or account id.
+- **Source records allow-listed.** Only fields of a fixed shape and length from a payload; never the raw payload. Links to a source are built only from a Wikidata item id and a revision number. Provider text is rendered as text.
+
 ### What history shows (D4)
 
 History is a view of `private.audit_events` built from two allow-lists, so a new kind of event or a new metadata key never appears until it is added on purpose.

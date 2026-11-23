@@ -59,6 +59,8 @@ const SUBMISSION_CODE = `QZB-${process.pid}`;
 const EVIDENCE_GAMES = [`Zqx A11y Evidence Confirmed ${process.pid}`, `Zqx A11y Evidence Missing ${process.pid}`];
 /** Whether the stack has M14c-1's evidence read (stacks without the B1 migrations don't). */
 const hasEvidenceRead = () => psql("select count(*) from pg_proc where proname = 'get_game_pairing_evidence';") === "1";
+/** M14c-2: the review-batch reads (20261212100000_m14c2_review_batch_reads). Their pages are audited with data in app:review-batch-checks. */
+const hasBatchReads = () => psql("select count(*) from pg_proc where proname = 'list_review_batches';") === "1";
 
 // ---------------------------------------------------------------------------
 // Redaction: secrets seen during the run, and anything shaped like one
@@ -433,6 +435,7 @@ try {
     insert into private.catalog_reclassifications (release_id, provider_record_id, import_run_id, action, reason) values ('${releaseUs}', '${importRecord}', '${importRun}', 'queued', 'Browser checks: the source now tags it a prototype');`);
   ok("setup: an import run with a queued reclassification", /^[0-9a-f-]{36}$/.test(importRun) && /^[0-9a-f-]{36}$/.test(importRecord));
   CATALOG_PAGES.push(["reclassification queue", "/admin/catalog/reclassifications"]);
+  if (hasBatchReads()) CATALOG_PAGES.push(["review batches", "/admin/catalog/batches"], ["review batches, filtered", "/admin/catalog/batches?status=all&platform=snes"]);
   const REFERENCE_PAGES = [
     ["reference summary", "/admin/reference"],
     ["platforms", "/admin/reference/platforms"],
