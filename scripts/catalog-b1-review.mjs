@@ -43,7 +43,9 @@
  * - review: signs in as the reviewer (password and a code from their authenticator, both typed
  *   by them), then walks the members that need an individual outcome: every flagged member and
  *   every sampled one. Each outcome, critical error and note is typed by the reviewer and
- *   confirmed before it is sent (record_batch_outcome). Nothing has a default.
+ *   confirmed before it is sent (record_batch_outcome). Nothing has a default. A "correct"
+ *   outcome needs the reviewer's own evidence of physical existence, 20 to 500 characters
+ *   (M14c-1), which approval carries into the pairing's verification basis.
  * - approve / reject: the reviewer's decision on the whole batch, with their reason, confirmed
  *   by typing the batch's first 8 characters. Approval publishes identities only (games and
  *   their SNES pairings): never a release. Reviewed members are recorded as individually
@@ -78,6 +80,17 @@ const EDITORS = join(WORK, "editors.local.json");
 const NOTES = join(ROOT, "docs", "proposals", "m12c-b1", "editorial-review-snes-150.json");
 const CRITICAL_ERRORS = ["wrong_identity_or_type", "wrong_platform", "physical_eligibility_unsupported", "distinct_games_merged",
   "conflicting_duplicate_identities", "conflicting_identifiers", "missing_provenance"];
+
+/**
+ * private.evidence_note_ok's rule (M14c-1), checked here only to explain a refusal before it is
+ * sent; the database decides. With surrounding and repeated whitespace collapsed, at least 20
+ * characters, at least 10 of them letters or digits, and at most 500.
+ */
+function evidenceNoteOk(note) {
+  if (typeof note !== "string" || note.length > 500) return false;
+  const collapsed = note.replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
+  return collapsed.length >= 20 && note.replace(/[^\p{L}\p{N}]/gu, "").length >= 10;
+}
 
 const status = stackStatus({ label: "the B1 review" });
 const api = status.API_URL;
@@ -536,9 +549,16 @@ async function cmdReview(o) {
         }
       }
     }
-    const note = await ask(m.critical_flags.length && outcome === "correct"
-      ? "Evidence (at least 20 characters: why the critical signal doesn't apply, and your source): "
+    // M14c-1: a correct outcome always needs the reviewer's own evidence of the game's physical
+    // existence on the platform; the database refuses it otherwise, and carries it into the
+    // pairing's basis at approval. A Wikidata listing is not that evidence.
+    const note = await ask(outcome === "correct"
+      ? `Physical evidence (20 to 500 characters: what you checked that shows a physical copy exists, and where${m.critical_flags.length ? "; and why the critical signal doesn't apply" : ""}): `
       : "Note (your evidence or reason; may be empty): ");
+    if (outcome === "correct" && !evidenceNoteOk(note)) {
+      console.log("That isn't evidence yet: at least 20 characters (10 of them letters or digits), at most 500, saying what you checked. Nothing was recorded.");
+      continue;
+    }
     const confirm = await ask(`Record "${outcome}"${critical ? ` with ${critical}` : ""} for ${m.title} (${m.qid})? Type yes: `);
     if (confirm !== "yes") {
       console.log("Not recorded.");

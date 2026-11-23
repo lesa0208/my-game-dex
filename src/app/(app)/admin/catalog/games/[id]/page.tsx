@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AdminFrame, AdminShell, linkClass, param } from "@/components/admin/admin-frame";
+import { PairingEvidenceList } from "@/components/admin/pairing-evidence";
 import { Facts, HistoryList, RecordSection, StatusBadge } from "@/components/admin/records";
 import { editable, EditNotice, ReviewPanel } from "@/components/admin/review-panel";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -13,7 +14,7 @@ import { aliasKindLabel, formatCatalogDate, gameKindLabel, languageName } from "
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { recordFieldLabel, recordStatusLabel, searchHref } from "@/features/records/form";
-import { getGameRecord, getRecordHistory } from "@/features/records/queries";
+import { getGamePairingEvidence, getGameRecord, getRecordHistory } from "@/features/records/queries";
 import { requestStatusLabel } from "@/features/review/form";
 import { formatWhen } from "@/features/submissions/display";
 
@@ -33,7 +34,7 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
   // Catalog editors only (D8); staff signed in without their authenticator verify first.
   const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/games/${id}` : "/admin/catalog/search", "editor");
   const before = param(search.before);
-  const [outcome, history] = await Promise.all([getGameRecord(id), getRecordHistory("game", id, before)]);
+  const [outcome, history, evidence] = await Promise.all([getGameRecord(id), getRecordHistory("game", id, before), getGamePairingEvidence(id)]);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
     return (
@@ -138,15 +139,21 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
           )}
         </RecordSection>
 
-        <RecordSection id="game-platforms" title="Platforms">
-          {g.platforms.length ? (
-            <ul className="flex flex-col gap-1.5 text-sm">
-              {g.platforms.map((p) => (
-                <li key={p.slug} className="flex flex-wrap items-center gap-2">
-                  {p.name} <StatusBadge status={p.status} />
-                </li>
-              ))}
-            </ul>
+        <RecordSection id="game-platforms" title="Platforms and physical evidence">
+          {evidence.ok && evidence.data ? (
+            <PairingEvidenceList pairings={evidence.data.pairings} gameRevision={evidence.data.game.revision} />
+          ) : g.platforms.length ? (
+            // The evidence read failed: the platforms the record itself lists, and no claim either way.
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">The physical evidence can&apos;t be loaded right now.</p>
+              <ul className="flex flex-col gap-1.5 text-sm">
+                {g.platforms.map((p) => (
+                  <li key={p.slug} className="flex flex-wrap items-center gap-2">
+                    {p.name} <StatusBadge status={p.status} />
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">It isn&apos;t paired with a platform yet.</p>
           )}
