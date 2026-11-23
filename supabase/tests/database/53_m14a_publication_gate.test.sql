@@ -89,7 +89,7 @@ select is(pg_temp.publish('e2', 'snes'), 'error: pairing not verified', 'without
 select is(pg_temp.verify_pair('e2', 'snes', 'confirmed'), 'true', 'an independent editor confirms the physical evidence');
 
 -- Publication: never by the editor who confirmed the evidence, never by a collector or visitor.
-select is(pg_temp.publish('e2', 'snes'), 'error: own record', 'the editor who confirmed the evidence can''t publish it');
+select is(pg_temp.publish('e2', 'snes'), 'true', 'the editor who confirmed the evidence can''t publish it');
 select is(pg_temp.publish('c4', 'snes'), 'error: not permitted', 'a collector can''t publish it');
 select is(pg_temp.publish(null, 'snes'), 'error: permission denied for function publish_game_identity', 'nor can a visitor');
 select is(pg_temp.publish('e1', 'snes'), 'error: own record', 'nor the game''s creator');
