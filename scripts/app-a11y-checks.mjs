@@ -55,6 +55,10 @@ const NOT_AVAILABLE = "This page isn't available";
 const PREFIX = "a11y";
 /** The product code of the release a collector submits (M10a), to find and remove it. */
 const SUBMISSION_CODE = `QZB-${process.pid}`;
+/** M14c-1: the two games whose record pages show the evidence section, to find and remove them. */
+const EVIDENCE_GAMES = [`Zqx A11y Evidence Confirmed ${process.pid}`, `Zqx A11y Evidence Missing ${process.pid}`];
+/** Whether the stack has M14c-1's evidence read (stacks without the B1 migrations don't). */
+const hasEvidenceRead = () => psql("select count(*) from pg_proc where proname = 'get_game_pairing_evidence';") === "1";
 
 // ---------------------------------------------------------------------------
 // Redaction: secrets seen during the run, and anything shaped like one
@@ -386,6 +390,25 @@ try {
   const exclusionId = psql(`select id from private.catalog_exclusions where release_id = '${excluded}';`);
   ok("setup: a real merge and a real exclusion", /^[0-9a-f-]{36}$/.test(mergeId) && /^[0-9a-f-]{36}$/.test(exclusionId)
     && psql(`select status from public.releases where id = '${dup}';`) === "merged" && psql(`select status from public.releases where id = '${excluded}';`) === "excluded", merged ?? "");
+  // M14c-1: the staff evidence section in its two review states, on a stack with the
+  // evidence read: a game whose SNES pairing an editor confirmed with evidence, and one whose
+  // pairing nobody has confirmed. Made through the editor functions, as the editor (creator)
+  // and the administrator (reviewer); nothing is published. Removed at the end.
+  if (hasEvidenceRead()) {
+    const confirmed = as(editor, `select public.create_game('${EVIDENCE_GAMES[0]}', 'game', null, null, '1994-03-01', 'day', 'Browser checks')`);
+    const unconfirmed = as(editor, `select public.create_game('${EVIDENCE_GAMES[1]}', 'game', null, null, '1994-03-02', 'day', 'Browser checks')`);
+    as(editor, `select public.set_game_platform('${confirmed}', '${snes}', 'Browser checks')`);
+    as(editor, `select public.set_game_platform('${unconfirmed}', '${snes}', 'Browser checks')`);
+    as(admin, `select public.verify_game(g.id, 'Browser checks', g.revision) from public.games g where g.id = '${confirmed}'`);
+    as(admin, `select public.verify_game_platform(g.id, '${snes}', '{"source": "editor", "reference": "Browser check photo set", "physical_eligibility": "confirmed", "note": "Cartridge, box and manual photographed; label matches"}', 'Browser checks', g.revision) from public.games g where g.id = '${confirmed}'`);
+    ok("setup: a pairing confirmed with evidence, and one not confirmed",
+      psql(`select string_agg(coalesce(gp.verification_basis ->> 'note', '-'), '|' order by g.title) from public.game_platforms gp join public.games g on g.id = gp.game_id where g.id in ('${confirmed}', '${unconfirmed}');`)
+        === "Cartridge, box and manual photographed; label matches|-");
+    CATALOG_PAGES.push(
+      ["game record, physical existence confirmed", `/admin/catalog/games/${confirmed}`],
+      ["game record, physical existence not confirmed", `/admin/catalog/games/${unconfirmed}`],
+    );
+  }
   CATALOG_PAGES.push(
     ["merge detail", `/admin/catalog/merges/${mergeId}`],
     ["catalog search", "/admin/catalog/search?q=starfall"],
@@ -981,6 +1004,19 @@ delete from private.catalog_verifications where release_id in (select id from pu
 delete from private.catalog_record_origins where release_id in (select id from public.releases where product_code in ('AYB-DUP', 'AYB-EXC'));
 delete from public.releases where product_code in ('AYB-DUP', 'AYB-EXC');
 commit;`);
+  // M14c-1's two games, with everything that records them.
+  if (hasEvidenceRead()) {
+    const games = `(select id from public.games where title in (${EVIDENCE_GAMES.map((t) => `'${t}'`).join(", ")}))`;
+    psql(`begin; set local session_replication_role = replica;
+delete from private.catalog_pairing_origins where game_id in ${games};
+delete from public.game_platforms where game_id in ${games};
+delete from private.game_title_keys where game_id in ${games};
+delete from private.catalog_verifications where game_id in ${games};
+delete from private.catalog_record_origins where game_id in ${games};
+delete from public.game_aliases where game_id in ${games};
+delete from public.games where id in ${games};
+commit;`);
+  }
   psql(`begin;
 delete from private.catalog_reclassifications where reason like 'Browser checks%';
 delete from private.import_run_records where import_run_id in (select id from private.import_runs where source_name = 'AYB snapshot.dat');

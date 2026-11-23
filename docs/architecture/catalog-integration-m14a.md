@@ -75,7 +75,7 @@ against the game's current revision, and audited. Negative or inconclusive findi
 recorded as batch outcomes (`incorrect` or `excluded`, final once recorded) or by withdrawing
 the pairing; they never verify anything.
 
-**Limitation for real use:** the basis is free text, and editors can't see it in the app (it has
+**Resolved by M14c-1** ([catalog-evidence-m14c1.md](catalog-evidence-m14c1.md)): every basis now carries the editor's evidence note, and staff see it. The limitation as it stood: the basis is free text, and editors can't see it in the app (it has
 no client grant and no staff page shows it). In the batch path, the stored reference is the
 member's Wikidata record; the reviewer's own evidence is kept only in their optional outcome
 note. The smallest next step: require an evidence note of at least 20 characters for every
@@ -121,6 +121,6 @@ collections and wishlists.
 3. Applying migrations 1 to 6 to that database with the forward process, after a verified backup.
 4. Re-staging the SNES candidates there from the saved snapshot. The B1 stack keeps its own
    history and its open batch `ae69e5d3…` (3 of 116 outcomes), untouched.
-5. The evidence improvement above (a required evidence note carried into the basis, and the
+5. The evidence improvement above (done in M14c-1: a required evidence note carried into the basis, and the
    basis shown on the staff game page), staff pages for pairings and batches (B1 step 5), and a
    `publish` step in `scripts/catalog-b1-review.mjs` for the second editor (it has none today).

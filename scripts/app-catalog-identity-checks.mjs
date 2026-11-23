@@ -35,6 +35,8 @@ const sql = (value) => `'${String(value).replace(/'/g, "''")}'`;
 const MESSAGE = "No verified physical release recorded yet";
 const CONFIRMED = "Zqx Verified Identity";
 const AWAITING = "Zqx Awaiting Evidence";
+/** M14c-1: the evidence note the fixture reviewer records for the confirmed game's SNES pairing. */
+const EVIDENCE_NOTE = "Cartridge, box and manual photographed; label and end label match the SNES listing";
 
 function resolveSegments(html) {
   const segments = new Map([...html.matchAll(/<div hidden id="S:([^"]+)">([\s\S]*?)<\/div><script>(?:(?!<\/script>)[\s\S])*?\$RS\("S:\1"/g)].map((m) => [m[1], m[2]]));
@@ -127,7 +129,7 @@ set local role authenticated;
 select public.verify_game(${gid(CONFIRMED)}, 'M14a identity checks', ${rev(CONFIRMED)});
 select public.verify_game(${gid(AWAITING)}, 'M14a identity checks', ${rev(AWAITING)});
 select public.verify_game_platform(${gid(CONFIRMED)}, ${snes},
-  '{"source": "editor", "reference": "Cartridge and box photographed; label checked", "physical_eligibility": "confirmed"}', 'M14a identity checks', ${rev(CONFIRMED)});
+  '{"source": "editor", "reference": "Cartridge and box photographed; label checked", "physical_eligibility": "confirmed", "note": "${EVIDENCE_NOTE}"}', 'M14a identity checks', ${rev(CONFIRMED)});
 reset role;
 ${as(PUBLISHER)}
 set local role authenticated;
@@ -248,6 +250,57 @@ async function catalogChange() {
   check("restored, the wishes are available again", back.includes(CONFIRMED) && !/no longer in the catalog/i.test(back));
 }
 
+/**
+ * M14c-1: the staff game record's evidence section, over HTTP. A catalog editor (a throwaway
+ * account with its own authenticator) sees each pairing's physical-evidence state, basis,
+ * verifier and publication eligibility; a collector, a visitor and the public game page see none
+ * of it, and neither can the evidence read be called directly.
+ */
+async function staffEvidence() {
+  section("Staff evidence");
+  const user = await createUser({ prefix: "ci-staff", mfa: true });
+  const browser = new Browser();
+  await signInAs(browser, user, "/home");
+  const welcome = await browser.get("/welcome");
+  await browser.submit("/welcome", forms(welcome.html).find((f) => f.names.includes("handle")), { handle: `ci_${randomBytes(5).toString("hex")}` });
+  psql(`insert into public.staff_roles (user_id, role) values ('${user.id}', 'catalog_editor');`);
+  people.staff = { ...user, browser };
+  const reviewer = psql(`select handle from public.profiles where id = '${FIXTURE_REVIEWER}';`);
+
+  const confirmed = await browser.get(`/admin/catalog/games/${G.confirmed.id}`);
+  const c = plain(confirmed.html);
+  check("staff see the game's platforms with their physical evidence", confirmed.response.status === 200 && c.includes("Platforms and physical evidence"));
+  check("the published identity says so, with no verified release", c.includes("Published identity, no verified release.") && c.includes("Physical releases None recorded"));
+  const facts = ["Physical existence Confirmed with evidence", "Evidence source editor", "Evidence reference Cartridge and box photographed; label checked", `Evidence note ${EVIDENCE_NOTE}`];
+  check("with its evidence: confirmed, source, reference and the reviewer's note", facts.every((f) => c.includes(f)),
+    `missing: ${facts.filter((f) => !c.includes(f)).join(" | ")}`);
+  check("who confirmed it, by handle only, and when", Boolean(reviewer) && c.includes(`Verified by @${reviewer}`) && /Verified [A-Z][a-z]+ \d{1,2}, /.test(c) && !c.includes("@example.test"));
+  check("and that its identity is already public", c.includes("Identity publication Already public."));
+  const awaiting = plain((await browser.get(`/admin/catalog/games/${G.awaiting.id}`)).html);
+  check("a pairing without evidence says its physical existence isn't confirmed",
+    awaiting.includes("Physical existence not confirmed.") && awaiting.includes("Physical existence Not confirmed: no evidence recorded"));
+  check("shows no evidence, verifier or date it doesn't have", !awaiting.includes("Evidence note") && !awaiting.includes("Verified by"));
+  check("and that it can't be published until its physical existence is confirmed",
+    awaiting.includes("Identity publication Not yet: its physical existence hasn't been confirmed with evidence."));
+
+  const asCollector = plain((await people.collector.browser.get(`/admin/catalog/games/${G.confirmed.id}`)).html);
+  check("a collector doesn't get the staff record or its evidence", !asCollector.includes("Platforms and physical evidence") && !asCollector.includes(EVIDENCE_NOTE));
+  const visitor = await new Browser().get(`/admin/catalog/games/${G.confirmed.id}`);
+  const v = plain(visitor.html);
+  check("nor does a visitor", !v.includes("Platforms and physical evidence") && !v.includes(EVIDENCE_NOTE));
+  const publicPage = plain((await new Browser().get(`/games/${G.confirmed.slug}`)).html);
+  check("the public game page shows no evidence note, basis or verifier",
+    !publicPage.includes(EVIDENCE_NOTE) && !publicPage.includes("Evidence note") && !publicPage.includes("Cartridge and box photographed; label checked") && !publicPage.includes(`@${reviewer}`));
+  const direct = await rpc(people.collector, "get_game_pairing_evidence", { p_game: G.confirmed.id });
+  check("a collector can't call the evidence read", direct.status >= 400 && !JSON.stringify(direct.json ?? "").includes(EVIDENCE_NOTE), `status ${direct.status}`);
+  const anon = await fetch(`${api}/rest/v1/rpc/get_game_pairing_evidence`, {
+    method: "POST", headers: { apikey: publishableKey, "Content-Type": "application/json" }, body: JSON.stringify({ p_game: G.confirmed.id }),
+  });
+  check("nor can a visitor", !anon.ok && !(await anon.text()).includes(EVIDENCE_NOTE));
+  const basis = await fetch(`${api}/rest/v1/game_platforms?select=verification_basis&game_id=eq.${G.confirmed.id}`, { headers: { apikey: publishableKey } });
+  check("and no visitor can read a pairing's basis from the table", !basis.ok && !(await basis.text()).includes(EVIDENCE_NOTE));
+}
+
 let browserApp = null;
 async function inBrowser() {
   section("In a real browser");
@@ -267,6 +320,9 @@ async function inBrowser() {
     ["game page, no verified release", `/games/${G.confirmed.slug}`, null],
     ["game page, no verified release, signed in", `/games/${G.confirmed.slug}`, people.collector],
     ["Explore result", `/explore?q=${encodeURIComponent("Zqx Verified")}`, null],
+    // M14c-1: the staff evidence section, confirmed and not confirmed.
+    ["staff game record, published identity", `/admin/catalog/games/${G.confirmed.id}`, people.staff],
+    ["staff game record, physical existence not confirmed", `/admin/catalog/games/${G.awaiting.id}`, people.staff],
   ]) {
     for (const viewport of [{ tag: "phone", width: 390, height: 844 }, { tag: "desktop", width: 1280, height: 900 }]) {
       const context = await browserApp.newContext({ viewport, colorScheme: "dark" });
@@ -304,6 +360,7 @@ try {
   await wishing();
   await statistics();
   await catalogChange();
+  await staffEvidence();
   await inBrowser();
 } catch (error) {
   check("the checks ran to the end", false, `${error.message}${error.cause ? ` (${error.cause.code ?? error.cause.message})` : ""}`);

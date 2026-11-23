@@ -1522,6 +1522,14 @@ Catalog editors and administrators can search every game and release, open a rea
 - **Bounded and stable.** Pages hold at most 50 results or events, however many are asked for. Search is ordered by sort title, then id, and history by event id, newest first; both page by keyset. A search cursor is opaque and tied to the query and filters it came from, and anything else is `invalid cursor`. Queries have at most 100 characters and need two letters or digits. Records list at most 100 releases, 20 submissions and 20 merges.
 - **Public reads are unchanged.** `search_catalog` and the picker still return published records only, and the read policies are as they were.
 
+### Physical evidence for staff (M14c-1)
+
+`get_game_pairing_evidence(game)` (migration `20261211100000`) gives the staff game record each pairing's physical-evidence state, its verification basis (source, reference, the editor's evidence note, snapshot hash, batch), its review batches, its release counts and whether its identity could be published now ([catalog-evidence-m14c1.md](catalog-evidence-m14c1.md)).
+
+- **Who.** As above: `require_active_staff('catalog_editor')`. `EXECUTE` for `authenticated` only; no grant to `anon` or `service_role`. Clients still have no column grant on `game_platforms.verification_basis` and none on the review-batch tables.
+- **One named person, by handle.** An exception to "No people" above, made for this read: the pairing's verifier is shown by handle ("A former staff member" once the account is gone), as staff history already names actors. No email address, account id or other person.
+- **Evidence is required where it is written.** `verify_game_platform` and batch approval store a basis only with an evidence note (20 to 500 characters, 10 of them letters or digits), and the check `game_platforms_physical_evidence_note` refuses any other.
+
 ### What history shows (D4)
 
 History is a view of `private.audit_events` built from two allow-lists, so a new kind of event or a new metadata key never appears until it is added on purpose.
