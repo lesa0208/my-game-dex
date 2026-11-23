@@ -1,7 +1,16 @@
 /**
- * M12c-B1: the editorial review of the first SNES staging, on the ISOLATED B1 STACK only
- * (MGD_STACK=b1). The batch functions are B1-M2's; this tool only calls them, as the editor
- * whose session it holds, so MFA, RLS, the review guard and every batch safeguard apply.
+ * M12c-B1: the editorial review of the first SNES staging, on an ISOLATED EDITORIAL STACK only:
+ * the historical B1 stack (MGD_STACK=b1) or, since M15, the SNES pilot stack (MGD_STACK=pilot),
+ * named explicitly and checked against the stack registry (scripts/lib/stack.mjs). Development,
+ * the test stack, scratch and a missing choice are refused. The batch functions are B1-M2's; this
+ * tool only calls them, as the editor whose session it holds, so MFA, RLS, the review guard and
+ * every batch safeguard apply.
+ *
+ * M15, the pilot: every editor is a real person with their own account, password and
+ * authenticator, typed by them. Nothing creates an editor for them: editor-a (B1's disposable
+ * batch creator) refuses the pilot, and create-batch there signs in as a real editor (--email).
+ * Each stack keeps its own working folder (~/.my-game-dex/catalog-pilot/<m12c-b1|m15-pilot>), its
+ * own preview address and its own API port. B1 works exactly as before.
  *
  * Operator (setup and read-only):
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs editor-a
@@ -34,6 +43,11 @@
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs reject --email <name>@example.test
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs publish --email <name>@example.test --game <game id>
  *   MGD_STACK=b1 node scripts/catalog-b1-review.mjs revoke-reviewer --email <name>@example.test
+ *
+ * On the pilot (MGD_STACK=pilot), the same commands with each editor's own address, except
+ * editor-a (refused); grant-editor is grant-reviewer's other name, and create-batch takes
+ * --email <editor A> and asks A for their password, code and reason
+ * (docs/architecture/catalog-pilot-m15.md).
  *
  * - reviewer-account / reviewer-password: the reviewer's own B1 account; the password is typed
  *   at a hidden prompt, sent only to the local Auth server, never stored or printed. No staff
@@ -73,9 +87,10 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
+import { editorEmailProblem } from "./lib/editorial-accounts.mjs";
 import { elevate, totp } from "./lib/mfa-session.mjs";
 import { choosePlatforms, confirmsGame, describePairings, printable, reportPublish, verifiedAt } from "./lib/publish-plan.mjs";
-import { dbContainer, stackName, stackStatus } from "./lib/stack.mjs";
+import { dbContainer, editorialTarget, explicitStack, projectId, stackStatus } from "./lib/stack.mjs";
 import { DISTRIBUTION_FORMAT_TABLE, FLAG_REASONS } from "./wikidata-entities.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,10 +98,19 @@ const fail = (message) => {
   console.error(message);
   process.exit(2);
 };
-if (stackName !== "b1") fail("Refusing: the B1 review runs only on the B1 stack (MGD_STACK=b1).");
+let TARGET;
+try {
+  TARGET = editorialTarget(explicitStack, projectId, "the editorial review");
+} catch (error) {
+  fail(error.message);
+}
+/** "B1" or "pilot", for messages. */
+const LABEL = TARGET.label;
+/** The command prefix for this stack, as messages print it. */
+const CMD = `MGD_STACK=${TARGET.name} node scripts/catalog-b1-review.mjs`;
 
-export const PREVIEW = "http://127.0.0.4:3004";
-const WORK = join(homedir(), ".my-game-dex", "catalog-pilot", "m12c-b1");
+export const PREVIEW = TARGET.preview;
+const WORK = join(homedir(), ".my-game-dex", "catalog-pilot", TARGET.work);
 const EDITORS = join(WORK, "editors.local.json");
 const NOTES = join(ROOT, "docs", "proposals", "m12c-b1", "editorial-review-snes-150.json");
 const CRITICAL_ERRORS = ["wrong_identity_or_type", "wrong_platform", "physical_eligibility_unsupported", "distinct_games_merged",
@@ -103,11 +127,11 @@ function evidenceNoteOk(note) {
   return collapsed.length >= 20 && note.replace(/[^\p{L}\p{N}]/gu, "").length >= 10;
 }
 
-const status = stackStatus({ label: "the B1 review" });
+const status = stackStatus({ label: "the editorial review", editorial: true });
 const api = status.API_URL;
 const publishable = status.PUBLISHABLE_KEY ?? status.ANON_KEY;
 const serviceKey = status.SECRET_KEY ?? status.SERVICE_ROLE_KEY;
-if (new URL(api).port !== "57321") fail("Refusing: that isn't the B1 stack's API (port 57321).");
+if (Number(new URL(api).port) !== TARGET.apiPort) fail(`Refusing: that isn't the ${LABEL} stack's API (port ${TARGET.apiPort}).`);
 
 const psql = (sql) =>
   execFileSync("docker", ["exec", "-i", dbContainer, "psql", "-U", "postgres", "-d", "postgres", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-At"], {
@@ -178,6 +202,8 @@ function editorA() {
 }
 
 async function cmdEditorA() {
+  // M15: on the pilot every editor is a real person; nothing creates or holds an editor's credentials.
+  if (!TARGET.disposableEditor) fail(`Refusing: on the ${LABEL} stack every editor is a real person with their own account and authenticator. Register them with reviewer-account, then grant-editor.`);
   if (editorA()) fail(`Editor A already exists (${EDITORS}). Nothing was created.`);
   const email = `b1-editor-a-${randomUUID()}@example.test`;
   const password = `pw-${randomBytes(18).toString("base64url")}`;
@@ -201,7 +227,7 @@ async function cmdEditorA() {
 
 async function editorASession() {
   const a = editorA();
-  if (!a) fail("No editor A yet. Run: MGD_STACK=b1 node scripts/catalog-b1-review.mjs editor-a");
+  if (!a) fail(`No editor A yet. Run: ${CMD} editor-a`);
   const session = await verifyFactor(await signIn(a.email, a.password), a.factorId, async () => totp(a.totpSecret));
   if (!session) fail("Editor A's second factor was refused.");
   return { a, session };
@@ -214,7 +240,7 @@ async function editorASession() {
 function stagedRun() {
   const runs = readJson(`select coalesce(json_agg(json_build_object('id', r.id, 'platform_id', r.platform_id, 'sha', r.source_sha256) order by r.started_at), '[]')
     from private.import_runs r join public.platforms p on p.id = r.platform_id where r.provider_code = 'wikidata' and p.slug = 'snes' and r.status = 'completed';`);
-  if (runs.length !== 1) fail(`Expected exactly one completed SNES Wikidata run on B1, found ${runs.length}.`);
+  if (runs.length !== 1) fail(`Expected exactly one completed SNES Wikidata run on ${LABEL}, found ${runs.length}.`);
   return runs[0];
 }
 
@@ -222,11 +248,11 @@ function openBatch(o = {}) {
   const batches = readJson(`select coalesce(json_agg(json_build_object('id', id, 'status', status) order by created_at), '[]') from private.catalog_review_batches;`);
   if (o.batch && o.batch !== true) {
     const b = batches.find((x) => x.id === o.batch);
-    if (!b) fail("No such batch on B1.");
+    if (!b) fail(`No such batch on ${LABEL}.`);
     return b;
   }
   const open = batches.filter((b) => b.status === "open");
-  if (open.length !== 1) fail(open.length ? "More than one open batch: pass --batch <id>." : "No open batch on B1.");
+  if (open.length !== 1) fail(open.length ? "More than one open batch: pass --batch <id>." : `No open batch on ${LABEL}.`);
   return open[0];
 }
 
@@ -256,27 +282,45 @@ async function cmdCreateBatch(o) {
       'invalid_assessments', (select count(*) from private.provider_records pr where pr.import_run_id = ${lit(run.id)} and pr.status <> 'ignored' and cardinality(private.review_risk_problems(pr)) > 0));`);
   console.log(`Before: ${pre.candidates} candidates, ${pre.held} held source records (${pre.held_with_game} with a game), ${pre.invalid_assessments} invalid risk assessments.`);
   if (pre.held_with_game > 0) fail("Stopping: a held record has a game, so it could become a member.");
-  const { session } = await editorASession();
-  const reason = typeof o.reason === "string" ? o.reason
-    : "M12c-B1: review batch of the first controlled SNES staging (150-item selection, 137 candidates; the 13 held records stay out until resolved)";
+  // B1: its disposable editor A, as before. The pilot: a real editor, signed in with their own
+  // password and authenticator, and their own reason. Nothing is created for them.
+  let session;
+  let reason;
+  if (TARGET.disposableEditor) {
+    ({ session } = await editorASession());
+    reason = typeof o.reason === "string" ? o.reason
+      : "M12c-B1: review batch of the first controlled SNES staging (150-item selection, 137 candidates; the 13 held records stay out until resolved)";
+  } else {
+    const email = reviewerEmail(o);
+    if (psql(`select count(*) from public.staff_roles s join auth.users u on u.id = s.user_id where lower(u.email) = ${lit(email)} and s.role = 'catalog_editor';`) === "0") {
+      fail("That account isn't a catalog editor on the pilot. Grant it first with grant-editor.");
+    }
+    if (psql(`select count(*) from public.staff_roles s join auth.users u on u.id = s.user_id where lower(u.email) = ${lit(email)} and s.role <> 'catalog_editor';`) !== "0") {
+      fail("Refusing: on the pilot the batch's creator is a catalog editor with no other staff role.");
+    }
+    session = await ownerSession(email);
+    reason = (await ask("Your reason for creating this batch (recorded in the audit log): ")).replace(/\s+/g, " ").trim();
+    if (!reason) fail("A reason is required. Nothing was created.");
+  }
   const created = await rpc(session, "create_review_batch", { p_run: run.id, p_platform: run.platform_id, p_reason: reason });
   if (!created.ok) fail(`create_review_batch refused: ${created.error}${created.detail ? ` (${created.detail})` : ""}. Nothing was created.`);
   const id = created.data;
-  console.log(`Batch ${id} created by editor A.`);
+  console.log(`Batch ${id} created by ${TARGET.disposableEditor ? "editor A" : "you"}.`);
   console.log(JSON.stringify(batchSummary(id), null, 2));
 
-  console.log("\nNo self-review, and no admin data for editor A (each attempt is refused and changes nothing):");
+  console.log("\nNo self-review, and no admin data for the batch's creator (each attempt is refused and changes nothing):");
+  const who = TARGET.disposableEditor ? "editor A" : "the batch's creator";
   const flagged = readJson(`select json_build_object('g', game_id) from private.catalog_review_batch_items where batch_id = ${lit(id)} and cardinality(flags) > 0 order by game_id limit 1;`);
   const checks = [
-    ["record_batch_outcome by the batch's creator", await rpc(session, "record_batch_outcome", { p_batch: id, p_game: flagged.g, p_outcome: "correct", p_critical_error: null, p_note: "Editor A trying to review its own batch" })],
-    ["approve_review_batch by the batch's creator", await rpc(session, "approve_review_batch", { p_batch: id, p_reason: "Editor A trying to approve its own batch" })],
-    ["get_import_runs (admin only) as editor A", await rpc(session, "get_import_runs", {})],
-    ["get_import_run (admin only) as editor A", await rpc(session, "get_import_run", { p_run: run.id })],
+    ["record_batch_outcome by the batch's creator", await rpc(session, "record_batch_outcome", { p_batch: id, p_game: flagged.g, p_outcome: "correct", p_critical_error: null, p_note: `${who} trying to review their own batch` })],
+    ["approve_review_batch by the batch's creator", await rpc(session, "approve_review_batch", { p_batch: id, p_reason: `${who} trying to approve their own batch` })],
+    [`get_import_runs (admin only) as ${who}`, await rpc(session, "get_import_runs", {})],
+    [`get_import_run (admin only) as ${who}`, await rpc(session, "get_import_run", { p_run: run.id })],
   ];
   for (const [label, r] of checks) console.log(`  ${label}: ${r.ok ? "ALLOWED (unexpected)" : `refused (${r.error})`}`);
   const history = await rpc(session, "get_catalog_record_history", { p_entity: "game", p_id: flagged.g });
   const leaks = JSON.stringify(history.data ?? "").match(/[A-Za-z]:\\\\|\\\\Users\\\\|\/Users\//g);
-  console.log(`  get_catalog_record_history for a member, as editor A: ${history.ok ? `returned; ${leaks ? "CONTAINS A LOCAL PATH (unexpected)" : "no local path"}` : `refused (${history.error})`}`);
+  console.log(`  get_catalog_record_history for a member, as ${who}: ${history.ok ? `returned; ${leaks ? "CONTAINS A LOCAL PATH (unexpected)" : "no local path"}` : `refused (${history.error})`}`);
   if (checks.some(([, r]) => r.ok) || leaks) fail("Stopping: a safeguard didn't hold. Investigate before any review.");
 }
 
@@ -321,7 +365,7 @@ export function memberMarkdown(m, note) {
     `- **Flags:** ${m.flags.length ? m.flags.map((f) => `\`${f}\`: ${reason(f)}`).join("; ") : "none"}`,
     ...(m.info_flags.length ? [`- **Info:** ${m.info_flags.map((f) => `\`${f}\`: ${reason(f)}`).join("; ")}`] : []),
     `- **Critical signals:** ${list(m.critical_flags)}${m.critical_flags.length ? " (marking it correct needs evidence: a note of 20+ characters)" : ""}`,
-    `- **In the B1 preview:** ${PREVIEW}/admin/catalog/games/${m.game_id}`,
+    `- **In the ${LABEL} preview:** ${PREVIEW}/admin/catalog/games/${m.game_id}`,
     `- **Wikidata:** https://www.wikidata.org/wiki/${m.qid} (staged revision ${m.revision}: https://www.wikidata.org/w/index.php?oldid=${m.revision})`,
     `- **Titles:** ${list(m.titles)}${m.ja_titles ? `; Japanese: ${list(m.ja_titles)}` : ""}`,
     `- **First release (any platform):** ${m.first_release}; SNES: ${s.platform_first_release ? `${s.platform_first_release.value} (${s.platform_first_release.precision})` : "not stated"}`,
@@ -343,7 +387,7 @@ async function cmdPacket(o) {
   const need = all.filter((m) => m.flags.length || m.sampled);
   const rest = all.filter((m) => !m.flags.length && !m.sampled);
   const md = [
-    `# B1 review packet: batch ${b.id.slice(0, 8)}`,
+    `# ${LABEL} review packet: batch ${b.id.slice(0, 8)}`,
     "",
     `Batch \`${b.id}\`, ${summary.status}. ${summary.items} members: ${summary.flagged} flagged and ${summary.sample_size} sampled need your outcome (${summary.pending} still pending); the other ${summary.items - summary.need_outcome} are accepted with the batch if you approve. Acceptance number ${summary.acceptance_number}: one sampled member not found correct fails the sample. Content hash \`${summary.content_sha256}\`.`,
     "",
@@ -375,7 +419,10 @@ async function cmdPacket(o) {
 
 function reviewerEmail(o) {
   const email = typeof o.email === "string" ? o.email.trim().toLowerCase() : "";
-  if (!/^[a-z0-9._+-]{1,64}@example\.test$/.test(email)) fail("--email must be a disposable test address ending in @example.test.");
+  // B1: disposable test addresses only, as before. The pilot: each editor's own address (local
+  // only: the pilot sends no mail, and no address leaves this computer).
+  const problem = editorEmailProblem(email, TARGET);
+  if (problem) fail(problem);
   if (editorA()?.email === email) fail("Refusing: that is editor A.");
   return email;
 }
@@ -427,7 +474,7 @@ async function ask(prompt) {
 
 function userId(email) {
   const id = psql(`select id from auth.users where lower(email) = ${lit(email)};`);
-  if (!id) fail("No account with that address on B1. Create it with reviewer-account first.");
+  if (!id) fail(`No account with that address on ${LABEL}. Create it with reviewer-account first.`);
   return id;
 }
 
@@ -461,8 +508,8 @@ async function withRecentMfa(holder, fn, body) {
 async function cmdReviewerAccount(o) {
   const email = reviewerEmail(o);
   requireTerminal();
-  if (psql(`select count(*) from auth.users where lower(email) = ${lit(email)};`) !== "0") fail("That address already has an account on B1.");
-  const password = await hidden("Choose a password for your B1 reviewer account (12+ characters, not shown): ");
+  if (psql(`select count(*) from auth.users where lower(email) = ${lit(email)};`) !== "0") fail(`That address already has an account on ${LABEL}.`);
+  const password = await hidden(`Choose a password for your ${LABEL} editor account (12+ characters, not shown): `);
   if (password.length < 12 || Buffer.byteLength(password, "utf8") > 72) fail("The password must be at least 12 characters and at most 72 bytes.");
   if ((await hidden("Type it again: ")) !== password) fail("The two passwords differ. Nothing was created.");
   const created = await fetch(`${api}/auth/v1/admin/users`, {
@@ -470,19 +517,19 @@ async function cmdReviewerAccount(o) {
     headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, email_confirm: true }),
   });
-  if (!created.ok) fail(`The B1 Auth server refused the account (status ${created.status}). Nothing was created.`);
-  console.log(`Created ${email} on B1, with no staff role and no authenticator.
+  if (!created.ok) fail(`The ${LABEL} Auth server refused the account (status ${created.status}). Nothing was created.`);
+  console.log(`Created ${email} on ${LABEL}, with no staff role and no authenticator.
 Next, on ${PREVIEW}:
   1. Sign in with it, and choose a handle.
   2. Settings → Security: add an authenticator, scanning the code with your own authenticator app.
-  3. Then: MGD_STACK=b1 node scripts/catalog-b1-review.mjs grant-reviewer --email ${email}`);
+  3. Then: ${CMD} grant-editor --email ${email}`);
 }
 
 async function cmdReviewerPassword(o) {
   const email = reviewerEmail(o);
   requireTerminal();
   const id = userId(email);
-  const password = await hidden("New password for your B1 reviewer account (12+ characters, not shown): ");
+  const password = await hidden(`New password for your ${LABEL} editor account (12+ characters, not shown): `);
   console.log(`${[...password].length} characters received.`);
   if (password.length < 12 || Buffer.byteLength(password, "utf8") > 72) fail("The password must be at least 12 characters and at most 72 bytes. Nothing was changed.");
   if ((await hidden("Type it again: ")) !== password) fail("The two passwords differ. Nothing was changed.");
@@ -491,7 +538,7 @@ async function cmdReviewerPassword(o) {
     headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
   });
-  if (!updated.ok) fail(`The B1 Auth server refused the change (status ${updated.status}). Nothing was changed.`);
+  if (!updated.ok) fail(`The ${LABEL} Auth server refused the change (status ${updated.status}). Nothing was changed.`);
   const session = await signIn(email, password);
   await auth("/logout", { token: session.access_token });
   console.log(`Password set, and it signs in. Sign in on ${PREVIEW} with ${email}.`);
@@ -510,8 +557,8 @@ function cmdGrantReviewer(o) {
   if (psql(`select count(*) from public.staff_roles where user_id = ${lit(id)};`) !== "0") fail("That account already has a staff role.");
   // Test-stack account setup, as for editor A: catalog_editor only. Every decision stays the reviewer's.
   psql(`insert into public.staff_roles (user_id, role) values (${lit(id)}, 'catalog_editor');`);
-  console.log(`${email} is a catalog editor on B1. Sign in again on ${PREVIEW} (Admin → Catalog), and review with:
-  MGD_STACK=b1 node scripts/catalog-b1-review.mjs review --email ${email}`);
+  console.log(`${email} is a catalog editor on ${LABEL}. Sign in again on ${PREVIEW} (Admin → Catalog), and work in the admin panel, or with:
+  ${CMD} review|approve|reject|publish --email ${email}`);
 }
 
 function cmdRevokeReviewer(o) {
@@ -656,11 +703,11 @@ async function decide(o, fn) {
 const o = args(process.argv.slice(2));
 const commands = {
   "editor-a": cmdEditorA, "create-batch": cmdCreateBatch, status: cmdStatus, packet: cmdPacket,
-  "reviewer-account": cmdReviewerAccount, "reviewer-password": cmdReviewerPassword, "grant-reviewer": cmdGrantReviewer, "revoke-reviewer": cmdRevokeReviewer,
+  "reviewer-account": cmdReviewerAccount, "reviewer-password": cmdReviewerPassword, "grant-reviewer": cmdGrantReviewer, "grant-editor": cmdGrantReviewer, "revoke-reviewer": cmdRevokeReviewer,
   review: cmdReview, approve: (x) => decide(x, "approve_review_batch"), reject: (x) => decide(x, "reject_review_batch"), publish: cmdPublish,
 };
 const command = commands[o._[0]];
-if (!command) fail(`Usage: MGD_STACK=b1 node scripts/catalog-b1-review.mjs ${Object.keys(commands).join("|")}. See the header of this file.`);
+if (!command) fail(`Usage: MGD_STACK=b1|pilot node scripts/catalog-b1-review.mjs ${Object.keys(commands).join("|")}. See the header of this file.`);
 try {
   await command(o);
 } catch (error) {
