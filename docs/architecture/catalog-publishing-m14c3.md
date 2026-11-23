@@ -1,5 +1,11 @@
 # M14c-3: approving batches and publishing identities in the admin panel
 
+**Current status, 2026-11-23 (M15 P1a):** merged into `main` (PR #28) and applied to the local
+development database (migration 82 of 82), after a backup, a cold snapshot and a rehearsal. Not
+applied to the test stack, B1 or any hosted database. Nothing real was approved, rejected or
+published. The first real SNES pilot runs on its own isolated stack ([catalog-pilot-m15.md](catalog-pilot-m15.md)), which doesn't exist yet. The command line now takes `MGD_STACK=b1` or `MGD_STACK=pilot`
+explicitly. The status below is this document's original, kept as history.
+
 **Written for:** whoever reviews or continues the catalog editorial workflow, and the operators
 of a first real pilot. **Status, 2026-11-23:** on branch `m14c-3-approval-publishing`, validated on
 a disposable scratch stack and in CI. Not applied to development, the test stack, B1 or any

@@ -2,6 +2,14 @@
 
 **Written for:** the product owner approving M12c-B1, and the engineers who will build it.
 
+**Current status, 2026-11-23 (M15 P1a):** the B1 migrations and M14a, M14c-1, M14c-2 and M14c-3
+are on `main` and applied to the local development database (82 migrations). The B1 stack is
+unchanged (its 72 migrations, its staging and its one open batch). Still no game is verified or
+published from the SNES staging. The real pilot runs on a new isolated stack, not on B1
+([catalog-pilot-m15.md](catalog-pilot-m15.md)); B1 is kept as the technical pilot's record. The
+two command-line tools now need `MGD_STACK=b1` (or `MGD_STACK=pilot`) explicitly and work on B1
+exactly as before. The status lines below are kept as history.
+
 **Status, 2026-11-22 (M14a Phase 1):** the B1 migrations are integrated with `main` on the local branch `m14a-b1-integration`, with a new physical-evidence gate: batch approval no longer publishes unsampled members. Validated on scratch only. See [catalog-integration-m14a.md](catalog-integration-m14a.md); the history below is unchanged.
 
 **Status, 2026-11-21: technical ingestion pilot complete. Editorial approval and publication are deferred and not validated end to end** ([B1: technical pilot wrap-up](#b1-technical-pilot-wrap-up-2026-11-21)). No game is verified or published, and the B1 migrations are not in `supabase/migrations` or on `main`.

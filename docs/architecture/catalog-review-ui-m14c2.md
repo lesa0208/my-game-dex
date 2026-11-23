@@ -1,5 +1,10 @@
 # M14c-2: review batches in the admin panel
 
+**Current status, 2026-11-23 (M15 P1a):** merged into `main` (PR #27) and applied to the local
+development database (migration 81 of 82), after a backup, a cold snapshot and a rehearsal. Not
+applied to the test stack, B1 or any hosted database. The first real SNES pilot runs on its own isolated stack ([catalog-pilot-m15.md](catalog-pilot-m15.md)), which doesn't exist yet. The status below is this
+document's original, kept as history.
+
 **Written for:** whoever reviews or continues the catalog editorial workflow. **Status,
 2026-11-23:** on branch `m14c-2-catalog-review-ui`, validated on a disposable scratch stack and in
 CI. Not applied to development, the test stack, B1 or any hosted database.

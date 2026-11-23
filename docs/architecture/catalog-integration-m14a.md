@@ -1,5 +1,10 @@
 # M14a Phase 1: B1 catalog integration
 
+**Current status, 2026-11-23 (M15 P1a):** merged into `main` (PR #21) and applied to the local
+development database, which has all 82 migrations on `main`. The test stack and B1 were not
+migrated. Nothing real is approved or published. The first real SNES pilot runs on its own isolated stack ([catalog-pilot-m15.md](catalog-pilot-m15.md)), which doesn't exist yet. The status below is this document's
+original, kept as history.
+
 **Written for:** whoever reviews or continues the catalog pilot. **Status, 2026-11-22:**
 technically integrated on the local branch `m14a-b1-integration` and validated on a disposable
 scratch stack only. Not applied to development, the test stack, B1 or any hosted database.
