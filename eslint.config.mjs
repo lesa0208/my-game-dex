@@ -27,6 +27,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // M15: the pilot preview builds here (next.config.ts).
+    ".next-pilot/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

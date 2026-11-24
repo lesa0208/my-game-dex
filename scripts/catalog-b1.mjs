@@ -1,6 +1,11 @@
 /**
- * M12c-B1: acquisition and staging tooling for the SNES identity pilot. Only clear-wikidata and
- * stage write, and only to the B1 stack (MGD_STACK=b1); nothing here verifies or publishes.
+ * M12c-B1: acquisition and staging tooling for the SNES identity pilot. Only clear-wikidata,
+ * record-wikidata-rights and stage write, and only to an editorial stack named explicitly: the
+ * historical B1 stack (MGD_STACK=b1) or, since M15, the SNES pilot stack (MGD_STACK=pilot).
+ * Development, the test stack, scratch and a missing choice are refused. On the pilot, every
+ * source file must be the pinned, verified one (scripts/lib/pilot-sources.mjs), and clearance and
+ * rights need --decision "<the product owner's decision for the pilot>". Nothing here verifies or
+ * publishes.
  *
  *   node scripts/catalog-b1.mjs select --wikidata <query snapshot> --out <selection.json>
  *        [--platform snes] [--seed mgd-m12c-b1-snes-1] [--size 150] [--fixed Q853143,Q370055]
@@ -15,6 +20,8 @@
  *        --notes <editorial notes.json> --terms-file <same page> --reason "<why>"
  *   MGD_STACK=b1 node scripts/catalog-b1.mjs record-wikidata-rights --terms-file <same page>
  *   MGD_STACK=b1 node scripts/catalog-b1.mjs report [--out <report.json>]
+ *   MGD_STACK=pilot node scripts/catalog-b1.mjs clear-wikidata|record-wikidata-rights --terms-file <page> --decision "<owner decision>"
+ *   MGD_STACK=pilot node scripts/catalog-b1.mjs stage ... (the pinned files only) | report
  *
  * - select: the deterministic 150-game selection from a saved query snapshot (the one the
  *   importer fetched), written outside the repository with the snapshot's hash.
@@ -329,17 +336,49 @@ async function cmdFetchFormats(o) {
 }
 
 // ---------------------------------------------------------------------------
-// clear-wikidata, stage and report (the B1 stack only)
+// clear-wikidata, stage and report (an editorial stack only: MGD_STACK=b1 or MGD_STACK=pilot)
 // ---------------------------------------------------------------------------
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The B1 stack's database container and port; refuses every other stack. */
+/**
+ * The editorial stack's database container and port: the historical B1 stack or the M15 pilot,
+ * named explicitly with MGD_STACK and checked against the stack registry (scripts/lib/stack.mjs).
+ * Refuses every other stack (development, the test stack, scratch, a missing choice), and a stack
+ * whose API isn't on its own port.
+ */
 async function b1Stack(label) {
-  const { dbContainer, stackName, stackStatus } = await import("./lib/stack.mjs");
-  if (stackName !== "b1") fail(`Refusing: ${label} runs only on the B1 stack (MGD_STACK=b1).`);
-  const status = stackStatus({ label });
-  return { container: dbContainer, port: new URL(status.DB_URL).port };
+  let stack;
+  try {
+    stack = await import("./lib/stack.mjs");
+  } catch (error) {
+    fail(`Refusing: ${error.message}`);
+  }
+  let target;
+  try {
+    target = stack.editorialTarget(stack.explicitStack, stack.projectId, label);
+  } catch (error) {
+    fail(error.message);
+  }
+  const status = stack.stackStatus({ label, editorial: true });
+  if (Number(new URL(status.API_URL).port) !== target.apiPort) fail(`Refusing: the ${target.label} stack's API should be on port ${target.apiPort}.`);
+  return { container: stack.dbContainer, port: new URL(status.DB_URL).port, target };
+}
+
+/** On the pilot, every source file must be exactly the pinned one (scripts/lib/pilot-sources.mjs). */
+async function requirePilotSources(target, files) {
+  if (target.name !== "pilot") return;
+  const { pilotSourceProblems } = await import("./lib/pilot-sources.mjs");
+  const problems = pilotSourceProblems(files);
+  if (problems.length) fail(`Refusing: the pilot is staged only from its verified sources. ${problems.join("; ")}. Nothing was changed.`);
+}
+
+/** On the pilot, a rights record cites the owner's decision for this pilot (P0): never assumed. */
+function pilotDecision(target, o) {
+  if (target.name !== "pilot") return null;
+  const decision = typeof o.decision === "string" ? o.decision.replace(/\s+/g, " ").trim() : "";
+  if (decision.length < 10 || decision.length > 300) fail("Refusing: on the pilot, --decision \"<the product owner's decision for this pilot, with its date>\" is required (10 to 300 characters). Nothing was changed.");
+  return decision;
 }
 
 const lit = (value) => `'${String(value).replace(/'/g, "''")}'`;
@@ -354,13 +393,17 @@ function psql(container, sql) {
 
 async function cmdClearWikidata(o) {
   if (!o["terms-file"] || o["terms-file"] === true) fail("--terms-file is required: the saved Wikidata:Licensing page.");
-  const { container } = await b1Stack("the B1 Wikidata clearance");
+  const { container, target } = await b1Stack("the Wikidata clearance");
+  await requirePilotSources(target, { terms: o["terms-file"] });
+  const decision = pilotDecision(target, o);
   const page = readFileSync(o["terms-file"]);
   if (!page.toString("utf8").includes("released into the public domain under")) fail("That file isn't the Wikidata:Licensing page.");
   const hash = sha256(page);
-  psql(container, `select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', ${lit(hash)},
-    ${lit("B1 stack: M11b-D1 approved Wikidata (CC0 structured data) for game identity. Saved terms copy read 2026-11-19. Game identity only: never evidence of a physical release.")});`);
-  console.log(`wikidata cleared on the B1 stack against terms sha256 ${hash}`);
+  const note = target.name === "pilot"
+    ? `Pilot stack: ${decision}. Wikidata (CC0 structured data) for game identity, against the saved terms copy read 2026-11-19. Game identity only: never evidence of a physical release.`
+    : "B1 stack: M11b-D1 approved Wikidata (CC0 structured data) for game identity. Saved terms copy read 2026-11-19. Game identity only: never evidence of a physical release.";
+  psql(container, `select private.record_provider_clearance('wikidata', true, 'https://www.wikidata.org/wiki/Wikidata:Licensing', ${lit(hash)}, ${lit(note)});`);
+  console.log(`wikidata cleared on the ${target.label} stack against terms sha256 ${hash}`);
 }
 
 /** The owner's decision D2 (2026-11-21), recorded with the provider's surviving rights. */
@@ -369,18 +412,26 @@ export const WIKIDATA_RIGHTS_NOTE =
 
 async function cmdRecordWikidataRights(o) {
   if (!o["terms-file"] || o["terms-file"] === true) fail("--terms-file is required: the saved Wikidata:Licensing page Wikidata is cleared against.");
-  const { container } = await b1Stack("recording Wikidata's surviving rights");
+  const { container, target } = await b1Stack("recording Wikidata's surviving rights");
+  await requirePilotSources(target, { terms: o["terms-file"] });
+  const decision = pilotDecision(target, o);
   const page = readFileSync(o["terms-file"]);
   const text = page.toString("utf8");
   if (!text.includes("released into the public domain under") || !text.includes("Creative Commons CC0")) fail("That file isn't the Wikidata:Licensing page stating the CC0 dedication.");
   const hash = sha256(page);
-  psql(container, `select private.record_provider_rights('wikidata', true, ${lit(hash)}, ${lit(WIKIDATA_RIGHTS_NOTE)});`);
+  // B1 records D2 as it was decided; the pilot records the owner's decision for the pilot, in the same terms.
+  const note = target.name === "pilot" ? `${decision}: ${WIKIDATA_RIGHTS_NOTE.replace("Owner decision D2 (2026-11-21): ", "")}`.slice(0, 500) : WIKIDATA_RIGHTS_NOTE;
+  psql(container, `select private.record_provider_rights('wikidata', true, ${lit(hash)}, ${lit(note)});`);
   console.log(`Wikidata's CC0 rights recorded as surviving withdrawal, for terms sha256 ${hash} only.`);
 }
 
 async function cmdStage(o) {
   for (const k of ["entities", "selection", "notes", "terms-file", "reason"]) if (!o[k] || o[k] === true) fail(`--${k} is required.`);
-  const { port } = await b1Stack("B1 staging");
+  const { port, target } = await b1Stack("staging");
+  // The pilot stages only its verified, pinned files; B1 keeps its own workflow.
+  await requirePilotSources(target, { entities: o.entities, selection: o.selection, notes: o.notes, terms: o["terms-file"] });
+  // The pilot is the SNES pilot: its pinned sources are SNES, so no other platform.
+  if (target.name === "pilot" && (o.platform ?? "snes") !== "snes") fail("Refusing: the pilot stages SNES only (--platform snes). Nothing was changed.");
   const fetchedAt = JSON.parse(readFileSync(o.entities, "utf8")).fetched_at;
   if (!fetchedAt || Number.isNaN(Date.parse(fetchedAt))) fail("The entity snapshot has no fetched_at time.");
   const password = randomBytes(24).toString("base64url");
@@ -429,9 +480,9 @@ select json_build_object(
 rollback;`;
 
 async function cmdReport(o) {
-  const { container } = await b1Stack("the B1 report");
+  const { container, target } = await b1Stack("the report");
   const out = psql(container, B1_REPORT_SQL).split("\n").filter((l) => l.startsWith("{")).pop();
-  const report = { stack: "b1", reported_at: new Date().toISOString(), ...JSON.parse(out) };
+  const report = { stack: target.name, reported_at: new Date().toISOString(), ...JSON.parse(out) };
   if (o.out && o.out !== true) {
     if (!(await outsideRepo(o.out))) fail("Reports must be kept outside the repository.");
     mkdirSync(dirname(o.out), { recursive: true });

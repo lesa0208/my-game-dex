@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
+// M15: the pilot preview (scripts/pilot-preview.mjs) builds into its own folder, so a build made
+// with the pilot's data never replaces .next (which the app checks and the B1 preview serve), and
+// the reverse. Nothing else may be chosen.
+const distDir = process.env.MGD_NEXT_DIST_DIR;
+if (distDir !== undefined && distDir !== ".next-pilot") throw new Error(`MGD_NEXT_DIST_DIR may only be ".next-pilot", not "${distDir}".`);
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  ...(distDir ? { distDir } : {}),
   cacheComponents: true,
   // Development only: the route indicator sat over the sidebar's tagline.
   devIndicators: { position: "bottom-right" },

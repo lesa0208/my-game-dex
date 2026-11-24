@@ -4,6 +4,7 @@
  *   node scripts/check-secrets.mjs            every tracked and untracked file
  *   node scripts/check-secrets.mjs --staged   staged content, used by the hook
  *   node scripts/check-secrets.mjs --bundle   browser bundles in .next/static
+ *                                             (.next-pilot/static with MGD_NEXT_DIST_DIR=.next-pilot: the pilot preview)
  *
  * Reports the file, line and rule. It never prints the matched value.
  */
@@ -81,9 +82,11 @@ function walk(directory) {
 }
 
 function collectBundleFindings() {
-  const directory = join(root, ".next", "static");
+  const dist = process.env.MGD_NEXT_DIST_DIR ?? ".next";
+  if (![".next", ".next-pilot"].includes(dist)) throw new Error(`MGD_NEXT_DIST_DIR may only be ".next-pilot", not "${dist}".`);
+  const directory = join(root, dist, "static");
   if (!existsSync(directory)) {
-    console.error("No build found at .next/static. Run npm run build first.");
+    console.error(`No build found at ${dist}/static. Run npm run build first.`);
     process.exit(1);
   }
   const findings = [];
