@@ -67,7 +67,7 @@
     "exclusion:test": "node --experimental-strip-types --no-warnings --test src/features/exclusion/exclusion.test.mjs",
     "merge:test": "node --experimental-strip-types --no-warnings --test src/features/merge/merge.test.mjs",
     "admin:test": "node --experimental-strip-types --no-warnings --test src/features/admin/admin.test.mjs",
-    "records:test": "node --experimental-strip-types --no-warnings --test src/features/records/records.test.mjs",
+    "records:test": "node --experimental-strip-types --no-warnings --test src/features/records/records.test.mjs src/features/records/source-facts.test.mjs",
     "editing:test": "node --experimental-strip-types --no-warnings --test src/features/editing/editing.test.mjs",
     "imports:test": "node --experimental-strip-types --no-warnings --test src/features/imports/imports.test.mjs src/features/reference/reference.test.mjs",
     "invitations:test": "node --experimental-strip-types --no-warnings --test src/features/invitations/invitations.test.mjs",
@@ -89,7 +89,10 @@
     "app:a11y-checks": "node scripts/app-a11y-checks.mjs",
     "db:exclusion-benchmark": "node scripts/db-exclusion-benchmark.mjs",
     "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs",
-    "db:wishlist-benchmark": "node scripts/db-wishlist-benchmark.mjs"
+    "db:wishlist-benchmark": "node scripts/db-wishlist-benchmark.mjs",
+    "enrichment:test": "node --experimental-strip-types --no-warnings --test src/features/enrichment/enrichment.test.mjs",
+    "app:catalog-ux-checks": "node scripts/app-catalog-ux-checks.mjs",
+    "app:catalog-ux-browser-checks": "node scripts/app-catalog-ux-browser-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

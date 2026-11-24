@@ -94,3 +94,30 @@ test("the creating editor's reason is the record's evidence note, and only the r
   assert.equal(creationNote(items.slice(0, 2), "release"), null);
   assert.equal(creationNote([{ ...items[2], reason: null }], "release"), null);
 });
+
+// M15 catalog UX: live search.
+import { LIVE_SEARCH_DELAY_MS, liveSearchHref, resultsLine, tooShortToSearch } from "./live-search.ts";
+
+test("live search builds the address from the filled fields only, never keeping a page cursor", () => {
+  const href = liveSearchHref("/admin/catalog/search", [["q", "  zelda "], ["platform", "snes"], ["status", ""], ["kind", "games"], ["cursor", "abc"]]);
+  assert.equal(href, "/admin/catalog/search?q=zelda&platform=snes&kind=games");
+  assert.equal(liveSearchHref("/admin/catalog/search", [["q", ""], ["status", " "]]), "/admin/catalog/search");
+  assert.equal(liveSearchHref("/x", [["q", "Zelda no Densetsu: Kamigami & Triforce"]]), "/x?q=Zelda+no+Densetsu%3A+Kamigami+%26+Triforce");
+});
+
+test("live search waits about 300 ms, and keeps results for a one-character query", () => {
+  assert.equal(LIVE_SEARCH_DELAY_MS, 300);
+  assert.equal(tooShortToSearch("z"), true);
+  assert.equal(tooShortToSearch(" z "), true);
+  assert.equal(tooShortToSearch("ゼ"), false);
+  assert.equal(tooShortToSearch(""), false);
+  assert.equal(tooShortToSearch("ze"), false);
+  assert.equal(tooShortToSearch(null), false);
+});
+
+test("the results line says what the page holds", () => {
+  assert.equal(resultsLine(25, "games", true, false), "25 games, by title · more on the next page");
+  assert.equal(resultsLine(1, "games", false, false), "1 game, by title");
+  assert.equal(resultsLine(12, "releases", false, true), "12 releases on this page, by title");
+  assert.equal(resultsLine(2, "games", false, false, " zelda "), "2 games matching “zelda”, by title", "the line names the search it shows");
+});

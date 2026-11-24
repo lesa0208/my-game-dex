@@ -5,6 +5,7 @@ import type { CatalogDate } from "@/features/catalog/types";
 import { UUID } from "@/features/collection/uuid";
 
 import type { HistoryEvent, SearchParams } from "./form";
+import type { SourceFacts } from "./source-facts";
 
 /**
  * Catalog records for staff (M10b), read with the staff member's own session through
@@ -161,6 +162,20 @@ async function record<T>(fn: "get_game_record" | "get_release_record", arg: "p_g
 /** One game for staff: null when there's none. */
 export function getGameRecord(id: string) {
   return record<GameRecord>("get_game_record", "p_game", id);
+}
+
+/**
+ * What the sources said about a game (M15 catalog UX, get_game_source_facts): the import's source
+ * records, their flags, and held records that may duplicate it. Catalog editors only. Claims, never
+ * verified facts.
+ */
+export async function getGameSourceFacts(id: string): Promise<Outcome<SourceFacts | null>> {
+  if (!UUID.test(id)) return { ok: true, data: null };
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { ok: false, reason: "unavailable" };
+  const { data, error } = await supabase.rpc("get_game_source_facts", { p_game: id });
+  if (error) return failure(error);
+  return { ok: true, data: typeof data === "object" && data !== null ? (data as SourceFacts) : null };
 }
 
 /**

@@ -9,6 +9,7 @@ import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-fram
 import { HistoryPanel } from "@/components/admin/records";
 import { CorrectionForm, PiecesForm } from "@/components/review/correction-form";
 import { DecisionForm } from "@/components/review/decision-form";
+import { ExternalSources } from "@/components/review/external-sources";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
 import { componentLabel, editionKindLabel } from "@/features/catalog/format";
@@ -258,6 +259,12 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
             <p className="text-sm text-muted-foreground">No release of this game on this platform, and nothing with the same product code or barcode.</p>
           )}
         </Section>
+
+        {request.kind === "new_game" ? (
+          <Section id="review-external" title="What external sources found">
+            <ExternalSources title={details.title} platformSlug={details.platform.slug} />
+          </Section>
+        ) : null}
 
         {release ? <HistoryPanel id="review-record-history" entity="release" recordId={release.id} title="Release history" admin={access.admin} /> : null}
 

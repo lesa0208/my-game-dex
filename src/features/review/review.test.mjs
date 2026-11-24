@@ -155,3 +155,23 @@ test("database errors become fixed messages, and nothing else gets through", () 
   assert.equal(reviewErrorMessage("request conflict"), reviewErrorMessage("record changed"));
   assert.equal(reviewErrorMessage('duplicate key value violates unique constraint "x"'), "The review couldn't be saved. Try again.");
 });
+
+// M15 catalog UX: predefined reasons, with an optional comment.
+import { REASON_CHOICES, REASON_OTHER } from "./form.ts";
+
+test("a chosen reason stands alone or takes a comment; Other needs the comment", () => {
+  const read = (fields) => (name) => fields[name] ?? "";
+  assert.deepEqual(readReason(read({ reason_choice: "Not a physical game" })), { value: "Not a physical game" });
+  assert.deepEqual(readReason(read({ reason_choice: "Not a physical game", reason: "  a download   code " })), { value: "Not a physical game: a download code" });
+  assert.ok("error" in readReason(read({ reason_choice: REASON_OTHER })));
+  assert.deepEqual(readReason(read({ reason_choice: REASON_OTHER, reason: "Seen at a fair" })), { value: "Seen at a fair" });
+  assert.ok("error" in readReason(read({ reason_choice: "I approve everything" })), "an unlisted choice is refused");
+  assert.deepEqual(readReason(read({ reason: "Typed as before" })), { value: "Typed as before" }, "the old free-text form still works");
+  assert.ok("error" in readReason(read({})));
+  assert.ok("error" in readReason(read({ reason_choice: REASON_CHOICES.reject[0], reason: "x".repeat(480) })), "500 characters at most, with the choice");
+});
+
+test("every decision offers its own reasons, none of them claiming a check the editor didn't choose", () => {
+  for (const d of ["start", "approve", "changes", "reject"]) assert.ok(REASON_CHOICES[d].length >= 1);
+  for (const r of REASON_CHOICES.approve) assert.match(r, /checked/i, "approving says what the editor checked, in their own choice");
+});
