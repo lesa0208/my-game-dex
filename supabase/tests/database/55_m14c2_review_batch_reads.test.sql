@@ -5,7 +5,7 @@
 -- synthetic accounts and records only; no savepoints (see 54).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(115);
+select plan(116);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.claims(p_user uuid, p_aal text) returns jsonb language plpgsql as $mfa$
@@ -454,6 +454,16 @@ select is(pg_temp.then_undo($$select pg_temp.outcome('e2', 'p', pg_temp.g('Pilot
           $$select string_agg((e ->> 'outcome') || ':' || (e ->> 'note') || ':' || (e -> 'person' ->> 'you'), ' | ' order by n)
             from jsonb_array_elements(pg_temp.member('e3', 'p', pg_temp.g('Pilot Alpha')) -> 'trail') with ordinality x(e, n)$$),
           'incorrect:Not a game: a cartridge-based utility:false | excluded:Excluded: not a game:false', 'its outcome trail, oldest first');
+-- M15: the two outcomes above share their time (one transaction). Forced: two recorded together,
+-- the later with the smaller id, so an order by id would reverse them. The trail follows seq.
+select is(pg_temp.then_undo($$insert into private.audit_events (id, actor_id, action, reason, metadata) values
+                                ('01900000-0000-7000-8000-0000000ff002', pg_temp.u('e2'), 'catalog_batch_outcome_recorded', 'Ordering check',
+                                 jsonb_build_object('batch_id', pg_temp.b('p'), 'game_id', pg_temp.g('Pilot Alpha'), 'outcome', 'incorrect', 'note', 'first')),
+                                ('01900000-0000-7000-8000-0000000ff001', pg_temp.u('e2'), 'catalog_batch_outcome_recorded', 'Ordering check',
+                                 jsonb_build_object('batch_id', pg_temp.b('p'), 'game_id', pg_temp.g('Pilot Alpha'), 'outcome', 'excluded', 'note', 'second'))$$,
+          $$select string_agg((e ->> 'outcome') || ':' || (e ->> 'note'), ' | ' order by n)
+            from jsonb_array_elements(pg_temp.member('e3', 'p', pg_temp.g('Pilot Alpha')) -> 'trail') with ordinality x(e, n)$$),
+          'incorrect:first | excluded:second', 'two outcomes recorded together stay oldest first, whatever their ids (M15)');
 select is(pg_temp.then_undo($$insert into private.catalog_review_batch_approvals (batch_id, approver_id, reason) values (pg_temp.b('p'), pg_temp.u('e3'), 'first of two')$$,
           $$select (pg_temp.member('e2', 'p', pg_temp.g('Pilot Alpha')) -> 'you' ->> 'record') || ' ' || (pg_temp.overview('e2', 'p') -> 'you' ->> 'review') || ' '
                    || pg_temp.outcome('e2', 'p', pg_temp.g('Pilot Alpha'), 'excluded', null, null)$$),

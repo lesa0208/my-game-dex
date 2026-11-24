@@ -310,5 +310,9 @@ Results:
 
 **Still open before P1:** the product owner's P0 decisions (where the pilot runs, the rights
 decision for it, who editors A and B are, the pilot size), and a second real person with local
-access. Pairings are verified through batch approval; there is no admin page for
+access. **Before any real editorial decision**, the audit-ordering fix
+([`20261214100000_m15_audit_ordering`](audit-ordering-m15.md)) must be merged, so a pilot created
+from `main` has it from the start. Without it, an approval's events and a member's outcome
+trail can be listed out of order. A decision on the shared local database password (above) is
+also needed before the pilot is created. Pairings are verified through batch approval; there is no admin page for
 `verify_game_platform` on its own.

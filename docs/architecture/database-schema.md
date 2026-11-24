@@ -1447,6 +1447,9 @@ In the `private` schema (M4). Replaces the planned `moderation_actions` (M4-D1).
 | `reason` | `text` | No | Trimmed, 1 to 500 characters |
 | `metadata` | `jsonb` | No | Before and after values. An object of at most 2 KB. Default `{}` |
 | `outcome` | `text` | No | M8. Generated from `action` and `actor_id`: `refused`, `operator` or `succeeded` |
+| `seq` | `bigint` | Yes | M15. Set by the trigger `audit_events_assign_seq` from `private.audit_events_seq` on every new row (a supplied value is replaced); required of new rows (`NOT VALID` check), positive and unique. Null for rows recorded before M15. Insertion order, not commit order; has gaps. See [Audit event ordering](audit-ordering-m15.md) |
+
+- **Order:** readers list events by `(occurred_at, coalesce(seq, 0), id)`, newest first descending (M15), with `audit_events_chronological_idx` on those three
 
 - **Primary key:** `id`
 - **Foreign keys:** none, deliberately. Deleting an account doesn't change the log, and rows hold no copies of profile data. L4 Reporting adds a report reference
