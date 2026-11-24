@@ -1,8 +1,8 @@
 # M15: the isolated SNES pilot stack
 
 **Written for:** the product owner and the operators of the first real SNES catalog pilot, and
-whoever reviews its tooling. **Status, 2026-11-23 (M15 P1a):** tooling only. The pilot stack
-**does not exist**. No account, role, rights record, staging, batch, outcome, approval,
+whoever reviews its tooling. **Status, 2026-11-24 (M15 P1a, with its hardening):** tooling only,
+rehearsed on a disposable twin. The pilot stack **does not exist**. No account, role, rights record, staging, batch, outcome, approval,
 publication, backup or snapshot was created for it. Everything below runs only at checkpoint P1
 and later, each step with its own authorization.
 
@@ -47,10 +47,40 @@ project ids are checked to collide with no other stack (`scripts/pilot-stack.tes
 - **A restart changes nothing.** A restart doesn't regenerate the pilot's config or copy
   migrations: it is refused if this checkout's `supabase/config.toml` or migrations differ from
   the pilot's. Restart it from the checkout it was created from.
-- **The marker.** Creating the pilot writes `~/.my-game-dex/protect-pilot-stack` as soon as it
-  starts (`MGD_TEST_STACK=pilot node scripts/test-stack.mjs protect-pilot` writes it again). While it exists, `reset` and `destroy` (which deletes the
-  volumes) refuse, whatever the environment says. Without it they still need
-  `MGD_ALLOW_PILOT_RESET=1`; B1's `MGD_ALLOW_B1_RESET` doesn't count.
+- **The marker, before anything exists.** Creating the pilot writes
+  `~/.my-game-dex/protect-pilot-stack` (`"state": "creating"`, with the pilot's own signing key's
+  id) *before* `supabase start` creates its database volume, so a volume never exists unprotected.
+  A start that fails or is killed half-way leaves a protected, partial pilot: the next start
+  resumes it (without `MGD_CREATE_PILOT` if its volume exists; the tool says when the flag is
+  needed again). Only when a start has succeeded and the running pilot uses its own keys does the
+  marker say `"created"`; from then on a missing volume is never created again, flag or not
+  (`scripts/lib/stack-marker.mjs`). While the marker exists, `reset` and `destroy` (which deletes
+  the volumes) refuse, whatever the environment says; without it they still need
+  `MGD_ALLOW_PILOT_RESET=1` (B1's `MGD_ALLOW_B1_RESET` doesn't count).
+- **No marker, no pilot.** A restart refuses while the marker is missing, unreadable, another
+  stack's or for other signing keys, and so does every tool (`stackStatus()` checks it for the
+  editorial tools, the preview and the backups). The tools also refuse a pilot whose marker still
+  says `creating`: one more guarded start checks it and marks it created. `db.mjs start` refuses
+  the pilot and its twin. Nothing writes it back automatically: if it is
+  missing and no authorized recovery removed it, the operator confirms this is the pilot created
+  at P1 and runs `MGD_TEST_STACK=pilot node scripts/test-stack.mjs protect-pilot`.
+- **Docker must answer.** Only Docker's own "no such volume" counts as a missing volume; any other
+  error (the daemon down, another context) stops the start, so an existing pilot is never taken
+  for a missing one.
+- **Its own signing keys.** Every other local stack shares the Supabase CLI's built-in
+  credentials, which are public: one ES256 signing key, one HS256 JWT secret, one publishable and
+  one secret API key, and one pair of Storage S3 keys. So development's secret key or a development
+  session would otherwise be valid on the pilot. Creating the pilot generates its own
+  (`scripts/lib/stack-keys.mjs`): an ES256 signing key (`.supabase-pilot/supabase/signing_keys.json`),
+  and a JWT secret and publishable and secret keys (`.supabase-pilot/supabase/.env`). They are
+  random, owner-only, git-ignored, written once and never printed. The generated config names them
+  (`env(…)`, `signing_keys_path`), never their values. Storage's S3 protocol, whose keys the CLI
+  can't change, is off on the pilot (the app doesn't use it). A restart refuses if the key files
+  are missing, empty or malformed (it would fall back to the shared keys), and key variables set
+  in the shell are never passed to the CLI. `supabase status` only repeats the config, so after
+  every start, and in every tool, the *running* pilot is checked: its Auth must publish only its
+  own signing key, and its own secret key (read from the key file) must open its Auth admin API;
+  if not, the start stops it again and the tool refuses. Proof: [Rehearsal](#rehearsal-2026-11-24).
 - **Nothing rewrites it.** No tool here runs `db reset`, `migration repair`, `migration up`, a seed,
   a restore or `pg_restore --clean` on the pilot. Migrating an existing pilot is a separate,
   authorized activation, as for development.
@@ -143,11 +173,16 @@ npm run pilot:backup -- snapshot --checkpoint <name>   # stops the pilot only, c
 npm run pilot:backup -- verify --manifest <file.sha256>
 ```
 
-Dumps go to `~/.my-game-dex/backups/pilot/`, created with mode 600 (owner-only on macOS and
-Linux; on Windows the folder inherits the user profile's permissions). `verify` refuses a
-manifest that is incomplete, lists a file twice or names a file outside its backup. Stop the
-preview before a snapshot: the tool compares the data before the stop and after the restart, and
-a sign-in in between shows as a difference. The inventories are the
+Dumps go to `~/.my-game-dex/backups/pilot/`. Each file is created with mode 600 (owner-only on
+macOS and Linux); on Windows mode bits do nothing and the files inherit the user profile's ACL
+(this user, SYSTEM and Administrators: checked by the rehearsal). The manifest is written last:
+a dump that fails is labelled `.FAILED.txt` and has no manifest, so it never verifies, and its
+name is never reused. `verify` refuses a manifest that is incomplete, lists a file twice or names
+a file outside its backup. A snapshot first runs every restart check
+(`test-stack.mjs preflight`), so it never stops a pilot this checkout couldn't start again, and it
+restarts through `test-stack.mjs` (all its start checks). Stop the preview before a snapshot: the
+tool compares the data before the stop and after the restart, and a sign-in in between shows as a
+difference. The inventories are the
 integrity queries used for every development activation (`scripts/sql/integrity/`).
 
 ## Recovery (separately authorized)
@@ -161,22 +196,42 @@ only with the product owner's explicit authorization for that restore, naming th
    with `pg_restore --clean` over a running database. Create `catalog_importer`,
    `supabase_functions_admin` and `supabase_realtime_admin` first. Compare its inventories with the
    checkpoint's.
-3. Only then, with the pilot stopped: remove the marker, copy the chosen `mgd_pilot_db_snapshot_*`
-   volume back over `supabase_db_my-game-dex-pilot` (as the snapshot was taken, in reverse),
-   start the pilot, compare the inventories with the checkpoint's, and write the marker again.
+3. Only then, with the pilot stopped (`MGD_TEST_STACK=pilot node scripts/test-stack.mjs stop`),
+   and the marker left in place: copy the chosen `mgd_pilot_db_snapshot_*` volume back over
+   `supabase_db_my-game-dex-pilot` (as the snapshot was taken, in reverse: empty the volume, then
+   `cp -a`), compare the two volumes' checksums, start it with the same command as any restart
+   (its guards check the marker, its config and its own keys), and compare the inventories with
+   the checkpoint's. The rehearsal does exactly this on the twin.
 4. Report what was lost between the checkpoint and the failure. Every decision taken since is
    recorded again by its editor, never replayed by a tool.
+
+The pilot's own key files (`.supabase-pilot/supabase/.env` and `signing_keys.json`) aren't in
+the database volume or the backups: keep them with the checkout the pilot was created from. A
+snapshot copied back works only with them. If they are lost, the data is intact but the pilot
+can't start (a restart refuses rather than fall back to the shared keys). Giving an existing pilot
+new keys hasn't been rehearsed: it would end every session, and the database still holds the old
+JWT secret (below), so it is its own authorized procedure, rehearsed on the twin first. The volume and the snapshots hold the
+JWT secret too (as `app.settings.jwt_secret`, and Realtime's tenant record): treat snapshots and
+dumps as secret.
 
 ## P1, when authorized
 
 From a clean checkout of `main` (not the development checkout, whose server on port 3000 keeps
 running):
 
+0. The rehearsal on the twin, from the same checkout, with nothing else changed since it passed
+   (see [Rehearsal](#rehearsal-2026-11-24)); then destroy the twin.
 1. `MGD_CREATE_PILOT=1 MGD_TEST_STACK=pilot node scripts/test-stack.mjs start` (it writes the
-   marker once the stack is up).
+   marker first, then the pilot's own keys, then starts it). If it fails, run the same command
+   without `MGD_CREATE_PILOT` to resume; never `destroy` a partial pilot without authorization.
 2. `MGD_STACK=pilot node scripts/db.mjs migrations`: every migration applied, none pending.
 3. `npm run pilot:backup -- dump --checkpoint empty`, then `snapshot --checkpoint empty`.
-4. `npm run build`, then `npm run pilot:preview` (it refuses unless the API is the pilot's).
+4. `npm run pilot:preview`: it refuses unless the API is the pilot's and the running pilot uses
+   its own keys, then builds the app with the pilot's URL and keys into its own folder,
+   `.next-pilot/` (`MGD_NEXT_DIST_DIR`, next.config.ts), scans its browser bundles for secrets and
+   serves that build. A build made with `.env.local` could carry development's cached catalog into
+   the preview, and a pilot build in `.next/` would be served by the app checks and the B1 preview:
+   neither happens.
 
 Then, each with its own authorization: the rights decision for the pilot, clearance
 (`clear-wikidata --terms-file … --decision …`), staging (`stage` with the pinned files and a reason),
@@ -185,16 +240,71 @@ Then, each with its own authorization: the rights decision for the pilot, cleara
 Admin → Catalog and a `reviewed` checkpoint; B's approval and an `approved` checkpoint; A's
 publications and a `published` checkpoint.
 
-**Known limits of this tooling (to settle before P1):**
+## Rehearsal (2026-11-24)
 
-- **Signing keys.** Every local stack uses the Supabase CLI's default JWT secret and default API
-  keys, so development's secret key would be accepted by the pilot's API if someone pointed it at
-  port 58321. The tools never do (each reads the URL and keys of the stack it checked together),
-  but isolation is by address, not by credential. Giving the pilot its own signing keys needs a
-  rehearsal on scratch first; until then, the operator keeps `.env.local` pointed at development.
-- **Not yet rehearsed:** a real `dump` and `snapshot` (that `pg_dump` runs as `supabase_admin` in
-  the container, and `pg_controldata` as the image's entry point). Rehearse both on a disposable
-  copy before the `empty` checkpoint.
+On the disposable twin (`MGD_TEST_STACK=rehearsal`: project `my-game-dex-rehearsal`, ports plus
+5000, its own keys, marker `~/.my-game-dex/protect-rehearsal-stack`, created with
+`MGD_CREATE_REHEARSAL=1`; same image and migrations as the pilot) and the scratch stack, which has
+the CLI's shared keys (development's: every key of development's `status` equals scratch's). No
+other stack was touched. Repeat it from the P1 checkout before creating the pilot:
+
+```sh
+MGD_CREATE_REHEARSAL=1 MGD_TEST_STACK=rehearsal node scripts/test-stack.mjs start
+MGD_TEST_STACK=scratch node scripts/test-stack.mjs start
+MGD_TEST_STACK=rehearsal node scripts/test-stack.mjs run db:pgtap     # then: run db:suites
+MGD_TEST_STACK=rehearsal node scripts/test-stack.mjs reset            # suites leave FK-orphan rows
+node scripts/pilot-rehearsal.mjs isolation
+node scripts/pilot-rehearsal.mjs backup --dir <an absolute folder outside ~/.my-game-dex/backups/pilot>
+node scripts/pilot-rehearsal.mjs cleanup
+MGD_TEST_STACK=rehearsal node scripts/test-stack.mjs destroy           # and scratch
+```
+
+Results:
+
+- **Credentials (26 of 26).** B (the twin) refuses A's (scratch's) session token on Auth, the
+  Data API and Storage, and A refuses B's. A's secret key is refused by B's Auth admin API and
+  Storage, and B's Data API treats it, and A's publishable key, exactly as no key at all
+  (anonymous: none of the service role's rights). A's legacy `service_role` key, and a
+  `service_role` token signed with A's JWT secret, are refused on Auth admin, the Data API and
+  Storage. B's own sessions, keys and secret key work. MFA on B: a TOTP factor enrols and
+  verifies, the `aal2` session is B's and A refuses it. A's S3 keys work on A and are refused by B
+  (S3 off); B's status has no S3 keys.
+- **Existing behaviour with its own keys.** Every pgTAP file (56 files, 4432 tests) and every one
+  of the 23 database suites (authorization, RLS, staff roles, MFA, sessions, owner, invitations,
+  passwords and the rest) pass on the twin, the suites taking its keys from its `status` as the
+  tools do.
+- **Start and protection.** A start without the flag is refused. A creation killed 1.8 s in, with
+  its database volume created, left the marker `creating`; retrying with the flag is refused
+  ("already exists"), a plain start resumed it and marked it `created`. With the volume then
+  deleted, creating it again is refused, flag or not. On the running twin, a missing marker or a
+  marker for other keys makes both the restart check and every tool refuse, and both pass again
+  once it is back.
+- **Backups (35 of 35).** A complete dump (9 files with its manifest; `pg_restore --list` reads
+  2381 entries); a second dump with the same name refused; the files and the key files readable
+  only by this user, SYSTEM and Administrators (Windows); a changed byte, a missing line, a file
+  outside the backup and a doubled line all refused by `verify`, and a rehearsal manifest by the
+  pilot's; a dump failing mid-way (the database paused) marked FAILED with no manifest; a dump
+  killed mid-way left no manifest. Restored into a new, empty database (owner `postgres`) in a
+  throwaway container from the same image: no error, every table's rows (99) and the migration
+  history (82) equal, all 17 roles present, the rights of `anon`, `authenticated` and
+  `service_role` on every table and function equal (1356), and the security inventory equal
+  apart from 36 owner-only table ACLs restored as the equivalent default. No key value is readable
+  in the dump. The snapshot: its restart checks first, a clean shutdown, the copy equal in
+  contents, owners, modes and times, the twin restarted unchanged. The manual recovery: a change
+  made after the snapshot, the twin stopped, the snapshot copied back (equal), started through its
+  checks, the data the snapshot's again and its own keys working.
+
+**Known limits:**
+
+- **The database's own password** is the CLI's fixed local `postgres` on every stack (the CLI has
+  no setting for it), so the pilot's database port (58322, loopback only) accepts development's
+  database URL with the pilot's port. No tool connects that way (they use `docker exec` into the
+  container they checked), and only a local user can reach the port.
+- **Re-keying an existing pilot** isn't rehearsed (see Recovery).
+- **Suite residue:** the database suites' clean-up deletes under
+  `session_replication_role = replica` (`db-release-identity-checks.mjs` deletes games that way),
+  which skips foreign-key cascades and leaves orphan rows; a dump of such a stack doesn't restore
+  with `--exit-on-error`. The pilot never runs suites; the persistent test stack has.
 - `scripts/catalog-import-role.mjs` (the importer login switch `stage` uses) has no stack guard of
   its own; it predates M15 and is reached on the pilot only through `stage`.
 
