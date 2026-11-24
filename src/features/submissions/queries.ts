@@ -14,7 +14,8 @@ import { UUID } from "@/features/collection/uuid";
 export type SubmissionOptions = {
   /** M12b: with its id, which an unidentified copy names. */
   platforms: { id: string; slug: string; name: string; shortName: string; family: string }[];
-  formats: { platform: string; code: string; name: string; category: string }[];
+  /** M15: acceptsNewPublications is false for a platform's "shape not classified" format (NES and SNES rom-cartridge). */
+  formats: { platform: string; code: string; name: string; category: string; acceptsNewPublications: boolean }[];
   regions: { code: string; label: string }[];
 };
 
@@ -96,15 +97,15 @@ export async function getSubmissionOptions(): Promise<SubmissionOptions | null> 
   cacheLife("hours");
   const [platforms, formats, regions] = await Promise.all([
     publicGet("platforms?select=id,slug,name,short_name,family&order=name"),
-    publicGet("platform_media_formats?select=platform:platforms(slug),format:media_formats(code,name,category,position)"),
+    publicGet("platform_media_formats?select=accepts_new_publications,platform:platforms(slug),format:media_formats(code,name,category,position)"),
     publicGet("region_codes?select=code,label,position&order=position"),
   ]);
   if (!Array.isArray(platforms) || !Array.isArray(formats) || !Array.isArray(regions)) return null;
   return {
     platforms: platforms.map((p: { id: string; slug: string; name: string; short_name: string; family: string }) => ({ id: p.id, slug: p.slug, name: p.name, shortName: p.short_name, family: p.family })),
-    formats: (formats as { platform: { slug: string }; format: { code: string; name: string; category: string; position: number } }[])
+    formats: (formats as { accepts_new_publications: boolean; platform: { slug: string }; format: { code: string; name: string; category: string; position: number } }[])
       .sort((a, b) => a.format.position - b.format.position)
-      .map((f) => ({ platform: f.platform.slug, code: f.format.code, name: f.format.name, category: f.format.category })),
+      .map((f) => ({ platform: f.platform.slug, code: f.format.code, name: f.format.name, category: f.format.category, acceptsNewPublications: f.accepts_new_publications !== false })),
     regions: (regions as { code: string; label: string }[]).map((r) => ({ code: r.code, label: r.label })),
   };
 }
@@ -151,4 +152,15 @@ export async function getMySubmissionForRelease(releaseId: string): Promise<stri
   if (!supabase) return null;
   const { data } = await supabase.rpc("my_submission_for_release", { p_release: releaseId });
   return typeof data === "string" ? data : null;
+}
+
+/** M15: the lookup of the caller's own new-game submission, as they may see it. Null when there is none. */
+export type MyEnrichment = { status: string; retrieved_at: string | null; found: boolean };
+export async function getMySubmissionEnrichment(id: string): Promise<MyEnrichment | null> {
+  if (!UUID.test(id)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("my_submission_enrichment", { p_submission: id });
+  if (error) return null;
+  return typeof data === "object" && data !== null ? (data as MyEnrichment) : null;
 }

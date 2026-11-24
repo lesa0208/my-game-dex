@@ -2,9 +2,11 @@
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
 import { createSupabaseServerClient } from "@/features/auth/server";
 import { UUID } from "@/features/collection/uuid";
+import { runSubmissionEnrichment } from "@/features/enrichment/server";
 import { getSubmissionOptions } from "@/features/submissions/queries";
 
 import { piecesEditable, readGameCorrections, readNote, readPieceCorrections, readReason, readReleaseCorrections, reviewErrorMessage } from "./form";
@@ -137,4 +139,34 @@ export async function correctSubmission(_state: ReviewState, formData: FormData)
 
 export async function correctSubmissionFromForm(formData: FormData): Promise<void> {
   await correctSubmission({ status: "idle", message: null }, formData);
+}
+
+/**
+ * M15: asks for a new lookup of a submission's game in approved sources (a catalog editor, with
+ * MFA: request_submission_enrichment checks), then runs it after the response. Lands back on the
+ * review page.
+ */
+export async function lookUpSubmissionAgain(formData: FormData): Promise<void> {
+  const id = field(formData, "request_id");
+  if (!UUID.test(id)) return;
+  const supabase = await signedIn();
+  if (!supabase) return;
+  const { data, error } = await supabase.rpc("request_submission_enrichment", { p_submission: id });
+  if (!error && data === true) after(() => runSubmissionEnrichment({ submissionId: id }));
+  refresh();
+  redirect(`/admin/catalog/${id}?notice=lookup`);
+}
+
+/**
+ * M15: runs due lookups after the response: one submission's, or a few waiting ones. Only for a
+ * catalog editor (can_review_submissions checks, with MFA); the claim decides what is due, so
+ * calling it again does nothing extra.
+ */
+export async function runDueLookups(submissionId: string | null): Promise<void> {
+  if (submissionId !== null && !UUID.test(submissionId)) return;
+  const supabase = await signedIn();
+  if (!supabase) return;
+  const { data } = await supabase.rpc("can_review_submissions");
+  if (data !== true) return;
+  after(() => runSubmissionEnrichment(submissionId ? { submissionId } : { limit: 3 }));
 }

@@ -91,6 +91,7 @@
     "db:merge-benchmark": "node scripts/db-merge-benchmark.mjs",
     "db:wishlist-benchmark": "node scripts/db-wishlist-benchmark.mjs",
     "enrichment:test": "node --experimental-strip-types --no-warnings --test src/features/enrichment/enrichment.test.mjs",
+    "app:enrichment-checks": "node scripts/app-enrichment-checks.mjs",
     "app:catalog-ux-checks": "node scripts/app-catalog-ux-checks.mjs",
     "app:catalog-ux-browser-checks": "node scripts/app-catalog-ux-browser-checks.mjs"
   },

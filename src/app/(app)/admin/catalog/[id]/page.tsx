@@ -9,14 +9,17 @@ import { AdminFrame, AdminShell, linkClass } from "@/components/admin/admin-fram
 import { HistoryPanel } from "@/components/admin/records";
 import { CorrectionForm, PiecesForm } from "@/components/review/correction-form";
 import { DecisionForm } from "@/components/review/decision-form";
-import { ExternalSources } from "@/components/review/external-sources";
+import { PreparedReview } from "@/components/review/prepared-review";
 import { EmptyState } from "@/components/shared/empty-state";
 import { requireAdminSection } from "@/features/admin/queries";
 import { componentLabel, editionKindLabel } from "@/features/catalog/format";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
 import { catalogStatusLabel, piecesEditable, requestStatusLabel, submitterLabel } from "@/features/review/form";
-import { getSubmissionReview } from "@/features/review/queries";
+import { LookupNudge } from "@/components/enrichment/lookup-nudge";
+import { wikidataConfigured } from "@/features/enrichment/server";
+import { runDueLookups } from "@/features/review/actions";
+import { getSubmissionEnrichment, getSubmissionReview } from "@/features/review/queries";
 import { formatWhen } from "@/features/submissions/display";
 import { GAME_KINDS, PIECE_KINDS } from "@/features/submissions/form";
 import { getSubmissionOptions } from "@/features/submissions/queries";
@@ -31,6 +34,7 @@ const NOTICES: Record<string, string> = {
   approved: "Approved and published. The submitter has been told.",
   changes_requested: "Sent back to the submitter with your note.",
   rejected: "Rejected. The submitter has been told.",
+  lookup: "Looking it up again. Reload in a moment to see the answer.",
 };
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
@@ -97,7 +101,16 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
   const details = request.details;
   const deleted = submitter.deleted;
   const inReview = request.status === "in_review";
-  const options = await getSubmissionOptions();
+  const [options, enrichment] = await Promise.all([getSubmissionOptions(), request.kind === "new_game" ? getSubmissionEnrichment(request.id) : Promise.resolve(null)]);
+  const configured = wikidataConfigured();
+  const waiting = ["open", "in_review", "changes_requested"].includes(request.status);
+  // A lookup still waiting (it failed, or never ran) is tried again once this page is open.
+  const nudge = configured && waiting && enrichment && ["pending", "failed"].includes(enrichment.status) && !enrichment.looking_up && enrichment.attempts < 5;
+  const formatName = (code: string) => options?.formats.find((f) => f.code === code)?.name ?? code;
+  const submittedFormat = options?.formats.some((f) => f.platform === details.platform.slug && f.code === details.format.code && !f.acceptsNewPublications)
+    ? "Not sure: the cartridge shell isn't identified yet"
+    : details.format.name;
+  const publishable = (code: string) => Boolean(release && options?.formats.some((f) => f.platform === release.platform.slug && f.code === code && f.acceptsNewPublications));
   const regionLabel = (code: string) => (code === "unknown" ? "Region unknown" : (options?.regions.find((r) => r.code === code)?.label ?? code));
   const regionText = (code: string, confirmed: boolean) =>
     code === "unknown" ? (confirmed ? "Unknown, confirmed by an editor" : "Unknown, not confirmed") : (options?.regions.find((r) => r.code === code)?.label ?? code);
@@ -120,7 +133,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
 
         <header>
           <p className="text-sm text-muted-foreground">
-            {[details.platform.short_name, details.region.code === "unknown" ? "Region unknown" : details.region.label, details.format.name].join(" · ")}
+            {[details.platform.short_name, details.region.code === "unknown" ? "Region unknown" : details.region.label, submittedFormat].join(" · ")}
           </p>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">{requestStatusLabel(request.status)}</span>
@@ -161,7 +174,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
               { label: "Type", value: request.created_game ? (GAME_KINDS.find((k) => k.value === details.game_kind)?.label ?? null) : null },
               { label: "First released", value: request.created_game && details.first_release_year ? String(details.first_release_year) : null },
               { label: "Platform", value: details.platform.name },
-              { label: "Physical format", value: details.format.name },
+              { label: "Physical format", value: submittedFormat },
               { label: "Region", value: details.region.code === "unknown" ? "Unknown" : details.region.label },
               { label: "Edition", value: details.edition_name },
               { label: "Edition type", value: details.edition_kind ? editionKindLabel(details.edition_kind) : null },
@@ -179,6 +192,21 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
             ]}
           />
         </Section>
+
+        {request.kind === "new_game" ? (
+          <Section id="review-prepared" title="Prepared for review">
+            {nudge ? <LookupNudge run={runDueLookups.bind(null, request.id)} refreshAfterMs={5000} /> : null}
+            <PreparedReview
+              requestId={request.id}
+              waiting={waiting}
+              enrichment={enrichment}
+              configured={configured}
+              release={release}
+              formatName={formatName}
+              publishable={publishable}
+            />
+          </Section>
+        ) : null}
 
         {release ? (
           <Section id="review-record" title="The record now">
@@ -260,11 +288,6 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
           )}
         </Section>
 
-        {request.kind === "new_game" ? (
-          <Section id="review-external" title="What external sources found">
-            <ExternalSources title={details.title} platformSlug={details.platform.slug} />
-          </Section>
-        ) : null}
 
         {release ? <HistoryPanel id="review-record-history" entity="release" recordId={release.id} title="Release history" admin={access.admin} /> : null}
 
