@@ -578,7 +578,7 @@ try {
 
     // Records: what they show, and what they never show.
     const gamePage = visible((await editor.browser.get(`/admin/catalog/games/${game}`)).html);
-    check("the game record shows its title, releases, sources and history", gamePage.includes("Starfall Odyssey") && gamePage.includes("Releases (") && gamePage.includes("Sources and locks") && gamePage.includes("History"));
+    check("the game record shows its title, releases, source, review actions and (in Advanced details) its history", gamePage.includes("Starfall Odyssey") && gamePage.includes("Physical releases (") && /\bSource\b/.test(gamePage) && gamePage.includes("Review actions") && gamePage.includes("Advanced details") && gamePage.includes("History"));
     const gameHtml = (await editor.browser.get(`/admin/catalog/games/${game}`)).html;
     check("and links to each of its releases", gameHtml.includes(`href="/admin/catalog/releases/${published}"`) && gameHtml.includes(`href="/admin/catalog/releases/${pending}"`));
     const pendingHtml = (await editor.browser.get(`/admin/catalog/releases/${pending}`)).html;

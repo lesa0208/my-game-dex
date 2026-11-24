@@ -2,7 +2,7 @@
 
 import { CircleAlert, CircleCheck } from "lucide-react";
 import Link from "next/link";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useState, useSyncExternalStore } from "react";
 
 import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,8 @@ export const EMPTY_SUBMISSION: SubmissionValues = {
   note: "",
 };
 
+const noSubscription = () => () => {};
+
 /** Keeps the form as typed when the request fails on the way, instead of the error boundary. */
 function keepOnFailure(action: (state: SubmissionState, formData: FormData) => Promise<SubmissionState>) {
   return async (state: SubmissionState, formData: FormData): Promise<SubmissionState> => {
@@ -118,6 +120,10 @@ export function SubmissionForm({
   const platformName = (slug: string) => options.platforms.find((p) => p.slug === slug)?.name ?? slug;
   const families = [...new Set(options.platforms.map((p) => p.family))].sort((a, b) => a.localeCompare(b));
   const showGameFields = mode === "game" || (editing && createdGame);
+  // True once hydrated (JavaScript on): the format then follows the platform. Without it, the full list.
+  const enhanced = useSyncExternalStore(noSubscription, () => true, () => false);
+  // A new submission with JavaScript: the format is derived when a platform has one, else asked as a follow-up.
+  const followsPlatform = enhanced && !editing;
 
   return (
     <form
@@ -135,27 +141,12 @@ export function SubmissionForm({
       {mode === "release" && game ? <input type="hidden" name="game_id" value={game.id} /> : null}
 
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 text-sm font-semibold">The game</legend>
+        <legend className="mb-1 text-sm font-semibold">{showGameFields ? "What are you adding?" : "The game"}</legend>
         {showGameFields ? (
           <>
-            <Field id="title" label="Title">
-              <Input id="title" name="title" required maxLength={200} defaultValue={values.title} autoComplete="off" className="h-10" />
+            <Field id="title" label="Title" hint="As printed on the box or cartridge.">
+              <Input id="title" name="title" required maxLength={200} defaultValue={values.title} aria-describedby="title-hint" autoComplete="off" className="h-10" />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field id="game_kind" label="Type">
-                <select id="game_kind" name="game_kind" defaultValue={values.gameKind || "game"} className={selectClassName}>
-                  {GAME_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>
-                      {k.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field id="first_release_year" label="First released (optional)" hint="Leave empty if you don't know.">
-                <Input id="first_release_year" name="first_release_year" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="YYYY"
-                  aria-describedby="first_release_year-hint" defaultValue={values.firstReleaseYear} autoComplete="off" className="h-10" />
-              </Field>
-            </div>
           </>
         ) : (
           <p className="text-sm">
@@ -163,10 +154,9 @@ export function SubmissionForm({
           </p>
         )}
       </fieldset>
-
       <fieldset className="flex flex-col gap-3">
         <legend className="mb-1 text-sm font-semibold">The physical release</legend>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={cn("grid gap-3", followsPlatform ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
           {editing ? (
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className="text-sm font-medium">Platform</span>
@@ -188,6 +178,7 @@ export function SubmissionForm({
               </select>
             </Field>
           )}
+          {followsPlatform ? null : (
           <Field id="media_format" label="Physical format">
             <select key={platform || "all"} id="media_format" name="media_format" required defaultValue={formats.some((f) => f.code === values.mediaFormat) ? values.mediaFormat : formats.length === 1 ? formats[0].code : ""} className={selectClassName}>
               <option value="">Choose a format</option>
@@ -210,8 +201,9 @@ export function SubmissionForm({
                     ))}
             </select>
           </Field>
-          <Field id="region" label="Region">
-            <select id="region" name="region" required defaultValue={values.region} className={selectClassName}>
+          )}
+          <Field id="region" label="Region" hint="Where this copy was sold, as printed on it.">
+            <select id="region" name="region" required defaultValue={values.region} aria-describedby="region-hint" className={selectClassName}>
               <option value="">Choose a region</option>
               {options.regions.filter((r) => r.code !== REGION_UNKNOWN).map((r) => (
                 <option key={r.code} value={r.code}>
@@ -222,14 +214,48 @@ export function SubmissionForm({
             </select>
           </Field>
         </div>
+        {followsPlatform && platform && formats.length === 1 ? (
+          <p className="text-sm text-muted-foreground">
+            Format: {formats[0].name}, the only physical format for {platformName(platform)}.
+            <input type="hidden" name="media_format" value={formats[0].code} />
+          </p>
+        ) : null}
+        {followsPlatform && platform && formats.length > 1 ? (
+          <fieldset className="flex flex-col gap-2 rounded-lg border p-3">
+            <legend className="px-1 text-sm font-medium">{platformName(platform)} has several kinds of physical format. Which one is yours?</legend>
+            {formats.map((f) => (
+              <label key={f.code} className="flex min-h-10 items-center gap-2 text-sm">
+                <input type="radio" name="media_format" value={f.code} required defaultChecked={values.mediaFormat === f.code} className="size-4 accent-primary" />
+                {f.name}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
       </fieldset>
 
       <details className="rounded-lg border" open={editing || undefined}>
         <summary className="flex min-h-10 cursor-pointer items-center rounded-lg px-3 text-sm font-medium outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
-          More about this release <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
+          More details <span className="ml-1 font-normal text-muted-foreground">(optional: editors and sources fill these in)</span>
         </summary>
         <div className="flex flex-col gap-5 border-t p-3">
-          <p className="text-xs text-muted-foreground">Only add what&apos;s printed on the package or what you&apos;re sure of. Editors check everything before it&apos;s published.</p>
+          <p className="text-xs text-muted-foreground">You don&apos;t need any of this. Only add what&apos;s printed on the package or what you&apos;re sure of. Editors check everything before it&apos;s published.</p>
+          {showGameFields ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field id="game_kind" label="Type">
+                <select id="game_kind" name="game_kind" defaultValue={values.gameKind || "game"} className={selectClassName}>
+                  {GAME_KINDS.map((k) => (
+                    <option key={k.value} value={k.value}>
+                      {k.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field id="first_release_year" label="First released" hint="Leave empty if you don't know.">
+                <Input id="first_release_year" name="first_release_year" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="YYYY"
+                  aria-describedby="first_release_year-hint" defaultValue={values.firstReleaseYear} autoComplete="off" className="h-10" />
+              </Field>
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field id="edition_name" label="Edition">
               <Input id="edition_name" name="edition_name" maxLength={120} defaultValue={values.editionName} placeholder="Standard, Greatest Hits…" autoComplete="off" className="h-10" />

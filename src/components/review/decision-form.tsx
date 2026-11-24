@@ -6,6 +6,7 @@ import { startTransition, useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { decideSubmission, decideSubmissionFromForm, type ReviewState } from "@/features/review/actions";
+import { REASON_CHOICES, REASON_OTHER } from "@/features/review/form";
 import { AdminField as Field, adminControl, adminTextarea } from "@/components/admin/form-controls";
 
 function keepOnFailure(action: (state: ReviewState, formData: FormData) => Promise<ReviewState>) {
@@ -84,8 +85,21 @@ export function DecisionForm({
           />
         </Field>
       ) : null}
-      <Field id={`${id}-reason`} label="Reason, for the record" hint="Kept in the audit log. Visible to other catalog staff.">
-        <Input id={`${id}-reason`} name="reason" required maxLength={500} autoComplete="off" aria-describedby={`${id}-reason-hint`} className={adminControl} />
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="mb-1 text-sm font-medium">Why?</legend>
+        {REASON_CHOICES[decision].map((choice, i) => (
+          <label key={choice} className="flex min-h-10 items-center gap-2 text-sm">
+            <input type="radio" name="reason_choice" value={choice} required={i === 0} className="size-4 accent-primary" />
+            {choice}
+          </label>
+        ))}
+        <label className="flex min-h-10 items-center gap-2 text-sm">
+          <input type="radio" name="reason_choice" value={REASON_OTHER} className="size-4 accent-primary" />
+          Other (write it below)
+        </label>
+      </fieldset>
+      <Field id={`${id}-reason`} label="Comment (optional, needed for Other)" hint="Kept in the audit log with the reason. Visible to other catalog staff.">
+        <Input id={`${id}-reason`} name="reason" maxLength={400} autoComplete="off" aria-describedby={`${id}-reason-hint`} className={adminControl} />
       </Field>
       <div>
         <Button

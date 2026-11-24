@@ -118,6 +118,8 @@ insert into approved_function_grants values
   ('get_pairing_withdrawal_preview(uuid,uuid)', 'authenticated'), ('withdraw_game_platform(uuid,uuid,text,bigint)', 'authenticated'), ('restore_game_platform(uuid,text,bigint)', 'authenticated'),
   -- M14c-1: the staff evidence read. It checks the caller itself.
   ('get_game_pairing_evidence(uuid)', 'authenticated'),
+  -- M15 catalog UX: the import's source claims for a game, catalog editors with MFA only (checked inside).
+  ('get_game_source_facts(uuid)', 'authenticated'),
   -- M14c-2: the review-batch reads. Each checks the caller itself.
   ('list_review_batches(text,text,uuid,integer)', 'authenticated'), ('get_review_batch_overview(uuid)', 'authenticated'),
   ('list_review_batch_members(uuid,text,uuid,integer)', 'authenticated'), ('get_review_batch_member(uuid,uuid)', 'authenticated'),

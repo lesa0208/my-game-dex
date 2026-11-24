@@ -8,10 +8,12 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { requireAdminSection } from "@/features/admin/queries";
+import { resultsLine } from "@/features/records/live-search";
 import { RECORD_STATUSES, SEARCH_KINDS, readSearchParams, searchHref } from "@/features/records/form";
 import { searchCatalogRecords } from "@/features/records/queries";
 import type { GameSummary, ReleaseSummary } from "@/features/records/queries";
 import { getSubmissionOptions } from "@/features/submissions/queries";
+import { LiveSearchForm, liveSearchSubmitClass } from "@/components/admin/live-search-form";
 import { adminControl, AdminField, adminLabel, adminSelect, FieldGrid, FormActions } from "@/components/admin/form-controls";
 
 export const metadata: Metadata = {
@@ -70,7 +72,7 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
   return (
     <AdminFrame access={access} current="catalog" title="Catalog records">
       <p className="text-sm text-muted-foreground">
-        Every game and release, published or not, merged, excluded and rejected ones included. Search by title, another title, product code, barcode or id.{" "}
+        Every game and release, published or not, merged, excluded and rejected ones included. Results follow what you type. Search by title, another title, product code, barcode or id.{" "}
         <Link href="/admin/catalog" className={linkClass}>
           Review queue
         </Link>
@@ -82,7 +84,7 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
         <span className="text-muted-foreground"> · search first, so it isn&apos;t added twice. Releases are added from their game&apos;s record.</span>
       </p>
       <div role="search" aria-label="Catalog records">
-        <form method="get" action="/admin/catalog/search" className="flex flex-col gap-4">
+        <LiveSearchForm action="/admin/catalog/search" className="flex flex-col gap-4">
           <FieldGrid columns={4}>
             <AdminField id="records-q" label="Search" className="sm:col-span-2">
               <Input id="records-q" name="q" type="search" maxLength={100} defaultValue={params.query} autoComplete="off" spellCheck={false} className={adminControl} />
@@ -122,15 +124,18 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
               ))}
             </fieldset>
             <FormActions>
-              <Button type="submit" variant="secondary" size="control">
-                Search
-              </Button>
+              {/* Wrapped: the button's own class list is merged, which would drop the group variant. */}
+              <span className={liveSearchSubmitClass}>
+                <Button type="submit" variant="secondary" size="control">
+                  Search
+                </Button>
+              </span>
               <Button asChild variant="ghost" size="control">
                 <Link href="/admin/catalog/search">Clear</Link>
               </Button>
             </FormActions>
           </div>
-        </form>
+        </LiveSearchForm>
       </div>
 
       {!outcome.ok ? (
@@ -157,8 +162,8 @@ async function SearchView({ searchParams }: { searchParams: PageProps<"/admin/ca
         </EmptyState>
       ) : (
         <section aria-labelledby="records-results">
-          <h2 id="records-results" className="sr-only">
-            {params.kind === "games" ? "Games" : "Releases"}, by title
+          <h2 id="records-results" className="mb-2 text-sm text-muted-foreground">
+            {resultsLine(outcome.data.items.length, params.kind, Boolean(outcome.data.next_cursor), Boolean(params.cursor), params.query ?? "")}
           </h2>
           <ol className="flex flex-col gap-2">
             {outcome.data.kind === "games"

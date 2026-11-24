@@ -70,10 +70,31 @@ type Result<T> = { value: T } | { error: string };
 
 const oneOf = (list: readonly string[], value: string) => list.includes(value);
 
-/** The editor's reason, which the audit log keeps: required, up to 500 characters. */
+/**
+ * M15 catalog UX: the usual reasons for each decision, chosen by the editor (never preselected),
+ * with an optional comment. "Other" needs the comment. Each is the editor's own statement: none
+ * is ever filled in for them.
+ */
+export const REASON_CHOICES = {
+  start: ["Starting the review"],
+  approve: ["The details match the evidence I checked", "Matches a reliable source I checked", "Corrected, then checked"],
+  changes: ["Information is missing", "Some details look wrong", "Needs clearer evidence (photos of the item)"],
+  reject: ["Duplicate of an existing game or release", "Not a physical game", "Never released, or a bootleg or prototype", "Outside the catalog's scope"],
+} as const;
+export const REASON_OTHER = "other";
+const ALL_CHOICES: readonly string[] = Object.values(REASON_CHOICES).flat();
+
+/**
+ * The editor's reason, which the audit log keeps: required, up to 500 characters. With a chosen
+ * reason (reason_choice), the free text is an optional comment added to it; with "Other" or no
+ * choice, the free text is the reason.
+ */
 export function readReason(read: Read): Result<string> {
-  const reason = read("reason").replace(/\s+/g, " ").trim();
-  if (!reason) return { error: "Give a reason for the record. Other catalog staff can see it." };
+  const choice = (read("reason_choice") ?? "").trim();
+  const comment = read("reason").replace(/\s+/g, " ").trim();
+  if (choice && choice !== REASON_OTHER && !ALL_CHOICES.includes(choice)) return { error: "Choose one of the listed reasons." };
+  const reason = choice && choice !== REASON_OTHER ? (comment ? `${choice}: ${comment}` : choice) : comment;
+  if (!reason) return { error: choice === REASON_OTHER ? "Write the reason. Other catalog staff can see it." : "Give a reason for the record. Other catalog staff can see it." };
   if (reason.length > 500) return { error: "The reason can be up to 500 characters." };
   return { value: reason };
 }
