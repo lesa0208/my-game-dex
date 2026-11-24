@@ -1147,4 +1147,18 @@ export const m12bMutations = [
   sql("a request isn't recorded", "pgtap", rewrite(RECORD, "  if p_outcome ->> 'outcome' = 'submitted' and p_outcome ? 'submission_id' then", "  if false then")),
 ];
 
-export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations, m12b: m12bMutations };
+// M15: audit events written together keep their order (20261214100000_m15_audit_ordering).
+const M15_AUDIT = "public.get_audit_log(integer, uuid, text, text, text, text, text, timestamptz, timestamptz)";
+const M15_HISTORY = "public.get_catalog_record_history(text, uuid, integer, uuid)";
+const M15_SUMMARY = "public.get_account_summary(text)";
+const M15_MEMBER = "public.get_review_batch_member(uuid, uuid)";
+export const m15Mutations = [
+  sql("new audit events get no number", "pgtap", "drop trigger audit_events_assign_seq on private.audit_events;"),
+  sql("signed-in users may draw audit numbers", "pgtap", "grant usage on sequence private.audit_events_seq to authenticated;"),
+  sql("the audit log ignores the recorded order", "pgtap", rewrite(M15_AUDIT, "e.occurred_at desc, coalesce(e.seq, 0) desc, e.id desc", "e.id desc")),
+  sql("a record history pages by id again", "pgtap", rewrite(M15_HISTORY, "(a.occurred_at, coalesce(a.seq, 0), a.id) < (v_before_at, v_before_seq, p_before)", "a.id < p_before")),
+  sql("the last status change is the largest id", "pgtap", rewrite(M15_SUMMARY, "order by e.occurred_at desc, coalesce(e.seq, 0) desc, e.id desc limit 1", "order by e.id desc limit 1")),
+  sql("a member trail ignores the recorded order", "pgtap", rewrite(M15_MEMBER, "order by e.occurred_at, coalesce(e.seq, 0), e.id", "order by e.occurred_at, e.id")),
+];
+
+export const suites = { m2: m2Mutations, m3: m3Mutations, m4: m4Mutations, m4b: m4bMutations, m5a: m5aMutations, m5b: m5bMutations, m5c: m5cMutations, m6: m6Mutations, m7a: m7aMutations, m7b1: m7b1Mutations, m7b2a: m7b2aMutations, m7b2b: m7b2bMutations, m7b2c: m7b2cMutations, m8: m8Mutations, m10a: m10aMutations, m10b: m10bMutations, m10c: m10cMutations, "m10c-review": m10cReviewMutations, m10d: m10dMutations, m10e: m10eMutations, m10i: m10iMutations, m11a1: m11a1Mutations, "m11a2-invitations": m11a2InvitationMutations, m11b1a: m11b1aMutations, m11b1b: m11b1bMutations, m12a: m12aMutations, m12b: m12bMutations, m15: m15Mutations };

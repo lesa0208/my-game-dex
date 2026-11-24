@@ -76,9 +76,12 @@ Unchanged:
    - Sequences aren't transactional, so a rolled-back write leaves a gap.
    - Nothing may rely on `seq` being gap-free or a count.
 4. **Events recorded before the migration keep `seq` null.** No number is made up for them.
-   - Among themselves they keep the old order, `(occurred_at, id)`. Events one old transaction
-     wrote in the same millisecond keep an order that is arbitrary but stable, and their real order
-     can't be recovered.
+   - Among themselves they are listed by `(occurred_at, id)`. That was the trail's old order. The
+     other four readers ordered by `id` alone. That differs only where an id's time and
+     `occurred_at` disagree (a long transaction, or a back-dated row), and the new order follows the
+     times the pages show.
+   - Events one old transaction wrote in the same millisecond keep an order that is arbitrary but
+     stable, and their real order can't be recovered.
    - At the same `occurred_at`, an event without `seq` sorts before one with it (`coalesce(seq, 0)`,
      and `seq` starts at 1). One transaction can't write both kinds: `ALTER TABLE` takes an
      ACCESS EXCLUSIVE lock, which waits for every transaction that has written to the table.
@@ -117,6 +120,14 @@ Two behaviours differ, both tested:
 
 As before, an event committed after a page was read, with a key before the cursor, appears only
 when the list is read again from the start.
+
+The cursor may name any audit event, not only one in the list: a record history's page is then
+placed by that event's time. That reveals no more than before, since a uuid_v7 id already encodes
+its millisecond.
+
+**Mutation rules.** The `m15` suite in `scripts/security-mutations.mjs` has six rules: the trigger
+dropped, the sequence granted, the audit log, a record's history cursor, the last status change and
+the trail each put back to id order. The pgTAP tests must catch every one.
 
 ## Rehearsal (2026-11-24)
 
@@ -167,8 +178,11 @@ data: a read-only `pg_dump`, restored as `supabase_admin` into an empty database
 ## Migration and recovery
 
 **Applying.** Apply it like any migration: to a stack's database, after that stack's usual backup
-(development: a dump and a cold volume snapshot, see the backup notes). It takes a brief ACCESS
-EXCLUSIVE lock on `audit_events` and changes no rows.
+(development: a dump and a cold volume snapshot, see the backup notes). It changes no rows.
+
+It holds an ACCESS EXCLUSIVE lock on `audit_events` for its whole transaction: the `seq > 0` check
+scans the table, and both indexes are built without `CONCURRENTLY`. That takes about 2 ms at a few
+hundred rows, and grows with the table.
 
 - A pilot created from `main` after this is merged has it from the start.
 - Development, the persistent test stack and B1 get it only when that is separately authorized.

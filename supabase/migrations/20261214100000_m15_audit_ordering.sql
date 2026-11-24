@@ -22,8 +22,11 @@
 --      before one holding a lower seq. Sequences aren't transactional, so a rolled-back write
 --      leaves a gap. Neither is a problem for ordering, and nothing may rely on seq having no gaps.
 --   4. Rows recorded before this migration keep seq null; no number is made up for them. Among
---      themselves they keep their old order, (occurred_at, id): rows one transaction wrote in the
---      same millisecond keep an arbitrary but stable order, which can no longer be recovered. With
+--      themselves they are listed by (occurred_at, id): the trail's old order; the other readers
+--      ordered by id alone, which differs only where an id's time and occurred_at disagree (a long
+--      transaction, a back-dated row), and the new order follows the times the pages show. Rows one
+--      transaction wrote in the same millisecond keep an arbitrary but stable order, which can no
+--      longer be recovered. With
 --      the same occurred_at, a row without seq sorts before one with seq (coalesce(seq, 0): seq
 --      starts at 1); one transaction can't write both, as the column is added under an ACCESS
 --      EXCLUSIVE lock that waits for every transaction that wrote to the table.

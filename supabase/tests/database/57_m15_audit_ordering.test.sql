@@ -8,8 +8,9 @@
 -- Deterministic by construction: events recorded together are given ids in the reverse of their
 -- insertion order, so an order by id would put every pair the wrong way round. Rows from before
 -- the migration are simulated by inserting them with the trigger off and the NOT VALID check
--- briefly dropped, then both are put back and checked. One rolled-back transaction, synthetic
--- accounts and records only.
+-- briefly dropped, then both are put back and checked. That holds an ACCESS EXCLUSIVE lock on
+-- private.audit_events until the final rollback, so this file must run on its own (pg_prove runs
+-- the files one at a time). One rolled-back transaction, synthetic accounts and records only.
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(44);
