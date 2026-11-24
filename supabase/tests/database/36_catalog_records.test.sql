@@ -312,8 +312,11 @@ select is((select count(*)::int from jsonb_array_elements(pg_temp.history('e4', 
 select is(jsonb_array_length(pg_temp.history('e4', 'game', pg_temp.id('g'), 2, (pg_temp.history('e4', 'game', pg_temp.id('g'), 2) ->> 'next_before')::uuid) -> 'items'), 2,
   'and holds the rest');
 select is(pg_temp.history('e4', 'game', pg_temp.id('g'), 4) ->> 'next_before', null, 'the last page has no cursor');
-select is((select bool_and((a ->> 'id') > (b ->> 'id')) from jsonb_array_elements(pg_temp.history('e4', 'game', pg_temp.id('g')) -> 'items') with ordinality x(a, o)
-  join jsonb_array_elements(pg_temp.history('e4', 'game', pg_temp.id('g')) -> 'items') with ordinality y(b, p) on p = o + 1), true, 'events are newest first');
+-- M15: newest first by time, then by the order they were recorded (seq), not by id.
+select is((select bool_and((ea.occurred_at, coalesce(ea.seq, 0), ea.id) > (eb.occurred_at, coalesce(eb.seq, 0), eb.id))
+  from jsonb_array_elements(pg_temp.history('e4', 'game', pg_temp.id('g')) -> 'items') with ordinality x(a, o)
+  join jsonb_array_elements(pg_temp.history('e4', 'game', pg_temp.id('g')) -> 'items') with ordinality y(b, p) on p = o + 1
+  join private.audit_events ea on ea.id = (a ->> 'id')::uuid join private.audit_events eb on eb.id = (b ->> 'id')::uuid), true, 'events are newest first, in the order they were recorded');
 select is(jsonb_array_length(pg_temp.history('e4', 'game', pg_temp.id('g2'), 1000) -> 'items'), 50, 'a page never has more than 50 events, however many are asked for');
 select is(pg_temp.as_user('e4', format('select public.get_catalog_record_history(''profile'', %L)::text', pg_temp.id('g'))), 'error: invalid filter', 'only games and releases have a history');
 select is(pg_temp.as_user('e4', format('select public.get_catalog_record_history(''game'', %L)::text', pg_temp.id('r'))), 'error: record unavailable',

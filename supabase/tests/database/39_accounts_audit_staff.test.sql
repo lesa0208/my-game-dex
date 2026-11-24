@@ -4,7 +4,7 @@
 -- transaction that rolls back, on the local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(85);
+select plan(86);
 
 create function pg_temp.session(p_user uuid, p_verified timestamptz) returns jsonb language plpgsql as $mfa$
 begin
@@ -224,7 +224,14 @@ select is(pg_temp.as_user('a1', 'select public.get_audit_log(10, null, ''deleted
 select is(pg_temp.as_user('a1', 'select public.get_audit_log(10, null, null, ''secrets'')::text'), 'error: invalid filter', 'an unknown kind is refused');
 select is(pg_temp.as_user('a1', 'select public.get_audit_log(10, null, null, null, ''maybe'')::text'), 'error: invalid filter', 'an unknown outcome is refused');
 select is(pg_temp.as_user('a1', 'select public.get_audit_log(10, null, null, null, null, ''x%'')::text'), 'error: invalid filter', 'a malformed handle is refused');
-select is((select bool_and((e ->> 'id') < '01900000-0000-7000-8000-00000000e005') from jsonb_array_elements(pg_temp.audit('100, ''01900000-0000-7000-8000-00000000e005''')) e), true, 'paged by id, older than the last seen');
+-- M15: paged by position, the events after the last seen in the log's order (time, then seq,
+-- then id), with the last seen event's id as the cursor.
+select is((select bool_and((a.occurred_at, coalesce(a.seq, 0), a.id) < (c.occurred_at, coalesce(c.seq, 0), c.id))
+  from jsonb_array_elements(pg_temp.audit('100, ''01900000-0000-7000-8000-00000000e005''')) e
+  join private.audit_events a on a.id = (e ->> 'id')::uuid join private.audit_events c on c.id = '01900000-0000-7000-8000-00000000e005'), true, 'paged after the last seen, in the log''s order');
+select is((select string_agg(right(e ->> 'id', 4), ',' order by n) from jsonb_array_elements(pg_temp.audit('100, ''01900000-0000-7000-8000-00000000e005''')) with ordinality x(e, n)
+  where e ->> 'id' like '01900000-0000-7000-8000-00000000e%'), 'e004,e003,e002,e001,e009',
+  'by time, not id: the 400-day-old event comes last though its id is larger');
 
 -- ---------------------------------------------------------------------------
 -- 6. Staff: standing and authenticator readiness as counts

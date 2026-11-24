@@ -129,7 +129,7 @@ select throws_ok('update private.audit_events set reason = ''changed''', 'P0001'
 select throws_ok('delete from private.audit_events', 'P0001', 'audit events are append-only', 'or delete one');
 select throws_ok('truncate private.audit_events', 'P0001', 'audit events are append-only', 'or truncate the table');
 select is((select string_agg(tgname || '=' || tgenabled::text, ',' order by tgname) from pg_trigger where tgrelid = 'private.audit_events'::regclass and not tgisinternal),
-  'audit_events_no_truncate=O,audit_events_no_update_or_delete=O', 'both append-only triggers are enabled');
+  'audit_events_assign_seq=O,audit_events_no_truncate=O,audit_events_no_update_or_delete=O', 'both append-only triggers are enabled, and M15''s ordering trigger');
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private') and (p.prosrc ~* 'update\s+private\.audit_events' or p.prosrc ~* 'delete\s+from\s+private\.audit_events' or p.prosrc ~* 'truncate[^;]*audit_events')),
   0, 'no function changes or removes audit rows');
