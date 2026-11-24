@@ -40,6 +40,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { cliEnv, ownKeyProblems, readStackKeys, runningKeyProblemsSync } from "./stack-keys.mjs";
+import { markerProblems, readMarker } from "./stack-marker.mjs";
+
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 
@@ -50,6 +53,7 @@ export const TEST_PORT_OFFSET = 1000;
 export const SCRATCH_PROJECT_ID = "my-game-dex-scratch";
 export const B1_PROJECT_ID = "my-game-dex-b1";
 export const PILOT_PROJECT_ID = "my-game-dex-pilot";
+export const REHEARSAL_PROJECT_ID = "my-game-dex-rehearsal";
 
 /** Every local stack: its project id, its directory (the CLI's --workdir) and its port offset. */
 export const STACKS = {
@@ -57,7 +61,9 @@ export const STACKS = {
   test: { project: TEST_PROJECT_ID, dir: ".supabase-test", offset: TEST_PORT_OFFSET },
   scratch: { project: SCRATCH_PROJECT_ID, dir: ".supabase-scratch", offset: 2000 },
   b1: { project: B1_PROJECT_ID, dir: ".supabase-b1", offset: 3000 },
-  pilot: { project: PILOT_PROJECT_ID, dir: ".supabase-pilot", offset: 4000 },
+  pilot: { project: PILOT_PROJECT_ID, dir: ".supabase-pilot", offset: 4000, ownKeys: true, marker: join(homedir(), ".my-game-dex", "protect-pilot-stack") },
+  // M15 P1a hardening: the pilot's disposable twin (its own keys too), for rehearsals only.
+  rehearsal: { project: REHEARSAL_PROJECT_ID, dir: ".supabase-rehearsal", offset: 5000, ownKeys: true, marker: join(homedir(), ".my-game-dex", "protect-rehearsal-stack") },
 };
 export const DEV_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-dev-stack");
 export const PILOT_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-pilot-stack");
@@ -176,9 +182,44 @@ export function stackStatus({ label, editorial = false } = {}) {
   guardDevStack(label, { editorial });
   let status;
   try {
-    status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json", ...workdirArgs], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    status = JSON.parse(execFileSync(process.execPath, [cli, "status", "-o", "json", ...workdirArgs], { cwd: root, env: cliEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
   } catch {
     throw new Error(stackName === "dev" ? "The local stack isn't running. Try npm run db:start." : `The ${stackName} stack isn't running. Start it with scripts/test-stack.mjs.`);
   }
-  return assertStackStatus(status);
+  assertStackStatus(status);
+  assertOwnKeys(status);
+  return status;
+}
+
+/**
+ * M15 P1a hardening: a guarded stack (the pilot, its rehearsal twin) is used only while it is
+ * protected and running with its own keys. Every tool reaches it through stackStatus(), which
+ * refuses unless:
+ *   - its protection marker exists, names it and records its own signing key's kid (the marker is
+ *     written before the stack is created, so a missing one means a removed protection);
+ *   - its key files are complete and well formed, and its status reports exactly those keys;
+ *   - the RUNNING stack uses them: its Auth publishes only its own signing key, and its own secret
+ *     key (from the key file) opens its Auth admin API. (`supabase status` only repeats the config.)
+ * Development, test, scratch and B1 keep the CLI's keys and have no marker: nothing changes there.
+ */
+export function assertOwnKeys(status, name = stackName, { probe = runningKeyProblemsSync, marker = undefined } = {}) {
+  const stack = STACKS[name];
+  if (!stack.ownKeys) return;
+  const supabaseDir = join(root, stack.dir, "supabase");
+  let keys;
+  try {
+    keys = readStackKeys(supabaseDir, `the ${name} stack`);
+  } catch (error) {
+    throw new Error(`Refusing: the ${name} stack's own key files (${supabaseDir}) can't be used: ${error.message} It would be using the CLI's shared keys.`);
+  }
+  const record = marker === undefined ? readMarker(stack.marker) : marker;
+  const problems = [
+    ...markerProblems(record, { stack: name, kid: keys.kids[0], file: stack.marker }),
+    // A creation that never finished ("creating") isn't a pilot to use yet: one more guarded start
+    // checks it and marks it created.
+    ...(record && record.state === "creating" ? [`its creation didn't finish: start it once more (MGD_TEST_STACK=${name} node scripts/test-stack.mjs start)`] : []),
+    ...ownKeyProblems(status, keys),
+  ];
+  if (!problems.length) problems.push(...probe(status.API_URL, keys));
+  if (problems.length) throw new Error(`Refusing: the ${name} stack isn't protected and running with its own keys: ${problems.join("; ")} (docs/architecture/catalog-pilot-m15.md).`);
 }

@@ -22,7 +22,8 @@ const cli = join(root, "node_modules", "supabase", "dist", "supabase.js");
 
 import { redact } from "./lib/redact.mjs";
 import { checkPgtapReport } from "./lib/pgtap-report.mjs";
-import { dbContainer, guardDevStack, requireStack, stackDir, stackName, workdirArgs } from "./lib/stack.mjs";
+import { STACKS, dbContainer, guardDevStack, requireStack, stackDir, stackName, workdirArgs } from "./lib/stack.mjs";
+import { cliEnv } from "./lib/stack-keys.mjs";
 
 export { redact };
 
@@ -39,7 +40,7 @@ function runCli(args, { capture = false } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args, ...workdirArgs], {
       cwd: root,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: { ...cliEnv(), NO_COLOR: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     const relay = (stream) => (chunk) => {
@@ -177,8 +178,9 @@ async function main() {
   requireDocker();
   // M15: the pilot stack is never reset or tested; only its read-only migration check may run on it.
   // It is started only by test-stack.mjs, which refuses to recreate it or change it on a restart.
-  if (stackName === "pilot" && command === "start") {
-    console.error("Refusing: start the pilot with MGD_TEST_STACK=pilot node scripts/test-stack.mjs start (it checks the pilot exists and is unchanged).");
+  if (STACKS[stackName].ownKeys && command === "start") {
+    // The pilot and its rehearsal twin start only through their guarded start (marker, keys, drift).
+    console.error(`Refusing: start the ${stackName} stack with MGD_TEST_STACK=${stackName} node scripts/test-stack.mjs start (it checks it exists, is protected, uses its own keys and is unchanged).`);
     process.exit(1);
   }
   if (!["start", "stop", "status"].includes(command)) guardDevStack(`db:${command}`, { editorial: command === "migrations" });
