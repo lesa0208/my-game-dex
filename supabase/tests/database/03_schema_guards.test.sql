@@ -120,6 +120,10 @@ insert into approved_function_grants values
   ('get_game_pairing_evidence(uuid)', 'authenticated'),
   -- M15 catalog UX: the import's source claims for a game, catalog editors with MFA only (checked inside).
   ('get_game_source_facts(uuid)', 'authenticated'),
+  -- M15 submission enrichment: the editors' read and new-lookup request, and the submitter's own status (each checks the caller);
+  -- the server's claim and record, for its secret key only, as set_avatar_path.
+  ('get_submission_enrichment(uuid)', 'authenticated'), ('request_submission_enrichment(uuid)', 'authenticated'), ('my_submission_enrichment(uuid)', 'authenticated'),
+  ('claim_submission_enrichments(uuid,integer)', 'service_role'), ('record_submission_enrichment(uuid,uuid,jsonb)', 'service_role'),
   -- M14c-2: the review-batch reads. Each checks the caller itself.
   ('list_review_batches(text,text,uuid,integer)', 'authenticated'), ('get_review_batch_overview(uuid)', 'authenticated'),
   ('list_review_batch_members(uuid,text,uuid,integer)', 'authenticated'), ('get_review_batch_member(uuid,uuid)', 'authenticated'),

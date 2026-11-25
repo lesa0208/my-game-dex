@@ -22,7 +22,11 @@ import { UUID, uuidv7 } from "@/features/collection/uuid";
 import { formValues, submissionName } from "@/features/submissions/display";
 import { GAME_KINDS, statusLabel } from "@/features/submissions/form";
 import { getMyMergedSubmission } from "@/features/merge/queries";
-import { getMySubmission, getSubmissionOptions } from "@/features/submissions/queries";
+import { getMySubmission, getMySubmissionEnrichment, getSubmissionOptions } from "@/features/submissions/queries";
+import { collectorLookupText } from "@/features/enrichment/match";
+import { LookupNudge } from "@/components/enrichment/lookup-nudge";
+import { wikidataConfigured } from "@/features/enrichment/server";
+import { runMyDueLookup } from "@/features/submissions/actions";
 
 export const metadata: Metadata = {
   title: "Submission",
@@ -88,11 +92,19 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
   const name = submissionName(details);
   const isPublic = submission.status === "published";
   const canCopy = Boolean(submission.release_id) && COPYABLE.has(submission.status) && viewer.isActive;
-  const [options, currency, mergedInto] = await Promise.all([
-    submission.editable ? getSubmissionOptions() : null,
+  const waiting = ["submitted", "in_review", "changes_requested"].includes(submission.status);
+  const [options, currency, mergedInto, lookup] = await Promise.all([
+    getSubmissionOptions(),
     canCopy ? getMyDefaultCurrency() : null,
     submission.status === "merged" ? getMyMergedSubmission(submission.id) : null,
+    submission.kind === "new_game" && waiting ? getMySubmissionEnrichment(submission.id) : null,
   ]);
+  // M15: a lookup that failed or never ran is tried again once this page is open.
+  const nudge = Boolean(lookup && ["pending", "failed"].includes(lookup.status) && wikidataConfigured());
+  const lookupText = lookup ? collectorLookupText(lookup.status, lookup.found) : null;
+  const formatText = options?.formats.some((f) => f.platform === details.platform.slug && f.code === details.format.code && !f.acceptsNewPublications)
+    ? "Not sure yet: the editors identify the cartridge shell"
+    : details.format.name;
   const region = details.region.code === "unknown" ? "Unknown, not confirmed" : details.region.label;
 
   return (
@@ -174,6 +186,13 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
         </p>
       ) : null}
 
+      {nudge ? <LookupNudge run={runMyDueLookup.bind(null, submission.id)} refreshAfterMs={5000} /> : null}
+      {lookupText ? (
+        <p role="status" className="rounded-lg border px-4 py-3 text-sm">
+          {lookupText}
+        </p>
+      ) : null}
+
       <Section id="submission-details" title="What you submitted">
         <Facts
           rows={[
@@ -181,7 +200,7 @@ async function SubmissionView({ params, searchParams }: { params: PageProps<"/su
             { label: "Type", value: submission.created_game ? (GAME_KINDS.find((k) => k.value === details.game_kind)?.label ?? null) : null },
             { label: "First released", value: submission.created_game && details.first_release_year ? String(details.first_release_year) : null },
             { label: "Platform", value: details.platform.name },
-            { label: "Physical format", value: details.format.name },
+            { label: "Physical format", value: formatText },
             { label: "Region", value: region },
             { label: "Edition", value: details.edition_name },
             { label: "Edition type", value: details.edition_kind ? editionKindLabel(details.edition_kind) : null },

@@ -8,9 +8,9 @@
  *   - The submission form: title, platform and region first; everything else optional and
  *     collapsed; a submission with only those (and the format, which a browser without
  *     JavaScript chooses from the full list) succeeds.
- *   - The editor's view of that submission: what external sources found (here: not looked up,
- *     since no Wikidata contact is configured, which the page says), and decisions with
- *     predefined reasons.
+ *   - The editor's view of that submission: what was prepared for review (here: still waiting,
+ *     since no Wikidata contact is configured, which the page says; the stored lookups themselves
+ *     are app-enrichment-checks.mjs's), and decisions with predefined reasons.
  *
  *   npm run build && MGD_TEST_STACK=scratch node scripts/test-stack.mjs run app:catalog-ux-checks
  *
@@ -117,17 +117,20 @@ try {
   check("a submission with only the title, platform, format and region succeeds, the type defaulting to game", /^[0-9a-f-]{36}$/.test(id ?? "") && psql(`select g.kind from public.catalog_change_requests r join public.games g on g.id = r.game_id where r.id = '${id}';`) === "game");
 
   section("The editor's view of the submission");
+  // M15: the lookup runs after the response and is stored; wait for it when lookups are live.
+  for (let i = 0; LIVE && i < 60 && psql(`select status from private.submission_enrichments where submission_id = '${id}';`) === "pending"; i++) await new Promise((r) => setTimeout(r, 250));
   const review = await editor.browser.get(`/admin/catalog/${id}`);
   const rtext = plain(review.html);
-  if (LIVE) check("it shows what external sources found: a made-up title has no Wikidata match", rtext.includes("What external sources found") && rtext.includes("Wikidata has no video game with this title on this platform"));
-  else check("it shows what external sources found, and that lookups are off without a Wikidata contact", rtext.includes("What external sources found") && rtext.includes("external lookups are off until the operator sets the Wikidata contact"));
+  if (LIVE) check("it shows what external sources found: a made-up title has no Wikidata match", rtext.includes("Prepared for review") && rtext.includes("Wikidata has no video game with this title on this platform"));
+  else check("it shows what was prepared, and that lookups wait without a Wikidata contact", rtext.includes("Prepared for review") && rtext.includes("external lookups are off until the operator sets the Wikidata contact"));
   if (LIVE) {
     const real = await collector.browser.get("/submit");
     const realPosted = await collector.browser.submit("/submit", formById(real.html, "new-submission"), { title: "Wild Guns", platform: "snes", media_format: "snes-cartridge-jp-pal", region: "pal", physical: "on" });
     const realId = location(realPosted.response).split("/")[2]?.split("?")[0];
     requests.push(realId);
+    for (let i = 0; i < 60 && psql(`select status from private.submission_enrichments where submission_id = '${realId}';`) === "pending"; i++) await new Promise((r) => setTimeout(r, 250));
     const realText = plain((await editor.browser.get(`/admin/catalog/${realId}`)).html);
-    check("a real title is matched to its Wikidata item, with dates, licence and retrieval time, and nothing chosen", realText.includes("Q682463") && realText.includes("same title") && realText.includes("CC0 1.0") && realText.includes("Retrieved") && /Check it's the same game|Choose the right one/.test(realText), realText.slice(realText.indexOf("What external sources found"), realText.indexOf("What external sources found") + 300));
+    check("a real title is matched to its Wikidata item, with dates, licence and retrieval time, and nothing chosen", realText.includes("Q682463") && realText.includes("same title") && realText.includes("CC0 1.0") && realText.includes("Retrieved") && /check it's the same game|None is chosen/.test(realText), realText.slice(realText.indexOf("Prepared for review"), realText.indexOf("Prepared for review") + 300));
     check("the lookup changed nothing in the submission", psql(`select status || ' ' || (select title from public.games g where g.id = r.game_id) from public.catalog_change_requests r where r.id = '${realId}';`) === "open Wild Guns");
   }
   check("its decisions offer predefined reasons and an optional comment", review.html.includes('name="reason_choice"') && rtext.includes("Comment (optional, needed for Other)"));

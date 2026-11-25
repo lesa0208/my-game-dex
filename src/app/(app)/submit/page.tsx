@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireViewerWithHandle } from "@/features/account/queries";
 import { uuidv7 } from "@/features/collection/uuid";
+import { searchCatalog } from "@/features/catalog/queries";
 import { formatWhen } from "@/features/submissions/display";
+import { catalogMatches } from "@/features/submissions/form";
 import { getMyPendingGame, getMySubmissions, getPublishedGame, getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
@@ -27,6 +29,10 @@ async function SubmitView({ searchParams }: { searchParams: PageProps<"/submit">
   const pending = first(search.pending);
   // M12b: a title to start from, as searched for in Explore. Only a starting value.
   const title = first(search.title).slice(0, 200);
+  // M15: sent back here, without JavaScript, to ask whether the game is one of these.
+  const platform = first(search.platform).slice(0, 60);
+  const region = first(search.region).slice(0, 20);
+  const checking = first(search.check) === "1" && Boolean(title && platform);
   const path = slug ? `/submit?game=${encodeURIComponent(slug)}` : pending ? `/submit?pending=${encodeURIComponent(pending)}` : "/submit";
   const viewer = await requireViewerWithHandle(path);
   if (!viewer.isActive) {
@@ -81,6 +87,8 @@ async function SubmitView({ searchParams }: { searchParams: PageProps<"/submit">
   }
 
   const remaining = allowance.limit - allowance.used;
+  const found = checking && !game ? await searchCatalog(title, platform, null).catch(() => null) : null;
+  const matches = found?.ok ? catalogMatches(found.data, title, platform) : undefined;
   return (
     <div className="flex flex-col gap-5">
       {game ? (
@@ -105,6 +113,9 @@ async function SubmitView({ searchParams }: { searchParams: PageProps<"/submit">
         options={options}
         values={EMPTY_SUBMISSION}
         initialTitle={game ? undefined : title}
+        initialPlatform={game ? undefined : platform}
+        initialRegion={game ? undefined : region}
+        initialMatches={matches}
         copyItemId={uuidv7()}
       />
     </div>

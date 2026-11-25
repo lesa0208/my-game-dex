@@ -4,6 +4,7 @@ import { cache } from "react";
 
 import { createSupabaseServerClient } from "@/features/auth/server";
 import { UUID } from "@/features/collection/uuid";
+import type { StoredEnrichment } from "@/features/enrichment/match";
 import type { SubmissionDetails } from "@/features/submissions/queries";
 
 import type { QueueFilter } from "./form";
@@ -135,4 +136,17 @@ export async function getSubmissionReview(id: string): Promise<ReviewItem | null
   const { data, error } = await supabase.rpc("get_submission_review", { p_request: id });
   if (error) return undefined;
   return typeof data === "object" && data !== null ? (data as ReviewItem) : null;
+}
+
+/**
+ * M15: what the server's lookup stored for a new-game submission, with the catalog games it may
+ * duplicate. Null when it has none (not a new game); undefined when it can't be read.
+ */
+export async function getSubmissionEnrichment(id: string): Promise<StoredEnrichment | null | undefined> {
+  if (!UUID.test(id)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.rpc("get_submission_enrichment", { p_submission: id });
+  if (error) return undefined;
+  return typeof data === "object" && data !== null ? (data as StoredEnrichment) : null;
 }

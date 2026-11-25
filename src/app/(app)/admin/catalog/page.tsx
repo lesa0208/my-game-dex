@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { requireAdminSection } from "@/features/admin/queries";
 import { formatDay } from "@/features/collection/details";
 import { UUID } from "@/features/collection/uuid";
+import { LookupNudge } from "@/components/enrichment/lookup-nudge";
+import { runDueLookups } from "@/features/review/actions";
 import { QUEUE_FILTERS, queueFilter, requestStatusLabel, submitterLabel } from "@/features/review/form";
 import { getSubmissionQueue } from "@/features/review/queries";
 import { cn } from "@/lib/utils";
@@ -30,6 +32,8 @@ async function QueueView({ searchParams }: { searchParams: PageProps<"/admin/cat
   return (
     // Here, not in the static shell, so only editors ever see what this page is.
     <AdminFrame access={access} current="catalog" title="Review submissions">
+      {/* M15: a few lookups that failed or never ran are tried again once the queue is open. */}
+      <LookupNudge run={runDueLookups.bind(null, null)} />
       <p className="text-sm text-muted-foreground">
         Missing games and releases sent by collectors. Oldest first.{" "}
         <Link href="/admin/catalog/search" className="text-primary-text underline underline-offset-4">

@@ -19,7 +19,10 @@ import { candidateFromEntry, isValidUserAgent, type EnrichmentCandidate, type En
  * submission is simply "not looked up yet". One request at a time, maxlag=5, a short timeout, and
  * every failure is soft: the caller always gets an answer.
  */
-const API = "https://www.wikidata.org/w/api.php";
+// The app checks' local stand-in for Wikidata (scripts/app-enrichment-checks.mjs): honoured only for
+// a loopback address, so no setting can send lookups anywhere else.
+const STAND_IN = process.env.MGD_WIKIDATA_API_URL;
+const API = STAND_IN && /^http:\/\/127\.0\.0\.1:\d{2,5}\/w\/api\.php$/.test(STAND_IN) ? STAND_IN : "https://www.wikidata.org/w/api.php";
 const TIMEOUT_MS = 5000;
 const DAY = 86400;
 
@@ -27,6 +30,7 @@ export function wikidataConfigured(): boolean {
   return isValidUserAgent(process.env.WIKIDATA_USER_AGENT);
 }
 
+/** `revalidate`: seconds Next.js may reuse the answer, or 0 for a fresh request every time. */
 async function call(params: Record<string, string>, revalidate: number): Promise<unknown | null> {
   const agent = process.env.WIKIDATA_USER_AGENT;
   if (!isValidUserAgent(agent)) return null;
@@ -35,7 +39,7 @@ async function call(params: Record<string, string>, revalidate: number): Promise
     const response = await fetch(url, {
       headers: { "User-Agent": agent!.trim(), "Api-User-Agent": agent!.trim(), Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      next: { revalidate },
+      ...(revalidate > 0 ? { next: { revalidate } } : { cache: "no-store" as const }),
     });
     if (!response.ok) return null;
     const body = (await response.json()) as { error?: unknown };
@@ -71,13 +75,15 @@ export async function lookUpWikidataGame(title: string, platformSlug: string): P
   const platformItem = WIKIDATA_PLATFORM_ITEMS[platformSlug];
   if (!wikidataConfigured()) return { status: "not_configured", provider: "wikidata", at, candidates: [] };
   if (!platformItem) return { status: "unsupported_platform", provider: "wikidata", at, candidates: [] };
-  const search = (await call({ action: "wbsearchentities", search: title.slice(0, 200), language: "en", uselang: "en", type: "item", limit: "10" }, DAY)) as {
+  // Fresh each time: the stored lookup is the cache (private.submission_enrichments), and it asks
+  // again only after an outage (with back-off, at most 5 times) or when an editor asks.
+  const search = (await call({ action: "wbsearchentities", search: title.slice(0, 200), language: "en", uselang: "en", type: "item", limit: "10" }, 0)) as {
     search?: { id?: string }[];
   } | null;
   if (!search) return { status: "failed", provider: "wikidata", at, candidates: [] };
   const ids = (search.search ?? []).map((s) => s.id).filter((id): id is string => Boolean(id && /^Q[0-9]+$/.test(id)));
   if (!ids.length) return { status: "no_match", provider: "wikidata", at, candidates: [] };
-  const entities = (await call({ action: "wbgetentities", ids: ids.join("|"), props: "info|labels|aliases|claims", languages: "en|mul|ja" }, DAY)) as {
+  const entities = (await call({ action: "wbgetentities", ids: ids.join("|"), props: "info|labels|aliases|claims", languages: "en|mul|ja" }, 0)) as {
     entities?: Record<string, unknown>;
   } | null;
   if (!entities) return { status: "failed", provider: "wikidata", at, candidates: [] };

@@ -73,3 +73,27 @@ test("statuses and errors read as fixed messages", () => {
   assert.equal(submissionErrorMessage("game unavailable").startsWith("That game isn't available"), true);
   assert.equal(submissionErrorMessage('duplicate key value violates "releases_pkey"'), "The submission couldn't be saved. Try again.");
 });
+
+// M15: a new game is checked against the published catalog before anything is submitted.
+test("published games the new game may be: close title matches on the platform, at most 5", async () => {
+  const { catalogMatches } = await import("./form.ts");
+  const game = (title, match, matched = null, count = 2) => ({ kind: "game", match, matched, game: { slug: title.toLowerCase().replace(/\W+/g, "-"), title }, platforms: [{ slug: "snes", releaseCount: count }] });
+  const found = {
+    items: [
+      game("Wild Guns", "exact"),
+      game("Wild Guns Reloaded", "prefix", null, 0),
+      game("Wildguns", "similar"),
+      game("Wild  Guns", "similar"),
+      game("Mild Puns", "similar"),
+      { kind: "release", match: "code", game: { slug: "x", title: "X" } },
+      game("Zelda", "words", { title: "Wild Guns", source: "alias" }, 1),
+    ],
+  };
+  const out = catalogMatches(found, "Wild Guns", "snes");
+  assert.deepEqual(out.map((m) => m.title), ["Wild Guns", "Wild Guns Reloaded", "Wild  Guns", "Zelda"]);
+  assert.equal(out[0].href, "/games/wild-guns");
+  assert.equal(out[0].releaseCount, 2);
+  assert.equal(out[3].matched, "Wild Guns", "a match by alias says which name matched");
+  assert.equal(catalogMatches({ items: [] }, "Wild Guns", "snes").length, 0, "nothing found: nothing to ask");
+  assert.equal(catalogMatches({ items: Array.from({ length: 9 }, (_, i) => game(`Wild Guns ${i}`, "prefix")) }, "Wild Guns", "snes").length, 5);
+});

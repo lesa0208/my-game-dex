@@ -225,6 +225,33 @@ export function readSubmissionChanges(read: Read, createdGame: boolean, currentY
   return { value: { ...changes, media_format: mediaFormat, region, details: release.value.details, components: release.value.components, note: note.value ?? "" } };
 }
 
+/** A published game a new game may be (M15), with where to go from here. */
+export type CatalogMatch = { title: string; href: string; matched: string | null; releaseCount: number };
+
+/**
+ * The published games a submitted new game may already be: games found by the catalog search
+ * (title, aliases, local titles) on the chosen platform, closest first, at most 5. A "similar"
+ * match counts only when its title has the same words in another form. Pure, for tests.
+ */
+export function catalogMatches(
+  found: { items: { kind: string; match?: string; matched?: { title: string } | null; game: { slug: string; title: string }; platforms?: { slug: string; releaseCount: number }[] }[] },
+  title: string,
+  platform: string,
+): CatalogMatch[] {
+  const words = (t: string) => t.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const wanted = words(title);
+  return found.items
+    .filter((item) => item.kind === "game" && ["exact", "prefix", "words"].includes(item.match ?? "")
+      || (item.kind === "game" && item.match === "similar" && words(item.game.title) === wanted))
+    .slice(0, 5)
+    .map((item) => ({
+      title: item.game.title,
+      href: `/games/${item.game.slug}`,
+      matched: item.matched?.title ?? null,
+      releaseCount: item.platforms?.find((p) => p.slug === platform)?.releaseCount ?? 0,
+    }));
+}
+
 /** The database's fixed errors, as messages for the submitter. */
 export function submissionErrorMessage(message: unknown): string {
   switch (message) {

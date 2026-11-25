@@ -8,6 +8,7 @@ import { Field, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SUBMITTER_PACKAGING_CHOICES } from "@/features/catalog/packaging";
+import { unclassifiedFormat } from "@/features/enrichment/match";
 import {
   type SubmissionState,
   submitToCatalog,
@@ -16,6 +17,7 @@ import {
   updateMySubmissionFromForm,
 } from "@/features/submissions/actions";
 import { EDITION_KINDS, GAME_KINDS, PIECE_KINDS, PIECE_ROWS, REGION_UNKNOWN } from "@/features/submissions/form";
+import type { CatalogMatch } from "@/features/submissions/form";
 import type { SubmissionOptions } from "@/features/submissions/queries";
 import { cn } from "@/lib/utils";
 
@@ -97,6 +99,9 @@ export function SubmissionForm({
   values: given,
   copyItemId,
   initialTitle,
+  initialPlatform,
+  initialRegion,
+  initialMatches,
 }: {
   mode: "release" | "game" | "edit";
   game: { id: string; title: string } | null;
@@ -111,8 +116,18 @@ export function SubmissionForm({
    * server page, which only holds a reference to EMPTY_SUBMISSION from this client module.
    */
   initialTitle?: string;
+  /** M15: the platform and region typed before the page asked whether the game is one of these. */
+  initialPlatform?: string;
+  initialRegion?: string;
+  /** M15: published games the new game may be, found by the page (without JavaScript). */
+  initialMatches?: CatalogMatch[];
 }) {
-  const values = initialTitle ? { ...given, title: initialTitle } : given;
+  const values = {
+    ...given,
+    ...(initialTitle ? { title: initialTitle } : {}),
+    ...(initialPlatform && options.platforms.some((p) => p.slug === initialPlatform) ? { platform: initialPlatform } : {}),
+    ...(initialRegion && options.regions.some((r) => r.code === initialRegion) ? { region: initialRegion } : {}),
+  };
   const editing = mode === "edit";
   const [state, action, pending] = useActionState(editing ? updateFromPage : submitFromPage, { status: "idle", message: null });
   const [platform, setPlatform] = useState(values.platform);
@@ -120,6 +135,13 @@ export function SubmissionForm({
   const platformName = (slug: string) => options.platforms.find((p) => p.slug === slug)?.name ?? slug;
   const families = [...new Set(options.platforms.map((p) => p.family))].sort((a, b) => a.localeCompare(b));
   const showGameFields = mode === "game" || (editing && createdGame);
+  // M15: on a platform with several cartridge shells and a "shape not classified" format (NES,
+  // SNES), "Not sure" is a real answer: the release waits on that format, which can't be
+  // published until an editor names the shell. Nothing false is recorded.
+  const notSure = (slug: string) => unclassifiedFormat(options.formats, slug);
+  const formatLabel = (f: { platform: string; code: string; name: string }) => (f.code === notSure(f.platform) ? "Not sure (the editors identify it)" : f.name);
+  const unclassified = platform ? notSure(platform) : null;
+  const matches = state.status === "matches" ? state.matches : state.status === "idle" ? initialMatches : undefined;
   // True once hydrated (JavaScript on): the format then follows the platform. Without it, the full list.
   const enhanced = useSyncExternalStore(noSubscription, () => true, () => false);
   // A new submission with JavaScript: the format is derived when a platform has one, else asked as a follow-up.
@@ -185,7 +207,7 @@ export function SubmissionForm({
               {platform
                 ? formats.map((f) => (
                     <option key={f.code} value={f.code}>
-                      {f.name}
+                      {formatLabel(f)}
                     </option>
                   ))
                 : options.platforms
@@ -194,7 +216,7 @@ export function SubmissionForm({
                       <optgroup key={p.slug} label={p.name}>
                         {options.formats.filter((f) => f.platform === p.slug).map((f) => (
                           <option key={`${p.slug}-${f.code}`} value={f.code}>
-                            {f.name}
+                            {formatLabel(f)}
                           </option>
                         ))}
                       </optgroup>
@@ -222,8 +244,18 @@ export function SubmissionForm({
         ) : null}
         {followsPlatform && platform && formats.length > 1 ? (
           <fieldset className="flex flex-col gap-2 rounded-lg border p-3">
-            <legend className="px-1 text-sm font-medium">{platformName(platform)} has several kinds of physical format. Which one is yours?</legend>
-            {formats.map((f) => (
+            <legend className="px-1 text-sm font-medium">
+              {unclassified
+                ? `${platformName(platform)} cartridges came in different shells. Do you know which one yours is?`
+                : `${platformName(platform)} has several kinds of physical format. Which one is yours?`}
+            </legend>
+            {unclassified ? (
+              <label className="flex min-h-10 items-center gap-2 text-sm">
+                <input type="radio" name="media_format" value={unclassified} required defaultChecked={!values.mediaFormat || values.mediaFormat === unclassified} className="size-4 accent-primary" />
+                Not sure: the editors identify it
+              </label>
+            ) : null}
+            {formats.filter((f) => f.code !== unclassified).map((f) => (
               <label key={f.code} className="flex min-h-10 items-center gap-2 text-sm">
                 <input type="radio" name="media_format" value={f.code} required defaultChecked={values.mediaFormat === f.code} className="size-4 accent-primary" />
                 {f.name}
@@ -345,6 +377,31 @@ export function SubmissionForm({
         </div>
       )}
 
+      {matches?.length ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium">{matches.length === 1 ? "This game may already be in the catalog." : "These games may already be in the catalog."} Is yours one of these?</p>
+          <ul className="flex flex-col gap-1.5">
+            {matches.map((m) => (
+              <li key={m.href}>
+                <Link href={m.href} className="font-medium text-primary-text underline underline-offset-4">
+                  {m.title}
+                </Link>
+                {m.matched ? <span className="text-muted-foreground"> (also called {m.matched})</span> : null}
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {m.releaseCount === 1 ? "1 release" : `${m.releaseCount} releases`} on this platform
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground">Open the game to add your copy, or to submit the missing release from its page.</p>
+          <div className="flex gap-3">
+            <input id="not_listed" name="not_listed" type="checkbox" className="mt-0.5 size-5 shrink-0 accent-primary-solid" />
+            <label htmlFor="not_listed">My game isn&apos;t one of these. Submit it as a new game.</label>
+          </div>
+        </div>
+      ) : null}
+
       {editing ? null : (
         <div className="flex gap-3 rounded-lg border bg-muted/40 p-3">
           <input id="physical" name="physical" type="checkbox" required className="mt-0.5 size-5 shrink-0 accent-primary-solid" />
@@ -361,6 +418,12 @@ export function SubmissionForm({
           </Button>
           {editing ? null : <p className="text-xs text-muted-foreground">Only you and catalog editors can see it until it&apos;s published. Up to 10 a day.</p>}
         </div>
+        {editing || mode !== "game" ? null : (
+          <p id="lookup-notice" className="text-xs text-muted-foreground">
+            To prepare your submission for the editors, My Game Dex looks up the title and platform you enter in Wikidata, an open database. Nothing else
+            about you or your copy is sent.
+          </p>
+        )}
         <div role="status" aria-live="polite" aria-atomic="true">
           {state.status === "saved" || state.status === "duplicate" ? (
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm">
