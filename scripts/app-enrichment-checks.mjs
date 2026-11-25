@@ -56,6 +56,7 @@ const TITLES = {
   joe: "Joe & Mac 3",
   probo: "Super Probotector",
   rockman: "ロックマンX",
+  own: `${TAG} Own Comet`,
 };
 const ENTITIES = {
   Q853143: MARIO,
@@ -65,6 +66,7 @@ const ENTITIES = {
   Q990000301: copyOf("Q990000301", TITLES.flaky),
   Q990000401: copyOf("Q990000401", TITLES.renamed),
   Q990000501: copyOf("Q990000501", TITLES.browser),
+  Q990000601: copyOf("Q990000601", TITLES.own),
   Q4677160: REAL("Q4677160"),
   Q1368099: REAL("Q1368099"),
   Q1196400: REAL("Q1196400"),
@@ -76,6 +78,7 @@ const SEARCH = {
   [TITLES.flaky]: ["Q990000301"],
   [TITLES.renamed]: ["Q990000401"],
   [TITLES.browser]: ["Q990000501"],
+  [TITLES.own]: ["Q990000601"],
   [TITLES.joe]: ["Q4677160"],
   [TITLES.probo]: ["Q1368099", "Q990000501"],
   [TITLES.rockman]: ["Q1196400"],
@@ -353,6 +356,18 @@ try {
   check("a rejection stores nothing", psql("select count(*) from private.provider_records where external_id = 'Q990000501';") === "0");
   const rock = await submitNew(collector, { title: TITLES.rockman, media_format: "rom-cartridge", region: "ntsc-j" });
   check("ロックマンX finds Mega Man X by its Japanese title, searching Japanese too", (await settled(rock.id)) === `single_match|1|${TITLES.rockman}|1` && seen.some((c) => c.search === TITLES.rockman && c.language === "ja"));
+
+  section("An editor's own submission is decided by another editor");
+  const own = await submitNew(editor, { title: TITLES.own, media_format: "rom-cartridge", region: "pal" });
+  check("a catalog editor submits a game themselves, and it's looked up", (await settled(own.id)) === `single_match|1|${TITLES.own}|1`);
+  const ownReview = await editor.browser.get(`/admin/catalog/${own.id}`);
+  check("their review says another editor decides its match, and offers no confirm or reject", plain(ownReview.html).includes("You submitted this game, so another catalog editor confirms or rejects its match") && !formById(ownReview.html, "confirm-review-Q990000601") && !formById(ownReview.html, "reject-review-Q990000601"));
+  const ownGame = psql(`select game_id from public.catalog_change_requests where id = '${own.id}';`);
+  const ownRecord = await editor.browser.get(`/admin/catalog/games/${ownGame}`);
+  check("and so does the game's record", plain(ownRecord.html).includes("You submitted this game, so another catalog editor confirms or rejects its match") && !formById(ownRecord.html, "confirm-game-Q990000601"));
+  const ownSession = readSession(editor.browser)?.session;
+  const forced = await fetch(`${api}/rest/v1/rpc/decide_submission_enrichment`, { method: "POST", headers: { apikey: publishableKey, Authorization: `Bearer ${ownSession?.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_submission: own.id, p_external_id: "Q990000601", p_decision: "confirm", p_reason: "My own game" }) });
+  check("a direct call by the submitting editor is refused by the database", (await forced.text()).includes("own submission") && psql("select count(*) from private.provider_records where external_id = 'Q990000601';") === "0");
 
   section("Look up again, and a changed title");
   const lookAgain = formById((await editor.browser.get(`/admin/catalog/${none.id}`)).html, "lookup-again");

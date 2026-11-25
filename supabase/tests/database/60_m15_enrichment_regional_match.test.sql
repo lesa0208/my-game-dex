@@ -6,7 +6,7 @@
 -- nothing else; reject is audited. One rolled-back transaction, on a disposable local stack only.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(50);
+select plan(60);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.claims(p_user uuid, p_aal text) returns jsonb language plpgsql as $mfa$
@@ -74,11 +74,11 @@ create function pg_temp.decide(p_actor text, p_sub text, p_qid text, p_decision 
   select pg_temp.as_role(p_actor, format('select public.decide_submission_enrichment(%L, %L, %L, %L)::text', pg_temp.id(p_sub), p_qid, p_decision, p_reason), p_aal)
 $$;
 
--- c1: a collector. e4: a catalog editor.
+-- c1: a collector. e4, e5: catalog editors (e5 also submits a game).
 insert into auth.users (id, aud, role, email, email_confirmed_at, instance_id)
-select pg_temp.u(s), 'authenticated', 'authenticated', s || '@example.test', now(), '00000000-0000-0000-0000-000000000000' from unnest(array['c1', 'e4']) s;
-update public.profiles set handle = 'rgm_' || right(id::text, 2), handle_changed_at = now() where id in (pg_temp.u('c1'), pg_temp.u('e4'));
-insert into public.staff_roles (user_id, role) values (pg_temp.u('e4'), 'catalog_editor');
+select pg_temp.u(s), 'authenticated', 'authenticated', s || '@example.test', now(), '00000000-0000-0000-0000-000000000000' from unnest(array['c1', 'e4', 'e5']) s;
+update public.profiles set handle = 'rgm_' || right(id::text, 2), handle_changed_at = now() where id in (pg_temp.u('c1'), pg_temp.u('e4'), pg_temp.u('e5'));
+insert into public.staff_roles (user_id, role) values (pg_temp.u('e4'), 'catalog_editor'), (pg_temp.u('e5'), 'catalog_editor');
 update private.external_providers set commercial_use_cleared = false where code = 'wikidata';
 
 -- An unpublished catalog game whose title is the likely match's main title, from another item.
@@ -189,6 +189,26 @@ select ok(pg_temp.decide('e4', 'sub3', 'Q900000304', 'confirm') like 'error:%loo
 update public.catalog_change_requests set details = details || '{"title": "Zqf Caveman Three"}' where id = pg_temp.id('sub');
 select is((pg_temp.row('sub')).decisions - 'Q900000301', '{}'::jsonb, 'a changed title drops the rejection');
 select ok((pg_temp.row('sub')).decisions ? 'Q900000301', 'and keeps the confirmation: the game keeps its source');
+
+-- 9. Separation of duties: a catalog editor's own submission
+select ok(pg_temp.as_role('e5', $$select public.submit_game('Zqf Caveman Own', 'game', null, 'snes', 'rom-cartridge', 'pal', '{}', '[]', null, true)::text$$) like '%submitted%',
+  'a catalog editor submits a game themselves');
+insert into ids select 'own', s.id from public.catalog_change_requests s where s.submitted_by = pg_temp.u('e5') and s.details ->> 'title' = 'Zqf Caveman Own';
+select is(pg_temp.record('own', pg_temp.result('single_match', jsonb_build_array(pg_temp.cand('Q900000305', 'Zqf Caveman Own', '["Zqf Caveman Own"]', 'exact', true)))), 'true',
+  'its lookup finds a likely match');
+select is(pg_temp.as_role('e5', format('select public.get_submission_enrichment(%L) ->> %L', pg_temp.id('own'), 'own_submission')), 'true', 'the submitting editor is told it is their own submission');
+select is(pg_temp.as_role('e4', format('select public.get_submission_enrichment(%L) ->> %L', pg_temp.id('own'), 'own_submission')), 'false', 'another editor is told it is not theirs');
+select ok(pg_temp.decide('e5', 'own', 'Q900000305', 'confirm') like 'error:%own submission%', 'the submitter can''t confirm their own game''s match, even as a catalog editor with MFA');
+select ok(pg_temp.decide('e5', 'own', 'Q900000305', 'reject') like 'error:%own submission%', 'nor reject it');
+select ok((pg_temp.row('own')).decisions = '{}'::jsonb
+          and not exists (select 1 from private.audit_events where actor_id = pg_temp.u('e5') and action in ('catalog_source_confirmed', 'catalog_source_rejected'))
+          and not exists (select 1 from private.provider_records where external_id = 'Q900000305'),
+  'the refused attempts decide, record and store nothing');
+select ok(pg_temp.decide('c1', 'own', 'Q900000305', 'confirm') like 'error:%', 'a collector can''t decide it either');
+select is(pg_temp.decide('e4', 'own', 'Q900000305', 'confirm', 'Same game, checked independently')::jsonb ->> 'decision', 'confirmed', 'an independent catalog editor with MFA confirms it');
+select ok((select status::text = 'open' from public.catalog_change_requests where id = pg_temp.id('own'))
+          and (select g.status::text = 'unverified' and g.verified_at is null from public.games g where g.id = pg_temp.game('own')),
+  'confirming its source neither approves the submission nor verifies the game');
 
 select * from finish();
 rollback;

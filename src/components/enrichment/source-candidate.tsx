@@ -26,7 +26,7 @@ export function CandidateCard({
   decide,
 }: {
   c: EnrichmentCandidate;
-  e: Pick<StoredEnrichment, "labels" | "region" | "catalog_items" | "decisions">;
+  e: Pick<StoredEnrichment, "labels" | "region" | "catalog_items" | "decisions" | "own_submission">;
   /** Shows the confirm and reject forms: the submission, its game and where to come back to. */
   decide?: { requestId: string; gameId: string; back: "game" | "review" } | null;
 }) {
@@ -100,7 +100,10 @@ export function CandidateCard({
         Retrieved {utc(c.retrieved_at)}
         {c.revision ? `, revision ${c.revision}` : ""}. {c.licence}. A source&apos;s claim about the game, not evidence of this physical release.
       </p>
-      {decide && !decision && !inCatalog.length ? (
+      {decide && !decision && !inCatalog.length && e.own_submission ? (
+        <p className="mt-3 border-t pt-3 text-muted-foreground">You submitted this game, so another catalog editor confirms or rejects its match.</p>
+      ) : null}
+      {decide && !decision && !inCatalog.length && !e.own_submission ? (
         <div className="mt-3 flex flex-col gap-3 border-t pt-3">
           <EditForm
             id={`confirm-${formId}`}

@@ -220,6 +220,8 @@ export type StoredEnrichment = {
   /** The submission's game, and the region of its release (for the regional release date). */
   game_id: string | null;
   region: string | null;
+  /** The reader submitted it: another editor decides its matches. */
+  own_submission?: boolean;
   /** The game's own Wikidata item, once linked (by an import or an editor's confirmation). */
   linked_external_id: string | null;
   /** An editor's decision on a candidate, by its Wikidata id. */

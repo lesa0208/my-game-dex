@@ -53,7 +53,7 @@ $$;
 
 -- An editor's decision per candidate, by Wikidata id: {"Q…": {"decision", "by", "at"}}.
 alter table private.submission_enrichments
-  add column decisions jsonb not null default '{}'
+  add column if not exists decisions jsonb not null default '{}'
     check (jsonb_typeof(decisions) = 'object' and pg_column_size(decisions) <= 8192);
 
 -- The importer's payload with every candidate makes rows larger: still bounded.
@@ -237,6 +237,8 @@ begin
     'current_title', v_req.details ->> 'title',
     'game_id', v_req.game_id,
     'region', v_req.details -> 'region' ->> 'code',
+    -- The reader submitted it, so another editor decides its matches (decide_submission_enrichment).
+    'own_submission', v_req.submitted_by = (select auth.uid()),
     'linked_external_id', (select xr.external_id from private.external_references xr
                            where xr.provider_code = 'wikidata' and xr.game_id = v_req.game_id order by xr.external_id limit 1),
     'decisions', coalesce((select pg_catalog.jsonb_object_agg(d.key, pg_catalog.jsonb_build_object('decision', d.value ->> 'decision', 'at', d.value ->> 'at'))
@@ -278,7 +280,7 @@ $$;
 
 -- The lookup behind a game created by a submission, for its record: the newest new-game
 -- submission that created it. Catalog editors (with MFA). Null when the game has none.
-create function public.get_game_enrichment(p_game uuid)
+create or replace function public.get_game_enrichment(p_game uuid)
 returns jsonb
 language plpgsql
 stable
@@ -304,7 +306,8 @@ $$;
 
 -- An editor's decision on one candidate of a submission's lookup: 'confirm' or 'reject', with the
 -- editor's own reason (the audit contract: nothing supplies one for them). Catalog editors with
--- MFA, while the submission's game exists and isn't merged, rejected or excluded.
+-- MFA, other than the submitter, while the submission's game exists and isn't merged, rejected or
+-- excluded.
 --
 -- Confirming stores the candidate's stored record (what the editor was shown) as the game's
 -- Wikidata source, as an import would: an import run naming the submission, a promoted provider
@@ -312,7 +315,7 @@ $$;
 -- isn't cleared for use, when the game already has a Wikidata source, or when the item is already
 -- another game's source (a duplicate, to merge instead). Nothing else changes: the game's title,
 -- verification, releases, pairings and publication stay as they are.
-create function public.decide_submission_enrichment(p_submission uuid, p_external_id text, p_decision text, p_reason text)
+create or replace function public.decide_submission_enrichment(p_submission uuid, p_external_id text, p_decision text, p_reason text)
 returns jsonb
 language plpgsql
 security definer
@@ -343,6 +346,11 @@ begin
   select * into v_game from public.games g where g.id = v_req.game_id for key share;
   if v_game.id is null or v_game.status in ('merged', 'rejected', 'excluded') or v_req.status in ('withdrawn', 'rejected', 'excluded', 'merged') then
     raise exception 'no longer open' using errcode = '55000';
+  end if;
+  -- Separation of duties, as for reviewing a submission (M7b-1): deciding which game a submission
+  -- is, is an editorial decision, so its submitter never makes it, even as a catalog editor.
+  if v_req.submitted_by = v_me or v_game.submitted_by = v_me then
+    raise exception 'own submission' using errcode = 'P0001';
   end if;
   select * into v_row from private.submission_enrichments e where e.submission_id = p_submission for update;
   if v_row.submission_id is null then

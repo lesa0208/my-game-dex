@@ -80,3 +80,15 @@ What changed:
 - **Existing lookups.** The migration looks up again any stored lookup for a submission still waiting whose candidates lack the new fields. The earlier answer stays until the new one arrives.
 
 **Known gap.** Wikidata states no publisher for Q4677160, so Elite Systems (the European publisher) can't come from it. The record says "Not stated by the source". Nothing is taken from other sites without cleared rights; adding the fact to Wikidata, or recording it by hand with evidence, are the editor's options.
+
+### What a confirmation stores, and what it doesn't
+
+| | After an editor confirms a match |
+| --- | --- |
+| **Source identity** | **Linked.** The game gets a Wikidata external reference (the item's id) and an import run naming the submission and the item. It's an editor's decision that this item is the game, audited (`catalog_source_confirmed`, with the editor's reason). It isn't a verification of the game. |
+| **Developer, publisher, regional dates, other titles** | **Kept as the source's claims.** They're in the promoted provider record's payload, exactly as Wikidata stated them when looked up. The game's record *displays* them from that source record (get_game_source_facts), as it does for imported games. The other titles also become the game's matching keys (game_title_keys), so searches and duplicate checks find the game by them. |
+| **Normalized game fields** | **Unchanged.** Title, kind, first-release date, aliases, verification and revision stay as they were. No developer, publisher or release-date column is written. An editor who wants a claim in the record edits the field as usual. |
+| **Physical releases** | **Unchanged.** Region, format, packaging, dates, codes and verification are untouched. Nothing is verified or published, and a source is never evidence of a physical release. |
+| **The submission** | **Unchanged.** It still waits for its review, and approval, changes and rejection work as before. |
+
+**Who decides.** A catalog editor with MFA, who isn't the submitter: a catalog editor's own submitted game is decided by another editor, as with reviewing a submission (`own submission`). On the pilot today the only catalog editor is the submitter of "Joe & Mac 3", so that match waits for a second editor.
