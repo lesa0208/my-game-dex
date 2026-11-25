@@ -22,6 +22,8 @@ const NOTICES: Record<string, string> = {
   platform_added: "The platform is added.",
   locked: "The field is locked against imports.",
   unlocked: "The field is unlocked.",
+  source_confirmed: "The Wikidata match is confirmed: it is now the game's source, still a claim to check before verification.",
+  source_rejected: "The Wikidata match is rejected.",
 };
 
 /** What an editing action just did, after its redirect. Unknown values show nothing. */

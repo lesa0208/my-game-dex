@@ -40,3 +40,43 @@ Editors read it through `get_submission_enrichment` (catalog editor with MFA). A
 
 - **Database test 59:** permissions, claims, stale answers, back-off, the attempt limit, a title change, duplicates, and that the catalog is left unchanged.
 - **App check:** `app:enrichment-checks`, collector to editor, with a local stand-in for Wikidata: a match, two matches, no match, and an outage that recovers. It uses a real browser for the JavaScript form and the automatic retry. The stand-in address (`MGD_WIKIDATA_API_URL`) is honoured only on loopback.
+
+## Regional titles and the editor's confirmation (M15, second step)
+
+The first real submission, "Joe & Mac 3" (SNES, PAL), showed four gaps. Wikidata had the game: Q4677160, *Joe & Mac 2: Lost in the Tropics*, whose European title "Joe & Mac 3: Lost in the Tropics" is an alias, with Data East as developer and dated releases per region (Japan 1994-02-18, North America 1994-04, Europe 1995-11). The lookup found and stored it. But:
+
+1. **It was graded "ambiguous, different title".** Only an exact title counted, and the collector typed the box title without its subtitle.
+2. **The regional dates were dropped.** Only the earliest date was kept.
+3. **It appeared only on the submission's review.** The game's record read imported sources only, so it said "Added by hand".
+4. **An editor couldn't accept it.** Nothing could make it the game's source.
+
+What changed:
+
+- **Matching (`match.ts`).** Each candidate says how it matches:
+
+  | Match | Meaning | Example |
+  | --- | --- | --- |
+  | `exact` | the item's title | "Mega Man X" |
+  | `regional_title` | another of its titles: an alias, a regional or a Japanese title | "Rockman X", "ロックマンX", "Super Probotector: Alien Rebels" |
+  | `main_title` | the main part of a title, before its subtitle | "Joe & Mac 3", "Super Probotector" |
+  | `partial` | found by Wikidata's search only | |
+
+  The first three are *likely*. One likely candidate is "single_match", even with weaker ones listed beside it; two likely ones are the editor's choice. "&" and "and" compare equal.
+- **Search.** English always: Wikidata keeps most regional titles as English aliases. Japanese is added for a Japanese title or an NTSC-J copy, and German and French for a PAL copy, whose box title is often a European label. That is at most three searches, one at a time. When nothing is found, the title's main part is searched as well.
+- **Regional releases.** Each candidate keeps its release dates on the platform, with their places (P577 with P291). The review shows the date for the copy's region: PAL covers Europe and its countries and Australia, NTSC-U/C covers North America, NTSC-J covers Japan.
+- **The game's record.** It shows the undecided candidates under **Automatically discovered — awaiting review**, in a dashed box above the record's own fields. Those fields stay "Not known" until a match is confirmed.
+- **Confirm or reject (`decide_submission_enrichment`).** Catalog editors only, with MFA and their own reason, from the review or the game's record.
+
+  Confirming stores the candidate's record exactly as the editor saw it (the importer's own parsed payload, kept with the candidate) as the game's Wikidata source, the way an import does:
+  - an import run named `submission-lookup:<submission>:<item>`;
+  - a promoted provider record;
+  - title keys;
+  - the external reference.
+
+  It is audited as `catalog_source_confirmed` and shown in the record's history. It is refused while Wikidata isn't cleared for use, when the game already has a Wikidata source, and when the item is already another game's source (a duplicate, to merge instead).
+
+  Rejecting is audited as `catalog_source_rejected` and stores nothing. Neither changes the game's title, verification, releases, pairings or publication.
+- **Duplicates.** The catalog check covers unpublished identities too, and it also matches the likely candidate's other titles. A catalog *Joe & Mac 2* is found for a submitted "Joe & Mac 3".
+- **Existing lookups.** The migration looks up again any stored lookup for a submission still waiting whose candidates lack the new fields. The earlier answer stays until the new one arrives.
+
+**Known gap.** Wikidata states no publisher for Q4677160, so Elite Systems (the European publisher) can't come from it. The record says "Not stated by the source". Nothing is taken from other sites without cleared rights; adding the fact to Wikidata, or recording it by hand with evidence, are the editor's options.

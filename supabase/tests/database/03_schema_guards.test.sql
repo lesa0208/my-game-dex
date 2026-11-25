@@ -123,6 +123,7 @@ insert into approved_function_grants values
   -- M15 submission enrichment: the editors' read and new-lookup request, and the submitter's own status (each checks the caller);
   -- the server's claim and record, for its secret key only, as set_avatar_path.
   ('get_submission_enrichment(uuid)', 'authenticated'), ('request_submission_enrichment(uuid)', 'authenticated'), ('my_submission_enrichment(uuid)', 'authenticated'),
+  ('get_game_enrichment(uuid)', 'authenticated'), ('decide_submission_enrichment(uuid,text,text,text)', 'authenticated'),
   ('claim_submission_enrichments(uuid,integer)', 'service_role'), ('record_submission_enrichment(uuid,uuid,jsonb)', 'service_role'),
   -- M14c-2: the review-batch reads. Each checks the caller itself.
   ('list_review_batches(text,text,uuid,integer)', 'authenticated'), ('get_review_batch_overview(uuid)', 'authenticated'),

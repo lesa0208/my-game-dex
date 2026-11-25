@@ -35,6 +35,8 @@ const NOTICES: Record<string, string> = {
   changes_requested: "Sent back to the submitter with your note.",
   rejected: "Rejected. The submitter has been told.",
   lookup: "Looking it up again. Reload in a moment to see the answer.",
+  source_confirmed: "The Wikidata match is confirmed: it is now the game's source, still a claim to check before verification.",
+  source_rejected: "The Wikidata match is rejected.",
 };
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
@@ -204,6 +206,7 @@ async function ReviewView({ params, searchParams }: { params: PageProps<"/admin/
               release={release}
               formatName={formatName}
               publishable={publishable}
+              canDecide={!["withdrawn", "rejected", "excluded", "merged"].includes(request.status)}
             />
           </Section>
         ) : null}

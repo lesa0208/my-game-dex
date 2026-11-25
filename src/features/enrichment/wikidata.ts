@@ -5,7 +5,7 @@ import { entityToEntry } from "../../../scripts/wikidata-entities.mjs";
 
 import { WIKIDATA_PLATFORM_ITEMS } from "@/features/records/source-facts";
 
-import { candidateFromEntry, isValidUserAgent, type EnrichmentCandidate, type EnrichmentResult } from "./match";
+import { candidateFromEntry, isValidUserAgent, lookupStatus, rankCandidates, searchLanguages, type EnrichmentCandidate, type EnrichmentResult } from "./match";
 
 /**
  * Wikidata, read server-side (M15 catalog UX): human-readable labels for the ids a game's source
@@ -70,31 +70,45 @@ export async function wikidataLabels(ids: string[]): Promise<Record<string, stri
  * games on the requested platform are candidates; nothing is chosen here. Several candidates, or
  * one whose title differs, is "ambiguous": an editor picks.
  */
-export async function lookUpWikidataGame(title: string, platformSlug: string): Promise<EnrichmentResult> {
+export async function lookUpWikidataGame(title: string, platformSlug: string, region?: string | null): Promise<EnrichmentResult> {
   const at = new Date().toISOString();
   const platformItem = WIKIDATA_PLATFORM_ITEMS[platformSlug];
   if (!wikidataConfigured()) return { status: "not_configured", provider: "wikidata", at, candidates: [] };
   if (!platformItem) return { status: "unsupported_platform", provider: "wikidata", at, candidates: [] };
   // Fresh each time: the stored lookup is the cache (private.submission_enrichments), and it asks
   // again only after an outage (with back-off, at most 5 times) or when an editor asks.
-  const search = (await call({ action: "wbsearchentities", search: title.slice(0, 200), language: "en", uselang: "en", type: "item", limit: "10" }, 0)) as {
-    search?: { id?: string }[];
-  } | null;
-  if (!search) return { status: "failed", provider: "wikidata", at, candidates: [] };
-  const ids = (search.search ?? []).map((s) => s.id).filter((id): id is string => Boolean(id && /^Q[0-9]+$/.test(id)));
+  // A regional title may be an English alias (Europe's "Super Probotector"), a label in the
+  // region's language, or Japanese: search the languages the copy suggests, one request each.
+  const ids: string[] = [];
+  let answered = false;
+  for (const language of searchLanguages(title, region)) {
+    const search = (await call({ action: "wbsearchentities", search: title.slice(0, 200), language, uselang: language, type: "item", limit: "10" }, 0)) as {
+      search?: { id?: string }[];
+    } | null;
+    if (!search) continue;
+    answered = true;
+    for (const s of search.search ?? []) if (s.id && /^Q[0-9]+$/.test(s.id) && !ids.includes(s.id)) ids.push(s.id);
+  }
+  // A box title with a subtitle the source doesn't list ("Joe & Mac 3: Caveman Ninja"): the main title.
+  const main = title.split(/\s*[:：]\s*|\s+[-–—]\s+/)[0]?.trim();
+  if (answered && !ids.length && main && main !== title.trim() && main.length >= 3) {
+    const search = (await call({ action: "wbsearchentities", search: main.slice(0, 200), language: "en", uselang: "en", type: "item", limit: "10" }, 0)) as { search?: { id?: string }[] } | null;
+    for (const s of search?.search ?? []) if (s.id && /^Q[0-9]+$/.test(s.id) && !ids.includes(s.id)) ids.push(s.id);
+  }
+  if (!answered) return { status: "failed", provider: "wikidata", at, candidates: [] };
   if (!ids.length) return { status: "no_match", provider: "wikidata", at, candidates: [] };
-  const entities = (await call({ action: "wbgetentities", ids: ids.join("|"), props: "info|labels|aliases|claims", languages: "en|mul|ja" }, 0)) as {
+  const wanted = ids.slice(0, 20);
+  const entities = (await call({ action: "wbgetentities", ids: wanted.join("|"), props: "info|labels|aliases|claims", languages: "en|mul|ja|de|fr" }, 0)) as {
     entities?: Record<string, unknown>;
   } | null;
   if (!entities) return { status: "failed", provider: "wikidata", at, candidates: [] };
   const candidates: EnrichmentCandidate[] = [];
-  for (const id of ids) {
+  for (const id of wanted) {
     const entity = entities.entities?.[id];
     if (!entity) continue;
-    const candidate = candidateFromEntry(entityToEntry(entity, platformItem), title, at);
+    const candidate = candidateFromEntry(entityToEntry(entity, platformItem), title, at, platformItem);
     if (candidate) candidates.push(candidate);
   }
-  if (!candidates.length) return { status: "no_match", provider: "wikidata", at, candidates: [] };
-  const exact = candidates.filter((c) => c.title_matches);
-  return { status: candidates.length === 1 && exact.length === 1 ? "single_match" : "ambiguous", provider: "wikidata", at, candidates };
+  const ranked = rankCandidates(candidates).slice(0, 10);
+  return { status: lookupStatus(ranked), provider: "wikidata", at, candidates: ranked };
 }

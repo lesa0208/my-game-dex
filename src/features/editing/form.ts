@@ -237,6 +237,20 @@ export function editErrorMessage(message: unknown): string {
       return "Packaging that has been classified can't go back to Not yet classified. Choose Unknown if it can't be established.";
     case "physical format unverified":
       return "Choose the cartridge shell before publishing. New NES and SNES releases can't use the generic ROM cartridge format.";
+    case "source not cleared":
+      return "Wikidata isn't cleared for use in this catalog yet, so nothing can be stored from it. The operator records the clearance first.";
+    case "look up again":
+      return "This lookup was stored before matches kept their source record. Press Look up again, then confirm the new answer.";
+    case "already has a source":
+      return "This game is already linked to a Wikidata item.";
+    case "already the source of another game":
+      return "This Wikidata item is already another game's source: that game is most likely the same one. Merge them instead.";
+    case "already decided":
+      return "This match has already been decided.";
+    case "unknown candidate":
+      return "That match isn't part of the lookup any more. Reload the page.";
+    case "no longer open":
+      return "This game can't take a source any more.";
     case "reauthentication required":
       return "Verify with your authenticator again to continue.";
     default:

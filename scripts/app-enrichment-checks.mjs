@@ -42,6 +42,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------------------
 
 const MARIO = JSON.parse(readFileSync(new URL("./fixtures/wikidata-b1/real-q853143-trimmed.json", import.meta.url), "utf8")).entities.Q853143;
+// Real, trimmed records (CC0) whose titles differ by region (the regression for the first real submission).
+const REAL = (q) => JSON.parse(readFileSync(new URL(`./fixtures/wikidata-b1/real-${q.toLowerCase()}-trimmed.json`, import.meta.url), "utf8")).entities[q];
 const copyOf = (id, title) => ({ ...structuredClone(MARIO), id, lastrevid: 4242, labels: { en: { language: "en", value: title } }, aliases: {} });
 const TITLES = {
   mario: "Super Mario World",
@@ -51,14 +53,21 @@ const TITLES = {
   renamed: `${TAG} Renamed Comet`,
   published: `${TAG} Already Published`,
   browser: `${TAG} Browser Quest`,
+  joe: "Joe & Mac 3",
+  probo: "Super Probotector",
+  rockman: "ロックマンX",
 };
 const ENTITIES = {
   Q853143: MARIO,
   Q990000201: copyOf("Q990000201", TITLES.twin),
-  Q990000202: copyOf("Q990000202", `${TITLES.twin} II`),
+  // Two items with the same title (a game and its remake): both likely, so the editor chooses.
+  Q990000202: copyOf("Q990000202", TITLES.twin),
   Q990000301: copyOf("Q990000301", TITLES.flaky),
   Q990000401: copyOf("Q990000401", TITLES.renamed),
   Q990000501: copyOf("Q990000501", TITLES.browser),
+  Q4677160: REAL("Q4677160"),
+  Q1368099: REAL("Q1368099"),
+  Q1196400: REAL("Q1196400"),
 };
 const SEARCH = {
   [TITLES.mario]: ["Q853143"],
@@ -67,8 +76,11 @@ const SEARCH = {
   [TITLES.flaky]: ["Q990000301"],
   [TITLES.renamed]: ["Q990000401"],
   [TITLES.browser]: ["Q990000501"],
+  [TITLES.joe]: ["Q4677160"],
+  [TITLES.probo]: ["Q1368099", "Q990000501"],
+  [TITLES.rockman]: ["Q1196400"],
 };
-const LABELS = { Q170420: "Nintendo EAD", Q8093: "Nintendo" };
+const LABELS = { Q170420: "Nintendo EAD", Q8093: "Nintendo", Q1172213: "Data East", Q46: "Europe", Q17: "Japan", Q49: "North America", Q45700: "Konami", Q14428: "Capcom", Q403714: "Capcom U.S.A." };
 const seen = []; // every request: { action, search, ids }
 let flakyDown = true;
 
@@ -76,7 +88,7 @@ const wikidata = createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1");
   const p = url.searchParams;
   const action = p.get("action");
-  seen.push({ action, search: p.get("search"), ids: p.get("ids"), agent: req.headers["user-agent"] });
+  seen.push({ action, search: p.get("search"), language: p.get("language"), ids: p.get("ids"), agent: req.headers["user-agent"] });
   const send = (status, body) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
@@ -157,6 +169,9 @@ insert into private.provider_records (provider_code, entity_type, external_id, p
 select 'wikidata', 'game', 'Q853143', jsonb_build_object('title', 'Super Mario World', 'titles', jsonb_build_array('Super Mario World')), repeat('9', 64), r.id, 'promoted', g.id from g, r
 returning matched_game_id;`).split("\n").find((l) => /^[0-9a-f-]{36}$/.test(l.trim()))?.trim();
 const before = psql("select count(*) filter (where status = 'published') || '/' || count(*) from public.games;");
+// Wikidata cleared for use, for the confirmation; restored afterwards.
+const clearance = psql("select coalesce(terms_sha256, '') || '|' || coalesce(terms_reviewed_at::text, '') || '|' || coalesce(cleared_note, '') || '|' || commercial_use_cleared from private.external_providers where code = 'wikidata';");
+psql("update private.external_providers set terms_sha256 = coalesce(terms_sha256, repeat('a', 64)), terms_reviewed_at = coalesce(terms_reviewed_at, now()), cleared_note = coalesce(cleared_note, 'App check clearance (restored after)'), commercial_use_cleared = true where code = 'wikidata';");
 
 try {
   origin = await startApp(PORT);
@@ -217,7 +232,7 @@ try {
 
   section("Two possible matches");
   const twin = await submitNew(collector, { title: TITLES.twin, media_format: "rom-cartridge", region: "unknown" });
-  check("stored as ambiguous, with both candidates", (await settled(twin.id)) === `ambiguous|1|${TITLES.twin}|2`);
+  check("two items with the same title: stored as ambiguous, with both", (await settled(twin.id)) === `ambiguous|1|${TITLES.twin}|2`);
   const ttext = plain((await editor.browser.get(`/admin/catalog/${twin.id}`)).html);
   check("the editor is told none is chosen, and sees both", ttext.includes("2 possible matches. None is chosen") && ttext.includes("Q990000201") && ttext.includes("Q990000202"));
   check("an unknown region suggests no shell", !ttext.includes("Suggested by the submission"));
@@ -259,8 +274,8 @@ try {
   await tab.goto(`${origin}/admin/catalog/${flaky.id}`, { waitUntil: "networkidle" });
   const retried = await changed(flaky.id, failedRow);
   check("opening it later retries it by itself, and it succeeds", retried === `single_match|2|${TITLES.flaky}|1`, `${failedRow} -> ${retried}`);
-  await tab.waitForFunction(() => document.body.innerText.includes("Wikidata has one game with exactly this title"), null, { timeout: 15000 }).catch(() => undefined);
-  check("and the page shows the answer without the editor reloading", (await tab.evaluate(() => document.body.innerText)).includes("Wikidata has one game with exactly this title"));
+  await tab.waitForFunction(() => document.body.innerText.includes("one likely match on this platform, with exactly this title"), null, { timeout: 15000 }).catch(() => undefined);
+  check("and the page shows the answer without the editor reloading", (await tab.evaluate(() => document.body.innerText)).includes("one likely match on this platform, with exactly this title"));
   check("a specific shell the collector knew is shown as given, with no suggestion", !plain((await editor.browser.get(`/admin/catalog/${flaky.id}`)).html).includes("Suggested by the submission"));
 
   section("The collector's form with JavaScript");
@@ -293,6 +308,51 @@ try {
   await tab.setViewportSize({ width: 1280, height: 900 });
   await tab.goto(`${origin}/admin/catalog/${mario.id}`, { waitUntil: "networkidle" });
   if (shots) await tab.screenshot({ path: `${shots}/editor-review.png`, fullPage: true });
+
+  section("Regional titles: the first real submission, Joe & Mac 3 (PAL)");
+  const joeCalls = seen.length;
+  const joe = await submitNew(collector, { title: TITLES.joe, media_format: "rom-cartridge", region: "pal" });
+  check("submitted with title, platform and region only", /^[0-9a-f-]{36}$/.test(joe.id ?? ""));
+  check("Wikidata's game under its European title is stored as the one likely match", (await settled(joe.id)) === `single_match|1|${TITLES.joe}|1`, lookup(joe.id));
+  check("searched in English, German and French for a PAL copy", ["en", "de", "fr"].every((l) => seen.slice(joeCalls).some((c) => c.action === "wbsearchentities" && c.language === l)));
+  const joeStored = JSON.parse(psql(`select candidates::text from private.submission_enrichments where submission_id = '${joe.id}';`))[0];
+  check("graded by the main part of its European title, with the importer's record kept", joeStored.external_id === "Q4677160" && joeStored.match === "main_title" && joeStored.matched_title === "Joe & Mac 3: Lost in the Tropics" && joeStored.payload?.title === "Joe & Mac 2: Lost in the Tropics");
+  check("with its release dates by region: Europe, November 1995", joeStored.release_dates.some((d) => d.value === "1995-11-01" && d.precision === "month" && d.places.includes("Q46")));
+  const joeGame = psql(`select game_id from public.catalog_change_requests where id = '${joe.id}';`);
+  const joeReview = plain((await editor.browser.get(`/admin/catalog/${joe.id}`)).html);
+  check("the review names it a likely match, and why", joeReview.includes("one likely match on this platform") && joeReview.includes("Likely match") && joeReview.includes("Matches the main part of “Joe & Mac 3: Lost in the Tropics”"));
+  check("with the developer, the copy's regional release and the publisher gap", joeReview.includes("Data East") && joeReview.includes("Nov 1995 (Europe)") && /Publisher\s+Not stated in Wikidata/.test(joeReview));
+  const jr = plain((await editor.browser.get(`/admin/catalog/games/${joeGame}`)).html);
+  check("the game's own record shows it as automatically discovered, awaiting review", jr.includes("Automatically discovered — awaiting review") && jr.includes("Joe & Mac 2: Lost in the Tropics") && jr.includes("Wikidata Q4677160") && jr.includes(`revision ${ENTITIES.Q4677160.lastrevid}`));
+  check("kept apart from the record's own fields, which say nothing is sourced yet", jr.indexOf("Automatically discovered") < jr.lastIndexOf("Physical releases") && /Developer\s+Not known/.test(jr) && jr.includes("Added by hand: no imported source"), jr.slice(jr.indexOf("The game Title"), jr.indexOf("The game Title") + 260));
+  await tab.goto(`${origin}/admin/catalog/games/${joeGame}`, { waitUntil: "networkidle" });
+  if (shots) await tab.screenshot({ path: `${shots}/game-discovered.png`, fullPage: true });
+  // Confirmed in the browser, with JavaScript, from the game's record.
+  await tab.fill("#confirm-game-Q4677160-reason", "Same game: Joe & Mac 3 is its European title");
+  await tab.click('form#confirm-game-Q4677160 button[type="submit"]');
+  await tab.waitForURL((u) => u.searchParams.get("notice") === "source_confirmed", { timeout: 15000 }).catch(() => undefined);
+  check("an editor confirms it with a reason and one button", new URL(tab.url()).searchParams.get("notice") === "source_confirmed", tab.url());
+  const confirmed = plain((await editor.browser.get(`/admin/catalog/games/${joeGame}`)).html);
+  check("the record now shows the source's facts: developer, European release, other titles", /Developer\s+Data East/.test(confirmed) && confirmed.includes("Nov 1995") && confirmed.includes("Europe") && confirmed.includes("Joe & Mac 3: Lost in the Tropics"));
+  check("with its provenance, and the publisher as not stated by the source", confirmed.includes("From Wikidata Q4677160") && confirmed.includes("confirmed by an editor from a submission's automatic lookup") && /Publisher\s+Not stated by the source/.test(confirmed));
+  check("and no longer as awaiting review", !confirmed.includes("Automatically discovered — awaiting review"));
+  check("its history records the confirmation", confirmed.includes("Confirmed a Wikidata match as the game's source") && confirmed.includes("Same game: Joe & Mac 3 is its European title"), confirmed.slice(confirmed.indexOf("History"), confirmed.indexOf("History") + 200));
+  check("nothing was verified or published: the game and its release are as submitted", psql(`select g.status || '/' || (g.verified_at is null) || '/' || g.title || '/' || r.media_format_code || '/' || r.status from public.games g join public.releases r on r.game_id = g.id where g.id = '${joeGame}';`) === `unverified/true/${TITLES.joe}/rom-cartridge/unverified`);
+  if (shots) {
+    await tab.goto(`${origin}/admin/catalog/games/${joeGame}`, { waitUntil: "networkidle" });
+    await tab.screenshot({ path: `${shots}/game-confirmed.png`, fullPage: true });
+  }
+
+  section("Regional titles: Super Probotector (PAL) and ロックマンX (Japan)");
+  const probo = await submitNew(collector, { title: TITLES.probo, media_format: "rom-cartridge", region: "pal" });
+  check("Super Probotector finds Contra III as the likely match, with a weaker possibility", (await settled(probo.id)) === `single_match|1|${TITLES.probo}|2`, lookup(probo.id));
+  const proboReview = await editor.browser.get(`/admin/catalog/${probo.id}`);
+  const reject = formById(proboReview.html, "reject-review-Q990000501");
+  const rejected = reject ? await editor.browser.submit(`/admin/catalog/${probo.id}`, reject, { reason: "Not this game: a different title" }) : null;
+  check("an editor rejects the weaker possibility from the review, without JavaScript", Boolean(reject) && location(rejected.response).includes("notice=source_rejected") && psql(`select decisions -> 'Q990000501' ->> 'decision' from private.submission_enrichments where submission_id = '${probo.id}';`) === "rejected");
+  check("a rejection stores nothing", psql("select count(*) from private.provider_records where external_id = 'Q990000501';") === "0");
+  const rock = await submitNew(collector, { title: TITLES.rockman, media_format: "rom-cartridge", region: "ntsc-j" });
+  check("ロックマンX finds Mega Man X by its Japanese title, searching Japanese too", (await settled(rock.id)) === `single_match|1|${TITLES.rockman}|1` && seen.some((c) => c.search === TITLES.rockman && c.language === "ja"));
 
   section("Look up again, and a changed title");
   const lookAgain = formById((await editor.browser.get(`/admin/catalog/${none.id}`)).html, "lookup-again");
@@ -338,10 +398,13 @@ delete from private.game_title_keys where game_id in (select id from public.game
 delete from private.catalog_verifications where game_id in (select id from public.games where title like '${TAG}%') or release_id in (select r.id from public.releases r join public.games g on g.id = r.game_id where g.title like '${TAG}%');
 delete from public.releases where game_id in (select id from public.games where title like '${TAG}%');
 delete from public.game_platforms where game_id in (select id from public.games where title like '${TAG}%');
-delete from private.provider_records where import_run_id in (select id from private.import_runs where source_name = '${TAG}.json');
+delete from private.provider_records where import_run_id in (select id from private.import_runs where source_name = '${TAG}.json' or source_name like 'submission-lookup:%');
+delete from private.import_runs where source_name like 'submission-lookup:%';
 delete from private.import_runs where source_name = '${TAG}.json';
 delete from public.games where title like '${TAG}%';
 commit;`);
+  const [terms, reviewed, note, cleared] = clearance.split("|");
+  psql(`update private.external_providers set commercial_use_cleared = ${cleared === "true"}, terms_sha256 = ${terms ? `'${terms}'` : "null"}, terms_reviewed_at = ${reviewed ? `'${reviewed}'` : "null"}, cleared_note = ${note ? `'${note.replaceAll("'", "''")}'` : "null"} where code = 'wikidata';`);
   const deleted = await deleteUsers();
   const all = [...new Set([...deleted, ...users])].map((u) => `'${u}'`).join(",");
   if (all) psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${all}) or target_profile_id in (${all}); commit;`);

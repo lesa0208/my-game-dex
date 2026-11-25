@@ -1,0 +1,371 @@
+{
+  "entities": {
+    "Q4677160": {
+      "type": "item",
+      "id": "Q4677160",
+      "lastrevid": 2570591457,
+      "labels": {
+        "en": {
+          "language": "en",
+          "value": "Joe & Mac 2: Lost in the Tropics"
+        },
+        "ja": {
+          "language": "ja",
+          "value": "戦え原始人3 主役はやっぱりJOE&MAC"
+        },
+        "mul": {
+          "language": "mul",
+          "value": "Joe & Mac 2: Lost in the Tropics"
+        }
+      },
+      "aliases": {
+        "ja": [
+          {
+            "language": "ja",
+            "value": "戦え原始人3"
+          }
+        ],
+        "en": [
+          {
+            "language": "en",
+            "value": "Caveman Combat 3: The Protagonists Are Joe & Mac Again"
+          },
+          {
+            "language": "en",
+            "value": "Joe & Mac 3: Lost in the Tropics"
+          },
+          {
+            "language": "en",
+            "value": "Tatakae Genshinjin 3: Shuyaku wa Yappari Joe & Mac"
+          }
+        ]
+      },
+      "claims": {
+        "P31": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P31",
+              "hash": "03d2d8ec4a899b29435a104a9ce7c189a31ae380",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "numeric-id": 7889,
+                  "id": "Q7889"
+                },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P136": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P136",
+              "hash": "b961fca2df841c993d8a208340ed7a3338a21ab4",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "numeric-id": 828322,
+                  "id": "Q828322"
+                },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P577": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P577",
+              "hash": "4b85943b24328c555e9be126793324d0e442e991",
+              "datavalue": {
+                "value": {
+                  "time": "+1994-02-18T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P400": [
+                {
+                  "snaktype": "value",
+                  "property": "P400",
+                  "hash": "abeb239479a081a0cc571b3a75b09662c72d0b01",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 183259,
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ],
+              "P291": [
+                {
+                  "snaktype": "value",
+                  "property": "P291",
+                  "hash": "bb32394d31503e16b2eca63379d79b080de13059",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 17,
+                      "id": "Q17"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ]
+            },
+            "qualifiers-order": [
+              "P400",
+              "P291"
+            ],
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P577",
+              "hash": "5a5de5f0c0e1e76c683f7c0ea567c371bd12f609",
+              "datavalue": {
+                "value": {
+                  "time": "+1994-04-00T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 10,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P400": [
+                {
+                  "snaktype": "value",
+                  "property": "P400",
+                  "hash": "abeb239479a081a0cc571b3a75b09662c72d0b01",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 183259,
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ],
+              "P291": [
+                {
+                  "snaktype": "value",
+                  "property": "P291",
+                  "hash": "93c986254392ae2e30c520c9a333479f563f11f7",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 49,
+                      "id": "Q49"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ]
+            },
+            "qualifiers-order": [
+              "P400",
+              "P291"
+            ],
+            "rank": "normal"
+          },
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P577",
+              "hash": "2cb7a34bc7b451de04c5c7b089384ca022ef7533",
+              "datavalue": {
+                "value": {
+                  "time": "+1995-11-00T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 10,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P400": [
+                {
+                  "snaktype": "value",
+                  "property": "P400",
+                  "hash": "abeb239479a081a0cc571b3a75b09662c72d0b01",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 183259,
+                      "id": "Q183259"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ],
+              "P291": [
+                {
+                  "snaktype": "value",
+                  "property": "P291",
+                  "hash": "548e20e9f59d661d6b409bea2e0126141a2cbc34",
+                  "datavalue": {
+                    "value": {
+                      "entity-type": "item",
+                      "numeric-id": 46,
+                      "id": "Q46"
+                    },
+                    "type": "wikibase-entityid"
+                  },
+                  "datatype": "wikibase-item"
+                }
+              ]
+            },
+            "qualifiers-order": [
+              "P400",
+              "P291"
+            ],
+            "rank": "normal"
+          }
+        ],
+        "P400": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P400",
+              "hash": "abeb239479a081a0cc571b3a75b09662c72d0b01",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "numeric-id": 183259,
+                  "id": "Q183259"
+                },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P178": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P178",
+              "hash": "60d57d2fdd1dfd9cac6946939bc0b9f9b571e1bc",
+              "datavalue": {
+                "value": {
+                  "entity-type": "item",
+                  "numeric-id": 1172213,
+                  "id": "Q1172213"
+                },
+                "type": "wikibase-entityid"
+              },
+              "datatype": "wikibase-item"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P1933": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P1933",
+              "hash": "c193c4e83f6c216d405f1e3539a710013b60bded",
+              "datavalue": {
+                "value": "joe-mac-2-lost-in-the-tropics",
+                "type": "string"
+              },
+              "datatype": "external-id"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P5794": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P5794",
+              "hash": "cbaee3ecb46b89e28f415a77b0eff445135657db",
+              "datavalue": {
+                "value": "joe-and-mac-2-lost-in-the-tropics",
+                "type": "string"
+              },
+              "datatype": "external-id"
+            },
+            "type": "statement",
+            "qualifiers": {
+              "P9043": [
+                {
+                  "snaktype": "value",
+                  "property": "P9043",
+                  "hash": "9cb26a8b81b3aa2b700343be72c045b90c57e96c",
+                  "datavalue": {
+                    "value": "42604",
+                    "type": "string"
+                  },
+                  "datatype": "external-id"
+                }
+              ]
+            },
+            "qualifiers-order": [
+              "P9043"
+            ],
+            "rank": "normal"
+          }
+        ],
+        "P11688": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P11688",
+              "hash": "a2a600e18f0425152dfede707ea1ede9a8d09e92",
+              "datavalue": {
+                "value": "24596",
+                "type": "string"
+              },
+              "datatype": "external-id"
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ]
+      }
+    }
+  }
+}

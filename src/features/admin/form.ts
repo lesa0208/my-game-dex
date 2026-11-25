@@ -230,6 +230,8 @@ export const AUDIT_ACTIONS: readonly { value: string; label: string }[] = [
   { value: "catalog_release_excluded", label: "Release excluded" },
   { value: "catalog_exclusion_restored", label: "Exclusion restored" },
   { value: "catalog_release_merged", label: "Release merged" },
+  { value: "catalog_source_confirmed", label: "Source match confirmed" },
+  { value: "catalog_source_rejected", label: "Source match rejected" },
 ];
 
 export function auditActionLabel(action: string): string {
