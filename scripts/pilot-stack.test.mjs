@@ -765,3 +765,22 @@ test("the running-key probe: against a fake Auth, with timeouts, retries and a c
   assert.equal(sync.length, 1);
   assert.match(sync[0], /couldn't be checked/);
 });
+
+test("self-registration and its confirmation email are the demo's only (M16)", () => {
+  const source = readFileSync(join(repo, "supabase", "config.toml"), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(!source.includes("[auth.email.template.confirmation]"), "the shared config has no confirmation email: every other stack is unchanged");
+  const demo = testConfig(source, { project: "my-game-dex-demo", offset: 5000, confirmationEmail: true });
+  assert.match(demo, /\[auth\.email\.template\.confirmation\]\nsubject = "Confirm your My Game Dex account"\ncontent_path = "\.\/supabase\/templates\/confirmation\.html"/);
+  assert.ok(!testConfig(source, { project: "my-game-dex-pilot", offset: 4000, signup: false }).includes("template.confirmation"), "nor does the pilot's");
+  assert.deepEqual(Object.keys(VARIANTS).filter((n) => VARIANTS[n].confirmationEmail), ["demo"]);
+  assert.equal(VARIANTS.pilot.signup, false, "the pilot's Auth refuses sign-ups itself");
+  assert.equal(VARIANTS.demo.site, "http://127.0.0.6:3006", "the demo's email links go to its preview");
+  // Each preview pins the app server's setting; the checks' app servers keep it closed by default.
+  assert.match(readFileSync(join(scripts, "demo-preview.mjs"), "utf8"), /MGD_SELF_REGISTRATION: "open"/);
+  assert.match(readFileSync(join(scripts, "pilot-preview.mjs"), "utf8"), /MGD_SELF_REGISTRATION: "closed"/);
+  assert.match(readFileSync(join(scripts, "app-harness.mjs"), "utf8"), /selfRegistration = "closed"/);
+  // A server-side variable only: never one Next.js would send to the browser.
+  const gate = readFileSync(join(repo, "src", "features", "auth", "registration.ts"), "utf8");
+  assert.match(gate, /return env\.MGD_SELF_REGISTRATION === "open";/);
+  assert.match(gate, /^import "server-only";/);
+});

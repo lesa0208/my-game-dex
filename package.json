@@ -97,7 +97,9 @@
     "app:collector-fast-add-checks": "node scripts/app-collector-fast-add-checks.mjs",
     "demo:preview": "node scripts/demo-preview.mjs",
     "demo:catalog": "node scripts/catalog-demo.mjs",
-    "app:demo-catalog-checks": "node scripts/app-demo-catalog-checks.mjs"
+    "app:demo-catalog-checks": "node scripts/app-demo-catalog-checks.mjs",
+    "app:sign-up-journey-checks": "node scripts/app-sign-up-journey-checks.mjs",
+    "app:sign-up-checks": "node scripts/app-sign-up-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

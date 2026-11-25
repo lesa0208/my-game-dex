@@ -34,6 +34,10 @@ const env = {
   ENABLE_SEED_DATA: "false",
   // The banner: "Demo catalog … Not the real catalog." Set at build time, in this build only.
   NEXT_PUBLIC_MGD_DEMO_CATALOG: "1",
+  // Self-registration (features/auth/registration.ts): open on this server only, a server-side
+  // variable the browser never sees. The demo stack's Auth allows sign-up and sends the
+  // confirmation email to its Mailpit (scripts/test-stack.mjs).
+  MGD_SELF_REGISTRATION: "open",
   MGD_NEXT_DIST_DIR: ".next-demo",
 };
 

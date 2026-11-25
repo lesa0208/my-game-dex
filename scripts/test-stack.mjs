@@ -88,6 +88,8 @@ const VARIANTS = {
   demo: {
     project: "my-game-dex-demo", offset: 5000, dir: ".supabase-demo", persistent: true, allowReset: "MGD_ALLOW_DEMO_RESET",
     seed: false, site: "http://127.0.0.6:3006", testTarget: false, sharesPortsWith: "rehearsal",
+    // M16: self-registration is open here only, so its Auth sends the account confirmation email.
+    confirmationEmail: true,
   },
 };
 VARIANTS.rehearsal.sharesPortsWith = "demo";
@@ -275,7 +277,7 @@ const DISABLED = new Set(["studio", "analytics", "edge_runtime"]);
  * API keys (scripts/lib/stack-keys.mjs: the config names them, never their values), and Storage's
  * S3 protocol, whose keys are the CLI's shared ones, is off.
  */
-export function testConfig(source, { signup = true, project = TEST_PROJECT_ID, offset = OFFSET, site = null, seed = true, ownKeys = false } = {}) {
+export function testConfig(source, { signup = true, project = TEST_PROJECT_ID, offset = OFFSET, site = null, seed = true, ownKeys = false, confirmationEmail = false } = {}) {
   let section = "";
   const config = source
     .split("\n")
@@ -298,13 +300,28 @@ export function testConfig(source, { signup = true, project = TEST_PROJECT_ID, o
     .join("\n");
   // The invitation and reset templates are in supabase/config.toml since the M11a local
   // activation, so both stacks use them; the test config inherits them unchanged.
-  return `${config}\n`;
+  // M16: the stack where self-registration is open (the demo) also gets the account confirmation
+  // email, whose link goes to the app's confirmation page as theirs do. Every other stack's config
+  // is unchanged, the pilot's included.
+  return confirmationEmail ? `${config}\n${CONFIRMATION_TEMPLATE}` : `${config}\n`;
 }
+
+/** The new account confirmation email (supabase/templates/confirmation.html), for the demo only. */
+export const CONFIRMATION_TEMPLATE = `[auth.email.template.confirmation]
+subject = "Confirm your My Game Dex account"
+content_path = "./supabase/templates/confirmation.html"
+`;
 
 function generatedConfig() {
   const variant = VARIANTS[STACK];
   const signup = variant.signup ?? process.env.MGD_TEST_SIGNUP !== "off";
-  const config = testConfig(readFileSync(join(root, "supabase", "config.toml"), "utf8"), { signup, site: variant.site ?? null, seed: variant.seed ?? true, ownKeys: variant.ownKeys ?? false });
+  const config = testConfig(readFileSync(join(root, "supabase", "config.toml"), "utf8"), {
+    signup,
+    site: variant.site ?? null,
+    seed: variant.seed ?? true,
+    ownKeys: variant.ownKeys ?? false,
+    confirmationEmail: variant.confirmationEmail ?? false,
+  });
   if (!config.includes(`project_id = "${TEST_PROJECT_ID}"`)) throw new Error("The generated config doesn't name the test project.");
   return { signup, config };
 }

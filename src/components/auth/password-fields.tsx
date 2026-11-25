@@ -1,12 +1,12 @@
 import { Input } from "@/components/ui/input";
 
 /** A new password and its confirmation, with the rule in the hint (M11a-1, M11a-2). */
-export function PasswordFields({ describedBy, invalid }: { describedBy: string; invalid: boolean }) {
+export function PasswordFields({ describedBy, invalid, label = "New password" }: { describedBy: string; invalid: boolean; label?: string }) {
   return (
     <>
       <div className="flex flex-col gap-1.5">
         <label htmlFor="password" className="text-sm font-medium">
-          New password
+          {label}
         </label>
         <Input
           id="password"

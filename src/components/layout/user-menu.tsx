@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, FilePlus2, LogIn, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { AtSign, FilePlus2, LogIn, LogOut, Settings, ShieldCheck, UserPlus, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { UserAvatar } from "@/components/shared/user-avatar";
@@ -25,16 +25,29 @@ export function UserMenuPlaceholder() {
   );
 }
 
-/** `isStaff`: the account holds a staff role, from `get_my_admin_access()`; /admin checks it again. */
-export function UserMenu({ viewer, isStaff = false }: { viewer: Viewer | null; isStaff?: boolean }) {
+/**
+ * `isStaff`: the account holds a staff role, from `get_my_admin_access()`; /admin checks it again.
+ * `canSignUp` (M16): this server allows self-registration, so a signed-out visitor is offered it.
+ */
+export function UserMenu({ viewer, isStaff = false, canSignUp = false }: { viewer: Viewer | null; isStaff?: boolean; canSignUp?: boolean }) {
   if (!viewer) {
     return (
-      <Button asChild variant="ghost" size="lg" className="h-10">
-        <Link href="/sign-in">
-          <LogIn aria-hidden="true" />
-          Sign in
-        </Link>
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button asChild variant="ghost" size="lg" className="h-10">
+          <Link href="/sign-in">
+            <LogIn aria-hidden="true" />
+            Sign in
+          </Link>
+        </Button>
+        {canSignUp ? (
+          <Button asChild size="lg" className="h-10">
+            <Link href="/sign-up">
+              <UserPlus aria-hidden="true" />
+              Sign up
+            </Link>
+          </Button>
+        ) : null}
+      </div>
     );
   }
 

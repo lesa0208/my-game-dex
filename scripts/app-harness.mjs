@@ -79,7 +79,8 @@ let appErrors = "";
 /** The server-only variable the app reads its Auth admin key from (M11a-1). */
 const SECRET_KEY_VARIABLE = "SUPABASE_SECRET_KEY";
 
-export async function startApp(port) {
+/** `selfRegistration`: "open" lets this app server accept sign-ups (M16); every other check keeps it closed. */
+export async function startApp(port, { selfRegistration = "closed" } = {}) {
   const buildId = join(root, ".next", "BUILD_ID");
   if (!existsSync(buildId)) {
     console.error("No production build found. Run npm run build first.");
@@ -93,7 +94,8 @@ export async function startApp(port) {
   app = spawn(process.execPath, [join(root, "node_modules", "next", "dist", "bin", "next"), "start", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: root,
     // `next start` serves the production build, with NODE_ENV=production.
-    env: { ...process.env, NODE_ENV: "production", SUPABASE_URL: api, SUPABASE_PUBLISHABLE_KEY: publishableKey, [SECRET_KEY_VARIABLE]: serviceKey, ENABLE_SEED_DATA: "false" },
+    // M16: self-registration is closed unless a check opens it (app-sign-up-checks.mjs).
+    env: { ...process.env, NODE_ENV: "production", SUPABASE_URL: api, SUPABASE_PUBLISHABLE_KEY: publishableKey, [SECRET_KEY_VARIABLE]: serviceKey, ENABLE_SEED_DATA: "false", MGD_SELF_REGISTRATION: selfRegistration },
     stdio: ["ignore", "ignore", "pipe"],
   });
   app.stderr.on("data", (chunk) => (appErrors += chunk.toString()));

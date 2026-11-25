@@ -6,13 +6,14 @@ import { MobileNav } from "@/components/layout/mobile-nav";
 import { UserMenu, UserMenuPlaceholder } from "@/components/layout/user-menu";
 import { getCurrentViewer } from "@/features/account/queries";
 import { getAdminAccess } from "@/features/admin/queries";
+import { selfRegistrationOpen } from "@/features/auth/registration";
 
 /** Reads the session, so it streams in on its own and the rest of the page doesn't wait. */
 async function AccountMenu() {
   // If the account can't be read, offering sign-in is safe: it shows nothing private.
   const viewer = await getCurrentViewer().catch(() => null);
   const access = viewer?.isActive ? await getAdminAccess().catch(() => null) : null;
-  return <UserMenu viewer={viewer} isStaff={(access?.roles.length ?? 0) > 0} />;
+  return <UserMenu viewer={viewer} isStaff={(access?.roles.length ?? 0) > 0} canSignUp={!viewer && selfRegistrationOpen()} />;
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

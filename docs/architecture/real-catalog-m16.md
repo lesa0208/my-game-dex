@@ -41,7 +41,7 @@ Everything runs through the existing tools; `scripts/catalog-demo.mjs` only orde
 3. `clear`: Wikidata clearance and CC0 rights on the demo stack, against the saved licensing page.
 4. `stage`: the M5b importer as `catalog_importer`, one run per platform, each candidate with its risk assessment.
 5. `publish`: three demo-only staff accounts, made in SQL and unable to sign in, use the real editor functions:
-   - the demo editor adds the source's other titles (`add_game_alias`) and any pairing the importer skipped (`set_game_platform`);
+   - the demo editor adds the source's other titles (`add_game_alias`). (In the 2026-11-25 build, before migration `20261220100000`, it also added 77 pairings the importer had skipped, through `set_game_platform`.);
    - the demo reviewer verifies the game and each eligible pairing (`verify_game`, `verify_game_platform`);
    - the demo publisher publishes (`publish_game_identity`). Whoever creates a pairing never verifies it, and whoever verifies never publishes, as in production.
 
@@ -71,7 +71,32 @@ MGD_TEST_STACK=demo node scripts/test-stack.mjs start     # if it isn't running
 npm run demo:preview                                       # build and serve http://127.0.0.6:3006
 ```
 
-Sign up with any email address at the preview. The confirmation email arrives in the demo's Mailpit at http://127.0.0.1:59324.
+Open the preview, choose **Sign up** (in the header, or "Create an account" on the sign-in page), enter any email address and a password of at least 12 characters. The confirmation email arrives in the demo's Mailpit at http://127.0.0.1:59324: open it, follow **Confirm my email**, press the button on the page it opens, and choose your handle.
+
+### Self-registration, in the demo only
+
+The app has one account system, Supabase Auth, and stays invitation only (M11a-1) everywhere but the demo:
+
+- **The setting.** Self-registration is open only where the app server's own environment says `MGD_SELF_REGISTRATION=open` (`src/features/auth/registration.ts`). It is a server-side variable, never a `NEXT_PUBLIC_` one, so no browser or request can turn it on. `npm run demo:preview` sets it; the pilot preview pins it to `closed`; the checks' app servers keep it closed unless a check opens it.
+- **Three gates, each on its own.**
+  - The proxy answers `/sign-up` with a real 404 where it's closed.
+  - The page checks the setting again.
+  - The `signUp` action refuses before Auth is asked, whatever page sends it: `app:sign-up-checks` loads the form while open, restarts the server closed, and sends the form's request through another page that serves the same action.
+- **Auth decides too.** The pilot's Auth has sign-up off (`scripts/test-stack.mjs`), so even the flag couldn't create an account there.
+- **The same rules as every new password.** At least 12 characters, at most 72 bytes, typed twice, then Auth's own checks.
+- **Confirmation.**
+  - Email confirmation is required (`enable_confirmations`).
+  - Only the demo stack's generated config adds the confirmation email (`supabase/templates/confirmation.html`), so the pilot's config is unchanged.
+  - Its link goes to `/auth/confirm?type=email`, which, like the invitation and reset links, only shows a button: the token is spent by that button's POST, never by opening the link, so a mail scanner can't use it.
+  - Expired, used and tampered links get one message, with the way to a new link (signing up again with the same address).
+- **Nothing about other accounts.**
+  - A new address, an unconfirmed one and a confirmed one get the same answer after the same minimum time.
+  - A confirmed account's password is unchanged, and it gets no new email.
+- **An ordinary collector.** The database makes only the profile and preferences (`handle_new_user`): no staff role, no Owner. After confirming, the new collector chooses a handle (the existing `/welcome`, with every handle rule), then reaches Home.
+- **Tests.**
+  - `app:sign-up-journey-checks` runs the whole journey on the running demo preview in a real browser, with the real email (41 checks).
+  - `app:sign-up-checks` covers open and closed.
+  - `pilot-stack.test.mjs` pins the configuration.
 
 To rebuild it from fresh snapshots (outside the repository):
 
@@ -113,7 +138,4 @@ The existing batch review already scales for game identities. What does not scal
 - **Platform game counts** (migration `20261219100000`). `list_catalog_platforms` counted games through releases only, so an identity-only catalog said "Nintendo 64 (0)". It now counts published games with a published pairing. pgTAP `62`.
 - **Distribution formats.** The new platforms' physical formats (the Game Paks, DVD, UMD and others) and digital channels (Virtual Console, PlayStation Network) are classified, from their own Wikidata labels. The SNES pilot's twelve are unchanged.
 - **Systems shelf accessibility.** A system tile's accessible name replaced its visible text ("Game Boy: 1 copy" for "NINTENDO GB 1 copy"), which fails WCAG 2.5.3. It now reads the visible text, then the full name.
-
-### Found, not fixed here
-
-- **The importer skips a platform's pairing when the record is unchanged.** It keeps one source record per Wikidata item. When an item's record is identical for two platforms, the second platform's run finds it "unchanged" and adds no pairing (116 of the demo's listings). The demo editor added the eligible ones through `set_game_platform`. A real multi-platform import needs the importer to pair on a matched-but-unchanged record (a `catalog_import` change and migration) before step 1 runs on several platforms.
+- **The importer's skipped cross-platform pairings** (migration `20261220100000`). The importer keeps one source record per Wikidata item and payload. When an item's record was identical for two platforms, the second platform's run staged it "unchanged", and `pending_records` and `apply_record` skipped it as already applied: no pairing for the second platform (116 of the demo's 1,080 listings). Now such a record is offered once more when its game has no pairing on the run's platform, and applying it only adds that pairing, under review (`private.import_pair_unchanged`). Nothing else about the game or the record changes; a merged, excluded or rejected game is never paired; an existing pairing, an excluded one included, is never touched. `catalog_importer` gains no privilege. pgTAP `63`. The demo built on 2026-11-25, before the fix, had the 77 eligible ones added by the demo editor through `set_game_platform`; a rebuild gets them from the importer.
