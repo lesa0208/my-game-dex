@@ -126,7 +126,7 @@ const yourCopies = async (page) => (await page.locator('aside[aria-label="Your c
 const chip = (page, step, name) => page.getByRole("navigation", { name: step, exact: true }).getByRole("link", { name, exact: false }).first();
 const firstResult = (page, title) => page.locator("main ol a:visible").filter({ hasText: title }).first();
 const mainSearch = (page) => page.locator('main input[name="q"]:visible');
-const suggestions = (page) => page.locator("main p:visible").filter({ hasText: "Chosen for you" });
+const suggestions = (page) => page.locator("main p:visible:not(#add-release-suggested)").filter({ hasText: "Chosen for you" });
 const addRelease = (page) => page.locator("#add-release:visible");
 const confirmation = (page) => page.locator('main [role="status"]:visible');
 
@@ -278,7 +278,12 @@ try {
   {
     await desk.goto(`${origin}/games/pixel-knight-saga?platform=nes&region=unsure`, { waitUntil: "networkidle" });
     check("with the region not sure, no release is offered and nothing is chosen for them", (await addRelease(desk).count()) === 0 && (await suggestions(desk).count()) === 0);
-    await desk.goto(`${origin}/games/pixel-knight-saga?platform=nes&region=unsure&edition=unsure`, { waitUntil: "networkidle" });
+    await desk.goto(`${origin}/games/pixel-knight-saga?platform=nes`, { waitUntil: "networkidle" });
+    const box = await addRelease(desk).locator("..").innerText();
+    check("a release chosen for the collector says so above its Add button", box.indexOf("Chosen for you, because it's the catalog's only matching release") >= 0 && box.indexOf("Chosen for you") < box.indexOf("Add to collection"));
+    await desk.getByRole("link", { name: "Add it without choosing a release" }).click();
+    await desk.waitForURL(/region=unsure&edition=unsure/);
+    check("one click from there adds it without a release: no release is offered", await eventually(async () => (await addRelease(desk).count()) === 0 && (await addButton(desk).count()) === 1));
     await addButton(desk).click();
     await waitForAdded(desk);
     check("the copy is added as the collector's own unidentified record, with the region not sure", copiesOf(alex.id).at(-1) === "claim:nes:not sure");

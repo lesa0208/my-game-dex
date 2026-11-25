@@ -441,6 +441,20 @@ export function ReleasePickerView({
               {outcome ? "Your release" : "The only release"}: {target.platform.shortName} · {regionLabel(target.region)}
               {target.edition?.name ? ` · ${target.edition.name}` : ""}
             </h3>
+            {plan.suggested.region || plan.suggested.edition ? (
+              // Said before the Add button: a release chosen for the collector is never added unnoticed.
+              <p id="add-release-suggested" className="text-sm text-muted-foreground">
+                Chosen for you, because it&apos;s the catalog&apos;s only matching release. Not sure your copy is this one?{" "}
+                <Link
+                  href={href({ platform: target.platform.slug, region: UNSURE, edition: UNSURE })}
+                  scroll={false}
+                  className="text-primary-text underline underline-offset-4"
+                >
+                  Add it without choosing a release
+                </Link>
+                .
+              </p>
+            ) : null}
             {renderAdd ? renderAdd(target) : null}
             {outcome ? (
               <p className="text-sm">
