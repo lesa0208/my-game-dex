@@ -59,7 +59,7 @@ export const DEMO_PLATFORMS = ["nes", "snes", "mega-drive", "nintendo-64", "game
 export const DEMO_API_PORT = 54321 + 5000;
 export const DEMO_REVIEWER = "de30de30-0000-4000-8000-0000000de301";
 export const DEMO_PUBLISHER = "de30de30-0000-4000-8000-0000000de302";
-/** Adds a platform pairing the importer skipped (below); never verifies or publishes. */
+/** Adds the source's other titles as aliases (below); never verifies or publishes. */
 export const DEMO_EDITOR = "de30de30-0000-4000-8000-0000000de303";
 /** Every demo pairing's basis says this, in place of physical evidence. */
 export const DEMO_NOTE =
@@ -353,35 +353,17 @@ async function cmdPublish(o) {
   const eligibility = demoEligibility(entitiesText, selections(o.dir));
   psql(container, demoStaffSql());
 
-  // The importer keeps one source record per Wikidata item. When an item's record is the same
-  // for two platforms, the second platform's run finds it unchanged and adds no pairing. The
-  // demo editor adds those pairings through the editor function, for eligible ones only, before
-  // the reviewer verifies them (whoever creates a pairing never verifies it).
+  // Every eligible listing should have its pairing from the importer: since migration
+  // 20261220100000 a record unchanged between two platforms' runs pairs the second platform too.
+  // (The demo built on 2026-11-25, before that fix, had 77 such pairings added by the demo editor.)
+  // Any still missing is reported, never made here.
   const known = JSON.parse(psql(container, `select coalesce(json_object_agg(x.external_id, json_build_object('game', x.game_id,
       'platforms', (select coalesce(json_agg(p.slug), '[]') from public.game_platforms gp join public.platforms p on p.id = gp.platform_id where gp.game_id = x.game_id))), '{}')
     from private.external_references x where x.provider_code = 'wikidata';`));
-  const missing = [];
-  for (const [platform, byId] of Object.entries(eligibility)) {
-    for (const [qid, reasons] of Object.entries(byId)) if (reasons === null && known[qid] && !known[qid].platforms.includes(platform)) missing.push({ qid, platform, game: known[qid].game });
-  }
-  if (missing.length) {
-    const calls = missing.map((m) => `select ${lit(`${m.qid} ${m.platform}`)} || ' ' || pg_temp.demo_pair(${lit(m.game)}, (select id from public.platforms where slug = ${lit(m.platform)}));`).join("\n");
-    const out = psql(container, `update auth.mfa_amr_claims set created_at = now(), updated_at = now() where session_id = '${DEMO_EDITOR}';
-create or replace function pg_temp.demo_pair(p_game uuid, p_platform uuid) returns text language plpgsql as $$
-begin
-  perform set_config('request.jwt.claims', pg_catalog.jsonb_build_object('sub', '${DEMO_EDITOR}', 'role', 'authenticated', 'aal', 'aal2', 'session_id', '${DEMO_EDITOR}')::text, true);
-  perform set_config('role', 'authenticated', true);
-  perform public.set_game_platform(p_game, p_platform, 'M16 demo catalog: the Wikidata item states this platform (P400); the importer skipped its unchanged record');
-  perform set_config('role', 'none', true);
-  return 'paired';
-exception when others then
-  return 'refused: ' || sqlerrm;
-end $$;
-${calls}`, { quiet: true });
-    const lines = out.split("\n").filter((l) => /^Q[0-9]+ /.test(l));
-    console.log(`pairings the importer skipped: ${missing.length}; added ${lines.filter((l) => l.endsWith(" paired")).length}`);
-    for (const l of lines.filter((x) => !x.endsWith(" paired")).slice(0, 10)) console.log(`  ${l}`);
-  }
+  const missing = Object.entries(eligibility).flatMap(([platform, byId]) =>
+    Object.entries(byId).filter(([qid, reasons]) => reasons === null && known[qid] && !known[qid].platforms.includes(platform)).map(([qid]) => `${qid} ${platform}`),
+  );
+  if (missing.length) console.log(`eligible listings without a pairing (the importer didn't pair them): ${missing.length}, e.g. ${missing.slice(0, 5).join(", ")}`);
 
   // The source's other titles, as catalog aliases (so search finds "Rockman X" or a Japanese
   // title), added by the demo editor through add_game_alias, for every game with an eligible pairing.
