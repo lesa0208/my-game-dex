@@ -8,6 +8,7 @@ import { SearchResultList, SearchResultsSkeleton } from "@/components/catalog/se
 import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
+import { searchFallbacks } from "@/features/catalog/fallback";
 import { listCatalogPlatforms, searchCatalog } from "@/features/catalog/queries";
 import type { CatalogPlatform } from "@/features/catalog/types";
 import { getMyOwnedGames } from "@/features/collection/queries";
@@ -100,7 +101,21 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
     );
   }
 
-  const { data } = outcome;
+  let data = outcome.data;
+  // Nothing found as typed: a product code with a space, or a title's words split where
+  // the catalog joins them, is tried once more, and the page says which search it shows.
+  let shown = params.query;
+  if (data.status !== "too_short" && data.items.length === 0 && params.query && !params.cursor) {
+    for (const alternative of searchFallbacks(params.query)) {
+      const retry = await searchCatalog(alternative, params.platform, null);
+      if (retry.ok && retry.data.items.length > 0) {
+        data = retry.data;
+        shown = alternative;
+        break;
+      }
+    }
+  }
+  const shownParams = { ...params, query: shown };
   if (data.status === "too_short") {
     return (
       <EmptyState icon={Search} title="Type a little more">
@@ -136,26 +151,31 @@ async function ExploreResults({ params, platforms }: { params: ExploreParams; pl
   // One read of the signed-in user's copies for the whole page, streamed into the
   // results (M12b). Started here, not awaited, so the results don't wait for it.
   const owned = getMyOwnedGames(data.items.map((item) => item.game.id));
-  const summary = params.query
-    ? `Games matching “${params.query}”${platformName ? ` on ${platformName}` : ""}`
+  const summary = shown
+    ? `Games matching “${shown}”${platformName ? ` on ${platformName}` : ""}`
     : `Games on ${platformName ?? "this platform"}, by title`;
   return (
     <section aria-labelledby="explore-results">
+      {shown !== params.query ? (
+        <p className="mb-2 text-sm">
+          Nothing matches “{params.query}” as typed, so these are the games matching “{shown}”.
+        </p>
+      ) : null}
       <h2 id="explore-results" className="mb-3 text-sm font-medium text-muted-foreground">
         {summary}
       </h2>
-      <SearchResultList items={data.items} owned={owned} />
+      <SearchResultList items={data.items} owned={owned} platform={params.platform} />
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         {params.cursor ? (
           <Button asChild variant="ghost" size="lg">
-            <Link href={exploreHref({ ...params, cursor: null })}>First results</Link>
+            <Link href={exploreHref({ ...shownParams, cursor: null })}>First results</Link>
           </Button>
         ) : (
           <span />
         )}
         {data.nextCursor ? (
           <Button asChild variant="secondary" size="lg">
-            <Link href={exploreHref({ ...params, cursor: data.nextCursor })}>More results</Link>
+            <Link href={exploreHref({ ...shownParams, cursor: data.nextCursor })}>More results</Link>
           </Button>
         ) : null}
       </div>

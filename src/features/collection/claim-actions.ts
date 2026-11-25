@@ -60,6 +60,8 @@ export async function addClaim(state: AddCopyState, formData: FormData): Promise
     if (outcome.reason === "signed_out") return { status: "signed_out", message: "Sign in to add copies to your collection.", itemId, count: null };
     return { status: "error", message: outcome.message, itemId: outcome.renewId ? uuidv7() : itemId, count: state.count };
   }
+  // As addCopy: the page shows the new copy straight away.
+  if (outcome.created) refresh();
   return {
     status: outcome.created ? "added" : "already_added",
     message: outcome.created ? "Added to your collection." : "This copy was already added.",

@@ -14,6 +14,12 @@
  * Several releases matching is never settled by picking one: the owner chooses, or adds
  * the copy unidentified.
  *
+ * A step the owner hasn't answered, where the catalog has only one choice (the only
+ * region of the platform's releases, the only edition of the region's), is filled with
+ * it as a labelled suggestion, so a game with one release per platform is one click
+ * from adding. It stays changeable, and it's never applied over an answer: "not sure"
+ * and "another" stay what the owner said.
+ *
  * Pure: the page passes in the public picker and the reference lists, so this is
  * tested on its own.
  */
@@ -67,6 +73,12 @@ export type FastAddPlan<R extends FastAddRelease = FastAddRelease> = {
   /** The catalog's editions for the platform and region chosen (any region when not sure). */
   editions: CatalogEdition[];
   edition: CatalogEdition | "other" | "unsure" | null;
+  /**
+   * Steps the owner hasn't answered, filled with the catalog's only choice there: the only
+   * region of the platform's releases, or the only edition of the region's. Shown as a
+   * suggestion they can change; never made over an answer, "not sure" included.
+   */
+  suggested: { region: boolean; edition: boolean };
   outcome: { kind: "release"; release: R } | { kind: "choose"; releases: R[] } | { kind: "claim"; claim: ClaimChoice } | null;
 };
 
@@ -90,7 +102,16 @@ function editionsOf<R extends FastAddRelease>(releases: R[]): CatalogEdition[] {
 const claimRegion = (code: string) => (code === "unknown" ? null : code);
 
 export function planFastAdd<R extends FastAddRelease>(picker: FastAddPicker<R>, selection: FastAddSelection, reference: FastAddReference): FastAddPlan<R> {
-  const plan: FastAddPlan<R> = { platform: null, choosingPlatform: false, region: null, choosingRegion: false, editions: [], edition: null, outcome: null };
+  const plan: FastAddPlan<R> = {
+    platform: null,
+    choosingPlatform: false,
+    region: null,
+    choosingRegion: false,
+    editions: [],
+    edition: null,
+    suggested: { region: false, edition: false },
+    outcome: null,
+  };
 
   // A release named in the address (a search result, a shared link) is what's added, but
   // only when every step also in the address agrees with it: a "not sure", "another" or
@@ -132,6 +153,15 @@ export function planFastAdd<R extends FastAddRelease>(picker: FastAddPicker<R>, 
   else if (region === OTHER) plan.choosingRegion = true;
   else if (region && onPlatform.some((r) => r.region.code === region)) plan.region = { code: region, inCatalog: true };
   else if (region && reference.regions.some((r) => r.code === region)) plan.region = { code: region, inCatalog: false };
+  else if (region === null) {
+    // Not answered yet, and the catalog's releases on the platform are all of one region:
+    // that region, as a suggestion.
+    const codes = new Set(onPlatform.map((r) => r.region.code));
+    if (codes.size === 1) {
+      plan.region = { code: [...codes][0], inCatalog: true };
+      plan.suggested.region = true;
+    }
+  }
   if (!plan.region) return plan;
   const chosenRegion = plan.region;
 
@@ -143,6 +173,12 @@ export function planFastAdd<R extends FastAddRelease>(picker: FastAddPicker<R>, 
   if (edition === UNSURE) plan.edition = "unsure";
   else if (edition === OTHER) plan.edition = "other";
   else if (edition !== null) plan.edition = plan.editions.find((e) => e.key === edition) ?? null;
+  else if (chosenRegion !== "unsure" && chosenRegion.inCatalog && plan.editions.length === 1) {
+    // Not answered yet, for a region of the catalog's, which lists one edition there: that
+    // edition, as a suggestion. With the region not sure, nothing is suggested.
+    plan.edition = plan.editions[0];
+    plan.suggested.edition = true;
+  }
   if (!plan.edition) return plan;
   const chosenEdition = plan.edition;
 

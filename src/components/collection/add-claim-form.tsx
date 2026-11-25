@@ -1,9 +1,10 @@
 "use client";
 
-import { CircleAlert, CircleCheck, Plus } from "lucide-react";
+import { CircleAlert, Plus } from "lucide-react";
 import Link from "next/link";
 import { startTransition, useActionState, useEffect, useId, useRef } from "react";
 
+import { AddedConfirmation, addedMessage, type AddedPlatform, NextGameSearch } from "@/components/collection/added-next";
 import { CopyFields, EMPTY_COPY, selectClassName } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,10 @@ export function AddClaimForm({
   currencies,
   maxDate,
   submitLabel = "Add to collection",
+  platform = null,
 }: {
+  /** The copy's platform, for the shelf link and the next game's search after an addition. */
+  platform?: AddedPlatform;
   gameId: string;
   platformId: string;
   /** The region code, or null for not sure. */
@@ -64,115 +68,111 @@ export function AddClaimForm({
     if (added) form.current?.reset();
   }, [added, state]);
 
+  const message = added ? addedMessage(state.message, state.count, "game") : null;
   return (
-    <form
-      ref={form}
-      action={addClaimFromForm}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (pending) return;
-        const data = new FormData(event.currentTarget);
-        startTransition(() => action(data));
-      }}
-      className="flex flex-col gap-3"
-      aria-describedby={`${id}-count`}
-    >
-      <input type="hidden" name="item_id" value={state.itemId} />
-      <input type="hidden" name="game_id" value={gameId} />
-      <input type="hidden" name="platform_id" value={platformId} />
-      <input type="hidden" name="region" value={region ?? ""} />
-      {edition && edition !== "other" ? (
-        <>
-          <input type="hidden" name="edition_kind" value={edition.kind ?? ""} />
-          <input type="hidden" name="edition_name" value={edition.name ?? ""} />
-        </>
-      ) : null}
-
-      {edition === "other" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-edition-name`} className="text-sm font-medium">
-              Edition name <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <Input
-              id={`${id}-edition-name`}
-              name="edition_name"
-              maxLength={80}
-              list={`${id}-edition-names`}
-              placeholder="Platinum, Greatest Hits…"
-              autoComplete="off"
-              className="h-10"
-            />
-            <datalist id={`${id}-edition-names`}>
-              {EDITION_NAME_SUGGESTIONS.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-edition-kind`} className="text-sm font-medium">
-              Edition type <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <select id={`${id}-edition-kind`} name="edition_kind" defaultValue="" className={selectClassName}>
-              <option value="">Not sure</option>
-              {EDITION_KIND_OPTIONS.map((k) => (
-                <option key={k.value} value={k.value}>
-                  {k.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button type="submit" size="lg" className="h-10" aria-disabled={pending || undefined}>
-          <Plus aria-hidden="true" />
-          {pending ? "Adding…" : added ? "Add another copy" : submitLabel}
-        </Button>
-        <p id={`${id}-count`} className="text-sm text-muted-foreground">
-          {countText(state.count)}
-        </p>
-      </div>
-
-      <div role="status" aria-live="polite" aria-atomic="true">
-        {added && state.message ? (
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm">
-            <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-primary-text" />
-            <span className="font-medium">{state.message}</span>
-            <Link href="/collection" className="text-primary-text underline underline-offset-4">
-              View your collection
-            </Link>
-          </p>
+    <div className="flex flex-col gap-3">
+      <form
+        ref={form}
+        action={addClaimFromForm}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (pending) return;
+          const data = new FormData(event.currentTarget);
+          startTransition(() => action(data));
+        }}
+        className="flex flex-col gap-3"
+        aria-describedby={`${id}-count`}
+      >
+        <input type="hidden" name="item_id" value={state.itemId} />
+        <input type="hidden" name="game_id" value={gameId} />
+        <input type="hidden" name="platform_id" value={platformId} />
+        <input type="hidden" name="region" value={region ?? ""} />
+        {edition && edition !== "other" ? (
+          <>
+            <input type="hidden" name="edition_kind" value={edition.kind ?? ""} />
+            <input type="hidden" name="edition_name" value={edition.name ?? ""} />
+          </>
         ) : null}
-      </div>
-      <div role="alert" aria-live="assertive">
-        {state.status === "error" || state.status === "signed_out" ? (
-          <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-            <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>
-              {state.message}
-              {state.status === "signed_out" ? (
-                <>
-                  {" "}
-                  <Link href="/sign-in" className="underline underline-offset-4">
-                    Sign in
-                  </Link>
-                </>
-              ) : null}
-            </span>
-          </p>
-        ) : null}
-      </div>
 
-      <details className="rounded-lg border">
-        <summary className="flex min-h-10 cursor-pointer items-center rounded-lg px-3 text-sm font-medium outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
-          More details <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
-        </summary>
-        <div className="flex flex-col gap-5 border-t p-3">
-          <CopyFields values={{ ...EMPTY_COPY, currency: defaultCurrency }} mediumLabel="Game" pieces={[]} currencies={currencies} maxDate={maxDate} />
+        {edition === "other" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={`${id}-edition-name`} className="text-sm font-medium">
+                Edition name <span className="font-normal text-muted-foreground">(optional)</span>
+              </label>
+              <Input
+                id={`${id}-edition-name`}
+                name="edition_name"
+                maxLength={80}
+                list={`${id}-edition-names`}
+                placeholder="Platinum, Greatest Hits…"
+                autoComplete="off"
+                className="h-10"
+              />
+              <datalist id={`${id}-edition-names`}>
+                {EDITION_NAME_SUGGESTIONS.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={`${id}-edition-kind`} className="text-sm font-medium">
+                Edition type <span className="font-normal text-muted-foreground">(optional)</span>
+              </label>
+              <select id={`${id}-edition-kind`} name="edition_kind" defaultValue="" className={selectClassName}>
+                <option value="">Not sure</option>
+                {EDITION_KIND_OPTIONS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button type="submit" size="lg" className="h-10" aria-disabled={pending || undefined}>
+            <Plus aria-hidden="true" />
+            {pending ? "Adding…" : added ? "Add another copy" : submitLabel}
+          </Button>
+          <p id={`${id}-count`} className="text-sm text-muted-foreground">
+            {countText(state.count)}
+          </p>
         </div>
-      </details>
-    </form>
+
+        <div role="status" aria-live="polite" aria-atomic="true">
+          {message ? <AddedConfirmation message={message} platform={platform} /> : null}
+        </div>
+        <div role="alert" aria-live="assertive">
+          {state.status === "error" || state.status === "signed_out" ? (
+            <p className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>
+                {state.message}
+                {state.status === "signed_out" ? (
+                  <>
+                    {" "}
+                    <Link href="/sign-in" className="underline underline-offset-4">
+                      Sign in
+                    </Link>
+                  </>
+                ) : null}
+              </span>
+            </p>
+          ) : null}
+        </div>
+
+        <details className="rounded-lg border">
+          <summary className="flex min-h-10 cursor-pointer items-center rounded-lg px-3 text-sm font-medium outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
+            More details <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
+          </summary>
+          <div className="flex flex-col gap-5 border-t p-3">
+            <CopyFields values={{ ...EMPTY_COPY, currency: defaultCurrency }} mediumLabel="Game" pieces={[]} currencies={currencies} maxDate={maxDate} />
+          </div>
+        </details>
+      </form>
+      {added && platform ? <NextGameSearch platform={platform} /> : null}
+    </div>
   );
 }

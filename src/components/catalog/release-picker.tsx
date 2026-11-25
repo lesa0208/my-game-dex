@@ -144,6 +144,16 @@ function Step({ id, number, title, children }: { id: string; number: number; tit
   );
 }
 
+/** A step filled in with the catalog's only choice: said so, and how to change it. */
+function Suggestion({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex gap-1.5 text-xs text-muted-foreground">
+      <Info aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 /** The catalog's name for an edition, or that it records none. */
 function catalogEditionText(edition: { kind: string | null; name: string | null }) {
   return editionText(edition.kind || edition.name ? { kind: edition.kind, name: edition.name } : null) ?? "Edition not recorded";
@@ -380,6 +390,12 @@ export function ReleasePickerView({
                 options={reference.regions.filter((r) => !(platform.inCatalog && picker.regions.some((c) => c.code === r.code))).map((r) => ({ value: r.code, text: r.label }))}
               />
             ) : null}
+            {plan.suggested.region && regionValue ? (
+              <Suggestion>
+                Chosen for you: the catalog&apos;s only region for {game.title} on {platformName(platform.slug)}. Yours is from elsewhere? Choose another region or
+                not sure.
+              </Suggestion>
+            ) : null}
           </Step>
         ) : null}
 
@@ -404,6 +420,9 @@ export function ReleasePickerView({
                 { key: UNSURE, text: "Not sure", href: href({ platform: platform.slug, region: regionValue, edition: UNSURE }), current: plan.edition === "unsure" },
               ]}
             />
+            {plan.suggested.edition ? (
+              <Suggestion>Chosen for you: the only edition the catalog lists for this region. Yours is different? Choose another edition or not sure.</Suggestion>
+            ) : null}
           </Step>
         ) : null}
 
@@ -422,6 +441,20 @@ export function ReleasePickerView({
               {outcome ? "Your release" : "The only release"}: {target.platform.shortName} · {regionLabel(target.region)}
               {target.edition?.name ? ` · ${target.edition.name}` : ""}
             </h3>
+            {plan.suggested.region || plan.suggested.edition ? (
+              // Said before the Add button: a release chosen for the collector is never added unnoticed.
+              <p id="add-release-suggested" className="text-sm text-muted-foreground">
+                Chosen for you, because it&apos;s the catalog&apos;s only matching release. Not sure your copy is this one?{" "}
+                <Link
+                  href={href({ platform: target.platform.slug, region: UNSURE, edition: UNSURE })}
+                  scroll={false}
+                  className="text-primary-text underline underline-offset-4"
+                >
+                  Add it without choosing a release
+                </Link>
+                .
+              </p>
+            ) : null}
             {renderAdd ? renderAdd(target) : null}
             {outcome ? (
               <p className="text-sm">

@@ -75,6 +75,7 @@ export async function AddToCollection({ release, returnPath }: { release: Picker
       maxDate={latestAcquisitionDate()}
       mediumLabel={mediumLabel(release.format?.category)}
       components={release.components.filter((c): c is typeof c & { label: string } => c.label !== null).map((c) => ({ kind: c.kind, label: c.label, quantity: c.quantity }))}
+      platform={{ slug: release.platform.slug, name: release.platform.shortName }}
     />
   );
 }
@@ -89,11 +90,14 @@ export async function AddClaimToCollection({
   platformId,
   claim,
   returnPath,
+  platformName,
 }: {
   gameId: string;
   platformId: string;
   claim: ClaimChoice;
   returnPath: string;
+  /** The platform's short name, for the shelf link after an addition. */
+  platformName: string;
 }) {
   const blocked = await notReady(returnPath);
   if (blocked) return blocked;
@@ -111,6 +115,7 @@ export async function AddClaimToCollection({
       defaultCurrency={currency}
       currencies={CURRENCIES}
       maxDate={latestAcquisitionDate()}
+      platform={{ slug: claim.platform, name: platformName }}
     />
   );
 }

@@ -42,9 +42,18 @@ function GameMeta({ game }: { game: GameResult["game"] }) {
   return parts.length ? <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p> : null;
 }
 
-function GameResultCard({ item, owned }: { item: GameResult; owned?: OwnedGames }) {
+/**
+ * A game's page, with the platform the search was filtered by already chosen there when
+ * the game is on it: a collector adding their SNES games goes straight to the SNES steps.
+ */
+function gameResultHref(item: GameResult, platform: string | null) {
+  const on = platform && item.platforms.some((p) => p.slug === platform);
+  return on ? `/games/${item.game.slug}?platform=${encodeURIComponent(platform)}` : `/games/${item.game.slug}`;
+}
+
+function GameResultCard({ item, owned, platform }: { item: GameResult; owned?: OwnedGames; platform: string | null }) {
   return (
-    <Link href={`/games/${item.game.slug}`} className={cardClassName}>
+    <Link href={gameResultHref(item, platform)} className={cardClassName}>
       <CatalogCover className="w-12" />
       <div className="min-w-0 flex-1">
         <p className="font-medium text-pretty">{item.game.title}</p>
@@ -93,12 +102,13 @@ function ReleaseResultCard({ item, owned }: { item: ReleaseResult; owned?: Owned
   );
 }
 
-export function SearchResultList({ items, owned }: { items: SearchResult[]; owned?: OwnedGames }) {
+/** `platform`: the platform the search was filtered by, which each game's link keeps. */
+export function SearchResultList({ items, owned, platform = null }: { items: SearchResult[]; owned?: OwnedGames; platform?: string | null }) {
   return (
     <ol className="flex flex-col gap-2">
       {items.map((item) => (
         <li key={item.kind === "release" ? `release-${item.release.id}` : `game-${item.game.id}`}>
-          {item.kind === "release" ? <ReleaseResultCard item={item} owned={owned} /> : <GameResultCard item={item} owned={owned} />}
+          {item.kind === "release" ? <ReleaseResultCard item={item} owned={owned} /> : <GameResultCard item={item} owned={owned} platform={platform} />}
         </li>
       ))}
     </ol>
