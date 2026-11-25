@@ -91,7 +91,7 @@ try {
   const text = plain(page.html);
   const at = (s) => text.indexOf(s);
   check("warnings come first, in plain words, critical first", at("Warnings (") > 0 && at("Possible error:") > at("Warnings (") && text.includes("Its external ids disagree") && text.includes("only digital releases for this platform"));
-  check("the essentials: platform, release date with its market, developer, publisher, other titles", text.includes("Super Nintendo") || text.includes("SNES") ? at("9 Apr 1993") > 0 && text.includes("Q17") && text.includes("Q170420") && /Publisher\s+Not known/.test(text) && text.includes(ALT) && text.includes("提灯の冒険") : false, text.slice(at("The game"), at("The game") + 400));
+  check("the essentials: platform, release date with its market, developer, publisher, other titles", text.includes("Super Nintendo") || text.includes("SNES") ? at("9 Apr 1993") > 0 && text.includes("Q17") && text.includes("Q170420") && /Publisher\s+Not stated by the source/.test(text) && text.includes(ALT) && text.includes("提灯の冒険") : false, text.slice(at("The game"), at("The game") + 400));
   check("formats are labelled as a source's claim, digital ones marked", text.includes("digital download (digital)") && text.includes("not evidence of a physical release"));
   check("what is still unknown is listed, never filled in", /Still unknown: [^.]*Publisher[^.]*Physical release/.test(text));
   check("the source, its licence and its import date are shown", text.includes("Wikidata Q990000001") && text.includes("CC0 1.0") && text.includes("imported"));

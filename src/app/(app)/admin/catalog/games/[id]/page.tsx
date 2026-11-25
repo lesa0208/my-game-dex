@@ -19,7 +19,10 @@ import { recordFieldLabel, recordStatusLabel, searchHref } from "@/features/reco
 import { publishMessage } from "@/features/publication/form";
 import { getGamePairingEvidence, getGameRecord, getGameSourceFacts, getRecordHistory } from "@/features/records/queries";
 import { alternativeTitles, formatLines, missingFacts, platformDates, sourceDate, sourceIds, warningsOf } from "@/features/records/source-facts";
-import { requestStatusLabel } from "@/features/review/form";
+import { catalogStatusLabel, requestStatusLabel } from "@/features/review/form";
+import { CandidateCard } from "@/components/enrichment/source-candidate";
+import { storedSummary, undecided } from "@/features/enrichment/match";
+import { getGameEnrichment } from "@/features/review/queries";
 import { formatWhen } from "@/features/submissions/display";
 
 export const metadata: Metadata = {
@@ -72,7 +75,7 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
   // Catalog editors only (D8); staff signed in without their authenticator verify first.
   const { access } = await requireAdminSection(UUID.test(id) ? `/admin/catalog/games/${id}` : "/admin/catalog/search", "editor");
   const before = param(search.before);
-  const [outcome, history, evidence, sourceOutcome] = await Promise.all([getGameRecord(id), getRecordHistory("game", id, before), getGamePairingEvidence(id), getGameSourceFacts(id)]);
+  const [outcome, history, evidence, sourceOutcome, enrichment] = await Promise.all([getGameRecord(id), getRecordHistory("game", id, before), getGamePairingEvidence(id), getGameSourceFacts(id), getGameEnrichment(id)]);
   if (!outcome.ok) {
     if (outcome.reason === "refused") notFound();
     return (
@@ -99,6 +102,11 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
   const formats = platform ? formatLines(facts, platform) : [];
   const missing = missingFacts(facts, g, platform);
   const source = facts?.sources[0] ?? null;
+  // What the submission's lookup found and no editor has decided yet: kept apart from the record.
+  const discovered = !source && enrichment ? undecided(enrichment) : [];
+  const stillLooking = !source && enrichment && !discovered.length && ["pending", "failed"].includes(enrichment.status);
+  const canDecide = Boolean(enrichment && editable(g.status) && !["withdrawn", "rejected", "excluded", "merged"].includes(enrichment.submission_status));
+  const viaMatch = (enrichment?.title_matches ?? []).filter((m) => !(enrichment?.catalog_items ?? []).some((c) => c.game_id === m.game_id));
 
   return (
     <AdminFrame access={access} current="catalog" title={g.title} titleId="game-record-title">
@@ -152,6 +160,45 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
           </RecordSection>
         ) : null}
 
+        {enrichment && (discovered.length || stillLooking) ? (
+          <RecordSection id="game-discovered" title="Automatically discovered — awaiting review">
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-sky-500/50 bg-sky-500/5 p-3 text-sm">
+              <p>
+                Found in Wikidata by the automatic lookup for{" "}
+                <Link href={`/admin/catalog/${enrichment.submission_id}`} className={linkClass}>
+                  the submission that created this game
+                </Link>
+                . These are a source&apos;s claims, kept apart from the record below until an editor confirms one: not verified, and not evidence of the physical release.
+              </p>
+              <p className="text-muted-foreground">{storedSummary(enrichment, wikidataConfigured())}</p>
+              {discovered.length ? (
+                <ul className="flex flex-col gap-3">
+                  {discovered.map((c) => (
+                    <CandidateCard key={c.external_id} c={c} e={enrichment} decide={canDecide ? { requestId: enrichment.submission_id, gameId: g.id, back: "game" } : null} />
+                  ))}
+                </ul>
+              ) : null}
+              {viaMatch.length ? (
+                <div className="flex flex-col gap-1">
+                  <p className="font-medium">Catalog games with the same title</p>
+                  <ul className="flex flex-col gap-1">
+                    {viaMatch.map((m) => (
+                      <li key={m.game_id}>
+                        <Link href={`/admin/catalog/games/${m.game_id}`} className={linkClass}>
+                          {m.title}
+                        </Link>{" "}
+                        <span className="text-muted-foreground">
+                          ({catalogStatusLabel(m.status)}{m.via_match ? ", by one of the Wikidata match's other titles" : ""}): possibly the same game.
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </RecordSection>
+        ) : null}
+
         <RecordSection id="game-essentials" title="The game">
           <Facts
             label="The game"
@@ -180,8 +227,8 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
                   "Not known"
                 ),
               },
-              { label: "Developer", value: <ItemList ids={developers} labels={labels} none="Not known" /> },
-              { label: "Publisher", value: <ItemList ids={publishers} labels={labels} none="Not known" /> },
+              { label: "Developer", value: <ItemList ids={developers} labels={labels} none={source ? "Not stated by the source" : "Not known"} /> },
+              { label: "Publisher", value: <ItemList ids={publishers} labels={labels} none={source ? "Not stated by the source" : "Not known"} /> },
               {
                 label: "Other titles",
                 value:
@@ -224,7 +271,13 @@ async function GameRecordView({ params, searchParams }: { params: PageProps<"/ad
                 <a href={`https://www.wikidata.org/wiki/${source.external_id}`} className={linkClass} rel="noreferrer" target="_blank">
                   {source.provider_name ?? source.provider} {source.external_id}
                 </a>
-                {source.imported_at ? `, imported ${formatDay(source.imported_at)}` : ""}
+                {source.source_name?.startsWith("submission-lookup:")
+                  ? source.imported_at
+                    ? `, confirmed by an editor from a submission's automatic lookup, ${formatDay(source.imported_at)}`
+                    : ", confirmed by an editor from a submission's automatic lookup"
+                  : source.imported_at
+                    ? `, imported ${formatDay(source.imported_at)}`
+                    : ""}
                 {source.source_fetched_at ? ` (data as of ${formatDay(source.source_fetched_at)})` : ""}.
               </p>
               <p className="text-muted-foreground">

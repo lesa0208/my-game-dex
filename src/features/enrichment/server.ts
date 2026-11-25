@@ -14,7 +14,7 @@ import { lookUpWikidataGame, wikidataConfigured, wikidataLabels } from "./wikida
  * time from this server; every failure is soft and leaves the submission as it is.
  */
 
-type Claim = { submission_id: string; claim_id: string; title: string | null; platform: string | null };
+type Claim = { submission_id: string; claim_id: string; title: string | null; platform: string | null; region?: string | null };
 
 function serviceConfig() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
@@ -46,10 +46,10 @@ function serially<T>(task: () => Promise<T>): Promise<T> {
 
 async function lookUp(claim: Claim): Promise<void> {
   if (!claim.title || !claim.platform) return;
-  const result = await serially(() => lookUpWikidataGame(claim.title!, claim.platform!));
+  const result = await serially(() => lookUpWikidataGame(claim.title!, claim.platform!, claim.region ?? null));
   // Switched off between the claim and now: nothing to record, the claim lapses and it waits.
   if (result.status === "not_configured") return;
-  const ids = result.candidates.flatMap((c) => [...c.developers, ...c.publishers]);
+  const ids = result.candidates.flatMap((c) => [...c.developers, ...c.publishers, ...c.release_dates.flatMap((d) => d.places)]);
   const labels = ids.length ? await serially(() => wikidataLabels(ids)) : {};
   await serviceRpc("record_submission_enrichment", {
     p_submission: claim.submission_id,

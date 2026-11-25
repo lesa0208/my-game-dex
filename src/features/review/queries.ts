@@ -150,3 +150,13 @@ export async function getSubmissionEnrichment(id: string): Promise<StoredEnrichm
   if (error) return undefined;
   return typeof data === "object" && data !== null ? (data as StoredEnrichment) : null;
 }
+
+/** The lookup behind a game a submission created (M15), for the game's record. Undefined: it can't be read. */
+export async function getGameEnrichment(id: string): Promise<(StoredEnrichment & { submission_id: string; submission_status: string }) | null | undefined> {
+  if (!UUID.test(id)) return null;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.rpc("get_game_enrichment", { p_game: id });
+  if (error) return undefined;
+  return typeof data === "object" && data !== null ? (data as StoredEnrichment & { submission_id: string; submission_status: string }) : null;
+}

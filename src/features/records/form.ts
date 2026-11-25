@@ -200,6 +200,10 @@ export function eventSummary(event: Pick<HistoryEvent, "action" | "details">, re
       return "Asked the submitter for changes";
     case "catalog_submission_rejected":
       return "Didn't approve the submission";
+    case "catalog_source_confirmed":
+      return typeof d.external_id === "string" ? `Confirmed Wikidata ${d.external_id} as the game's source` : "Confirmed a Wikidata match as the game's source";
+    case "catalog_source_rejected":
+      return typeof d.external_id === "string" ? `Rejected Wikidata ${d.external_id} as a match` : "Rejected a Wikidata match";
     case "catalog_release_excluded":
       return "Excluded the release";
     case "catalog_exclusion_restored":

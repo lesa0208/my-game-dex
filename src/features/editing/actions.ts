@@ -444,6 +444,32 @@ export async function verifyRecord(_state: EditState, formData: FormData): Promi
   done(back, "verified", false);
 }
 
+/**
+ * M15: an editor confirms or rejects one Wikidata match a submission's lookup found, with their
+ * own reason. Confirming makes it the game's source (decide_submission_enrichment); nothing is
+ * verified or published. Back to the game's record or the submission's review, as it was asked from.
+ */
+export async function decideSourceMatch(_state: EditState, formData: FormData): Promise<EditState> {
+  const read = (name: string) => field(formData, name);
+  const reason = readReason(read);
+  if ("error" in reason) return { status: "error", message: reason.error };
+  const request = field(formData, "request_id");
+  const qid = field(formData, "external_id");
+  const decision = field(formData, "decision");
+  const game = field(formData, "game_id");
+  if (!UUID.test(request) || !UUID.test(game) || !/^Q[1-9][0-9]{0,11}$/.test(qid) || (decision !== "confirm" && decision !== "reject")) {
+    return { status: "error", message: editErrorMessage("record unavailable") };
+  }
+  const supabase = await signedIn();
+  if (!supabase) return UNAVAILABLE;
+  const back = field(formData, "back") === "review" ? `/admin/catalog/${request}` : gamePath(game);
+  const { error } = await supabase.rpc("decide_submission_enrichment", { p_submission: request, p_external_id: qid, p_decision: decision, p_reason: reason.value });
+  if (error?.code === "23505") return { status: "error", message: editErrorMessage(error.message) };
+  const problem = failed(error, back);
+  if (problem) return problem;
+  done(back, decision === "confirm" ? "source_confirmed" : "source_rejected", false);
+}
+
 /** Publishes a verified release at the revision the editor read, with its game if that isn't public yet. */
 export async function publishRelease(_state: EditState, formData: FormData): Promise<EditState> {
   const read = (name: string) => field(formData, name);
@@ -487,3 +513,4 @@ export async function setRequirementsFromForm(formData: FormData) { await plain(
 export async function setLockFromForm(formData: FormData) { await plain(setLock, formData); }
 export async function verifyRecordFromForm(formData: FormData) { await plain(verifyRecord, formData); }
 export async function publishReleaseFromForm(formData: FormData) { await plain(publishRelease, formData); }
+export async function decideSourceMatchFromForm(formData: FormData) { await plain(decideSourceMatch, formData); }

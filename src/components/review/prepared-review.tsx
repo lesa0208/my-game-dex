@@ -2,8 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-import { publicationGaps, storedSummary, suggestedShell, type StoredEnrichment } from "@/features/enrichment/match";
-import { flagText, sourceDate } from "@/features/records/source-facts";
+import { CandidateCard } from "@/components/enrichment/source-candidate";
+import { decisionSummary, publicationGaps, storedSummary, suggestedShell, undecided, type StoredEnrichment } from "@/features/enrichment/match";
 import { lookUpSubmissionAgain } from "@/features/review/actions";
 import { catalogStatusLabel } from "@/features/review/form";
 import type { ReviewRelease } from "@/features/review/queries";
@@ -48,8 +48,11 @@ export function PreparedReview({
   release,
   formatName,
   publishable,
+  canDecide = false,
 }: {
   requestId: string;
+  /** The editor may confirm or reject a match (the game exists and can still take a source). */
+  canDecide?: boolean;
   /** The request still waits for a decision, so a new lookup may be asked for. */
   waiting: boolean;
   enrichment: StoredEnrichment | null | undefined;
@@ -59,8 +62,6 @@ export function PreparedReview({
   publishable: (code: string) => boolean;
 }) {
   const e = enrichment ?? null;
-  const names = (ids: string[]) => (ids.length ? ids.map((q) => e?.labels[q] ?? q).join(", ") : null);
-  const inCatalog = (qid: string) => (e?.catalog_items ?? []).filter((c) => c.external_id === qid);
   const shell = release && !publishable(release.media_format_code) ? suggestedShell(release.platform.slug, release.region_code) : null;
   const gaps = release ? publicationGaps(release, publishable) : [];
   // Games already named as using a candidate's item aren't listed again by title.
@@ -68,7 +69,7 @@ export function PreparedReview({
 
   return (
     <div className="flex flex-col gap-5 text-sm">
-      <p className="text-muted-foreground">Gathered automatically when the game was submitted. Nothing here is decided, copied into the record or published.</p>
+      <p className="text-muted-foreground">Gathered automatically when the game was submitted. Nothing here is copied into the record or published until an editor confirms a match, and even then nothing is verified.</p>
 
       <Part title="Wikidata" kind="claim">
         {enrichment === undefined ? (
@@ -82,58 +83,11 @@ export function PreparedReview({
             {e.looked_up_title ? ` as “${e.looked_up_title}”` : ""}.
           </p>
         ) : null}
+        {decisionSummary(e) ? <p className="font-medium">{decisionSummary(e)}</p> : null}
         {e?.candidates.length ? (
           <ul className="flex flex-col gap-3">
             {e.candidates.map((c) => (
-              <li key={c.external_id} className="rounded-lg border p-3">
-                <p className="font-medium">
-                  <a href={c.url} className="text-primary-text underline underline-offset-4" rel="noreferrer" target="_blank">
-                    {c.title}
-                  </a>{" "}
-                  <span className="font-normal text-muted-foreground">
-                    Wikidata {c.external_id}
-                    {c.title_matches ? " · same title" : " · different title"}
-                  </span>
-                </p>
-                <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
-                  <dt className="text-muted-foreground">Developer</dt>
-                  <dd>{names(c.developers) ?? "Not known"}</dd>
-                  <dt className="text-muted-foreground">Publisher</dt>
-                  <dd>{names(c.publishers) ?? "Not known"}</dd>
-                  <dt className="text-muted-foreground">Released on this platform</dt>
-                  <dd>{sourceDate(c.platform_first_release?.value, c.platform_first_release?.precision) ?? "Not known"}</dd>
-                  <dt className="text-muted-foreground">First released</dt>
-                  <dd>{sourceDate(c.first_release?.value, c.first_release?.precision) ?? "Not known"}</dd>
-                  <dt className="text-muted-foreground">Other titles</dt>
-                  <dd>{c.titles.filter((t) => t !== c.title).concat(c.ja_titles).join(" · ") || "None known"}</dd>
-                </dl>
-                {inCatalog(c.external_id).length ? (
-                  <p className="mt-2">
-                    <Kind kind="catalog" /> This Wikidata item is already the source of{" "}
-                    {inCatalog(c.external_id).map((g, i) => (
-                      <span key={g.game_id}>
-                        {i ? ", " : ""}
-                        <Link href={`/admin/catalog/games/${g.game_id}`} className="font-medium text-primary-text underline underline-offset-4">
-                          {g.title}
-                        </Link>{" "}
-                        ({catalogStatusLabel(g.status)})
-                      </span>
-                    ))}
-                    : most likely a duplicate.
-                  </p>
-                ) : null}
-                {c.flags.length ? (
-                  <ul className="mt-2 flex list-disc flex-col gap-0.5 pl-5 text-muted-foreground">
-                    {c.flags.map((f) => (
-                      <li key={f}>{flagText(f).text}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Retrieved {utc(c.retrieved_at)}
-                  {c.revision ? `, revision ${c.revision}` : ""}. {c.licence}. A source&apos;s claim about the game, not evidence of this physical release.
-                </p>
-              </li>
+              <CandidateCard key={c.external_id} c={c} e={e} decide={canDecide && e.game_id && undecided(e).includes(c) ? { requestId, gameId: e.game_id, back: "review" } : null} />
             ))}
           </ul>
         ) : null}
@@ -156,7 +110,8 @@ export function PreparedReview({
                   {g.title}
                 </Link>{" "}
                 <span className="text-muted-foreground">
-                  ({catalogStatusLabel(g.status)}, {g.via === "title" ? "same title" : g.via === "alias" ? "an alias" : "one of its source titles"})
+                  ({catalogStatusLabel(g.status)}, {g.via === "title" ? "same title" : g.via === "alias" ? "an alias" : "one of its source titles"}
+                  {g.via_match ? ", matching one of the Wikidata match's other titles" : ""})
                 </span>
               </li>
             ))}

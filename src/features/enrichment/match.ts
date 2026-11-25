@@ -14,7 +14,18 @@ export type EnrichmentCandidate = {
   title: string;
   titles: string[];
   ja_titles: string[];
+  /** The submitted title is exactly the item's title or one of its other titles. */
   title_matches: boolean;
+  /** How the submitted title relates to the item's titles (best first). */
+  match: MatchKind;
+  /** The item's title the submitted one matched, when it matched one. */
+  matched_title: string | null;
+  /** A likely match: exactly a title, a regional title or alias, or a title's main part. */
+  likely: boolean;
+  /** The item's release dates on this platform, each with the places it names (Wikidata P577 + P291). */
+  release_dates: { value: string; precision: string; places: string[] }[];
+  /** The importer's own parsed record, kept so an editor's confirmation stores exactly what was shown. */
+  payload?: Record<string, unknown>;
   first_release: { value: string; precision: string } | null;
   platform_first_release: { value: string; precision: string } | null;
   developers: string[];
@@ -40,9 +51,94 @@ export function comparableTitle(title: string): string {
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[™℠®]/g, " ")
+    .replace(/&/g, " and ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/^the /, "")
     .trim();
+}
+
+/**
+ * How a submitted title relates to an item's titles, best first. Regional releases often carry
+ * another name ("Joe & Mac 3: Lost in the Tropics" in Europe for Joe & Mac 2), and collectors type
+ * what is on their box, often without the subtitle ("Joe & Mac 3"):
+ *   exact           the item's own title
+ *   regional_title  one of its other titles: a regional title, an alias, a Japanese title
+ *   main_title      the main part of one of its titles, before the subtitle
+ *   partial         Wikidata's search found it, but no title matches: an editor's call
+ */
+export type MatchKind = "exact" | "regional_title" | "main_title" | "partial";
+const MATCH_RANK: Record<MatchKind, number> = { exact: 0, regional_title: 1, main_title: 2, partial: 3 };
+
+/** A title's main part: before a subtitle introduced by a colon or a dash. */
+export function mainTitle(title: string): string {
+  return comparableTitle(title.split(/\s*[:：]\s*|\s+[-–—]\s+/)[0] ?? title);
+}
+
+export function titleMatch(query: string, title: string, others: string[]): { match: MatchKind; matched_title: string | null } {
+  const wanted = comparableTitle(query);
+  if (!wanted) return { match: "partial", matched_title: null };
+  if (comparableTitle(title) === wanted) return { match: "exact", matched_title: title };
+  const other = others.find((t) => comparableTitle(t) === wanted);
+  if (other) return { match: "regional_title", matched_title: other };
+  const wantedMain = mainTitle(query);
+  const main = [title, ...others].find((t) => mainTitle(t) === wanted || (wantedMain !== wanted && mainTitle(t) === wantedMain && comparableTitle(t).startsWith(wanted)));
+  if (main) return { match: "main_title", matched_title: main };
+  return { match: "partial", matched_title: null };
+}
+
+/**
+ * The languages to search Wikidata in for a submitted title: English always (Wikidata keeps most
+ * regional titles as English aliases), Japanese for a Japanese title or copy, and German and French
+ * for a PAL copy, whose box title is often a European label. At most three requests.
+ */
+export function searchLanguages(title: string, region?: string | null): string[] {
+  const out = ["en"];
+  if (/[぀-ヿ㐀-鿿ｦ-ﾟ]/.test(title) || region === "ntsc-j") out.push("ja");
+  if (region === "pal") out.push("de", "fr");
+  return out.slice(0, 3);
+}
+
+/** The status a set of candidates gives: one likely candidate is a match, anything else is the editor's choice. */
+export function lookupStatus(candidates: EnrichmentCandidate[]): "no_match" | "single_match" | "ambiguous" {
+  if (!candidates.length) return "no_match";
+  return candidates.filter((c) => c.likely).length === 1 ? "single_match" : "ambiguous";
+}
+
+/** Candidates in the order an editor reads them: likely first, the closest match first. */
+export function rankCandidates(candidates: EnrichmentCandidate[]): EnrichmentCandidate[] {
+  return candidates.map((c, i) => ({ c, i })).sort((a, b) => MATCH_RANK[a.c.match] - MATCH_RANK[b.c.match] || a.i - b.i).map(({ c }) => c);
+}
+
+/** How a candidate's title relates to the submitted one, in words. */
+export function matchText(c: Pick<EnrichmentCandidate, "match" | "matched_title" | "title">): string {
+  switch (c.match) {
+    case "exact":
+      return "Same title";
+    case "regional_title":
+      return `Matches its other title “${c.matched_title}” (a regional title or alias)`;
+    case "main_title":
+      return `Matches the main part of “${c.matched_title}”`;
+    default:
+      return "Different title: found by Wikidata's search only";
+  }
+}
+
+/**
+ * Wikidata places (P291) that a release region covers, for picking the release date that applies
+ * to a collector's copy. Countries and regions Wikidata commonly uses for game releases.
+ */
+const REGION_PLACES: Record<string, string[]> = {
+  pal: ["Q46", "Q458", "Q145", "Q183", "Q142", "Q38", "Q29", "Q55", "Q31", "Q408", "Q664", "Q34", "Q35", "Q20", "Q33", "Q40", "Q39", "Q45", "Q27", "Q36"],
+  "ntsc-uc": ["Q49", "Q30", "Q16", "Q828"],
+  "ntsc-j": ["Q17"],
+};
+export const PLACE_NAMES: Record<string, string> = { Q46: "Europe", Q458: "European Union", Q49: "North America", Q30: "United States", Q16: "Canada", Q17: "Japan", Q145: "United Kingdom", Q183: "Germany", Q142: "France", Q408: "Australia" };
+
+/** The release dates a source names for the region of the collector's copy. */
+export function regionalReleases(c: Pick<EnrichmentCandidate, "release_dates">, region: string | null | undefined): EnrichmentCandidate["release_dates"] {
+  const places = REGION_PLACES[region ?? ""];
+  if (!places) return [];
+  return (c.release_dates ?? []).filter((d) => d.places.some((p) => places.includes(p)));
 }
 
 type Entry = {
@@ -61,6 +157,7 @@ type Entry = {
       publishers?: string[];
       distribution_formats?: string[];
       platform_first_release?: { value: string; precision: string };
+      release_dates?: { value: string; precision: string; platforms?: string[]; places?: string[] }[];
       external_ids?: { igdb?: string[]; mobygames?: string[] };
     };
   };
@@ -70,13 +167,21 @@ type Entry = {
  * A candidate from one parsed entity (scripts/wikidata-entities.mjs entityToEntry), or null when
  * the importer would never take it: not a video game, not on this platform, or no usable title.
  */
-export function candidateFromEntry(entry: Entry, query: string, retrievedAt: string): EnrichmentCandidate | null {
+export function candidateFromEntry(entry: Entry, query: string, retrievedAt: string, platformItem?: string): EnrichmentCandidate | null {
   if (!entry || entry.ignore_reason || !entry.payload?.title) return null;
   const p = entry.payload;
   const s = p.source ?? {};
   const wanted = comparableTitle(query);
   const titles = p.titles ?? [p.title!];
+  const { match, matched_title } = titleMatch(query, p.title!, [...titles, ...(p.ja_titles ?? [])].filter((t) => t !== p.title));
   return {
+    match,
+    matched_title,
+    likely: match !== "partial",
+    release_dates: (s.release_dates ?? [])
+      .filter((d) => d && typeof d.value === "string" && (!platformItem || !d.platforms?.length || d.platforms.includes(platformItem)))
+      .map((d) => ({ value: d.value, precision: d.precision ?? "unknown", places: d.places ?? [] })),
+    payload: p as Record<string, unknown>,
     provider: "wikidata",
     external_id: entry.external_id,
     url: `https://www.wikidata.org/wiki/${entry.external_id}`,
@@ -112,11 +217,29 @@ export type StoredEnrichment = {
   candidates: EnrichmentCandidate[];
   labels: Record<string, string>;
   current_title: string | null;
+  /** The submission's game, and the region of its release (for the regional release date). */
+  game_id: string | null;
+  region: string | null;
+  /** The reader submitted it: another editor decides its matches. */
+  own_submission?: boolean;
+  /** The game's own Wikidata item, once linked (by an import or an editor's confirmation). */
+  linked_external_id: string | null;
+  /** An editor's decision on a candidate, by its Wikidata id. */
+  decisions: Record<string, { decision: "confirmed" | "rejected"; at: string }>;
   /** Catalog games whose own source records or references use a candidate's Wikidata item. */
   catalog_items: { external_id: string; game_id: string; title: string; status: string; slug: string | null }[];
-  /** Catalog games with the submitted title as their title, an alias or a source title. */
-  title_matches: { game_id: string; title: string; status: string; slug: string | null; via: "title" | "alias" | "source title" }[];
+  /**
+   * Catalog games with the submitted title, or one of the likely match's titles, as their title, an
+   * alias or a source title. `via_match`: found only through the match's titles.
+   */
+  title_matches: { game_id: string; title: string; status: string; slug: string | null; via: "title" | "alias" | "source title"; via_match?: boolean }[];
 };
+
+/** The candidates still waiting for an editor's decision (none once one is confirmed). */
+export function undecided(e: Pick<StoredEnrichment, "candidates" | "decisions" | "linked_external_id"> | null | undefined): EnrichmentCandidate[] {
+  if (!e || e.linked_external_id || Object.values(e.decisions ?? {}).some((d) => d.decision === "confirmed")) return [];
+  return e.candidates.filter((c) => !e.decisions?.[c.external_id]);
+}
 
 /** What a stored lookup means, for the editor. `configured`: whether this server may ask Wikidata. */
 export function storedSummary(e: StoredEnrichment | null, configured: boolean): string {
@@ -133,11 +256,31 @@ export function storedSummary(e: StoredEnrichment | null, configured: boolean): 
       return "Not looked up: Wikidata lookups don't cover this platform yet.";
     case "no_match":
       return stale ? "Wikidata had no match for the earlier title." : "Wikidata has no video game with this title on this platform. Everything below has to come from the editor.";
-    case "single_match":
-      return "Wikidata has one game with exactly this title on this platform. It's a likely match: check it's the same game before relying on it.";
+    case "single_match": {
+      const likely = e.candidates.find((c) => c.likely) ?? e.candidates[0];
+      const how =
+        likely?.match === "regional_title"
+          ? `under another of its titles, “${likely.matched_title}”`
+          : likely?.match === "main_title"
+            ? `whose title “${likely.matched_title}” begins with this one`
+            : "with exactly this title";
+      const others = e.candidates.length - 1;
+      return `Wikidata has one likely match on this platform, ${how}. Check it's the same game, then confirm or reject it.${others ? ` ${others === 1 ? "One weaker possibility is" : `${others} weaker possibilities are`} listed too.` : ""}`;
+    }
     case "ambiguous":
       return `Wikidata has ${e.candidates.length === 1 ? "one possible match, with a different title" : `${e.candidates.length} possible matches`}. None is chosen: decide which, if any, is this game.`;
   }
+}
+
+/** What has been decided about a stored lookup, for the editor. Null: nothing yet. */
+export function decisionSummary(e: Pick<StoredEnrichment, "candidates" | "decisions" | "linked_external_id"> | null | undefined): string | null {
+  if (!e) return null;
+  const confirmed = Object.entries(e.decisions ?? {}).find(([, d]) => d.decision === "confirmed")?.[0];
+  if (confirmed) return `An editor confirmed Wikidata ${confirmed} as this game: it is now the game's source, still to be checked before verification.`;
+  if (e.linked_external_id) return `The game is already linked to Wikidata ${e.linked_external_id}.`;
+  const rejected = Object.entries(e.decisions ?? {}).filter(([, d]) => d.decision === "rejected").map(([q]) => q);
+  if (rejected.length && rejected.length >= e.candidates.length) return `Every candidate was rejected (${rejected.join(", ")}).`;
+  return null;
 }
 
 /**
@@ -199,7 +342,7 @@ export function enrichmentSummary(result: EnrichmentResult | null): string {
     case "no_match":
       return "Wikidata has no video game with this title on this platform.";
     case "single_match":
-      return "Wikidata has one game with exactly this title on this platform. Check it's the same game before relying on it.";
+      return "Wikidata has one likely match on this platform. Check it's the same game before relying on it.";
     case "ambiguous":
       return `Wikidata has ${result.candidates.length === 1 ? "one possible match, with a different title" : `${result.candidates.length} possible matches`}. Choose the right one, if any.`;
   }

@@ -12,7 +12,13 @@ import {
   comparableTitle,
   enrichmentSummary,
   isValidUserAgent,
+  lookupStatus,
+  mainTitle,
+  matchText,
   publicationGaps,
+  rankCandidates,
+  regionalReleases,
+  searchLanguages,
   storedSummary,
   suggestedShell,
   unclassifiedFormat,
@@ -22,6 +28,12 @@ const SNES = "Q183259";
 const NES = "Q172742";
 const mario = JSON.parse(readFileSync(new URL("../../../scripts/fixtures/wikidata-b1/real-q853143-trimmed.json", import.meta.url), "utf8")).entities.Q853143;
 const AT = "2026-11-24T12:00:00.000Z";
+// Real, trimmed Wikidata records (CC0) whose titles differ by region.
+const fixture = (q) => JSON.parse(readFileSync(new URL(`../../../scripts/fixtures/wikidata-b1/real-${q.toLowerCase()}-trimmed.json`, import.meta.url), "utf8")).entities[q];
+const joeMac = fixture("Q4677160"); // Joe & Mac 2: Lost in the Tropics; Europe: Joe & Mac 3: Lost in the Tropics
+const contra = fixture("Q1368099"); // Contra III: The Alien Wars; Europe: Super Probotector: Alien Rebels
+const megaMan = fixture("Q1196400"); // Mega Man X; Japan: Rockman X
+const cand = (entity, title) => candidateFromEntry(entityToEntry(entity, SNES), title, AT, SNES);
 
 test("a User-Agent needs a tool, a version and a contact: none is ever invented", () => {
   assert.equal(isValidUserAgent(undefined), false);
@@ -133,4 +145,62 @@ test("the collector is told what happens, never asked for more", () => {
   assert.match(collectorLookupText("ambiguous", true), /prepared it for the editors/);
   assert.match(collectorLookupText("no_match", false), /editors will research it/);
   assert.equal(collectorLookupText(undefined, false), null);
+});
+
+test("Joe & Mac 3 (the first real submission) finds Joe & Mac 2 by its European title, as a likely match", () => {
+  const full = cand(joeMac, "Joe & Mac 3: Lost in the Tropics");
+  assert.equal(full.match, "regional_title");
+  assert.equal(full.likely, true);
+  const short = cand(joeMac, "Joe & Mac 3");
+  assert.equal(short.external_id, "Q4677160");
+  assert.equal(short.title, "Joe & Mac 2: Lost in the Tropics");
+  assert.equal(short.match, "main_title");
+  assert.equal(short.matched_title, "Joe & Mac 3: Lost in the Tropics");
+  assert.equal(short.likely, true);
+  assert.equal(cand(joeMac, "Joe and Mac 3").match, "main_title");
+  assert.equal(lookupStatus([short]), "single_match");
+  assert.match(matchText(short), /main part of “Joe & Mac 3: Lost in the Tropics”/);
+});
+
+test("its developer and its European release month come with it; no publisher is invented", () => {
+  const c = cand(joeMac, "Joe & Mac 3");
+  assert.deepEqual(c.developers, ["Q1172213"]); // Data East
+  assert.deepEqual(c.publishers, []); // Wikidata states none: a gap, never filled in
+  assert.deepEqual(regionalReleases(c, "pal"), [{ value: "1995-11-01", precision: "month", places: ["Q46"] }]);
+  assert.deepEqual(regionalReleases(c, "ntsc-j").map((d) => d.value), ["1994-02-18"]);
+  assert.deepEqual(regionalReleases(c, "ntsc-uc").map((d) => d.value), ["1994-04-01"]);
+  assert.deepEqual(regionalReleases(c, "unknown"), []);
+  assert.equal(c.payload.title, "Joe & Mac 2: Lost in the Tropics");
+  assert.equal(c.revision, joeMac.lastrevid);
+});
+
+test("other regional titles: Super Probotector is Contra III, Rockman X is Mega Man X", () => {
+  const probo = cand(contra, "Super Probotector: Alien Rebels");
+  assert.equal(probo.match, "regional_title");
+  assert.equal(cand(contra, "Super Probotector").match, "main_title");
+  assert.equal(regionalReleases(probo, "pal")[0].value, "1992-11-19");
+  assert.equal(cand(megaMan, "Rockman X").match, "regional_title");
+  assert.equal(cand(megaMan, "ロックマンX").match, "regional_title");
+  assert.equal(cand(megaMan, "Mega Man X").match, "exact");
+  assert.equal(cand(megaMan, "Mega Man X4").match, "partial");
+  assert.equal(cand(megaMan, "Mega Man").match, "partial");
+});
+
+test("one likely candidate is a match even with weaker ones; two likely ones are for the editor to choose", () => {
+  const likely = cand(megaMan, "Rockman X");
+  const weak = cand(contra, "Rockman X");
+  assert.equal(weak.likely, false);
+  assert.equal(lookupStatus([weak, likely]), "single_match");
+  assert.deepEqual(rankCandidates([weak, likely]).map((c) => c.external_id), ["Q1196400", "Q1368099"]);
+  assert.equal(lookupStatus([likely, cand(contra, "Contra III")]), "ambiguous");
+  assert.equal(lookupStatus([]), "no_match");
+});
+
+test("searches the languages the copy suggests, at most three", () => {
+  assert.deepEqual(searchLanguages("Joe & Mac 3", "pal"), ["en", "de", "fr"]);
+  assert.deepEqual(searchLanguages("Rockman X", "ntsc-j"), ["en", "ja"]);
+  assert.deepEqual(searchLanguages("ロックマンX", "unknown"), ["en", "ja"]);
+  assert.deepEqual(searchLanguages("Mega Man X", "ntsc-uc"), ["en"]);
+  assert.equal(mainTitle("Joe & Mac 3: Lost in the Tropics"), "joe and mac 3");
+  assert.equal(mainTitle("Street Fighter II - The World Warrior"), "street fighter ii");
 });
