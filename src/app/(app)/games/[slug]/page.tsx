@@ -74,18 +74,57 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   };
   const plan = planFastAdd(picker, { ...selection, edition }, reference);
   const here = fastAddHref(picker.game.slug, { ...selection, edition });
-  const platformIds = new Map(options?.platforms.map((p) => [p.slug, p.id]) ?? []);
+  const platformIds = new Map(options?.platforms.map((p) => [p.slug, { id: p.id, shortName: p.shortName }]) ?? []);
 
   // The catalog is public and cached. The collector's copies and adding read the
   // session, so they stream in on their own, and return here after signing in.
   return (
     <>
       <Breadcrumbs items={[{ label: "Explore", href: "/explore" }, { label: picker.game.title }]} />
-      {/* One grid: on narrow screens the collector's copies come straight after the game;
-          on wide ones they stand in a column beside everything else. */}
+      {/* One grid: on narrow screens adding comes straight after the game, then the
+          collector's copies; on wide ones the copies stand in a column beside everything
+          else. Adding comes before the full list of releases, so a collector adding a pile
+          of games reaches it without scrolling past what they already know. */}
       <div className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 lg:col-start-1">
           <GameHero game={picker.game} summary={summary} overview={overview} />
+        </div>
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
+          <ReleasePickerView
+            picker={picker}
+            plan={plan}
+            reference={reference}
+            requestedRelease={selection.release !== null}
+            showHeader={false}
+            collapseReleases={!hasSelection}
+            renderAdd={(release) => (
+              <>
+                <Suspense fallback={<AddToCollectionSkeleton />}>
+                  <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
+                </Suspense>
+                {/* M12 W2: wanting this release, kept apart from adding a copy. */}
+                <Suspense fallback={null}>
+                  <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />
+                </Suspense>
+                <Suspense fallback={null}>
+                  <ExcludeReleaseLink releaseId={release.id} />
+                </Suspense>
+                <Suspense fallback={null}>
+                  <MergeReleaseLink releaseId={release.id} />
+                </Suspense>
+              </>
+            )}
+            renderClaim={(claim) => {
+              const platform = platformIds.get(claim.platform);
+              return platform ? (
+                <Suspense fallback={<AddToCollectionSkeleton />}>
+                  <AddClaimToCollection gameId={picker.game.id} platformId={platform.id} platformName={platform.shortName} claim={claim} returnPath={here} />
+                </Suspense>
+              ) : (
+                <p className="text-sm text-muted-foreground">Adding isn&apos;t available right now. Try again later.</p>
+              );
+            }}
+          />
         </div>
         <aside aria-label="Your collection" className="min-w-0 empty:hidden lg:sticky lg:top-22 lg:col-start-2 lg:row-span-3 lg:row-start-1">
           <div className="flex flex-col gap-6">
@@ -109,43 +148,6 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
               </Suspense>
             )}
           />
-        </div>
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
-            <ReleasePickerView
-              picker={picker}
-              plan={plan}
-              reference={reference}
-              requestedRelease={selection.release !== null}
-              showHeader={false}
-              collapseReleases={!hasSelection}
-              renderAdd={(release) => (
-                <>
-                  <Suspense fallback={<AddToCollectionSkeleton />}>
-                    <AddToCollection release={release} returnPath={fastAddHref(picker.game.slug, { ...selection, edition, release: release.id })} />
-                  </Suspense>
-                  {/* M12 W2: wanting this release, kept apart from adding a copy. */}
-                  <Suspense fallback={null}>
-                    <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />
-                  </Suspense>
-                  <Suspense fallback={null}>
-                    <ExcludeReleaseLink releaseId={release.id} />
-                  </Suspense>
-                  <Suspense fallback={null}>
-                    <MergeReleaseLink releaseId={release.id} />
-                  </Suspense>
-                </>
-              )}
-              renderClaim={(claim) => {
-                const platformId = platformIds.get(claim.platform);
-                return platformId ? (
-                  <Suspense fallback={<AddToCollectionSkeleton />}>
-                    <AddClaimToCollection gameId={picker.game.id} platformId={platformId} claim={claim} returnPath={here} />
-                  </Suspense>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Adding isn&apos;t available right now. Try again later.</p>
-                );
-              }}
-            />
         </div>
       </div>
     </>

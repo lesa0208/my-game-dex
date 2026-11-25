@@ -34,9 +34,15 @@ const psql = (sql) =>
     stdio: ["pipe", "pipe", "pipe"],
   }).trim();
 
-export function installFixture() {
+/**
+ * The M5c search fixture by default. `file` names another fixture made the same way, with
+ * the same fixture editor and reviewer (the collector fast-add fixture), which
+ * removeFixture removes alike. Only one is installed at a time.
+ */
+export function installFixture(file = "catalog-search-fixture.sql") {
+  if (!/^[a-z0-9-]+\.sql$/.test(file)) throw new Error("A fixture is a file in scripts/fixtures.");
   assertLocal();
-  const out = psql(readFileSync(join(root, "scripts", "fixtures", "catalog-search-fixture.sql"), "utf8"));
+  const out = psql(readFileSync(join(root, "scripts", "fixtures", file), "utf8"));
   // M11a-5: an Auth row made in SQL without the fields GoTrue reads breaks Auth's user
   // listing for every account (and reading the account). Refuse to carry on with one.
   const malformed = psql(`select count(*) from auth.users u where u.id in ('${FIXTURE_EDITOR}', '${FIXTURE_REVIEWER}')

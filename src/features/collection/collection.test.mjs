@@ -416,6 +416,46 @@ test("'not sure' stays not sure: no release is inferred, even when only one coul
   assert.equal(plan(sel("snes", "unsure", PLATINUM)).outcome.kind, "claim", "and with the region not sure, it's unidentified");
 });
 
+test("a step the owner hasn't answered is suggested only when the catalog has one choice there (collector fast add)", () => {
+  const STANDARD = editionKey({ kind: "standard", name: "Standard" });
+  // One release on the platform: region and edition are both suggested, so it's one click to add.
+  const lone = picker({ regions: [{ code: "pal", label: "PAL", releaseCount: 1 }], releases: [rel("eu", "pal", "standard", "Standard")] });
+  const one = planFastAdd(lone, sel("snes"), REFERENCE);
+  assert.deepEqual(one.suggested, { region: true, edition: true });
+  assert.equal(one.region.code, "pal");
+  assert.equal(one.outcome.release.id, "eu", "the only release, shown for the owner to add");
+  assert.equal(planFastAdd(lone, sel(null), REFERENCE).outcome.release.id, "eu", "a game on one platform too");
+
+  // One region with two editions: the region is suggested, the edition is the owner's to pick.
+  const usOnly = picker({ regions: [{ code: "ntsc-uc", label: "NTSC-U/C", releaseCount: 2 }], releases: RELEASES.filter((r) => r.region.code === "ntsc-uc") });
+  const two = planFastAdd(usOnly, sel("snes"), REFERENCE);
+  assert.deepEqual(two.suggested, { region: true, edition: false });
+  assert.equal(two.outcome, null);
+  assert.deepEqual(
+    two.editions.map((e) => e.name),
+    ["Standard", "Greatest Hits"],
+  );
+
+  // Several regions: nothing is suggested until the owner picks one; then a lone edition is.
+  assert.deepEqual(plan(sel("snes")).suggested, { region: false, edition: false });
+  assert.equal(plan(sel("snes")).region, null);
+  const palOnlyStandard = picker({ releases: RELEASES.filter((r) => r.id !== "eu-p1" && r.id !== "eu-p2") });
+  const pal = planFastAdd(palOnlyStandard, sel("snes", "pal"), REFERENCE);
+  assert.deepEqual(pal.suggested, { region: false, edition: true });
+  assert.equal(pal.outcome.release.id, "eu");
+
+  // An answer always wins: not sure, another, or a choice of the owner's own.
+  assert.deepEqual(planFastAdd(lone, sel("snes", "unsure"), REFERENCE).suggested, { region: false, edition: false }, "region not sure: no edition is suggested");
+  assert.equal(planFastAdd(lone, sel("snes", "unsure"), REFERENCE).outcome, null, "and nothing is inferred");
+  assert.equal(planFastAdd(lone, sel("snes", "other"), REFERENCE).choosingRegion, true, "another region stays another");
+  assert.equal(planFastAdd(lone, sel("snes", "ntsc-j"), REFERENCE).region.inCatalog, false, "a region the catalog lacks stays the owner's");
+  assert.equal(planFastAdd(lone, sel("snes", "ntsc-j"), REFERENCE).suggested.edition, false, "with no catalog edition suggested for it");
+  assert.equal(planFastAdd(lone, sel("snes", "pal", "unsure"), REFERENCE).outcome.kind, "claim", "edition not sure stays not sure");
+  assert.equal(planFastAdd(lone, sel("snes", "pal", OTHER), REFERENCE).outcome.claim.edition, "other");
+  assert.equal(planFastAdd(lone, sel("snes", "pal", STANDARD), REFERENCE).suggested.edition, false, "an edition chosen isn't a suggestion");
+  assert.equal(planFastAdd(lone, sel("nes"), REFERENCE).suggested.region, false, "a platform the catalog doesn't list for the game: nothing to suggest");
+});
+
 test("a release named in the address is added as itself (M12b)", () => {
   const p = plan(sel(null, null, null, "us-gh"), picker({ selection: { platform: "snes", region: "ntsc-uc", releaseId: "us-gh" } }));
   assert.equal(p.outcome.kind, "release");

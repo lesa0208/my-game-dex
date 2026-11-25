@@ -36,7 +36,7 @@
     "secrets:check": "node scripts/check-secrets.mjs",
     "secrets:bundle": "node scripts/check-secrets.mjs --bundle",
     "secrets:test": "node --test scripts/check-secrets.test.mjs",
-    "catalog:test": "node --test scripts/catalog-import-sources.test.mjs scripts/catalog-b1.test.mjs scripts/pilot-stack.test.mjs scripts/publish-plan.test.mjs && node --experimental-strip-types --no-warnings --test src/features/catalog/parse.test.mjs src/features/catalog/packaging.test.mjs",
+    "catalog:test": "node --test scripts/catalog-import-sources.test.mjs scripts/catalog-b1.test.mjs scripts/pilot-stack.test.mjs scripts/publish-plan.test.mjs && node --experimental-strip-types --no-warnings --test src/features/catalog/parse.test.mjs src/features/catalog/packaging.test.mjs src/features/catalog/fallback.test.mjs",
     "pilot:preview": "node scripts/pilot-preview.mjs",
     "pilot:backup": "node scripts/pilot-backup.mjs",
     "catalog:import": "node scripts/catalog-import.mjs",
@@ -93,7 +93,8 @@
     "enrichment:test": "node --experimental-strip-types --no-warnings --test src/features/enrichment/enrichment.test.mjs",
     "app:enrichment-checks": "node scripts/app-enrichment-checks.mjs",
     "app:catalog-ux-checks": "node scripts/app-catalog-ux-checks.mjs",
-    "app:catalog-ux-browser-checks": "node scripts/app-catalog-ux-browser-checks.mjs"
+    "app:catalog-ux-browser-checks": "node scripts/app-catalog-ux-browser-checks.mjs",
+    "app:collector-fast-add-checks": "node scripts/app-collector-fast-add-checks.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

@@ -84,6 +84,9 @@ export async function addCopy(state: AddCopyState, formData: FormData): Promise<
 
   const created = typeof data === "object" && data !== null && (data as { created?: unknown }).created === true;
   const count = await getMyReleaseCopyCount(releaseId);
+  // The page's own copies, counts and shelf links show the new copy straight away. The
+  // form keeps its state: it's keyed by the release, which doesn't change.
+  if (created) refresh();
   return {
     status: created ? "added" : "already_added",
     message: created ? "Added to your collection." : "This copy was already added.",

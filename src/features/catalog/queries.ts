@@ -33,13 +33,16 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<CatalogOu
     headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(args),
   });
+  let code = "";
   if (response.status === 400) {
     const body: unknown = await response.json().catch(() => null);
     const message = typeof body === "object" && body !== null && "message" in body ? String(body.message) : "";
     const reason = QUERY_ERRORS[message];
     if (reason) return { ok: false, reason };
+    code = typeof body === "object" && body !== null && "code" in body ? String(body.code).slice(0, 8) : "";
   }
-  if (!response.ok) throw new Error(`The catalog request failed with status ${response.status}.`);
+  // The server log names the function and the database's error code, never the arguments.
+  if (!response.ok) throw new Error(`The catalog request ${fn} failed with status ${response.status}${code ? ` (${code})` : ""}.`);
   return { ok: true, data: await response.json() };
 }
 

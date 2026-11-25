@@ -144,6 +144,16 @@ function Step({ id, number, title, children }: { id: string; number: number; tit
   );
 }
 
+/** A step filled in with the catalog's only choice: said so, and how to change it. */
+function Suggestion({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex gap-1.5 text-xs text-muted-foreground">
+      <Info aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 /** The catalog's name for an edition, or that it records none. */
 function catalogEditionText(edition: { kind: string | null; name: string | null }) {
   return editionText(edition.kind || edition.name ? { kind: edition.kind, name: edition.name } : null) ?? "Edition not recorded";
@@ -380,6 +390,12 @@ export function ReleasePickerView({
                 options={reference.regions.filter((r) => !(platform.inCatalog && picker.regions.some((c) => c.code === r.code))).map((r) => ({ value: r.code, text: r.label }))}
               />
             ) : null}
+            {plan.suggested.region && regionValue ? (
+              <Suggestion>
+                Chosen for you: the catalog&apos;s only region for {game.title} on {platformName(platform.slug)}. Yours is from elsewhere? Choose another region or
+                not sure.
+              </Suggestion>
+            ) : null}
           </Step>
         ) : null}
 
@@ -404,6 +420,9 @@ export function ReleasePickerView({
                 { key: UNSURE, text: "Not sure", href: href({ platform: platform.slug, region: regionValue, edition: UNSURE }), current: plan.edition === "unsure" },
               ]}
             />
+            {plan.suggested.edition ? (
+              <Suggestion>Chosen for you: the only edition the catalog lists for this region. Yours is different? Choose another edition or not sure.</Suggestion>
+            ) : null}
           </Step>
         ) : null}
 
