@@ -18,6 +18,10 @@
  *                   editorial decisions, so every script refuses it by default (below), and only
  *                   the editorial tools (catalog-b1.mjs, catalog-b1-review.mjs, the pilot preview
  *                   and backups) may reach it.
+ *   MGD_STACK=demo  the local demo catalog (M16): .supabase-demo/, project "my-game-dex-demo",
+ *                   real Wikidata game identities published by demo-only staff
+ *                   (scripts/catalog-demo.mjs), served by the demo preview. Never a source for
+ *                   the pilot or any real catalog.
  *
  * Every script reads the project, container, CLI arguments and status from here, so
  * none can mix the two. Both stacks must answer on a loopback address, and each must
@@ -54,6 +58,7 @@ export const SCRATCH_PROJECT_ID = "my-game-dex-scratch";
 export const B1_PROJECT_ID = "my-game-dex-b1";
 export const PILOT_PROJECT_ID = "my-game-dex-pilot";
 export const REHEARSAL_PROJECT_ID = "my-game-dex-rehearsal";
+export const DEMO_PROJECT_ID = "my-game-dex-demo";
 
 /** Every local stack: its project id, its directory (the CLI's --workdir) and its port offset. */
 export const STACKS = {
@@ -64,6 +69,9 @@ export const STACKS = {
   pilot: { project: PILOT_PROJECT_ID, dir: ".supabase-pilot", offset: 4000, ownKeys: true, marker: join(homedir(), ".my-game-dex", "protect-pilot-stack") },
   // M15 P1a hardening: the pilot's disposable twin (its own keys too), for rehearsals only.
   rehearsal: { project: REHEARSAL_PROJECT_ID, dir: ".supabase-rehearsal", offset: 5000, ownKeys: true, marker: join(homedir(), ".my-game-dex", "protect-rehearsal-stack") },
+  // M16: the local demo catalog. On the rehearsal stack's ports, which the MGD-Rehearsal-Block-In
+  // firewall rule already blocks from the network: the two never run at once (test-stack.mjs).
+  demo: { project: DEMO_PROJECT_ID, dir: ".supabase-demo", offset: 5000 },
 };
 export const DEV_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-dev-stack");
 export const PILOT_PROTECTION_MARKER = join(homedir(), ".my-game-dex", "protect-pilot-stack");

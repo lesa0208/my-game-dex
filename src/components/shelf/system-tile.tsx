@@ -18,7 +18,7 @@ export function SystemTile({
   console: consoleKind,
   accent: [accent, accentLight],
   count,
-  label,
+  fullName,
   empty = false,
 }: {
   href: string;
@@ -28,15 +28,18 @@ export function SystemTile({
   accent: [string, string];
   /** What the badge says: "32 games", "5 copies". */
   count: string;
-  /** The link's accessible name. */
-  label: string;
+  /**
+   * The system's full name ("Game Boy" for "GB"), read after the visible text. The link's
+   * accessible name is its visible text plus this, so it always contains what is shown (WCAG
+   * 2.5.3, label in name): someone saying "GB" to voice control finds it.
+   */
+  fullName: string;
   empty?: boolean;
 }) {
   return (
     <Link
       href={href}
       className="group relative block aspect-16/10 overflow-hidden rounded-xl border border-white/10 bg-[#16151c] shadow-[0_14px_30px_-12px_rgb(0_0_0/0.9)] transition duration-300 outline-none hover:-translate-y-1 hover:border-primary/70 hover:shadow-[0_0_0_1px_var(--color-primary),0_0_32px_-4px_rgb(139_92_246/0.55),0_18px_30px_-12px_rgb(0_0_0/0.9)] focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-      aria-label={label}
     >
       {/* Diagonal colour bands in the system's accent. */}
       <div
@@ -69,6 +72,7 @@ export function SystemTile({
             {count}
           </span>
         )}
+        {fullName.toLowerCase() !== shortName.toLowerCase() ? <span className="sr-only">, {fullName}</span> : null}
       </div>
 
       {consoleKind ? (

@@ -40,6 +40,12 @@
  * ~/.my-game-dex/protect-pilot-stack exists (written when the pilot is created, and by
  * protect-pilot), and otherwise unless MGD_ALLOW_PILOT_RESET=1.
  *
+ * MGD_TEST_STACK=demo selects the local demo catalog (M16): project "my-game-dex-demo" in
+ * .supabase-demo/, the rehearsal stack's ports (blocked from the network by its firewall rule; the
+ * two never run at once), sign-up on with Auth's links pointing at the demo preview
+ * (http://127.0.0.6:3006), no development seed, never a test target. It keeps its catalog: reset and
+ * destroy need MGD_ALLOW_DEMO_RESET=1.
+ *
  * MGD_TEST_SIGNUP=off at start or reset makes the test stack invite-only, as a hosted
  * project will be: [auth] enable_signup = false, with the email provider left on (turning
  * that off also blocks password sign-in and recovery; M11a-0).
@@ -74,10 +80,27 @@ const VARIANTS = {
     project: "my-game-dex-rehearsal", offset: 5000, dir: ".supabase-rehearsal", persistent: false,
     marker: join(homedir(), ".my-game-dex", "protect-rehearsal-stack"), ownKeys: true, createFlag: "MGD_CREATE_REHEARSAL",
   },
+  // M16: the local demo catalog (scripts/catalog-demo.mjs). Keeps its imported catalog, so reset and
+  // destroy need MGD_ALLOW_DEMO_RESET=1. Sign-up on, with Auth's links pointing at the demo preview
+  // (http://127.0.0.6:3006); no development seed; never a test target. It uses the rehearsal stack's
+  // ports, which the MGD-Rehearsal-Block-In firewall rule already blocks from the network, so start
+  // refuses while the rehearsal stack runs (and the rehearsal refuses while the demo runs).
+  demo: {
+    project: "my-game-dex-demo", offset: 5000, dir: ".supabase-demo", persistent: true, allowReset: "MGD_ALLOW_DEMO_RESET",
+    seed: false, site: "http://127.0.0.6:3006", testTarget: false, sharesPortsWith: "rehearsal",
+  },
 };
+VARIANTS.rehearsal.sharesPortsWith = "demo";
 export { VARIANTS };
 const STACK = process.env.MGD_TEST_STACK ?? "test";
-if (!Object.hasOwn(VARIANTS, STACK)) throw new Error('MGD_TEST_STACK may only be "scratch", "b1", "pilot" or "rehearsal".');
+if (!Object.hasOwn(VARIANTS, STACK)) throw new Error('MGD_TEST_STACK may only be "scratch", "b1", "pilot", "rehearsal" or "demo".');
+
+/** The stacks sharing ports never run at once: refuse while the other one has any container running. */
+export function portSharingProblem(variant = VARIANTS[STACK], running = (project) => execFileSync("docker", ["ps", "--filter", `label=com.supabase.cli.project=${project}`, "--format", "{{.Names}}"], { encoding: "utf8" }).trim()) {
+  if (!variant.sharesPortsWith) return null;
+  const other = VARIANTS[variant.sharesPortsWith];
+  return running(other.project) ? `Refusing: the ${variant.sharesPortsWith} stack (${other.project}) is running on the same ports. Stop it first.` : null;
+}
 const TEST_PROJECT_ID = VARIANTS[STACK].project;
 const OFFSET = VARIANTS[STACK].offset;
 const dir = join(root, VARIANTS[STACK].dir);
@@ -357,8 +380,11 @@ function runNpm(script, extra) {
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
-    case "start":
+    case "start": {
+      const shared = portSharingProblem();
+      if (shared) throw new Error(shared);
       return startStack(STACK, VARIANTS[STACK], process.env, startIo(VARIANTS[STACK]));
+    }
     case "preflight":
       // Every restart check of an existing guarded stack, without starting it (pilot-backup snapshot).
       if (!VARIANTS[STACK].createFlag) throw new Error("preflight is for the pilot and its rehearsal twin only.");

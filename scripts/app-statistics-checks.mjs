@@ -212,11 +212,14 @@ async function overview() {
   for (const slug of ["snes", "playstation", "sega-saturn", "game-boy", "mega-drive"]) {
     check(`the ${slug} row links to its shelf`, resolveSegments(page.html).includes(`href="/collection/systems/${slug}"`));
   }
-  // The Systems screen's tiles are named "<system>: <copies>" (from the collection summary).
-  const systemsHtml = decode(resolveSegments((await o.browser.get("/collection/systems")).html));
+  // The Systems screen's tiles show their copies, then the system's full name for screen readers
+  // (M16: the tile's accessible name is its visible text plus the full name, WCAG 2.5.3).
+  const systemsHtml = decode(resolveSegments((await o.browser.get("/collection/systems")).html)).replace(/<!-- -->/g, "");
   for (const [name, line] of rows) {
     const copiesText = line.split(" · ")[0];
-    check(`${name}: the same ${copiesText} as its Systems tile`, systemsHtml.includes(`aria-label="${name}: ${copiesText}"`));
+    // A system whose short name is its full name (Saturn) adds nothing to read after the visible text.
+    const tile = systemsHtml.includes(`${copiesText}</span><span class="sr-only">, ${name}</span>`) || (systemsHtml.includes(`>${name}</p>`) && systemsHtml.includes(`${copiesText}</span>`));
+    check(`${name}: the same ${copiesText} as its Systems tile`, tile);
   }
 
   section("Regions and physical media");

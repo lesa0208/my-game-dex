@@ -13,7 +13,20 @@ import { createHash } from "node:crypto";
  * M12c-A: nes (Q172742, "Nintendo Entertainment System", with Famicom among its
  * aliases), famicom-disk-system (Q135321) and playstation, each checked on 2026-11-19.
  */
-export const WIKIDATA_PLATFORMS = { nes: "Q172742", snes: "Q183259", "famicom-disk-system": "Q135321", playstation: "Q10677" };
+export const WIKIDATA_PLATFORMS = {
+  nes: "Q172742",
+  snes: "Q183259",
+  "famicom-disk-system": "Q135321",
+  playstation: "Q10677",
+  // M16: the demo catalog's other platforms, each the platform's own item (checked 2026-11-25:
+  // 1,032, 412, 561, 474, 1,067 and 3,164 video games state it as their platform).
+  "mega-drive": "Q10676",
+  "nintendo-64": "Q184839",
+  "game-boy": "Q186437",
+  "game-boy-color": "Q203992",
+  "game-boy-advance": "Q188642",
+  "playstation-2": "Q10680",
+};
 
 // Latin-script label languages, for titles that differ by market.
 const LATIN_LABELS = ["de", "fr", "es", "it", "nl", "pt", "sv"];

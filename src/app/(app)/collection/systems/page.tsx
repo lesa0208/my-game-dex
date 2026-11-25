@@ -118,7 +118,7 @@ async function SystemsView() {
                     console={system.console}
                     accent={system.accent}
                     count={copies(system.copies)}
-                    label={`${system.name}: ${copies(system.copies)}`}
+                    fullName={system.name}
                   />
                 </div>
                 <ShelfBoard />

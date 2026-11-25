@@ -178,6 +178,12 @@ export function planFastAdd<R extends FastAddRelease>(picker: FastAddPicker<R>, 
     // edition, as a suggestion. With the region not sure, nothing is suggested.
     plan.edition = plan.editions[0];
     plan.suggested.edition = true;
+  } else if (plan.editions.length === 0) {
+    // M16: not answered yet, and the catalog lists no edition here at all (a game with no
+    // release recorded yet, or a region the catalog lacks): "not sure", the only honest answer
+    // until the collector names it. Never a catalog edition, so nothing about a release is implied.
+    plan.edition = "unsure";
+    plan.suggested.edition = true;
   }
   if (!plan.edition) return plan;
   const chosenEdition = plan.edition;

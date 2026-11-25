@@ -29,6 +29,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     // M15: the pilot preview builds here (next.config.ts).
     ".next-pilot/**",
+    // M16: and the demo preview.
+    ".next-demo/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
