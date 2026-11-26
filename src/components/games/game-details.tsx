@@ -1,108 +1,22 @@
-import { CalendarDays, ChevronRight, Disc3, Globe, Layers } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { editionText } from "@/components/catalog/release-picker";
 import { ConsoleArt } from "@/components/shelf/console-art";
 import { GameMedia } from "@/components/shelf/game-media";
-import { ShelfBoard, ShelfLight } from "@/components/shelf/shelf-parts";
 import { Skeleton } from "@/components/ui/skeleton";
-import { aliasKindLabel, formatCatalogDate, gameKindLabel, languageName, NO_VERIFIED_RELEASE, regionLabel, releaseCountLabel } from "@/features/catalog/format";
+import { formatCatalogDate, languageName, NO_VERIFIED_RELEASE, regionLabel, releaseCountLabel } from "@/features/catalog/format";
 import { packagingLabel } from "@/features/catalog/packaging";
-import type { PickerRelease, ReleasePicker } from "@/features/catalog/types";
+import type { PickerRelease } from "@/features/catalog/types";
 import { editionKey, fastAddHref } from "@/features/collection/fast-add";
-import { consoleFor, type gameOverview, releaseMedia, shelfFrame } from "@/features/shelf/copies";
+import { consoleFor, type gameOverview, releaseMedia } from "@/features/shelf/copies";
 
-// A game's page, as the catalog records it: the game itself (its hero), then each of its
-// physical releases. Public and cached: nothing here reads the session. Only what the
+// A game's page, as the catalog records it: each of its physical releases (the hero is
+// in game-hero.tsx). Public and cached: nothing here reads the session. Only what the
 // catalog records is shown; a missing detail is left out, never filled in.
 
 type Overview = ReturnType<typeof gameOverview>;
-
-/** The game: front-facing media on a lit shelf, its title and the catalog's facts about it. */
-export function GameHero({ game, summary, overview }: { game: ReleasePicker["game"]; summary: string | null; overview: Overview }) {
-  const hero = overview.hero;
-  // M14a: the catalog's platforms for the game, including one with no verified release yet.
-  const platforms = overview.platforms;
-  const heroConsole = hero ? consoleFor(hero.release.platform.slug) : null;
-  const eyebrow = [platforms.map((p) => p.shortName).join(" · "), game.firstRelease ? game.firstRelease.value.slice(0, 4) : null].filter(Boolean).join(" · ");
-  const facts = [
-    game.firstRelease ? { icon: CalendarDays, label: "First released", value: formatCatalogDate(game.firstRelease) } : null,
-    platforms.length ? { icon: Layers, label: platforms.length === 1 ? "Platform" : "Platforms", value: platforms.map((p) => p.name).join(", ") } : null,
-    { icon: Disc3, label: "Physical releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount) : NO_VERIFIED_RELEASE },
-    overview.regions.length ? { icon: Globe, label: overview.regions.length === 1 ? "Region" : "Regions", value: overview.regions.map((r) => regionLabel(r)).join(", ") } : null,
-  ].filter((fact) => fact !== null);
-
-  return (
-    <article aria-labelledby="game-title" className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#141319]">
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 bg-[radial-gradient(45%_80%_at_18%_0%,rgb(255_176_96/0.14),transparent_70%),radial-gradient(50%_90%_at_100%_100%,rgb(139_92_246/0.16),transparent_70%)]"
-      />
-      <div className="relative grid items-center gap-8 p-6 sm:p-8 md:grid-cols-[minmax(0,17rem)_1fr] md:gap-10">
-        {/* One of the game's releases, standing on a lit shelf. */}
-        <figure className="relative mx-auto w-full max-w-64 md:max-w-none">
-          <div className="relative">
-            <ShelfLight />
-            <div className="relative px-6 pt-10 pb-1">
-              <GameMedia
-                media={hero?.media ?? null}
-                frame={hero ? shelfFrame(hero.release.platform.slug) : null}
-                seed={game.id}
-                title={game.title}
-                systemLabel={hero?.release.platform.shortName ?? ""}
-                sizes="(min-width: 768px) 240px, 60vw"
-                priority
-              />
-            </div>
-            <ShelfBoard />
-          </div>
-          <figcaption className="mt-2 text-center text-xs text-muted-foreground">
-            {hero ? `Shown as the ${hero.release.platform.shortName} ${regionLabel(hero.release.region)} release. Placeholder label art.` : overview.releaseCount
-                ? "Placeholder art: the catalog doesn't record enough to draw this release's shell."
-                : "Placeholder art: no physical release to draw yet."}
-          </figcaption>
-        </figure>
-
-        <div className="min-w-0">
-          {eyebrow ? (
-            <p className="flex items-center gap-2 text-xs font-medium tracking-[0.16em] text-muted-foreground uppercase">
-              {heroConsole ? <ConsoleArt kind={heroConsole} sizes="40px" className="h-6 w-8 shrink-0" /> : null}
-              {eyebrow}
-            </p>
-          ) : null}
-          <h1 id="game-title" className="mt-2 text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl">
-            {game.title}
-          </h1>
-          {game.kind !== "game" ? <p className="mt-1.5 text-sm text-muted-foreground">{gameKindLabel(game.kind)}</p> : null}
-          {game.aliases.length ? (
-            <ul aria-label="Other titles" className="mt-2 flex flex-col gap-0.5 text-sm">
-              {game.aliases.map((alias) => (
-                <li key={`${alias.title}-${alias.languageCode}-${alias.regionCode}`}>
-                  <span className="text-muted-foreground">{aliasKindLabel(alias.kind)}: </span>
-                  {alias.title}
-                  {alias.languageCode ? <span className="text-muted-foreground"> · {languageName(alias.languageCode)}</span> : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {summary ? <p className="mt-4 max-w-prose text-sm leading-relaxed text-pretty text-foreground/90">{summary}</p> : null}
-          <dl className="mt-6 grid max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2">
-            {facts.map(({ icon: Icon, label, value }) => (
-              <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3.5 py-3">
-                <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Icon aria-hidden="true" className="size-3.5 shrink-0 text-primary-text" />
-                  {label}
-                </dt>
-                <dd className="mt-1 text-sm font-medium text-pretty">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </div>
-    </article>
-  );
-}
 
 /** "Disc 2 × CD-ROM · SLUS-00594 · 1997 · Sony": what the catalog records, in a fixed order. */
 function releaseFacts(release: PickerRelease) {

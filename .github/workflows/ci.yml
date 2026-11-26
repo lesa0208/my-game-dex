@@ -53,6 +53,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # M17b: every listed game image has its source, licence and approval, and its file.
+      - name: Game image registry
+        run: npm run media:test
+
       - name: Mutation runners refuse without an explicit opt-in
         run: npm run mutation:guard-test
 

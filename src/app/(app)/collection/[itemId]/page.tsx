@@ -434,7 +434,8 @@ async function CopyView({ params, searchParams }: { params: PageProps<"/collecti
       ) : null}
 
       {preserved ? null : viewer.isActive ? (
-        <details className="rounded-lg border bg-card">
+        // M17b: opened when the game page's "Edit" sends the collector here (?edit=1#edit).
+        <details id="edit" key={search.edit === "1" ? "editing" : "viewing"} open={search.edit === "1"} className="scroll-mt-24 rounded-lg border bg-card">
           <summary className="flex min-h-11 cursor-pointer items-center rounded-lg px-4 text-sm font-semibold outline-none select-none focus-visible:ring-3 focus-visible:ring-ring">
             Edit this copy
           </summary>

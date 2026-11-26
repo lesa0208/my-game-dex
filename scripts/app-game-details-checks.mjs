@@ -71,11 +71,15 @@ function claim(owner, title, platform, region = null, editionName = null) {
 }
 
 /** The copies listed in the page's "Your copies" section, by their links. */
+/**
+ * The copies listed under "Your copies of this game", by their View links. M17b: read
+ * from the whole page, because React may stream part of the list later in the same
+ * response (a placeholder, then the content), so the list isn't always one block.
+ */
 function listedCopies(html) {
-  const start = html.indexOf('aria-label="Your copies of this game"');
-  if (start < 0) return [];
-  const section = html.slice(start, html.indexOf("</ul>", start));
-  return [...section.matchAll(/href="\/collection\/([0-9a-f-]{36})"/g)].map((m) => m[1]);
+  if (!html.includes('aria-label="Your copies of this game"')) return [];
+  const views = [...html.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((tag) => tag.includes('aria-label="View copy, '));
+  return [...new Set(views.map((tag) => /href="\/collection\/([0-9a-f-]{36})"/.exec(tag)?.[1]).filter(Boolean))];
 }
 
 /**
@@ -139,7 +143,8 @@ async function visitor() {
   const missingText = plain(missing.html);
   check("a game the catalog knows little about still has a page", missing.response.status === 200 && missingText.includes("Quiet Meadow"));
   check("with no first release date or summary invented", !missingText.includes("First released") && !missingText.includes(SUMMARY));
-  check("the hero says why it's a placeholder", missingText.includes("doesn't record enough to draw this release's shell"));
+  // M17b: no generated shell in the hero; it says there's no approved artwork yet.
+  check("the hero says there's no artwork, rather than drawing a made-up one", missingText.includes("No artwork for Quiet Meadow yet"));
   check("and its unknown-region release drawn as a placeholder, not a guessed shell", missing.html.includes('data-media="placeholder"') && !/data-media="snes-cart/.test(missing.html));
 
   const chosen = await browser.get(`/games/starfall-odyssey?platform=snes&region=pal&release=${release("Starfall Odyssey", "snes", "pal", "rom-cartridge")}`);
@@ -167,11 +172,12 @@ async function collectors() {
   const text = plain(page.html);
   const listed = listedCopies(page.html);
   check("the page counts the collector's copies", text.includes("Owned: 5 copies"), text.match(/Owned: [^ ]+ ?\w*/)?.[0]);
-  check("and lists each one on its own", listed.length === 5 && mine.every((id) => listed.includes(id)), `${listed.length}`);
+  check("and lists each one on its own", listed.length === 5 && mine.every((id) => listed.includes(id)), `${listed.length}; missing ${mine.filter((id) => !listed.includes(id)).map((id) => `${id.slice(0, 8)}:${page.html.split(id).length - 1}`).join(",")}`);
   check("copies of the same release stay separate", text.includes("Copy 1 of 3") && text.includes("Copy 2 of 3") && text.includes("Copy 3 of 3"));
   check("a copy of another game with a similar title isn't listed", !listed.includes(sequel));
   check("an unidentified copy is listed, and says it isn't linked to a release", listed.includes(unidentified) && text.includes("Not linked to a release"));
-  check("each copy shows its completeness and condition", text.includes("Complete in box · Very good") && text.includes("Sealed · Mint"));
+  const recorded = (completeness, condition) => new RegExp(`>Completeness</dt><dd>${completeness}</dd></div><div[^>]*><dt[^>]*>Condition</dt><dd>${condition}</dd>`).test(page.html);
+  check("each copy shows its completeness and condition, as recorded", recorded("Complete in box", "Very good") && recorded("Sealed", "Mint"));
   check("and nothing private: no acquisition date", !text.includes("2021"));
   check("the copies link to their own pages and to the collector's shelves", page.html.includes(`href="/collection/${jp}"`) && page.html.includes('href="/collection/systems/snes"') && page.html.includes('href="/collection/systems/playstation"'));
 

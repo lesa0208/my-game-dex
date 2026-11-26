@@ -9,8 +9,6 @@ import { collectionHref, DEFAULT_PARAMS } from "@/features/collection/list-param
 import { getMyGameOwnership } from "@/features/collection/queries";
 import { getMyCopiesOfGame } from "@/features/shelf/collection";
 
-const NOT_RECORDED = "Not recorded";
-
 /**
  * What the signed-in collector has of this game, on its page: the headline count
  * (M12b's "Owned", which counts every copy that isn't preserved, whatever its catalog
@@ -72,22 +70,47 @@ export async function GameCopies({ gameId, title }: { gameId: string; title: str
       {copies ? (
         <ul aria-label="Your copies of this game" className="mt-2 flex flex-col gap-2">
           {copies.items.map((item) => (
-            <li key={item.key}>
-              <Link
-                href={item.href}
-                className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5 outline-none transition-colors hover:border-primary/50 hover:bg-white/[0.04] focus-visible:ring-3 focus-visible:ring-ring"
-              >
+            <li key={item.key} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5" data-my-copy="">
+              <div className="flex items-start gap-3">
                 <div className="w-12 shrink-0">
                   <GameMedia media={item.media} seed={item.labelSeed} title={item.title} systemLabel={item.details.split(" · ")[0] ?? ""} sizes="48px" />
                 </div>
                 <div className="min-w-0 flex-1 text-sm">
-                  <p className="font-medium text-pretty">{item.details || item.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {item.completeness?.label ?? `Completeness: ${NOT_RECORDED.toLowerCase()}`} · {item.condition?.label ?? `Condition: ${NOT_RECORDED.toLowerCase()}`}
+                  <p className="font-medium text-pretty">
+                    <Link href={item.href} className="rounded-sm outline-none hover:text-primary-text focus-visible:ring-3 focus-visible:ring-ring">
+                      {item.details || item.title}
+                    </Link>
                   </p>
+                  {/* M17b: only what the collector recorded. */}
+                  {item.completeness || item.condition ? (
+                    <dl className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                      {item.completeness ? (
+                        <div className="flex gap-1">
+                          <dt className="text-muted-foreground">Completeness</dt>
+                          <dd>{item.completeness.label}</dd>
+                        </div>
+                      ) : null}
+                      {item.condition ? (
+                        <div className="flex gap-1">
+                          <dt className="text-muted-foreground">Condition</dt>
+                          <dd>{item.condition.label}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  ) : (
+                    <p className="mt-0.5 text-xs text-muted-foreground">No condition or completeness recorded yet.</p>
+                  )}
                   {item.note ? <p className="mt-1 inline-flex rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs">{item.note}</p> : null}
+                  <p className="mt-2 flex gap-3 text-xs font-medium">
+                    <Link href={item.href} className="text-primary-text underline-offset-4 hover:underline" aria-label={`View copy, ${item.details || item.title}`}>
+                      View copy
+                    </Link>
+                    <Link href={`${item.href}?edit=1#edit`} className="text-primary-text underline-offset-4 hover:underline" aria-label={`Edit, ${item.details || item.title}`}>
+                      Edit
+                    </Link>
+                  </p>
                 </div>
-              </Link>
+              </div>
             </li>
           ))}
         </ul>

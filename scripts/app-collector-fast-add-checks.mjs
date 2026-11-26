@@ -326,13 +326,17 @@ try {
     await press("Enter");
     await keys.waitForURL(/\/games\/comet-rally/);
     await eventually(async () => (await addButton(keys).count()) === 1);
-    const toAdd = await tabTo("to Add", () => document.activeElement?.textContent?.trim() === "Add to collection", 20);
+    // M17b: the hero's Add to Collection (the quick add) comes first; the step-by-step add,
+    // which can link this exact release, follows the hero and the page's tab bar.
+    const toQuick = await tabTo("to the hero's Add", () => document.activeElement?.matches("[data-action=add]") ?? false, 8);
+    const toAdd = await tabTo("then to Add", () => document.activeElement?.textContent?.trim() === "Add to collection", 20);
     await press("Enter");
     await waitForAdded(keys);
-    check("the skip link, the search, the result and Add are each reached and used from the keyboard", skipped.every(Boolean) && toSearch && toResult && toAdd, presses.join(", "));
+    check("the skip link, the search, the result and Add are each reached and used from the keyboard", skipped.every(Boolean) && toSearch && toResult && toQuick && toAdd, presses.join(", "));
+    const count = (label) => Number(new RegExp(`${label} (\\d+)`).exec(presses.join(","))?.[1] ?? 99);
     check(
-      "focus stays in the search box after searching, a few Tabs from the first result, and Add is a few Tabs into the game's page",
-      (Number(/to the first result (\d+)/.exec(presses.join(","))?.[1]) ?? 99) <= 4 && (Number(/to Add (\d+)/.exec(presses.join(","))?.[1]) ?? 99) <= 15,
+      "focus stays in the search box after searching, a few Tabs from the first result; the hero's Add a few Tabs into the game's page, and the step-by-step Add soon after",
+      count("to the first result") <= 4 && count("to the hero's Add") <= 4 && count("to the hero's Add") + count("then to Add") <= 17,
       presses.join(", "),
     );
     check("added from the keyboard: the SNES copy", copiesOf(alex.id).at(-1) === "SNS-CR-USA");

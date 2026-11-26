@@ -1,5 +1,6 @@
 import { PlugZap } from "lucide-react";
 import type { Metadata } from "next";
+import Image from "next/image";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -7,7 +8,10 @@ import { gameHref, ReleasePickerView } from "@/components/catalog/release-picker
 import { AddClaimToCollection, AddToCollection, AddToCollectionSkeleton } from "@/components/collection/add-to-collection";
 import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { ExcludeReleaseLink } from "@/components/exclusion/exclude-release-link";
-import { GameDetailsSkeleton, GameHero, PhysicalReleases } from "@/components/games/game-details";
+import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-details";
+import { GameHero } from "@/components/games/game-hero";
+import { GameOverview, HeroActions, HeroActionsSkeleton, VisitorPanel } from "@/components/games/game-sections";
+import { SectionNav } from "@/components/games/section-nav";
 import { MergeReleaseLink } from "@/components/merge/merge-release-link";
 import { EmptyState } from "@/components/shared/empty-state";
 import { GameWishlist, GameWishlistSkeleton, WantRelease } from "@/components/wishlist/game-wishlist";
@@ -15,6 +19,8 @@ import { Breadcrumbs } from "@/components/shelf/shelf-parts";
 import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { type FastAddReference, fastAddHref, planFastAdd } from "@/features/collection/fast-add";
 import { gameOverview } from "@/features/shelf/copies";
+import { LICENSE_LABELS } from "@/features/media/game-images";
+import { approvedImageFor, approvedImagesOf } from "@/features/media/registry";
 import { getSubmissionOptions } from "@/features/submissions/queries";
 
 export const metadata: Metadata = {
@@ -76,20 +82,59 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const here = fastAddHref(picker.game.slug, { ...selection, edition });
   const platformIds = new Map(options?.platforms.map((p) => [p.slug, { id: p.id, shortName: p.shortName }]) ?? []);
 
-  // The catalog is public and cached. The collector's copies and adding read the
+  // M17b: the platform the page shows (chosen, or the game's only one), its region's
+  // label, the approved image for them (never a stand-in), and the publisher only when
+  // every verified release names the same one.
+  const platform = overview.platforms.some((p) => p.slug === picker.selection.platform)
+    ? picker.selection.platform
+    : overview.platforms.length === 1
+      ? overview.platforms[0].slug
+      : null;
+  const regionName = options?.regions.find((r) => r.code === picker.selection.region)?.label ?? null;
+  const image = approvedImageFor({ game: picker.game.slug, platform, region: picker.selection.region, release: picker.selection.releaseId });
+  const publishers = new Set(all.releases.map((r) => r.publisherName));
+  const publisher = publishers.size === 1 ? ([...publishers][0] ?? null) : null;
+  const gallery = approvedImagesOf(picker.game.slug);
+  const intent = first(query.add) === picker.game.slug ? "add" : first(query.wish) === picker.game.slug ? "wish" : null;
+
+  // The catalog is public and cached. The collector's copies, adding and wishing read the
   // session, so they stream in on their own, and return here after signing in.
   return (
     <>
       <Breadcrumbs items={[{ label: "Explore", href: "/explore" }, { label: picker.game.title }]} />
-      {/* One grid: on narrow screens adding comes straight after the game, then the
-          collector's copies; on wide ones the copies stand in a column beside everything
-          else. Adding comes before the full list of releases, so a collector adding a pile
-          of games reaches it without scrolling past what they already know. */}
-      <div className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 lg:col-start-1">
-          <GameHero game={picker.game} summary={summary} overview={overview} />
+      <div className="mt-4">
+        <GameHero
+          game={picker.game}
+          overview={overview}
+          platform={platform}
+          region={regionName}
+          image={image}
+          publisher={publisher}
+          actions={
+            <Suspense fallback={<HeroActionsSkeleton />}>
+              <HeroActions game={{ id: picker.game.id, slug: picker.game.slug, title: picker.game.title }} platform={platform} returnPath={here} autoOpen={intent} />
+            </Suspense>
+          }
+        />
+      </div>
+      {/* One grid: on narrow screens the game's parts come first, then the collector's
+          copies; on wide ones the copies stand in a column beside them. Adding a specific
+          copy comes before the full list of releases, so a collector adding a pile of
+          games reaches it without scrolling past what they already know. */}
+      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="flex min-w-0 flex-col gap-8 lg:col-start-1">
+          <SectionNav
+            items={[
+              { id: "overview", label: "Overview" },
+              { id: "add-copy", label: "Add a copy" },
+              { id: "releases", label: "Physical releases", count: overview.releaseCount },
+              ...(gallery.length ? [{ id: "gallery", label: "Gallery", count: gallery.length }] : []),
+              { id: "your-copies", label: "Your collection" },
+            ]}
+          />
+          <GameOverview game={picker.game} summary={summary} />
         </div>
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
+        <div id="add-copy" className="min-w-0 scroll-mt-32 rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6 lg:col-start-1">
           <ReleasePickerView
             picker={picker}
             plan={plan}
@@ -126,10 +171,13 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
             }}
           />
         </div>
-        <aside aria-label="Your collection" className="min-w-0 empty:hidden lg:sticky lg:top-22 lg:col-start-2 lg:row-span-3 lg:row-start-1">
+        <aside id="your-copies" aria-label="Your collection" className="min-w-0 scroll-mt-32 lg:sticky lg:top-22 lg:col-start-2 lg:row-span-4 lg:row-start-1">
           <div className="flex flex-col gap-6">
             <Suspense fallback={<GameCopiesSkeleton />}>
               <GameCopies gameId={picker.game.id} title={picker.game.title} />
+            </Suspense>
+            <Suspense fallback={null}>
+              <VisitorPanel title={picker.game.title} returnPath={here} />
             </Suspense>
             {/* M12 W2: the collector's wishes for this game, apart from their copies. */}
             <Suspense fallback={<GameWishlistSkeleton />}>
@@ -137,7 +185,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
             </Suspense>
           </div>
         </aside>
-        <div className="min-w-0 lg:col-start-1">
+        <div id="releases" className="min-w-0 scroll-mt-32 lg:col-start-1">
           <PhysicalReleases
             slug={picker.game.slug}
             title={picker.game.title}
@@ -149,6 +197,26 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
             )}
           />
         </div>
+        {/* Only approved images, and only when there are some: never an empty gallery. */}
+        {gallery.length ? (
+          <section id="gallery" aria-labelledby="gallery-title" className="min-w-0 scroll-mt-32 lg:col-start-1">
+            <h2 id="gallery-title" className="text-xl font-semibold tracking-tight">
+              Gallery
+            </h2>
+            <ul className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {gallery.map((g) => (
+                <li key={g.id} className="flex flex-col gap-1.5">
+                  <div className="flex aspect-square items-center justify-center rounded-xl border border-white/[0.08] bg-black/20 p-3">
+                    <Image src={`/${g.file}`} alt={g.alt} width={g.width} height={g.height} sizes="(min-width: 640px) 220px, 45vw" className="h-auto max-h-full w-auto max-w-full object-contain" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {g.source.name} · {LICENSE_LABELS[g.license]}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </>
   );
