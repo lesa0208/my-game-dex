@@ -227,6 +227,7 @@ try {
   const saturn = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   check("on the Saturn, which IGDB doesn't list: no cover, the honest fallback", (await page.locator('[data-game-image="igdb-cover"]').count()) === 0 && (await page.locator('[data-game-image="none"]').count()) === 1, saturn.slice(0, 160));
   check("the game's description stays, as IGDB's", saturn.includes(SUMMARY) && saturn.includes("Description from IGDB.com"));
+  check("and no Gallery of IGDB's screenshots on a platform IGDB doesn't list", (await page.getByRole("tab", { name: /Gallery/ }).count()) === 0 && (await page.locator("[data-screenshot=igdb]").count()) === 0);
 
   await page.goto(`${origin}/games/starfall-odyssey`, { waitUntil: "networkidle" });
   const starfall = (await page.locator("main").innerText()).replace(/\s+/g, " ");

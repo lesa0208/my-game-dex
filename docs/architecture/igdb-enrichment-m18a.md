@@ -48,7 +48,7 @@ The secret scan (`npm run secrets:check`) runs before every demo build. The file
   - It links the IGDB id in `private.external_references` beside the game's Wikidata id, and marks the record matched with the matcher's tier and notes.
   - It allows one IGDB id per game and one game per IGDB id, and refuses a held record or an unpublished game.
   - It writes nothing on the game. Run again, it reports the record as skipped.
-- **Display.** `public.get_game_provider_metadata(uuid[])` is the only public read (anon and authenticated). It returns data only for published games, while the provider is cleared, from the latest attached record for the game's linked id. Images come only while media are cleared, image ids are validated, arrays are bounded, and the IGDB URL must be an `igdb.com/games/…` address.
+- **Display.** `public.get_game_provider_metadata(uuid[])` is the only read, and **only the app server may call it** (service_role, with `SUPABASE_SECRET_KEY`; migration `20261222100000`): no public Supabase client, signed in or not, can fetch IGDB's records as stored, because IGDB's terms rule out redistributing its data as-is through our own API. It returns data only for published games, while the provider is cleared, from the latest attached record for the game's linked id. Images come only while media are cleared, image ids are validated, arrays are bounded, and the IGDB URL must be an `igdb.com/games/…` address.
 
 Held records (needing review) stay in `provider_records` as `needs_review` with their reason, unapplied. The editor review queue reads release reclassifications only, so they can't be resolved into games there.
 
@@ -87,11 +87,11 @@ The record stores what IGDB returns, bounded:
 
 | Where | What | Rule |
 | --- | --- | --- |
-| Game page, artwork | IGDB's cover, framed as artwork, captioned "Cover art from IGDB.com. Game artwork, not a photo of a specific release." | An approved physical-item image (the M17b registry) comes first. The cover is never laid on a cartridge or presented as a release. With no cover, the honest fallback stays |
+| Game page, artwork | IGDB's cover, framed as artwork, captioned "Game artwork from IGDB.com. General game artwork, not verified for a specific platform, region or edition." | An approved physical-item image (the M17b registry) comes first. **Only on a platform IGDB lists for the game** (`platform_ids`; never the SNES cover on the GBA page); elsewhere, and with no cover, the honest fallback stays. Never laid on a cartridge or presented as a release |
 | Overview | IGDB's summary, "Description from IGDB.com" | Only when the catalog has no summary of its own |
 | Game Details | "From IGDB": developers, publishers, genres, themes, and the credit | Labelled as IGDB's. The hero's publisher stays the catalog's (only when every verified release agrees) |
-| Gallery | IGDB's screenshots, credited | The tab appears when there are approved images or IGDB screenshots |
-| Explore cards | The cover on the card's stage, instead of the console art | One credit under the grid: "Cover art: IGDB.com" |
+| Gallery | IGDB's screenshots, "Game screenshots from IGDB.com, not tied to a platform or release" | Same platform rule as the cover. The tab appears when there are approved images or IGDB screenshots |
+| Explore cards | The cover on the card's stage, instead of the console art | With a platform chosen, only on a platform IGDB lists. One credit under the grid: "Cover art: IGDB.com. General game artwork, not a specific platform, region or release." |
 
 **Not written.** IGDB's alternative names don't become catalog aliases, and its first release date doesn't replace the catalog's. Its platforms don't add pairings, and nothing becomes a physical release. Differences are in the report.
 
