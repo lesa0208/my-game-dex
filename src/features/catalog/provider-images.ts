@@ -1,8 +1,9 @@
 /** M18a: an IGDB image as the catalog keeps it: its id (which builds its address) and its size. */
 export type ProviderImage = { imageId: string; width: number | null; height: number | null };
 
-/** IGDB's image sizes the app uses. */
-export type IgdbImageSize = "cover_big" | "cover_big_2x" | "screenshot_big" | "720p";
+/** IGDB's image sizes the app uses: the only sizes its image route serves. */
+export const IGDB_IMAGE_SIZES = ["cover_big", "cover_big_2x", "screenshot_big", "720p"] as const;
+export type IgdbImageSize = (typeof IGDB_IMAGE_SIZES)[number];
 
 /**
  * Our platform slugs to IGDB platform ids: the same map as scripts/lib/igdb-match.mjs
@@ -33,7 +34,11 @@ export function coverFitsPlatform(platformIds: readonly number[], platformSlug: 
   return id !== undefined && platformIds.includes(id);
 }
 
-/** An IGDB image's address, built from its id: the only form next.config.ts's remotePatterns accepts. */
+/**
+ * An IGDB image's address in the app: its own route, which serves it only while it is authorized
+ * (src/app/media/igdb/[size]/[image]/route.ts). Render it with `unoptimized`: the image optimizer
+ * would keep a copy on disk, and is not allowed to fetch IGDB at all (next.config.ts).
+ */
 export function igdbImageUrl(image: ProviderImage, size: IgdbImageSize) {
-  return `https://images.igdb.com/igdb/image/upload/t_${size}/${image.imageId}.jpg`;
+  return `/media/igdb/${size}/${image.imageId}.jpg`;
 }

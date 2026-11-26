@@ -85,7 +85,7 @@ export function GameCard({ item, context }: { item: SearchResult; context: CardC
         {cover ? (
           // M18a: the game's cover art from IGDB: game artwork, not a photo of any release.
           <span className="absolute inset-y-[7%] left-1/2 aspect-[264/374] -translate-x-1/2 overflow-hidden rounded-md shadow-[0_14px_22px_rgb(0_0_0/0.7)] ring-1 ring-white/10 transition-transform duration-300 group-hover/card:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/card:translate-y-0" data-cover="igdb">
-            <Image src={igdbImageUrl(cover, "cover_big")} alt="" fill sizes="(min-width: 1280px) 150px, (min-width: 480px) 22vw, 40vw" className="object-cover" />
+            <Image src={igdbImageUrl(cover, "cover_big")} unoptimized alt="" fill sizes="(min-width: 1280px) 150px, (min-width: 480px) 22vw, 40vw" className="object-cover" />
           </span>
         ) : consoles.length ? (
           consoles.map((kind, i) => (

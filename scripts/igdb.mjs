@@ -11,6 +11,11 @@
  *   MGD_STACK=demo node scripts/igdb.mjs clear --basis-file <file> --note "<basis>" [--media --media-note "<scope>"]
  *        Operator step: records IGDB's clearance against the saved basis (its hash), and, with
  *        --media, that its images may be shown. Local demo, scratch or test stacks only.
+ *   MGD_STACK=demo node scripts/igdb.mjs withdraw --note "<why>" [--media-only]
+ *        Operator step: withdraws IGDB's media (and, without --media-only, its clearance), then
+ *        removes the image optimizer's stored copies (.next/cache/images, .next-demo/cache/images).
+ *        The app stops showing IGDB data and images from the next request: its read and its image
+ *        route ask the database every time. Also: purge-image-cache, the second step alone.
  *   MGD_STACK=demo node scripts/igdb.mjs enrich --batch m18a-first-20 | --games <slug,slug>
  *        --basis-file <same file> --reason "<why>" [--out <dir>] [--snapshot <igdb.json>] [--dry-run]
  *        Reads the games (catalog_importer), fetches their IGDB candidates (or reuses a snapshot),
@@ -27,7 +32,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,6 +185,42 @@ async function cmdPlatforms() {
   const rows = await checkPlatforms(igdb);
   for (const r of rows) console.log(`${r.ok ? "ok  " : "DIFF"} ${r.slug.padEnd(18)} IGDB ${String(r.id).padEnd(3)} ${r.igdb ?? "(not found)"}${r.ok ? "" : ` (expected ${r.expected})`}`);
   if (rows.some((r) => !r.ok)) process.exit(1);
+}
+
+/**
+ * The image optimizer's stored copies, in every build folder of this checkout. Before the M18a
+ * security fix the optimizer fetched IGDB images and kept them for hours; it may no longer fetch
+ * them, and this removes what it kept. Its other entries (the app's own images) are rebuilt on use.
+ */
+function purgeImageCaches() {
+  const removed = [];
+  for (const dist of [".next", ".next-demo", ".next-pilot"]) {
+    const dir = join(ROOT, dist, "cache", "images");
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+      removed.push(dir);
+    }
+  }
+  return removed;
+}
+
+async function cmdPurgeImageCache() {
+  const removed = purgeImageCaches();
+  console.log(removed.length ? `removed: ${removed.join(", ")}` : "no stored optimizer images to remove");
+}
+
+async function cmdWithdraw(o) {
+  need(o, ["note"]);
+  if (process.env.CATALOG_IMPORTER_DATABASE_URL) fail("withdraw is an operator step on a local stack, in SQL; it doesn't use the importer.");
+  const { container, name } = await localStack();
+  const note = lit(`${name} stack (M18a): ${o.note}`);
+  psql(container, `select private.record_provider_media(${lit(PROVIDER)}, false, ${note});`);
+  console.log(`igdb media withdrawn on the ${name} stack`);
+  if (!o["media-only"]) {
+    psql(container, `select private.record_provider_clearance(p.code, false, p.terms_url, p.terms_sha256, ${note}) from private.external_providers p where p.code = ${lit(PROVIDER)};`);
+    console.log(`igdb clearance withdrawn on the ${name} stack`);
+  }
+  await cmdPurgeImageCache();
 }
 
 async function cmdClear(o) {
@@ -384,8 +425,8 @@ export function reportMarkdown(snapshot, _games, decisions, missing, run = null)
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const o = args(rest);
-  const commands = { check: cmdCheck, platforms: cmdPlatforms, clear: cmdClear, enrich: cmdEnrich, resume: cmdResume, report: cmdReport };
-  if (!commands[command]) fail("Usage: node scripts/igdb.mjs check|platforms|clear|enrich|resume|report [options]. See the header of this file.");
+  const commands = { check: cmdCheck, platforms: cmdPlatforms, clear: cmdClear, withdraw: cmdWithdraw, "purge-image-cache": cmdPurgeImageCache, enrich: cmdEnrich, resume: cmdResume, report: cmdReport };
+  if (!commands[command]) fail("Usage: node scripts/igdb.mjs check|platforms|clear|withdraw|purge-image-cache|enrich|resume|report [options]. See the header of this file.");
   try {
     await commands[command](o);
   } catch (error) {

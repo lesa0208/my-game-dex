@@ -158,7 +158,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
                 {igdbImages.screenshots.map((shot, i) => (
                   <li key={shot.imageId} className="flex flex-col gap-1.5" data-screenshot="igdb">
                     <div className="relative aspect-video overflow-hidden rounded-xl border border-white/[0.08] bg-black/20">
-                      <Image src={igdbImageUrl(shot, "screenshot_big")} alt={`Screenshot ${i + 1} of ${picker.game.title}`} fill sizes="(min-width: 640px) 300px, 45vw" className="object-cover" />
+                      <Image src={igdbImageUrl(shot, "screenshot_big")} unoptimized alt={`Screenshot ${i + 1} of ${picker.game.title}`} fill sizes="(min-width: 640px) 300px, 45vw" className="object-cover" />
                     </div>
                   </li>
                 ))}

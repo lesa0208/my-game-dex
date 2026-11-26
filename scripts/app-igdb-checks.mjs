@@ -12,13 +12,18 @@
  *      catalog's own summary first; a held game shows nothing from IGDB. A game-level cover is
  *      shown only on a platform IGDB lists for the game, captioned as general game artwork; on
  *      another platform the honest fallback stays. The browser never contacts IGDB or Twitch:
- *      images come from the app's own optimizer. axe on the page.
+ *      images come from the app's own route. axe on the page.
+ *   5. Image authorization (security fix): the route serves an image only while that asset is
+ *      authorized; unattached, unknown and malformed images are 404; the image optimizer refuses
+ *      IGDB and the route alike. Withdrawing media or clearance takes effect on the next request,
+ *      for pages and images, and survives an app restart; the deployment flag alone isn't enough;
+ *      the withdraw command removes the optimizer's stored copies; re-clearing brings the images back.
  *
  *   npm run build && MGD_STACK=scratch node scripts/app-igdb-checks.mjs
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -26,6 +31,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { chromium } from "playwright-core";
+import sharp from "sharp";
 
 import { api, appErrorLines, check, createUser, deleteUsers, psql, publishableKey, results, root, section, service, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
@@ -48,7 +54,9 @@ const sql = (s) => psql(s);
 const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 // ---- the stand-in -------------------------------------------------------------------
+const JPEG = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#7a5cff" } }).jpeg().toBuffer();
 const seen = [];
+const imageFetches = [];
 let records = new Map();
 const server = createServer((req, res) => {
   let body = "";
@@ -59,6 +67,13 @@ const server = createServer((req, res) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     };
+    // IGDB's image CDN: any well-formed address answers, as the real one does for real ids.
+    const img = /^\/igdb\/image\/upload\/t_[a-z0-9_]+\/([a-z0-9]+)\.jpg$/.exec(req.url);
+    if (img) {
+      imageFetches.push(img[1]);
+      res.writeHead(200, { "Content-Type": "image/jpeg" });
+      return res.end(JPEG);
+    }
     if (req.url.startsWith("/oauth2/token")) return json(200, { access_token: `stand-in-${randomBytes(4).toString("hex")}`, expires_in: 3600, token_type: "bearer" });
     if (req.headers["client-id"] !== "standinclientidforthechecks01" || !String(req.headers.authorization).startsWith("Bearer stand-in-")) return json(401, { message: "Authorization Failure" });
     if (req.url === "/v4/platforms") return json(200, Object.entries(PLATFORM_NAMES).map(([id, name]) => ({ id: Number(id), name })));
@@ -185,7 +200,8 @@ try {
 
   section("4. The pages");
   process.env.MGD_PROVIDER_MEDIA = "igdb";
-  const origin = await startApp(3418);
+  process.env.MGD_IGDB_IMAGE_ORIGIN = `${STAND_IN}/igdb/image/upload`;
+  let origin = await startApp(3418);
   const channels = process.env.A11Y_BROWSER ? [process.env.A11Y_BROWSER] : ["msedge", "chrome"];
   for (const channel of channels) {
     try {
@@ -204,14 +220,13 @@ try {
     if (/igdb\.com$|twitch\.tv$/.test(host)) outside.push(r.url());
     if (r.url().includes("get_game_provider_metadata")) providerCalls.push(r.url());
   });
-  // The optimizer would fetch the stand-in's made-up image ids from IGDB: not in a check.
-  await page.route("**/_next/image**", (route) => route.abort());
   await page.goto(`${origin}/games/quiet-meadow`, { waitUntil: "networkidle" });
   const main = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   check("Quiet Meadow shows IGDB's description, credited", main.includes(SUMMARY) && main.includes("Description from IGDB.com"));
   check("and IGDB's developer, publisher, genre and theme under From IGDB", await page.locator("[data-provider-facts=igdb]").innerText().then((t) => /Stand-in Studio/.test(t) && /Stand-in Publishing/.test(t) && /Adventure/.test(t) && /Fantasy/.test(t)));
   const coverSrc = await page.locator('[data-game-image="igdb-cover"] img').getAttribute("src");
-  check("its cover, from the app's own optimizer, as general game artwork", Boolean(coverSrc?.startsWith("/_next/image?url=https%3A%2F%2Fimages.igdb.com%2Figdb%2Fimage%2Fupload%2Ft_cover_big_2x%2Fco9102m18a.jpg")) && main.includes("General game artwork, not verified for a specific platform, region or edition"), coverSrc);
+  check("its cover, from the app's own image route, as general game artwork", coverSrc === "/media/igdb/cover_big_2x/co9102m18a.jpg" && main.includes("General game artwork, not verified for a specific platform, region or edition"), coverSrc);
+  check("and it loads", await page.locator('[data-game-image="igdb-cover"] img').evaluate((i) => i.complete && i.naturalWidth > 0));
   check("never laid on a cartridge: no label overlay with the cover", (await page.locator('[data-game-image="igdb-cover"]').innerText()).includes("Artwork not available") === false);
   await page.getByRole("tab", { name: /Gallery/ }).click();
   const gallery = await page.locator('[data-panel="gallery"]').innerText();
@@ -245,6 +260,63 @@ try {
   check("nor called the provider read itself", providerCalls.length === 0, providerCalls.join(", "));
   const html = await (await fetch(`${origin}/games/quiet-meadow`)).text();
   check("no secret key in the page", !html.includes(service.apikey));
+
+  section("5. Image authorization and withdrawal");
+  const img = (path, headers = {}) => fetch(`${origin}${path}`, { headers, redirect: "manual" });
+  const COVER = "/media/igdb/cover_big/co9102m18a.jpg";
+  const ok1 = await img(COVER);
+  const etag = ok1.headers.get("etag");
+  check("an authorized image: 200, a JPEG, revalidated on every use", ok1.status === 200 && ok1.headers.get("content-type") === "image/jpeg" && /no-cache/.test(ok1.headers.get("cache-control") ?? "") && Boolean(etag), `${ok1.status} ${ok1.headers.get("cache-control")}`);
+  check("and a browser's revalidation is a 304 while it stays authorized", (await img(COVER, { "If-None-Match": etag })).status === 304);
+  const fetchedBefore = imageFetches.length;
+  check("the remake's cover (staged, held, never attached): 404", (await img("/media/igdb/cover_big/co9104m18a.jpg")).status === 404);
+  check("an unknown image: 404", (await img("/media/igdb/cover_big/co31337zz.jpg")).status === 404);
+  check("a malformed id, another size or another extension: 404",
+    (await img("/media/igdb/cover_big/..%2Fsecret.jpg")).status === 404 && (await img("/media/igdb/t_original/co9102m18a.jpg")).status === 404 && (await img("/media/igdb/cover_big/co9102m18a.png")).status === 404);
+  check("nothing unauthorized was even fetched from IGDB", imageFetches.length === fetchedBefore, imageFetches.slice(fetchedBefore).join(","));
+  const opt = (url) => img(`/_next/image?url=${encodeURIComponent(url)}&w=256&q=75`);
+  check("the image optimizer refuses IGDB's own address", (await opt("https://images.igdb.com/igdb/image/upload/t_cover_big/co9102m18a.jpg")).status === 400);
+  check("and refuses the image route (it would keep a copy on disk)", (await opt(COVER)).status === 400);
+
+  const optimizerCache = join(root, ".next", "cache", "images");
+  mkdirSync(optimizerCache, { recursive: true });
+  writeFileSync(join(optimizerCache, "m18a-check-stored-copy"), "a copy kept from before the fix");
+  await igdb("withdraw", "--media-only", "--note", "M18a checks: media withdrawn");
+  check("withdrawing media: the same image is a 404 on the next request", (await img(COVER)).status === 404);
+  check("even revalidating with the old ETag", (await img(COVER, { "If-None-Match": etag })).status === 404);
+  check("the withdraw command removed the optimizer's stored copies", !existsSync(optimizerCache));
+  await page.goto(`${origin}/games/quiet-meadow`, { waitUntil: "networkidle" });
+  const noMedia = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check("the page shows no cover and no Gallery from the next request", (await page.locator('[data-game-image="igdb-cover"]').count()) === 0 && (await page.getByRole("tab", { name: /Gallery/ }).count()) === 0);
+  check("while IGDB's text, still cleared, stays", noMedia.includes(SUMMARY));
+
+  await igdb("withdraw", "--note", "M18a checks: clearance withdrawn");
+  await page.goto(`${origin}/games/quiet-meadow`, { waitUntil: "networkidle" });
+  const noData = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check("withdrawing clearance: no IGDB text or facts from the next request", !noData.includes(SUMMARY) && (await page.locator("[data-provider-facts]").count()) === 0 && noData.includes("No description yet."));
+  await page.goto(`${origin}/explore?q=quiet+meadow`, { waitUntil: "networkidle" });
+  check("and no cover on Explore", (await page.locator('[data-game-card="Quiet Meadow"]').count()) === 1 && (await page.locator("[data-cover=igdb]").count()) === 0);
+
+  stopApp();
+  await new Promise((r) => setTimeout(r, 1500));
+  origin = await startApp(3419);
+  check("after an app restart, still nothing: no stored copy brings it back", (await img(COVER)).status === 404 && !(await (await fetch(`${origin}/games/quiet-meadow`)).text()).includes(SUMMARY));
+
+  await igdb("clear", "--basis-file", basis, "--note", "synthetic basis for the M18a checks, restored", "--media", "--media-note", "scratch display for the M18a checks, restored");
+  check("cleared again: the existing authorized image is served again", (await img(COVER)).status === 200);
+  await page.goto(`${origin}/games/quiet-meadow`, { waitUntil: "networkidle" });
+  check("and the page shows it, and loads it", (await page.locator('[data-game-image="igdb-cover"] img').count()) === 1 && (await page.locator('[data-game-image="igdb-cover"] img').evaluate((i) => i.complete && i.naturalWidth > 0)));
+
+  stopApp();
+  await new Promise((r) => setTimeout(r, 1500));
+  delete process.env.MGD_PROVIDER_MEDIA;
+  origin = await startApp(3420);
+  check("a deployment that doesn't allow provider media serves none, even authorized", (await img(COVER)).status === 404);
+  stopApp();
+  await new Promise((r) => setTimeout(r, 1500));
+  process.env.MGD_PROVIDER_MEDIA = "igdb";
+  check("and the flag alone authorizes nothing: an unattached image stays a 404 with it set", await (async () => { origin = await startApp(3421); return (await img("/media/igdb/cover_big/co9104m18a.jpg")).status === 404 && (await img(COVER)).status === 200; })());
+
   const appErrors = appErrorLines();
   check("the app logged no errors", appErrors.length === 0, appErrors.slice(0, 3).join(" | "));
 } catch (error) {

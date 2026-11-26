@@ -65,6 +65,7 @@ export function GameArtwork({
           <div className="relative aspect-[264/374] h-[94%] overflow-hidden rounded-lg shadow-[0_28px_36px_rgb(0_0_0/0.65)] ring-1 ring-white/10">
             <Image
               src={igdbImageUrl(cover.image, "cover_big_2x")}
+              unoptimized
               alt={`Cover art for ${title}`}
               fill
               sizes="(min-width: 1536px) 17rem, (min-width: 1280px) 14rem, (min-width: 768px) 11rem, 10rem"

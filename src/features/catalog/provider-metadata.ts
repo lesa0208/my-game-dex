@@ -1,9 +1,6 @@
 import "server-only";
 
-import { cacheLife, cacheTag } from "next/cache";
-
 import type { ProviderImage } from "./provider-images";
-import { CATALOG_TAG } from "./queries";
 
 export { igdbImageUrl, type ProviderImage } from "./provider-images";
 
@@ -17,7 +14,8 @@ export { igdbImageUrl, type ProviderImage } from "./provider-images";
  * Images have two gates: the database returns them only while the provider's media are cleared
  * (private.record_provider_media), and this deployment shows them only when MGD_PROVIDER_MEDIA
  * names the provider (the local demo preview sets it; nothing else does). They are served by the
- * app's image optimizer (next.config.ts remotePatterns), so a browser never contacts IGDB.
+ * app's own route, which checks each image's authorization on every request
+ * (provider-image-server.ts), so a browser never contacts IGDB.
  */
 
 export type ProviderMetadata = {
@@ -89,11 +87,13 @@ export function parseProviderMetadata(rows: unknown, allowMedia: (provider: stri
   });
 }
 
-/** Provider metadata for these games (up to 200), by game id. Empty when the catalog isn't connected. */
+/**
+ * Provider metadata for these games (up to 200), by game id. Empty when the catalog isn't
+ * connected. Deliberately not cached (M18a security fix): every request asks the database, so
+ * withdrawing the provider's clearance or media hides its data from the next page request on,
+ * with no server cache, router cache or prerendered shell keeping a copy.
+ */
 export async function getProviderMetadata(gameIds: readonly string[]): Promise<Map<string, ProviderMetadata>> {
-  "use cache";
-  cacheLife("minutes");
-  cacheTag(CATALOG_TAG);
   const ids = [...new Set(gameIds.filter((id) => UUID.test(id)))].slice(0, 200);
   const url = process.env.SUPABASE_URL;
   // The server's secret key: read here, on the server, and sent only to the database.
@@ -103,6 +103,8 @@ export async function getProviderMetadata(gameIds: readonly string[]): Promise<M
     method: "POST",
     headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ p_games: ids }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(5000),
   }).catch(() => null);
   if (!response?.ok) return new Map();
   const rows: unknown = await response.json().catch(() => null);

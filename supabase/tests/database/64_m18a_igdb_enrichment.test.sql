@@ -4,7 +4,7 @@
 -- Calls the importer functions as their owner, as 17_catalog_import does. Synthetic data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(35);
+select plan(42);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.try(p_sql text) returns text language plpgsql as $t$
@@ -94,7 +94,7 @@ select is(pg_temp.try(format($$select catalog_import.attach_game_record(%L, %L, 
 -- Another staged record for the same IGDB id can't go to another game; another id can't go to a linked game.
 select catalog_import.stage_records(pg_temp.run('r1'), pg_temp.u('e1'), $$[
   {"entity_type": "game", "external_id": "1001", "payload": {"id": "1001", "slug": "star-voyage", "name": "Zqx Star Voyage", "summary": "changed"}},
-  {"entity_type": "game", "external_id": "1003", "payload": {"id": "1003", "slug": "star-voyage-remake", "name": "Zqx Star Voyage"}}
+  {"entity_type": "game", "external_id": "1003", "payload": {"id": "1003", "slug": "star-voyage-remake", "name": "Zqx Star Voyage", "cover": {"image_id": "co3zqx"}}}
 ]$$::jsonb, null);
 select is(pg_temp.try(format($$select catalog_import.attach_game_record(%L, %L, '1001', %L, 'A', '{}', null) ->> 'outcome'$$, pg_temp.run('r1'), pg_temp.u('e1'), pg_temp.g('zqx-moon-patrol'))),
   'error: identity conflict: the id is linked to another game', 'one game per IGDB id');
@@ -112,21 +112,32 @@ select is((pg_temp.meta('zqx-star-voyage') ->> 'provider') || '/' || (pg_temp.me
 select is(pg_temp.meta('zqx-star-voyage') -> 'genres', '["Shooter", "Arcade"]'::jsonb, 'its genres');
 select is(pg_temp.meta('zqx-star-voyage') -> 'platform_ids', '[19]'::jsonb, 'the IGDB platform ids it lists, an invalid one dropped');
 select is(pg_temp.meta('zqx-star-voyage') ->> 'cover', null, 'no cover while media aren''t cleared');
+select is(public.provider_image_allowed('igdb', 'co1zqx'), false, 'an image isn''t served while media aren''t cleared');
 select private.record_provider_media('igdb', true, 'M18a test: local display');
+-- 20261223100000: the image route asks, asset by asset.
+select is(public.provider_image_allowed('igdb', 'co1zqx') and public.provider_image_allowed('igdb', 'sc1zqx'), true, 'the attached record''s cover and screenshot may be served');
+select is(public.provider_image_allowed('igdb', 'co3zqx'), false, 'not the cover of a staged record never attached');
+select is(public.provider_image_allowed('igdb', 'co999zqx') or public.provider_image_allowed('igdb', '../etc/passwd') or public.provider_image_allowed('wikidata', 'co1zqx'), false,
+  'not an unknown image, a malformed id, or another provider');
 select is(pg_temp.meta('zqx-star-voyage') -> 'cover' ->> 'image_id', 'co1zqx', 'the cover once media are cleared');
 select is(jsonb_array_length(pg_temp.meta('zqx-star-voyage') -> 'screenshots'), 1, 'screenshots, an invalid image id dropped');
 select is((select count(*)::int from public.get_game_provider_metadata(array[pg_temp.g('zqx-moon-patrol'), pg_temp.g('zqx-hidden-game')])), 0,
   'nothing for a game with only a held record, or an unpublished game');
 select private.record_provider_media('igdb', false, 'M18a test: withdrawn');
 select is(pg_temp.meta('zqx-star-voyage') ->> 'cover', null, 'withdrawing media hides the images at once');
+select is(public.provider_image_allowed('igdb', 'co1zqx'), false, 'and the image route may serve them no more');
+select private.record_provider_media('igdb', true, 'M18a test: restored for the next check');
 select private.record_provider_clearance('igdb', false, 'https://api-docs.igdb.com/', repeat('2', 64), 'M18a test: withdrawn');
 select is((select count(*)::int from public.get_game_provider_metadata(array[pg_temp.g('zqx-star-voyage')])), 0, 'withdrawing the provider hides everything');
+select is(public.provider_image_allowed('igdb', 'co1zqx'), false, 'its images too, even with media still marked cleared');
 
 -- 8. Access.
 -- 20261222100000: IGDB's records as stored are the app server's only (no redistribution through our API).
 select is((select string_agg(r, ',' order by r) from unnest(array['anon', 'authenticated', 'service_role', 'catalog_importer']) r
   where has_function_privilege(r, 'public.get_game_provider_metadata(uuid[])', 'execute')), 'service_role',
   'only the app server (service_role) may read provider metadata: no public client, signed in or not');
+select is((select string_agg(r, ',' order by r) from unnest(array['anon', 'authenticated', 'service_role', 'catalog_importer']) r
+  where has_function_privilege(r, 'public.provider_image_allowed(text,text)', 'execute')), 'service_role', 'and only it may ask whether an image is authorized');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role', 'catalog_importer']) r
   where has_function_privilege(r, 'private.record_provider_media(text,boolean,text)', 'execute')), 0, 'no client role or the importer can clear media');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array[

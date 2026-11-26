@@ -21,10 +21,16 @@ const nextConfig: NextConfig = {
       bodySizeLimit: 2 * 1024 * 1024 + 64 * 1024,
     },
   },
-  // M18a: IGDB's images, by their id (igdbImageUrl), through the app's image optimizer only:
-  // the server fetches and caches them, so a browser never contacts IGDB. Nothing else remote.
+  // M18a security fix: the image optimizer may fetch nothing remote, and locally only the app's own
+  // static imports and the reviewed image registry (public/game-images). IGDB images never go
+  // through it (it would fetch any IGDB image and keep copies on disk for hours): the app serves
+  // them through /media/igdb/..., which checks each image's authorization on every request.
   images: {
-    remotePatterns: [{ protocol: "https", hostname: "images.igdb.com", port: "", pathname: "/igdb/image/upload/**", search: "" }],
+    remotePatterns: [],
+    localPatterns: [
+      { pathname: "/_next/static/media/**", search: "" },
+      { pathname: "/game-images/**", search: "" },
+    ],
   },
   partialPrefetching: true,
   // M8d (D10): the review pages moved under /admin/catalog. Permanent (308), applied
