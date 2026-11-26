@@ -3,6 +3,7 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 
 import { parsePlatforms, parseReleasePicker, parseSearchResponse } from "./parse";
+import { SUGGEST_LIMIT, type Suggestion, toSuggestions } from "./suggest";
 import type { CatalogPlatform, ReleasePicker, SearchResponse } from "./types";
 
 /**
@@ -65,6 +66,19 @@ export async function searchCatalog(query: string, platform: string | null, curs
     p_cursor: cursor,
   });
   return outcome.ok ? { ok: true, data: parseSearchResponse(outcome.data) } : outcome;
+}
+
+/**
+ * M17a: suggestions while typing. The same search as the results page, a short first
+ * page only, cached like it: the same query typed by anyone is read once a minute at
+ * most, so typing costs the database little.
+ */
+export async function suggestCatalog(query: string): Promise<CatalogOutcome<Suggestion[]>> {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
+  const outcome = await rpc("search_catalog", { p_query: query, p_platforms: null, p_limit: SUGGEST_LIMIT, p_cursor: null });
+  return outcome.ok ? { ok: true, data: toSuggestions(parseSearchResponse(outcome.data).items) } : outcome;
 }
 
 export async function listCatalogPlatforms(): Promise<CatalogOutcome<CatalogPlatform[]>> {

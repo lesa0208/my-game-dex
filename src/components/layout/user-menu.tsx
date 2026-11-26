@@ -33,14 +33,16 @@ export function UserMenu({ viewer, isStaff = false, canSignUp = false }: { viewe
   if (!viewer) {
     return (
       <div className="flex items-center gap-1">
-        <Button asChild variant="ghost" size="lg" className="h-10">
+        {/* On a phone, sign in is an icon (with its name for assistive technology), so
+            the header fits beside the logo. */}
+        <Button asChild variant="ghost" size="lg" className="h-10 shrink-0 max-sm:w-10 max-sm:px-0">
           <Link href="/sign-in">
             <LogIn aria-hidden="true" />
-            Sign in
+            <span className="max-sm:sr-only">Sign in</span>
           </Link>
         </Button>
         {canSignUp ? (
-          <Button asChild size="lg" className="h-10">
+          <Button asChild size="lg" className="h-10 shrink-0 max-sm:px-3">
             <Link href="/sign-up">
               <UserPlus aria-hidden="true" />
               Sign up

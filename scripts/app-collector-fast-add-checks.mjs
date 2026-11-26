@@ -124,7 +124,7 @@ async function waitForAdded(page, text = "Added") {
 }
 const yourCopies = async (page) => (await page.locator('aside[aria-label="Your collection"]:visible').innerText()).replace(/\s+/g, " ");
 const chip = (page, step, name) => page.getByRole("navigation", { name: step, exact: true }).getByRole("link", { name, exact: false }).first();
-const firstResult = (page, title) => page.locator("main ol a:visible").filter({ hasText: title }).first();
+const firstResult = (page, title) => page.locator("main [data-game-card] h3 a:visible").filter({ hasText: title }).first();
 const mainSearch = (page) => page.locator('main input[name="q"]:visible');
 const suggestions = (page) => page.locator("main p:visible:not(#add-release-suggested)").filter({ hasText: "Chosen for you" });
 const addRelease = (page) => page.locator("#add-release:visible");
@@ -244,9 +244,9 @@ try {
   section("Forgiving search");
   {
     await desk.goto(`${origin}/explore?q=${encodeURIComponent("aurora gp")}`, { waitUntil: "networkidle" });
-    check("another title finds the game, and says which title matched", (await desk.locator("main ol").innerText()).includes("Also known as Aurora GP"));
+    check("another title finds the game, and says which title matched", (await desk.locator("main [data-game-grid]").innerText()).includes("Also known as Aurora GP"));
     await desk.goto(`${origin}/explore?q=${encodeURIComponent("holow spire")}`, { waitUntil: "networkidle" });
-    check("a spelling mistake still finds it", (await desk.locator("main ol").innerText()).includes("Hollow Spire"));
+    check("a spelling mistake still finds it", (await desk.locator("main [data-game-grid]").innerText()).includes("Hollow Spire"));
     await desk.goto(`${origin}/explore?q=${encodeURIComponent("slus 01999")}`, { waitUntil: "networkidle" });
     const text = await desk.locator("main").innerText();
     check("a product code typed with a space finds its release, and the page says how it read it", text.includes("Nothing matches “slus 01999” as typed") && text.includes("SLUS-01999") && text.includes("Hollow Spire"));
@@ -322,7 +322,7 @@ try {
     await keys.waitForURL(/q=comet/);
     // A person sees the results before moving on; focus is still in the search box.
     await eventually(async () => (await firstResult(keys, "Comet Rally").count()) === 1);
-    const toResult = await tabTo("to the first result", () => document.activeElement?.matches("main ol a") ?? false);
+    const toResult = await tabTo("to the first result", () => document.activeElement?.matches("main [data-game-card] h3 a") ?? false);
     await press("Enter");
     await keys.waitForURL(/\/games\/comet-rally/);
     await eventually(async () => (await addButton(keys).count()) === 1);

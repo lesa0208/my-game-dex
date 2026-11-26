@@ -90,7 +90,7 @@ function actions(page, name) {
 
 const addButton = (page) => page.locator("main").getByRole("button", { name: /^(Add to collection|Add another copy)$/ }).first();
 const chip = (page, step, name) => page.getByRole("navigation", { name: step, exact: true }).getByRole("link", { name, exact: true }).first();
-const firstResult = (page, title) => page.locator("main ol a:visible").filter({ hasText: title }).first();
+const firstResult = (page, title) => page.locator("main [data-game-card] h3 a:visible").filter({ hasText: title }).first();
 const mainText = async (page) => (await page.locator("main").innerText().catch(() => "")).replace(/\s+/g, " ");
 const confirmation = (page) => page.locator('main [role="status"]:visible');
 async function waitForAdded(page, text = "Added") {
@@ -154,7 +154,7 @@ try {
   {
     const act = actions(desk, "N64, Mario Kart 64, PAL");
     await desk.goto(`${origin}/explore?platform=nintendo-64`, { waitUntil: "networkidle" });
-    check("the Nintendo 64 shelf of the catalog lists its games", (await desk.locator("main ol > li:visible").count()) >= 20);
+    check("the Nintendo 64 shelf of the catalog lists its games", (await desk.locator("main [data-game-card]:visible").count()) >= 20);
     await audit(desk, "platform browse");
     await act.type(desk.locator('main input[name="q"]:visible'), "mario kart 64");
     await act.press("Enter");
@@ -202,7 +202,7 @@ try {
     await desk.goto(`${origin}/home`, { waitUntil: "networkidle" });
     await act.type(desk.locator('header input[type="search"]'), "sonic the hedgehog");
     await act.press("Enter");
-    await act.click(desk.locator("main ol a:visible").filter({ hasText: /^Sonic the Hedgehog\s*\d{4}/ }).first());
+    await act.click(desk.locator("main [data-game-card] h3 a:visible").filter({ hasText: /^Sonic the Hedgehog$/ }).first());
     const platformChip = (name) => desk.getByRole("navigation", { name: "Platform", exact: true }).getByRole("link", { name: new RegExp(`^${name}\\b`) }).first();
     check(
       "its three platforms are offered, and none is chosen for the collector",
