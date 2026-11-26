@@ -161,8 +161,9 @@ async function explore() {
   const visitor = new Browser();
   const found = plain((await visitor.get(`/explore?q=${encodeURIComponent("Zqx Verified")}`)).html);
   check("the confirmed game is found", found.includes(CONFIRMED));
-  check(`its result says "${MESSAGE}"`, found.includes(`${MESSAGE}.`));
-  check("and its SNES chip says no verified release yet, not \"0 releases\"", found.includes("SNES · no verified release yet") && !found.includes("0 releases"));
+  // M17a: a result no longer repeats the notice on every card and chip; the game page says it.
+  check(`its result doesn't repeat "${MESSAGE}"`, !found.includes(MESSAGE) && !found.includes("no verified release yet"));
+  check("and its SNES chip never says \"0 releases\"", found.includes("SNES") && !found.includes("0 releases"));
   const hidden = plain((await visitor.get(`/explore?q=${encodeURIComponent("Zqx Awaiting")}`)).html);
   check("the game without physical evidence isn't found", !hidden.includes(AWAITING));
   const fixture = plain((await visitor.get(`/explore?q=${encodeURIComponent("Starfall Odyssey")}`)).html);

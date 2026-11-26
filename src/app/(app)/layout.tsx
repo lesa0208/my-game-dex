@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { AppHeader } from "@/components/layout/app-header";
+import { AccountHeaderLinks, AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { UserMenu, UserMenuPlaceholder } from "@/components/layout/user-menu";
@@ -13,7 +13,12 @@ async function AccountMenu() {
   // If the account can't be read, offering sign-in is safe: it shows nothing private.
   const viewer = await getCurrentViewer().catch(() => null);
   const access = viewer?.isActive ? await getAdminAccess().catch(() => null) : null;
-  return <UserMenu viewer={viewer} isStaff={(access?.roles.length ?? 0) > 0} canSignUp={!viewer && selfRegistrationOpen()} />;
+  return (
+    <>
+      {viewer ? <AccountHeaderLinks /> : null}
+      <UserMenu viewer={viewer} isStaff={(access?.roles.length ?? 0) > 0} canSignUp={!viewer && selfRegistrationOpen()} />
+    </>
+  );
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

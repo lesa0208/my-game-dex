@@ -116,7 +116,7 @@ async function addGame(page, { query, title, platform, region }) {
   await page.locator('header input[type="search"]').fill(query);
   await page.keyboard.press("Enter");
   await page.waitForURL(/\/explore\?/);
-  const result = page.locator("main ol a:visible").filter({ hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\d{4}`) }).first();
+  const result = page.locator("main [data-game-card] h3 a:visible").filter({ hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }).first();
   await result.waitFor({ timeout: 15000 });
   await result.click();
   await page.waitForURL(/\/games\//);

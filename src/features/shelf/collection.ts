@@ -34,6 +34,11 @@ const ACCENTS: Record<string, [string, string]> = {
 };
 const DEFAULT_ACCENT: [string, string] = ["#8b5cf6", "#c4b5fd"];
 
+/** A system's tile accent, as on the Systems page (M17a: Explore's browse by system). */
+export function systemAccent(slug: string): [string, string] {
+  return ACCENTS[slug] ?? DEFAULT_ACCENT;
+}
+
 export type MySystem = {
   slug: string;
   name: string;

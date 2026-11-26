@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 import { cn } from "@/lib/utils";
 
-function HeaderIconLink({
+export function HeaderIconLink({
   href,
   label,
   icon: Icon,
@@ -24,7 +24,7 @@ function HeaderIconLink({
       asChild
       variant="ghost"
       size="icon"
-      className={cn("size-10 text-muted-foreground", className)}
+      className={cn("size-10 shrink-0 text-muted-foreground", className)}
     >
       <Link href={href} aria-label={label}>
         <Icon aria-hidden="true" className="size-5" />
@@ -33,35 +33,40 @@ function HeaderIconLink({
   );
 }
 
-/** `account` is the account menu, rendered separately because it reads the session. */
+/**
+ * Messages and notifications, for a signed-in account only: a visitor has neither, and
+ * on a phone they crowded the header until it overlapped the logo (M17a).
+ */
+export function AccountHeaderLinks() {
+  return (
+    <>
+      <HeaderIconLink href="/messages" label="Messages" icon={Mail} className="md:hidden" />
+      <HeaderIconLink href="/notifications" label="Notifications" icon={Bell} />
+    </>
+  );
+}
+
+/**
+ * `account` is the account area (messages, notifications and the account menu, or sign
+ * in), rendered separately because it reads the session. The logo never shrinks; the
+ * account area fits beside it from 320px up.
+ */
 export function AppHeader({ account }: { account: ReactNode }) {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/90 px-4 backdrop-blur md:h-16 md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/90 px-3 backdrop-blur sm:gap-3 sm:px-4 md:h-16 md:px-6">
       <Link
         href="/home"
         aria-label={`${siteConfig.name} home`}
-        className="flex h-10 min-w-0 items-center gap-2 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring md:hidden"
+        className="flex h-10 shrink-0 items-center gap-2 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring md:hidden"
       >
         <LogoMark className="size-6" />
-        <LogoWordmark className="text-xs max-[359px]:hidden" />
+        <LogoWordmark className="text-xs max-[379px]:hidden" />
       </Link>
 
       <SearchForm className="hidden max-w-xl flex-1 md:block" />
 
-      <div className="ml-auto flex items-center gap-0.5">
-        <HeaderIconLink
-          href="/explore"
-          label="Search"
-          icon={Search}
-          className="md:hidden"
-        />
-        <HeaderIconLink
-          href="/messages"
-          label="Messages"
-          icon={Mail}
-          className="md:hidden"
-        />
-        <HeaderIconLink href="/notifications" label="Notifications" icon={Bell} />
+      <div className="ml-auto flex min-w-0 items-center gap-0.5">
+        <HeaderIconLink href="/explore" label="Search" icon={Search} className="md:hidden" />
         {account}
       </div>
     </header>
