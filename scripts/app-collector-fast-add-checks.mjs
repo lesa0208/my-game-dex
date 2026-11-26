@@ -129,6 +129,16 @@ const mainSearch = (page) => page.locator('main input[name="q"]:visible');
 const suggestions = (page) => page.locator("main p:visible:not(#add-release-suggested)").filter({ hasText: "Chosen for you" });
 const addRelease = (page) => page.locator("#add-release:visible");
 const confirmation = (page) => page.locator('main [role="status"]:visible');
+/**
+ * M17b: a result opens the game's page, which adds through its quick add; the M15 step-by-
+ * step add these sections check is on /games/<slug>/add, with the same choices. Moving
+ * there isn't counted as one of the collector's actions.
+ */
+async function toSteps(page) {
+  await page.waitForURL(/\/games\/[a-z0-9-]+(\?|$)/);
+  const url = new URL(page.url());
+  await page.goto(`${url.origin}${url.pathname}/add${url.search}`, { waitUntil: "networkidle" });
+}
 
 async function audit(page, name) {
   if (!(await page.evaluate(() => Boolean(window.axe)))) await page.addScriptTag({ content: axeSource });
@@ -170,6 +180,7 @@ try {
     const result = firstResult(desk, "Pixel Knight Saga");
     check("the result keeps the platform the search was filtered by", (await result.getAttribute("href")) === "/games/pixel-knight-saga?platform=nes");
     await act.click(result);
+    await toSteps(desk);
     check(
       "the game opens with its only release ready to add: nothing to choose",
       await eventually(async () => (await addButton(desk).count()) === 1 && (await addRelease(desk).innerText()).includes("NES · NTSC-U/C")),
@@ -198,6 +209,7 @@ try {
     await act.press("Enter");
     check("the next game's search stays on NES", new URL(desk.url()).searchParams.get("platform") === "nes" && new URL(desk.url()).searchParams.get("q") === "turbo bandit");
     await act.click(firstResult(desk, "Turbo Bandit"));
+    await toSteps(desk);
     const regions = await eventually(async () => (await chip(desk, "Region", "PAL").count()) === 1);
     check("two regions: nothing is chosen for the collector", regions && (await addButton(desk).count()) === 0 && (await suggestions(desk).count()) === 0, (await mainText(desk)).slice(0, 300));
     await act.click(chip(desk, "Region", "PAL"));
@@ -220,6 +232,7 @@ try {
     await act.type(desk.locator('header input[type="search"]'), "aurora circuit");
     await act.press("Enter");
     await act.click(firstResult(desk, "Aurora Circuit"));
+    await toSteps(desk);
     check(
       "a game on one platform has it chosen; three regions are the collector's to pick",
       (await eventually(async () => (await chip(desk, "Region", "NTSC-U/C").count()) === 1)) && (await suggestions(desk).count()) === 0,
@@ -266,6 +279,7 @@ try {
     await act.type(mainSearch(desk), "comet rally");
     await act.press("Enter");
     await act.click(firstResult(desk, "Comet Rally"));
+    await toSteps(desk);
     check("the filtered platform is chosen, and its only release is ready", await eventually(async () => (await addButton(desk).count()) === 1 && (await addRelease(desk).innerText()).includes("PS1")));
     await act.click(addButton(desk), false);
     await waitForAdded(desk);
@@ -276,9 +290,9 @@ try {
 
   section("'Not sure' stays not sure");
   {
-    await desk.goto(`${origin}/games/pixel-knight-saga?platform=nes&region=unsure`, { waitUntil: "networkidle" });
+    await desk.goto(`${origin}/games/pixel-knight-saga/add?platform=nes&region=unsure`, { waitUntil: "networkidle" });
     check("with the region not sure, no release is offered and nothing is chosen for them", (await addRelease(desk).count()) === 0 && (await suggestions(desk).count()) === 0);
-    await desk.goto(`${origin}/games/pixel-knight-saga?platform=nes`, { waitUntil: "networkidle" });
+    await desk.goto(`${origin}/games/pixel-knight-saga/add?platform=nes`, { waitUntil: "networkidle" });
     const box = await addRelease(desk).locator("..").innerText();
     check("a release chosen for the collector says so above its Add button", box.indexOf("Chosen for you, because it's the catalog's only matching release") >= 0 && box.indexOf("Chosen for you") < box.indexOf("Add to collection"));
     await desk.getByRole("link", { name: "Add it without choosing a release" }).click();
@@ -325,18 +339,29 @@ try {
     const toResult = await tabTo("to the first result", () => document.activeElement?.matches("main [data-game-card] h3 a") ?? false);
     await press("Enter");
     await keys.waitForURL(/\/games\/comet-rally/);
-    await eventually(async () => (await addButton(keys).count()) === 1);
-    const toAdd = await tabTo("to Add", () => document.activeElement?.textContent?.trim() === "Add to collection", 20);
+    // M17b: on the game's page, the hero's Add to Collection opens the quick add, with the
+    // search's platform chosen; the arrow keys pick the verified release, and Add adds it.
+    // A person sees the page before moving on (a freshly started server renders its first game page slowly).
+    await keys.locator("#game-title:visible").waitFor({ timeout: 30000 });
+    const toQuick = await tabTo("to the hero's Add", () => document.activeElement?.matches("[data-action=add]") ?? false, 8);
     await press("Enter");
-    await waitForAdded(keys);
-    check("the skip link, the search, the result and Add are each reached and used from the keyboard", skipped.every(Boolean) && toSearch && toResult && toAdd, presses.join(", "));
+    const dialog = keys.getByRole("dialog");
+    await eventually(async () => (await dialog.getByRole("radio").count()) > 0);
+    const toRelease = await tabTo("into the release choice", () => document.activeElement?.matches('input[type="radio"][name$="-release"]') ?? false, 20);
+    await press("ArrowDown");
+    const toAdd = await tabTo("then to Add", () => document.activeElement?.textContent?.trim() === "Add to collection", 25);
+    const focusVisible = await keys.evaluate(() => getComputedStyle(document.activeElement).outlineStyle !== "none" || getComputedStyle(document.activeElement).boxShadow !== "none");
+    await press("Enter");
+    const doneByKeys = await eventually(async () => (await dialog.locator("[data-quick-add-done]").count()) === 1, 15000);
+    check("the quick add, used from the keyboard, adds the copy", doneByKeys, `${presses.join(", ")} | ${(await dialog.innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 300)}`);
+    check("the skip link, the search, the result and Add are each reached and used from the keyboard", skipped.every(Boolean) && toSearch && toResult && toQuick && toRelease && toAdd, presses.join(", "));
+    const count = (label) => Number(new RegExp(`${label} (\\d+)`).exec(presses.join(","))?.[1] ?? 99);
     check(
-      "focus stays in the search box after searching, a few Tabs from the first result, and Add is a few Tabs into the game's page",
-      (Number(/to the first result (\d+)/.exec(presses.join(","))?.[1]) ?? 99) <= 4 && (Number(/to Add (\d+)/.exec(presses.join(","))?.[1]) ?? 99) <= 15,
+      "focus stays in the search box after searching, a few Tabs from the first result; the hero's Add a few Tabs into the game's page, and Add a few more in the quick add",
+      count("to the first result") <= 4 && count("to the hero's Add") <= 4 && count("into the release choice") + count("then to Add") <= 12,
       presses.join(", "),
     );
     check("added from the keyboard: the SNES copy", copiesOf(alex.id).at(-1) === "SNS-CR-USA");
-    const focusVisible = await keys.evaluate(() => getComputedStyle(document.activeElement).outlineStyle !== "none" || getComputedStyle(document.activeElement).boxShadow !== "none");
     check("focus stays visible on the control that was used", focusVisible);
     timings.push({ name: `keyboard only, SNES: ${keysPressed} key presses and the title typed (${presses.join(", ")})`, actions: keysPressed + 1, seconds: NaN });
     await keys.context().close();
@@ -351,6 +376,7 @@ try {
     await act.press("Enter");
     await audit(phone, "search results");
     await act.click(firstResult(phone, "Hollow Spire"));
+    await toSteps(phone);
     await eventually(async () => (await addButton(phone).count()) === 1);
     const button = await addButton(phone).boundingBox();
     check("the barcode's release is ready to add on the phone's first two screens", (button?.y ?? Infinity) < PHONE.height * 2, `Add at ${Math.round(button?.y ?? -1)} px`);

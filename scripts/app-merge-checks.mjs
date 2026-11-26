@@ -123,9 +123,9 @@ try {
   const before = keep();
 
   section("Who can reach it");
-  const gamePage = await editor.browser.get(`/games/starfall-odyssey?release=${dup}`);
+  const gamePage = await editor.browser.get(`/games/starfall-odyssey/add?release=${dup}`);
   check("an editor sees “Merge into another release” on a release", hrefs(gamePage.html).includes(`/admin/catalog/merge/${dup}`));
-  const asCollector = await owner.browser.get(`/games/starfall-odyssey?release=${dup}`);
+  const asCollector = await owner.browser.get(`/games/starfall-odyssey/add?release=${dup}`);
   check("a collector doesn't", !hrefs(asCollector.html).some((h) => h.startsWith("/admin/catalog/merge/")));
   const refused = await owner.browser.get(`/admin/catalog/merge/${dup}`);
   check("and gets the page for an address that doesn't exist", plain(refused.html).includes(NOT_AVAILABLE) && !plain(refused.html).includes("MGA-DUP"));

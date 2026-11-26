@@ -102,9 +102,9 @@ try {
   const before = keep();
 
   section("Who can reach it");
-  const game = await editor.browser.get(`/games/starfall-odyssey?release=${eu}`);
+  const game = await editor.browser.get(`/games/starfall-odyssey/add?release=${eu}`);
   check("an editor sees “Exclude from the catalog” on a release", hrefs(game.html).includes(`/admin/catalog/exclude/${eu}`));
-  const gameAsCollector = await owner.browser.get(`/games/starfall-odyssey?release=${eu}`);
+  const gameAsCollector = await owner.browser.get(`/games/starfall-odyssey/add?release=${eu}`);
   check("a collector doesn't", !hrefs(gameAsCollector.html).some((h) => h.startsWith("/admin/catalog/exclude/")));
   const refused = await owner.browser.get(`/admin/catalog/exclude/${eu}`);
   check("and gets the page for an address that doesn't exist", plain(refused.html).includes(NOT_AVAILABLE) && !plain(refused.html).includes("Starfall"));

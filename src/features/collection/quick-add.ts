@@ -24,6 +24,8 @@ export type QuickAddRelease = {
   /** "Platinum · SLUS-00594 · Sony Computer Entertainment": what tells releases apart. */
   label: string;
   mediumLabel: string;
+  /** The edition as the catalog names it, or null for a standard release. */
+  edition: { kind: string | null; name: string | null } | null;
   components: { kind: string; label: string; quantity: number }[];
 };
 
@@ -33,6 +35,8 @@ export type QuickAddOptions =
       status: "ready";
       game: { id: string; slug: string; title: string };
       platforms: { id: string; slug: string; name: string; shortName: string }[];
+      /** M17b: every other platform, for a copy on one the catalog doesn't list for this game (M12a). */
+      otherPlatforms: { id: string; slug: string; name: string; shortName: string }[];
       regions: { code: string; label: string }[];
       releases: QuickAddRelease[];
       /** The collector's counted copies of the game, when known. */
@@ -60,6 +64,7 @@ export async function loadQuickAdd(gameSlug: string): Promise<QuickAddOptions> {
     game: { id: game.id, slug: game.slug, title: game.title },
     // The game's published platforms: the ones an unidentified copy may name (M12a).
     platforms: pairings,
+    otherPlatforms: options.platforms.filter((p) => !pairings.some((q) => q.slug === p.slug)).map((p) => ({ id: p.id, slug: p.slug, name: p.name, shortName: p.shortName })),
     regions: options.regions.filter((r) => r.code !== "unknown"),
     releases: picker.data.releases.map((r) => ({
       id: r.id,
@@ -69,6 +74,7 @@ export async function loadQuickAdd(gameSlug: string): Promise<QuickAddOptions> {
         [r.edition?.name, r.variantName, r.localTitle, r.identifiers.productCode, r.publisherName, r.format?.name].filter((v): v is string => Boolean(v)).join(" · ") ||
         `${r.platform.shortName} · ${r.region.label}`,
       mediumLabel: mediumLabel(r.format?.category),
+      edition: r.edition && (r.edition.name || r.edition.kind) ? { kind: r.edition.kind, name: r.edition.name } : null,
       components: r.components.filter((c): c is typeof c & { label: string } => c.label !== null).map((c) => ({ kind: c.kind, label: c.label, quantity: c.quantity })),
     })),
     copies: ownership ? ownership.copies : null,

@@ -40,7 +40,8 @@ import { footprint } from "./lib/footprint.mjs";
 const SLUG = "starfall-odyssey";
 const release = (code) => psql(`select id from public.releases where product_code = '${code}';`);
 const copies = (userId, releaseId) => Number(psql(`select count(*) from public.collection_items where owner_id = '${userId}' and release_id = '${releaseId}';`));
-const page = (releaseId) => `/games/${SLUG}?release=${releaseId}`;
+// M17b: adding a release is on the step-by-step add page; the game page adds through its quick add.
+const page = (releaseId) => `/games/${SLUG}/add?release=${releaseId}`;
 // The add-copy form (it carries the release's pieces), not M12 W2's "Want this release".
 const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "components" in f.hidden);
 const text = (html) => html.replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&");
@@ -218,7 +219,7 @@ async function catalog() {
   const visitor = new Browser();
   const search = await visitor.get("/explore?q=starfall");
   check("search still works signed out", search.response.status === 200 && search.html.includes("Starfall Odyssey"));
-  const game = await visitor.get(`/games/${SLUG}`);
+  const game = await visitor.get(`/games/${SLUG}/add`);
   check("the release picker still lists the releases", game.response.status === 200 && (game.html.match(/aria-current="true"/g) ?? []).length === 0 && game.html.includes("SNS-ZSFE-USA"));
   check("and asks for the platform, region and edition, or a release, before adding", game.html.includes("Choose the platform, region and edition you have, or pick your release below."));
 }

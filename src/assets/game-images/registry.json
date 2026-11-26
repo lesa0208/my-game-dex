@@ -1,0 +1,4 @@
+{
+  "$comment": "Approved images of physical game items, with source and licence (M17b, ADR-017). Add only with scripts/game-image-add.mjs. Empty until images with permission exist.",
+  "images": []
+}

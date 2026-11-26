@@ -177,9 +177,9 @@ async function gameDetails() {
   const text = plain(page.html);
   people.gameText = text;
   check("the page loads for a visitor", page.response.status === 200, `${page.response.status}`);
-  check("its facts give the platform and the message", text.includes("Platform Super Nintendo Entertainment System") && text.includes(`Physical releases ${MESSAGE}`));
-  check("the releases section says none is recorded, and invents no edition, region, publisher, format or packaging",
-    text.includes(`${MESSAGE}. The catalog records ${CONFIRMED} on Super Nintendo Entertainment System, but none of its editions, regions, publishers, formats or packaging yet.`));
+  check("its facts give the platform and the message", text.includes("System Super Nintendo Entertainment System") && text.includes(`Physical releases ${MESSAGE}`));
+  check("the releases section says briefly that none is recorded, and that a copy can still be added",
+    text.includes(`${MESSAGE} You can still add your copy. It's kept without a specific release.`));
   check("no release row, product code or shell is shown", !/Want this release|SNS-|NTSC-U\/C release|PAL release/.test(text) && !resolveSegments(page.html).includes('data-media="snes-cart"'));
   check("its first release date is the catalog's", text.includes("First released") && text.includes("1994"));
   const awaiting = await visitor.get(`/games/${encodeURIComponent(psql(`select coalesce(slug, 'zqx-awaiting-evidence') from public.games where id = ${sql(G.awaiting.id)};`))}`);
@@ -191,9 +191,9 @@ async function gameDetails() {
 async function collecting() {
   section("Collecting it");
   const c = (people.collector = await collector("cic"));
-  const page = await c.browser.get(`/games/${G.confirmed.slug}`);
+  const page = await c.browser.get(`/games/${G.confirmed.slug}/add`);
   const html = resolveSegments(page.html);
-  check("signed in, the add steps offer the SNES (the existing picker)", html.includes(`href="/games/${G.confirmed.slug}?platform=snes"`));
+  check("signed in, the add steps offer the SNES (the existing picker)", html.includes(`href="/games/${G.confirmed.slug}/add?platform=snes"`));
   const claim = await rpc(c, "add_unidentified_copy", { p_item_id: uuidv7(), p_game: G.confirmed.id, p_platform: G.snes, p_region: "pal", p_edition_kind: null, p_edition_name: null, p_details: { completeness: "complete" } });
   check("a copy of it is added as the collector's own record (an unidentified copy)", Boolean(claim.json?.item_id), `${claim.status}`);
   const refused = await rpc(c, "add_unidentified_copy", { p_item_id: uuidv7(), p_game: G.awaiting.id, p_platform: G.snes, p_region: null, p_edition_kind: null, p_edition_name: null, p_details: {} });
@@ -207,7 +207,7 @@ async function collecting() {
 async function wishing() {
   section("The wishlist");
   const c = people.collector;
-  const page = await c.browser.get(`/games/${G.confirmed.slug}`);
+  const page = await c.browser.get(`/games/${G.confirmed.slug}/add`);
   const add = formById(page.html, "add-wish");
   check("the game page has the wishlist form", Boolean(add));
   const raw = resolveSegments(page.html);

@@ -114,7 +114,7 @@ export function ResultActions({
 
         {wish.status === "saved" && wish.id ? (
           <Button asChild variant="secondary" size="lg" className="h-10 text-primary-text" data-action="wish" data-wished="">
-            <Link href={`/collection/wishlist/${wish.id}`} aria-label={`On your wishlist: ${game.title}. Open the entry to refine it`}>
+            <Link href={`/collection/wishlist/${wish.id}`} aria-label={`Wishlisted: ${game.title}. Open the entry to refine it`}>
               <Heart aria-hidden="true" className="fill-current" />
               <span className="max-[359px]:sr-only">Wishlisted</span>
             </Link>
@@ -127,7 +127,7 @@ export function ResultActions({
             className="h-10"
             onClick={saveWish}
             aria-disabled={wish.status === "saving" || undefined}
-            aria-label={`Add ${game.title} to your wishlist`}
+            aria-label={`Wishlist: add ${game.title}`}
             data-action="wish"
           >
             {wish.status === "saving" ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Heart aria-hidden="true" />}
@@ -135,7 +135,7 @@ export function ResultActions({
           </Button>
         ) : viewer === "inactive" ? null : (
           <Button asChild variant="secondary" size="lg" className="h-10" data-action="wish">
-            <Link href={viewer === "signed_out" ? back("wish") : welcome} aria-label={`Sign in to add ${game.title} to your wishlist`}>
+            <Link href={viewer === "signed_out" ? back("wish") : welcome} aria-label={`Wishlist: sign in to add ${game.title}`}>
               <Heart aria-hidden="true" />
               <span className="max-[359px]:sr-only">Wishlist</span>
             </Link>

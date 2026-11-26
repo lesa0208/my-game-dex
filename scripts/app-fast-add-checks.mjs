@@ -39,7 +39,9 @@ const plain = (html) => decode(html.replace(/<script\b[\s\S]*?<\/script>/g, " ")
 const count = (sql) => Number(psql(sql));
 const release = (code) => psql(`select id from public.releases where product_code = '${code}';`);
 const GAME = "/games/starfall-odyssey";
-const q = (params) => `${GAME}?${new URLSearchParams(params)}`;
+// M17b: the step-by-step add has its own page; the game page adds through its quick add.
+const STEPS = `${GAME}/add`;
+const q = (params) => `${STEPS}?${new URLSearchParams(params)}`;
 const users = [];
 
 async function collector(prefix = "fa") {
@@ -72,8 +74,8 @@ let starfallId;
 async function steps() {
   section("The steps offer the catalog's choices first, then another or not sure");
   const visitor = new Browser();
-  const first = plain((await visitor.get(GAME)).html);
-  check("the game page asks for the platform first, and offers another", first.includes("Add to your collection") && first.includes("1. Platform") && first.includes("Another platform"));
+  const first = plain((await visitor.get(STEPS)).html);
+  check("the step-by-step add asks for the platform first, and offers another", first.includes("Add to your collection") && first.includes("1. Platform") && first.includes("Another platform"));
   check("a game on one platform has it chosen, so the region comes next", first.includes("2. Region") && first.includes("NTSC-U/C") && first.includes("PAL") && first.includes("NTSC-J"));
   check("with another region and Not sure", first.includes("Another region") && first.includes("Not sure"));
   check("the edition waits for the region", !first.includes("3. Edition"));

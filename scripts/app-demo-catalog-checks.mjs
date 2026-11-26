@@ -88,14 +88,7 @@ function actions(page, name) {
   };
 }
 
-const addButton = (page) => page.locator("main").getByRole("button", { name: /^(Add to collection|Add another copy)$/ }).first();
-const chip = (page, step, name) => page.getByRole("navigation", { name: step, exact: true }).getByRole("link", { name, exact: true }).first();
-const firstResult = (page, title) => page.locator("main [data-game-card] h3 a:visible").filter({ hasText: title }).first();
 const mainText = async (page) => (await page.locator("main").innerText().catch(() => "")).replace(/\s+/g, " ");
-const confirmation = (page) => page.locator('main [role="status"]:visible');
-async function waitForAdded(page, text = "Added") {
-  await confirmation(page).filter({ hasText: text }).first().waitFor({ timeout: 15000 });
-}
 /** The collector's copies, as stored: the claimed platform, region and game title. */
 const copiesOf = (userId) =>
   psql(`select p.slug || ':' || coalesce(c.claimed_region_code, 'not sure') || ':' || g.title from public.collection_items c
@@ -150,6 +143,12 @@ try {
   const alex = await collector("dma");
   const desk = await signedInPage(origin, alex, DESKTOP);
 
+  // M17b: adding is the quick add (from a result or the game's page), not steps on the page.
+  const dialogOf = (page) => page.getByRole("dialog");
+  const choice = (page, text) => dialogOf(page).locator("label").filter({ hasText: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }).first();
+  const addInDialog = (page) => dialogOf(page).getByRole("button", { name: "Add to collection" });
+  const added = (page) => dialogOf(page).locator("[data-quick-add-done]").waitFor({ timeout: 15000 });
+
   section("Nintendo 64: a real game with no release recorded, added as the collector's own copy");
   {
     const act = actions(desk, "N64, Mario Kart 64, PAL");
@@ -158,39 +157,49 @@ try {
     await audit(desk, "platform browse");
     await act.type(desk.locator('main input[name="q"]:visible'), "mario kart 64");
     await act.press("Enter");
-    await act.click(firstResult(desk, "Mario Kart 64"));
-    check("its platform is chosen, and every region is one click away", await eventually(async () => (await chip(desk, "Region", "PAL").count()) === 1 && (await chip(desk, "Region", "Not sure").count()) === 1));
-    check("nothing is offered as a release: the catalog has none", (await desk.locator("#add-release:visible").count()) === 0);
-    await act.click(chip(desk, "Region", "PAL"));
-    check("the edition starts as not sure, and says so", await eventually(async () => (await addButton(desk).count()) === 1 && (await mainText(desk)).includes("the catalog lists no edition here yet")));
-    await audit(desk, "game page, ready to add");
-    await act.click(addButton(desk), false);
-    await waitForAdded(desk);
+    const card = desk.locator('[data-game-card="Mario Kart 64"]').first();
+    await act.click(card.locator("[data-action=add]"), false);
+    check(
+      "its platform is chosen, and every region is one click away",
+      await eventually(async () => (await dialogOf(desk).locator("label:has(input:checked)", { hasText: "Nintendo 64" }).count()) === 1 && (await choice(desk, "PAL").count()) === 1 && (await choice(desk, "Not sure").count()) === 1),
+    );
+    check("nothing is offered as a release: the catalog has none", (await dialogOf(desk).getByText("Is your copy one of these verified releases?").count()) === 0);
+    await act.click(choice(desk, "PAL"), false);
+    check("the edition starts as not sure", (await dialogOf(desk).locator("fieldset").nth(2).locator("label:has(input:checked)").innerText()).includes("Not sure"));
+    await audit(desk, "quick add, ready to add");
+    await act.click(addInDialog(desk), false);
+    await added(desk);
     const { count, seconds } = act.done();
-    check("added: five actions from the search box (type, Enter, the result, PAL, Add)", count === 5, `${count} actions, ${seconds.toFixed(1)} s`);
+    check("added: five actions from the search box (type, Enter, Add, PAL, Add), without opening the game", count === 5, `${count} actions, ${seconds.toFixed(1)} s`);
     check("stored as the collector's own copy: Nintendo 64, PAL, no release, no edition", JSON.stringify(copiesOf(alex.id)) === JSON.stringify(["nintendo-64:pal:Mario Kart 64"]) &&
       psql(`select count(*) from public.collection_items where owner_id = '${alex.id}' and release_id is null and claimed_edition_kind is null and claimed_edition_name is null;`) === "1");
-    check("the game's own copies show it at once", await eventually(async () => !(await desk.locator('aside[aria-label="Your collection"]:visible').innerText()).includes("Not in your collection yet")));
+    await desk.keyboard.press("Escape");
+    check("the result shows it owned at once", await eventually(async () => (await card.innerText()).includes("In your collection")));
     const second = actions(desk, "a second copy");
-    await second.click(addButton(desk), false);
-    await waitForAdded(desk, "You now have 2 copies of this game");
-    check("a second copy is one more click", second.done().count === 1);
+    await second.click(card.locator("[data-action=add]"), false);
+    await eventually(async () => (await dialogOf(desk).getByRole("radio").count()) > 0);
+    await second.click(addInDialog(desk), false);
+    await added(desk);
+    check("a second copy is two more clicks (Add another, Add)", second.done().count === 2 && copiesOf(alex.id).length === 2);
   }
 
   section("The next Nintendo 64 game, from the confirmation");
   {
     const act = actions(desk, "N64, the next game, NTSC-U/C");
-    await act.type(desk.getByRole("search", { name: "Next game" }).getByRole("searchbox"), "ocarina of time");
+    await act.click(dialogOf(desk).getByRole("button", { name: "Add another game" }), false);
+    check("Add another game goes back to the search, still on the Nintendo 64", await eventually(async () => (await desk.evaluate(() => document.activeElement?.matches('main input[name="q"]') ?? false))) && (await desk.locator("#catalog-platform").inputValue()) === "nintendo-64");
+    await act.type(desk.locator('main input[name="q"]:visible'), "ocarina of time");
     await act.press("Enter");
-    const result = firstResult(desk, "The Legend of Zelda: Ocarina of Time");
-    check("the next game's search stays on the Nintendo 64", (await result.getAttribute("href"))?.endsWith("?platform=nintendo-64") === true);
-    await act.click(result);
-    await act.click(chip(desk, "Region", "NTSC-U/C"));
-    await act.click(addButton(desk), false);
-    await waitForAdded(desk);
+    const card = desk.locator('[data-game-card="The Legend of Zelda: Ocarina of Time"]').first();
+    const shown = await eventually(async () => (await card.count()) === 1);
+    check("the next game's result stays on the Nintendo 64", shown && (await card.locator("h3 a").getAttribute("href"))?.endsWith("?platform=nintendo-64") === true, `${desk.url()} | ${(await mainText(desk)).slice(0, 240)}`);
+    await act.click(card.locator("[data-action=add]"), false);
+    await act.click(choice(desk, "NTSC-U/C"), false);
+    await act.click(addInDialog(desk), false);
+    await added(desk);
     const { count } = act.done();
-    check("added: five actions from the confirmation", count === 5, `${count} actions`);
-    await confirmation(desk).getByRole("link", { name: "Your N64 shelf" }).click();
+    check("added: six actions from the confirmation (Add another game, type, Enter, Add, region, Add)", count === 6, `${count} actions`);
+    await dialogOf(desk).getByRole("link", { name: "See it on your N64 shelf" }).click();
     await desk.waitForURL(/\/collection\/systems\/nintendo-64/);
     check("the Nintendo 64 shelf shows both games", await eventually(async () => (await mainText(desk)).includes("Mario Kart 64") && (await mainText(desk)).includes("Ocarina of Time")));
     await audit(desk, "Nintendo 64 shelf");
@@ -202,22 +211,24 @@ try {
     await desk.goto(`${origin}/home`, { waitUntil: "networkidle" });
     await act.type(desk.locator('header input[type="search"]'), "sonic the hedgehog");
     await act.press("Enter");
-    await act.click(desk.locator("main [data-game-card] h3 a:visible").filter({ hasText: /^Sonic the Hedgehog$/ }).first());
-    const platformChip = (name) => desk.getByRole("navigation", { name: "Platform", exact: true }).getByRole("link", { name: new RegExp(`^${name}\\b`) }).first();
+    const card = desk.locator('[data-game-card="Sonic the Hedgehog"]').first();
+    await act.click(card.locator("[data-action=add]"), false);
+    const platforms = dialogOf(desk).locator("fieldset").first();
     check(
       "its three platforms are offered, and none is chosen for the collector",
-      (await eventually(async () => (await platformChip("Mega Drive").count()) === 1)) &&
-        (await platformChip("PlayStation 2").count()) === 1 &&
-        (await platformChip("Game Boy Advance").count()) === 1 &&
-        (await desk.getByRole("navigation", { name: "Region", exact: true }).count()) === 0,
+      (await eventually(async () => (await platforms.locator("label", { hasText: "Mega Drive" }).count()) === 1)) &&
+        (await platforms.locator("label", { hasText: "PlayStation 2" }).count()) === 1 &&
+        (await platforms.locator("label", { hasText: "Game Boy Advance" }).count()) === 1 &&
+        (await platforms.locator("input:checked").count()) === 0,
     );
-    await act.click(platformChip("Mega Drive"));
-    await act.click(chip(desk, "Region", "PAL"));
-    await act.click(addButton(desk), false);
-    await waitForAdded(desk);
+    await act.click(platforms.locator("label", { hasText: "Mega Drive" }), false);
+    await act.click(choice(desk, "PAL"), false);
+    await act.click(addInDialog(desk), false);
+    await added(desk);
     const { count } = act.done();
-    check("added: six actions (type, Enter, the result, platform, region, Add)", count === 6, `${count} actions`);
+    check("added: six actions (type, Enter, Add, platform, region, Add)", count === 6, `${count} actions`);
     check("on the Mega Drive", copiesOf(alex.id).at(-1) === "mega-drive:pal:Sonic the Hedgehog");
+    await desk.keyboard.press("Escape");
   }
 
   section("On a phone: Game Boy, region not sure");
@@ -228,13 +239,14 @@ try {
     await act.type(phone.locator('main input[name="q"]:visible'), "pokemon yellow");
     await act.press("Enter");
     await audit(phone, "search results");
-    await act.click(firstResult(phone, "Pokémon Yellow"));
-    const region = await phone.getByRole("navigation", { name: "Region", exact: true }).boundingBox();
-    check("the region step is on the phone's first two screens", (region?.y ?? Infinity) < PHONE.height * 2, `at ${Math.round(region?.y ?? -1)} px`);
-    await act.click(chip(phone, "Region", "Not sure"));
-    await audit(phone, "game page, ready to add");
-    await act.click(addButton(phone), false);
-    await waitForAdded(phone);
+    await act.click(phone.locator('[data-game-card="Pokémon Yellow"] [data-action=add]').first(), false);
+    await eventually(async () => (await dialogOf(phone).getByRole("radio").count()) > 0);
+    const region = await dialogOf(phone).locator("fieldset").nth(1).boundingBox();
+    check("the region step is on the phone's first screen of the sheet", (region?.y ?? Infinity) < PHONE.height, `at ${Math.round(region?.y ?? -1)} px`);
+    await act.click(choice(phone, "Not sure"), false);
+    await audit(phone, "quick add sheet, ready to add");
+    await act.click(addInDialog(phone), false);
+    await added(phone);
     const { count } = act.done();
     check("added: five actions on a phone", count <= 6, `${count} actions`);
     check("on the Game Boy, region not sure", copiesOf(alex.id).at(-1) === "game-boy:not sure:Pokémon Yellow");

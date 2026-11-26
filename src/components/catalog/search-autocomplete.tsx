@@ -47,6 +47,8 @@ export function SearchAutocomplete({
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [items, setItems] = useState<Suggestion[]>([]);
+  // The query the listed suggestions answer: a choice is only taken from the current list.
+  const [itemsFor, setItemsFor] = useState<string | null>(null);
   const [active, setActive] = useState(-1);
   const [order] = useState(latestOnly);
   const abort = useRef<AbortController | null>(null);
@@ -91,8 +93,10 @@ export function SearchAutocomplete({
         if (!response.ok || !Array.isArray(body?.suggestions)) {
           setStatus("error");
           setItems([]);
+          setItemsFor(null);
         } else {
           setItems(body.suggestions);
+          setItemsFor(query);
           setStatus("ready");
         }
         setActive(-1);
@@ -110,10 +114,11 @@ export function SearchAutocomplete({
   }
 
   const query = suggestQuery(value);
+  const current = itemsFor !== null && itemsFor === query;
   const showList = open && query !== null && status !== "idle";
   // While the first answer is on its way there is nothing to list yet.
   const listVisible = showList && !(status === "loading" && !items.length);
-  const activeId = active >= 0 && items[active] ? `${id}-option-${active}` : undefined;
+  const activeId = current && active >= 0 && items[active] ? `${id}-option-${active}` : undefined;
   const announcement =
     !showList || status === "loading"
       ? ""
@@ -149,6 +154,8 @@ export function SearchAutocomplete({
         className={cn(large ? "h-13 pl-12 text-base" : "pl-9", inputClassName)}
         onChange={(event) => {
           setValue(event.target.value);
+          // A highlighted suggestion belongs to the text before this keystroke.
+          setActive(-1);
           setOpen(true);
           request(event.target.value);
         }}
@@ -171,7 +178,8 @@ export function SearchAutocomplete({
               return next;
             });
           } else if (event.key === "Enter") {
-            if (showList && active >= 0 && items[active]) {
+            // Only a suggestion for the text in the field now, never a stale one.
+            if (showList && current && active >= 0 && items[active]) {
               event.preventDefault();
               choose(items[active]);
             } else {

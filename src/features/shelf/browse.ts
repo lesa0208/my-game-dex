@@ -40,6 +40,9 @@ export type ShelfItem = {
   note: string | null;
   /** The physical format as recorded, or null. */
   format: string | null;
+  /** M17b, a collector's copy only: its platform's full name and its edition, as recorded. */
+  platformName?: string | null;
+  edition?: string | null;
 };
 
 export type ShelfSort = "title" | "year" | "acquired" | "added" | "condition";

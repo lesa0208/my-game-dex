@@ -6,13 +6,20 @@ import { startTransition, useActionState, useEffect, useId, useRef, useState } f
 
 import { CopyFields, EMPTY_COPY } from "@/components/collection/copy-fields";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { addCopy, type AddCopyState } from "@/features/collection/actions";
 import { addClaim } from "@/features/collection/claim-actions";
+import { EDITION_KIND_OPTIONS, EDITION_NAME_SUGGESTIONS } from "@/features/collection/details";
 import { loadQuickAdd, type QuickAddOptions } from "@/features/collection/quick-add";
 import { keepingIdOnFailure } from "@/features/collection/retry";
 import { uuidv7 } from "@/features/collection/uuid";
 import { cn } from "@/lib/utils";
+
+const OTHER_EDITION = "other";
+/** A catalog edition as one value: its kind and name. */
+const editionValue = (e: { kind: string | null; name: string | null } | null) => (e ? `${e.kind ?? ""}~${e.name ?? ""}` : "");
+const editionLabel = (e: { kind: string | null; name: string | null }) => e.name ?? EDITION_KIND_OPTIONS.find((k) => k.value === e.kind)?.label ?? "Edition";
 
 /** The regions most copies are from, offered as buttons; the rest are in a list. */
 const COMMON_REGIONS = ["ntsc-uc", "pal", "ntsc-j"];
@@ -111,11 +118,16 @@ function QuickAddForm({ options, presetPlatform, onAdded, onDone }: { options: R
   const [platform, setPlatform] = useState<string | null>(firstPlatform);
   const [region, setRegion] = useState<string>(UNSURE);
   const [release, setRelease] = useState<string>(NO_RELEASE);
+  const [edition, setEdition] = useState<string>(UNSURE);
   const [state, action, pending] = useActionState(submit, { status: "idle", message: null, itemId: uuidv7(), count: options.copies });
   const form = useRef<HTMLFormElement>(null);
-  const platformInfo = options.platforms.find((p) => p.slug === platform) ?? null;
-  // The verified releases for the platform (and region, once chosen): offered, never assumed.
-  const releases = options.releases.filter((r) => r.platform === platform && (region === UNSURE || r.region.code === region));
+  const platformInfo = [...options.platforms, ...options.otherPlatforms].find((p) => p.slug === platform) ?? null;
+  // The catalog's editions for the platform (and region, once chosen), then the releases for
+  // what's chosen: offered, never assumed.
+  const onPlatform = options.releases.filter((r) => r.platform === platform && (region === UNSURE || r.region.code === region));
+  const editions = [...new Map(onPlatform.filter((r) => r.edition).map((r) => [editionValue(r.edition), r.edition!])).entries()];
+  const catalogEdition = editions.find(([key]) => key === edition)?.[1] ?? null;
+  const releases = onPlatform.filter((r) => !catalogEdition || editionValue(r.edition) === edition);
   // A release chosen for another platform or region no longer applies: it reads as none.
   const chosen = releases.find((r) => r.id === release) ?? null;
   const selectedRelease = chosen ? chosen.id : NO_RELEASE;
@@ -196,6 +208,12 @@ function QuickAddForm({ options, presetPlatform, onAdded, onDone }: { options: R
           <input type="hidden" name="game_id" value={options.game.id} />
           <input type="hidden" name="platform_id" value={platformInfo?.id ?? ""} />
           <input type="hidden" name="region" value={region} />
+          {catalogEdition ? (
+            <>
+              <input type="hidden" name="edition_kind" value={catalogEdition.kind ?? ""} />
+              <input type="hidden" name="edition_name" value={catalogEdition.name ?? ""} />
+            </>
+          ) : null}
         </>
       )}
 
@@ -208,6 +226,23 @@ function QuickAddForm({ options, presetPlatform, onAdded, onDone }: { options: R
             </Chip>
           ))}
         </div>
+        {options.otherPlatforms.length ? (
+          <label className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+            Another platform
+            <select
+              value={options.otherPlatforms.some((p) => p.slug === platform) ? (platform ?? "") : ""}
+              onChange={(event) => event.target.value && setPlatform(event.target.value)}
+              className="h-9 max-w-[14rem] rounded-lg border border-white/12 bg-transparent px-2 text-foreground"
+            >
+              <option value="">Choose…</option>
+              {options.otherPlatforms.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </fieldset>
 
       <fieldset className="flex flex-col gap-2" disabled={!platform}>
@@ -238,6 +273,49 @@ function QuickAddForm({ options, presetPlatform, onAdded, onDone }: { options: R
               ))}
             </select>
           </label>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-2" disabled={!platform}>
+        <legend className="mb-2 text-sm font-semibold">
+          Edition <span className="font-normal text-muted-foreground">(optional)</span>
+        </legend>
+        <div className="flex flex-wrap gap-2">
+          <Chip name={`${id}-edition`} value={UNSURE} checked={edition === UNSURE || (!catalogEdition && edition !== OTHER_EDITION)} onChange={setEdition}>
+            Not sure
+          </Chip>
+          {editions.map(([key, e]) => (
+            <Chip key={key} name={`${id}-edition`} value={key} checked={edition === key} onChange={setEdition}>
+              {editionLabel(e)}
+            </Chip>
+          ))}
+          <Chip name={`${id}-edition`} value={OTHER_EDITION} checked={edition === OTHER_EDITION} onChange={setEdition}>
+            Another edition
+          </Chip>
+        </div>
+        {edition === OTHER_EDITION && !chosen ? (
+          <div className="mt-1 grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1.5 text-sm font-medium">
+              Edition name
+              <Input name="edition_name" maxLength={80} list={`${id}-edition-names`} placeholder="Platinum, Greatest Hits…" autoComplete="off" className="h-10" />
+              <datalist id={`${id}-edition-names`}>
+                {EDITION_NAME_SUGGESTIONS.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium">
+              Edition type
+              <select name="edition_kind" defaultValue="" className="h-10 rounded-lg border border-white/12 bg-transparent px-2 font-normal text-foreground">
+                <option value="">Not sure</option>
+                {EDITION_KIND_OPTIONS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         ) : null}
       </fieldset>
 
@@ -289,6 +367,13 @@ function QuickAddForm({ options, presetPlatform, onAdded, onDone }: { options: R
           {pending ? "Adding…" : "Add to collection"}
         </Button>
         {!platform ? <p className="text-xs text-muted-foreground">Choose a platform first.</p> : null}
+        <Link
+          href={`/games/${options.game.slug}/add${platform ? `?platform=${encodeURIComponent(platform)}` : ""}`}
+          className="ml-auto text-xs font-medium text-primary-text underline-offset-4 hover:underline"
+          data-step-by-step=""
+        >
+          Step by step
+        </Link>
       </div>
     </form>
   );

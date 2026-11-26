@@ -25,6 +25,15 @@ export async function proxy(request: NextRequest) {
   if ((path === "/sign-up" || path.startsWith("/sign-up/")) && !selfRegistrationOpen()) {
     return NextResponse.rewrite(new URL("/_not-found", request.url), { status: 404 });
   }
+  // M17b: the step-by-step add moved from the game page to /games/<slug>/add. An old step
+  // address (a region or an edition chosen) is sent there, with the same choices; a game
+  // page with only a platform or a release stays the game page. Page loads only.
+  if ((request.method === "GET" || request.method === "HEAD") && /^\/games\/[a-z0-9][a-z0-9-]*$/.test(path)) {
+    const search = request.nextUrl.searchParams;
+    if (search.has("region") || search.has("edition")) {
+      return NextResponse.redirect(new URL(`${path}/add${request.nextUrl.search}`, request.url), 308);
+    }
+  }
   const config = supabaseConfig();
   if (!config) return NextResponse.next({ request });
 

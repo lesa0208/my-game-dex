@@ -49,6 +49,15 @@ export async function getPlatformMakers(): Promise<Record<string, string>> {
   return Object.fromEntries((rows ?? []).filter((r) => r.manufacturer).map((r) => [r.slug, r.manufacturer as string]));
 }
 
+/** Each platform's release year, as the catalog's platform record has it, by slug (M17b). */
+export async function getPlatformYears(): Promise<Record<string, number>> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(CATALOG_TAG);
+  const rows = await publicRows<{ slug: string; released_year: number | null }>("platforms?select=slug,released_year");
+  return Object.fromEntries((rows ?? []).filter((r) => typeof r.released_year === "number").map((r) => [r.slug, r.released_year as number]));
+}
+
 /** Up to `limit` games published on three systems or more, most systems first, then by title. */
 export async function getMostPlatformGames(limit = 12): Promise<GameResult[] | null> {
   "use cache";
