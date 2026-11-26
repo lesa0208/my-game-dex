@@ -170,6 +170,30 @@ async function toItems(entries: CollectionEntry[]): Promise<ShelfItem[]> {
   return entries.map((entry) => copyItem(entry, { labels: LABELS, preservedTitle: titles.get(entry.id)?.title ?? null, copyNumber: numbers.get(entry.id) ?? null }));
 }
 
+export type RecentCopy = {
+  item: ShelfItem;
+  /** The system the copy is on, as its release or claim names it; null when it can't be read. */
+  platform: { slug: string; name: string; shortName: string } | null;
+};
+
+/**
+ * Home (M16): the signed-in collector's most recently added copies, newest first. Read
+ * through get_my_collection with its "added" sort (the copies' own creation dates), which
+ * returns only the caller's copies. Null when it can't be read.
+ */
+export async function getMyRecentCopies(limit = 6): Promise<RecentCopy[] | null> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_my_collection", { p_sort: "added", p_limit: Math.min(Math.max(limit, 1), 24) });
+  if (error || typeof data !== "object" || data === null || !Array.isArray((data as CollectionPage).items)) return null;
+  const entries = (data as CollectionPage).items;
+  const items = await toItems(entries);
+  return entries.map((entry, i) => {
+    const platform = copyPlatform(entry);
+    return { item: items[i]!, platform: platform ? { slug: platform.slug, name: platform.name, shortName: platform.short_name } : null };
+  });
+}
+
 /** At most this many of a game's copies are listed on its page. */
 export const GAME_COPIES_LIMIT = 500;
 
