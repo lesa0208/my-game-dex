@@ -159,12 +159,24 @@ try {
   check("the backdrop is the cover's own wash, the cover being authorized for the SNES", (await guest.locator("[data-hero-backdrop]").getAttribute("data-hero-backdrop")) === "artwork");
   check("a meta line: the catalog's year, then IGDB's developer and genre, marked as IGDB's", await guest.locator("[data-hero-meta]").evaluate((p) => p.textContent.startsWith("1990") && p.textContent.includes("(from IGDB)")));
   check("a description preview from IGDB, credited, with Read more", (await guest.locator('[data-hero-description="igdb"]').count()) === 1 && (await guest.locator('[data-hero-description="igdb"]').innerText()).includes("Description from IGDB.com"));
-  check("key facts by the title: the first release date and verified releases", /First released/.test(await guest.locator("article[aria-labelledby=game-title]").innerText()) && smw.includes("Verified releases"));
-  check("each fact said once: the first release date isn't repeated in Overview or Game Details", smw.split("November 21, 1990").length === 2 && !smw.includes("Release Information"));
-  check("Game Details gives the detail behind them: each system by its full name, with its verified releases", await (async () => { const t = await guest.locator("[data-game-facts]").innerText(); return t.includes("Super Nintendo Entertainment System") && t.includes("Game Boy Advance") && t.includes("No verified release yet") && !t.includes("First released"); })());
+  check("the hero's facts: verified releases; the year in the meta line, the full date left to Overview", smw.includes("Verified releases") && !/First released/.test(await guest.locator("[data-hero]").innerText()));
+  check("each fact said once: the first release date appears once, in Overview's catalog details", smw.split("November 21, 1990").length === 2 && (await guest.locator("[data-catalog-facts]").innerText()).includes("November 21, 1990") && !smw.includes("Release Information"));
+  // Game Details 2.0, Phase 2: no sidebar; the tabs take the page's width.
+  check("no Game Details sidebar: the tabs span the content width", (await guest.locator("[data-game-facts]").count()) === 0 && (await guest.evaluate(() => { const tabs = document.querySelector("[data-game-tabs]").getBoundingClientRect(); const hero = document.querySelector("[data-hero]").getBoundingClientRect(); return Math.abs(tabs.width - hero.width) < 2; })));
+  check("Overview's Platforms: each system by its full name, with its verified releases", await (async () => { const t = await guest.locator("[data-game-platforms]").innerText(); return t.includes("Super Nintendo Entertainment System") && t.includes("Game Boy Advance") && t.includes("No verified release yet"); })());
+  check("the catalog's details and IGDB's side by side, each under its own source heading", (await guest.locator("[data-catalog-facts] h3").innerText()).includes("My Game Dex catalog") && (await guest.locator("[data-provider-facts=igdb] h3").innerText()).includes("From IGDB") && (await guest.locator("[data-catalog-facts]").evaluate((c) => c.getBoundingClientRect().top)) === (await guest.locator("[data-provider-facts=igdb]").evaluate((c) => c.getBoundingClientRect().top)));
+  check("IGDB's facts say they're about the game, verifying no release, and link to IGDB.com", await guest.locator("[data-provider-facts=igdb]").innerText().then((t) => t.includes("don't verify any physical release") && t.includes("Game data from IGDB.com")) && (await guest.locator("[data-provider-facts=igdb] [data-igdb-credit] a").getAttribute("href")).startsWith("https://www.igdb.com/games/"));
+  const pubs = guest.locator("[data-provider-facts=igdb] details").first();
+  check("a long list (4 publishers) shows two, with an accessible Show all", (await guest.locator("[data-provider-facts=igdb]").innerText()).includes("Show all 4") && (await pubs.locator("summary").textContent()).includes("Show all 4 publishers"));
+  await pubs.locator("summary").focus();
+  await guest.keyboard.press("Enter");
+  check("which the keyboard opens, to the full list", (await pubs.getAttribute("open")) !== null && (await pubs.locator("li").count()) === 4 && (await pubs.locator("summary").innerText()).includes("Show fewer"));
+  await guest.keyboard.press("Enter");
   check("real tabs: Overview, Physical Releases, My Copies, and Gallery for IGDB's screenshots", JSON.stringify((await tabNames(guest)).map((t) => t.replace(/\s*\(\d+\)$/, ""))) === JSON.stringify(["Overview", "Physical Releases", "My Copies", "Gallery"]));
   check("Overview shows; the other tabs' content doesn't", JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-overview"]));
-  check("Overview: About the Game with IGDB's description, credited; Other titles folded away", smw.includes("About the Game") && smw.includes("Description from IGDB.com") && !smw.includes("No description yet.") && /Other titles \(\d+\)/.test(smw) && (await guest.locator("details:has(summary:text('Other titles'))").getAttribute("open")) === null);
+  check("Overview: About the Game with IGDB's full description, credited; Other titles among the catalog's details", smw.includes("About the Game") && smw.includes("Description from IGDB.com") && !smw.includes("No description yet.") && (await guest.locator('[data-catalog-facts] ul[aria-label="Other titles"] li').count()) >= 1);
+  await guest.locator("[data-hero-description] a", { hasText: "Read more" }).click();
+  check("the hero's Read more lands on Overview, focused, the description in view", await eventually(async () => (await guest.evaluate(() => document.activeElement?.getAttribute("data-panel"))) === "overview" && (await guest.locator("#about-game").evaluate((h) => { const r = h.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight; }))));
   check("the other titles aren't between the title and the facts", !(await guest.locator("article[aria-labelledby=game-title]").innerText()).includes("Regional title"));
   check("no add steps or wishlist form on the page itself", (await guest.locator("#choose-release").count()) === 0 && (await guest.locator("#add-wish:visible").count()) === 0);
   const outsideIgdb = smw.replace((await guest.locator("[data-provider-facts]").innerText().catch(() => "")).replace(/\s+/g, " "), "");
@@ -177,6 +189,7 @@ try {
   check("and its backdrop stays the generic light, with no description preview invented", (await empty.locator("[data-hero-backdrop]").getAttribute("data-hero-backdrop")) === "generic" && (await empty.locator("[data-hero-description]").count()) === 0);
   check("and its tabs: Overview, Physical Releases, My Copies; no Gallery without images", JSON.stringify((await tabNames(empty)).map((t) => t.replace(/\s*\(\d+\)$/, ""))) === JSON.stringify(["Overview", "Physical Releases", "My Copies"]));
   check("and a quiet line for the missing description; nothing from IGDB", tetris.includes("No description yet.") && !tetris.includes("IGDB") && (await empty.locator("[data-provider-facts]").count()) === 0);
+  check("and only the catalog's details, said as the catalog's", (await empty.locator("[data-catalog-facts]").count()) === 1);
   await empty.close();
   check("a visitor sees no My Copy panel and no sign-up card in the hero, nothing of anyone's", (await guest.locator("[data-my-copy-panel]").count()) === 0 && !(await guest.locator("[data-hero]").innerText()).includes("Create Account") && !smw.includes("Owned:"));
   check("a two-column hero: no empty third column", await guest.evaluate(() => { const art = document.querySelector("[data-game-image]").getBoundingClientRect(); const hero = document.querySelector("[data-hero]").getBoundingClientRect(); const title = document.querySelector("#game-title").getBoundingClientRect(); return title.left > art.right && hero.right - title.right < hero.width * 0.4; }));
@@ -256,7 +269,7 @@ try {
   check("stored as recorded: SNES, NTSC-U/C, Player's Choice, no release", psql(`select p.slug || '|' || c.claimed_region_code || '|' || coalesce(c.claimed_edition_name, '') || '|' || (c.release_id is null) from public.collection_items c join public.platforms p on p.id = c.claimed_platform_id where c.owner_id = '${kimId}';`) === "snes|ntsc-uc|Player's Choice|true");
   await desk.keyboard.press("Escape");
   const panel = desk.locator('[data-my-copy-panel="owned"]');
-  check("the hero says it's owned (Your copies, beside it on a wide screen)", await eventually(async () => (await desk.locator("[data-owned]").textContent().catch(() => "")).includes("Owned: Yes") && (await panel.count()) === 1));
+  check("the hero says it's owned once, in Your copies", await eventually(async () => (await desk.locator("[data-owned]").textContent().catch(() => "")).includes("Owned: Yes") && (await panel.count()) === 1 && (await desk.locator("[data-owned]").count()) === 1));
   check("My Copy shows the copy: platform, region and edition as recorded", await eventually(async () => {
     const t = (await panel.innerText().catch(() => "")).replace(/\s+/g, " ");
     return /platform snes/i.test(t) && /region ntsc-u\/c/i.test(t) && /edition player's choice/i.test(t);
@@ -289,6 +302,7 @@ try {
   const phone = await (await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, colorScheme: "dark", storageState: await desk.context().storageState() })).newPage();
   await phone.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   check("the owner's phone page doesn't scroll sideways", await noSideScroll(phone));
+  check("on a phone, ownership is said once: in Your copies, with Edit and View copy", (await phone.locator("[data-owned]:visible").count()) === 1 && (await phone.locator('[data-my-copy-panel] a:visible', { hasText: "Edit" }).count()) === 1 && (await phone.locator('[data-my-copy-panel] a:visible', { hasText: "View copy" }).count()) === 1);
   await shoot(phone, "10-game-owned-mobile-390", { fullPage: true });
   await phone.context().close();
 

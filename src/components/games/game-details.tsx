@@ -125,12 +125,11 @@ export function PhysicalReleases({
 
 export function GameDetailsSkeleton() {
   return (
-    <div aria-hidden="true" className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <div className="flex flex-col gap-6">
-        <Skeleton className="h-80 w-full rounded-2xl" />
-        <Skeleton className="h-56 w-full rounded-2xl" />
-      </div>
-      <Skeleton className="h-48 w-full rounded-2xl" />
+    // The page's shape without a sidebar: the hero, the tab row, then Overview's content.
+    <div aria-hidden="true" className="flex flex-col gap-6">
+      <Skeleton className="h-80 w-full rounded-3xl" />
+      <Skeleton className="h-12 w-full max-w-md rounded-lg" />
+      <Skeleton className="h-56 w-full rounded-2xl" />
     </div>
   );
 }

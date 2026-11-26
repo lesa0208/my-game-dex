@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 import { ConsoleArt } from "@/components/shelf/console-art";
 import { shellFor } from "@/components/shelf/media-shells";
-import { formatCatalogDate, gameKindLabel, releaseCountLabel } from "@/features/catalog/format";
+import { gameKindLabel, releaseCountLabel } from "@/features/catalog/format";
 import { coverSize, igdbImageUrl, type ProviderImage } from "@/features/catalog/provider-images";
 import type { ReleasePicker } from "@/features/catalog/types";
 import { type GameImage, imageCaption, LICENSE_LABELS } from "@/features/media/game-images";
@@ -278,11 +278,11 @@ export function GameIdentity({
 /**
  * The hero's remaining information, after the identity (and, on a phone, after the artwork and
  * Your copies): a short description preview where a real description exists, with its source,
- * and the facts a collector looks for first. Only what the catalog or IGDB records.
+ * and the facts a collector looks for first. The full first-release date and the rest are in
+ * Overview, said once. Only what the catalog or IGDB records.
  */
-export function GameHeroInfo({ game, overview, publisher, description }: { game: ReleasePicker["game"]; overview: Overview; publisher: string | null; description: HeroDescription | null }) {
+export function GameHeroInfo({ overview, publisher, description }: { overview: Overview; publisher: string | null; description: HeroDescription | null }) {
   const facts = [
-    game.firstRelease ? { label: "First released", value: formatCatalogDate(game.firstRelease) } : null,
     publisher ? { label: "Publisher", value: publisher } : null,
     { label: "Verified releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount).replace(/ releases?$/, "") : "None yet" },
   ].filter((f) => f !== null);

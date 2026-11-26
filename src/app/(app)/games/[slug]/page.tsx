@@ -8,7 +8,8 @@ import { gameHref } from "@/components/catalog/release-picker";
 import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-details";
 import { GameArtwork, GameHeroInfo, GameIdentity, type HeroDescription, HeroBackdrop } from "@/components/games/game-hero";
-import { GameFactsCard, HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, OverviewTab, ReleasesEmptyAction } from "@/components/games/game-sections";
+import { OverviewTab } from "@/components/games/game-overview";
+import { HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, ReleasesEmptyAction } from "@/components/games/game-sections";
 import { type GameTab, GameTabs } from "@/components/games/game-tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
@@ -31,9 +32,9 @@ function first(value: string | string[] | undefined) {
 }
 
 /**
- * M17b: a game's page as a collector's dashboard. The hero: the artwork on the left, the
- * game and the collector's actions in the centre, their copy on the right. Below it, the
- * game's content as tabs, with the catalog's facts beside them. Adding goes through the
+ * M17b: a game's page as a collector's dashboard. The hero (Game Details 2.0): the artwork on
+ * the left, the game and the collector's actions beside it, their copies (owners only). Below it,
+ * the game's content as tabs, full width; the game's information in Overview (Phase 2). Adding goes through the
  * quick add (the hero, or the My Copy panel); the step-by-step add has its own page
  * (/games/<slug>/add), linked from the hero's "More" menu and from each release.
  */
@@ -95,7 +96,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const game = { id: picker.game.id, slug: picker.game.slug, title: picker.game.title };
 
   const tabs: GameTab[] = [
-    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} summary={summary} provider={provider} /> },
+    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} overview={overview} summary={summary} provider={provider} /> },
     {
       id: "releases",
       label: "Physical Releases",
@@ -224,16 +225,15 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
             </Suspense>
           </div>
           <div className="order-4 min-w-0 md:[grid-area:info] md:self-start xl:pl-10">
-            <GameHeroInfo game={picker.game} overview={overview} publisher={publisher} description={heroDescription} />
+            <GameHeroInfo overview={overview} publisher={publisher} description={heroDescription} />
           </div>
         </div>
       </article>
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] xl:gap-8 2xl:grid-cols-[minmax(0,1fr)_21rem]">
+      {/* Game Details 2.0, Phase 2: no sidebar; the tabs take the page's width, and the game's
+          information lives in Overview, each source on its own. */}
+      <div className="mt-6 md:mt-8">
         <GameTabs tabs={tabs} />
-        <div className="min-w-0 lg:sticky lg:top-22">
-          <GameFactsCard game={picker.game} overview={overview} provider={provider} />
-        </div>
       </div>
     </>
   );
