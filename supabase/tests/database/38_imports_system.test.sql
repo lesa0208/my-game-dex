@@ -154,7 +154,7 @@ select is((select count(*) from private.audit_events) - (select n from audit_bef
 -- 3. Providers
 -- ---------------------------------------------------------------------------
 create function pg_temp.providers() returns jsonb language sql as $$ select pg_temp.as_user('a1', 'select public.get_import_providers()::text')::jsonb $$;
-select is((select string_agg(p ->> 'code', ',') from jsonb_array_elements(pg_temp.providers()) p), 'no-intro,wikidata', 'every source, by name');
+select is((select string_agg(p ->> 'code', ',') from jsonb_array_elements(pg_temp.providers()) p), 'igdb,no-intro,wikidata', 'every source, by name (M18a added IGDB, uncleared)');
 select is((select string_agg(k, ',' order by k) from jsonb_object_keys(pg_temp.providers() -> 0) k),
   'cleared_note,code,commercial_use_cleared,last_run_at,name,runs,runs_running,source_records,terms_reviewed_at,terms_sha256,terms_url,updated_at', 'with fixed keys');
 select is((select p ->> 'runs' || '/' || (p ->> 'runs_running') || '/' || (p ->> 'source_records') || '/' || (p ->> 'commercial_use_cleared')
@@ -265,7 +265,7 @@ select is(pg_temp.system() -> 'importer' ->> 'login_enabled', (select rolcanlogi
 select is(pg_temp.system() -> 'importer' ->> 'runs_running' || '/' || (pg_temp.system() -> 'importer' ->> 'leases_expired'), '2/1', 'runs in progress, and those stopped with an expired lease');
 select is(pg_temp.system() -> 'migrations' ->> 'latest', (select max(version) from supabase_migrations.schema_migrations), 'the latest migration');
 select is((pg_temp.system() -> 'migrations' ->> 'applied')::int, (select count(*)::int from supabase_migrations.schema_migrations), 'and how many are applied');
-select is(pg_temp.system() -> 'providers', '{"total": 2, "cleared": 0}'::jsonb, 'sources, and those cleared');
+select is(pg_temp.system() -> 'providers', '{"total": 3, "cleared": 0}'::jsonb, 'sources, and those cleared');
 select is((pg_temp.system() -> 'reference' ->> 'platforms')::int, (select count(*)::int from public.platforms), 'reference data counts');
 select is(pg_temp.system() ? 'owner_assigned', false, 'nothing from the Owner record, which get_ownership_status covers');
 select is((select count(*)::int from jsonb_each_text(pg_temp.system()) e

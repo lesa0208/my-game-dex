@@ -1,8 +1,10 @@
 import { Gamepad2, Library } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 import { ConsoleArt } from "@/components/shelf/console-art";
 import { firstReleaseYear, gameKindLabel, regionLabel } from "@/features/catalog/format";
+import { igdbImageUrl, type ProviderImage } from "@/features/catalog/provider-images";
 import type { CatalogPlatformCount, SearchResult } from "@/features/catalog/types";
 import type { ConsoleKind } from "@/features/shelf/browse";
 import { consoleFor } from "@/features/shelf/copies";
@@ -24,6 +26,8 @@ export type CardContext = {
   returnPath: string;
   /** A return from signing in: the game and what to open. */
   intent: { slug: string; action: "add" | "wish" } | null;
+  /** M18a: each game's cover from IGDB, where its media are cleared. */
+  covers: Map<string, ProviderImage>;
 };
 
 function hrefFor(item: SearchResult, platform: string | null) {
@@ -71,13 +75,19 @@ export function GameCard({ item, context }: { item: SearchResult; context: CardC
   const verified = item.kind === "game" ? item.platforms.reduce((sum, p) => sum + p.releaseCount, 0) : 0;
   const presetPlatform = item.kind === "release" ? item.release.platform.slug : context.platform && platforms.some((p) => p.slug === context.platform) ? context.platform : null;
   const intent = context.intent?.slug === item.game.slug ? context.intent.action : null;
+  const cover = context.covers.get(item.game.id) ?? null;
 
   return (
     <article className="group/card flex w-full flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#141319] transition-colors hover:border-primary/40 motion-reduce:transition-none" data-game-card={item.game.title}>
       <Link href={href} tabIndex={-1} aria-hidden="true" className="relative block aspect-[16/9] overflow-hidden shelf-wall max-[479px]:aspect-[2/1]">
         <span aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(70%_80%_at_50%_100%,rgb(139_92_246/0.28),transparent_70%)]" />
         <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-amber-100/40 shadow-[0_0_10px_2px_rgb(255_190_120/0.2)]" />
-        {consoles.length ? (
+        {cover ? (
+          // M18a: the game's cover art from IGDB: game artwork, not a photo of any release.
+          <span className="absolute inset-y-[7%] left-1/2 aspect-[264/374] -translate-x-1/2 overflow-hidden rounded-md shadow-[0_14px_22px_rgb(0_0_0/0.7)] ring-1 ring-white/10 transition-transform duration-300 group-hover/card:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/card:translate-y-0" data-cover="igdb">
+            <Image src={igdbImageUrl(cover, "cover_big")} alt="" fill sizes="(min-width: 1280px) 150px, (min-width: 480px) 22vw, 40vw" className="object-cover" />
+          </span>
+        ) : consoles.length ? (
           consoles.map((kind, i) => (
             <ConsoleArt
               key={kind}
@@ -161,7 +171,9 @@ export function GameCard({ item, context }: { item: SearchResult; context: CardC
 }
 
 export function GameGrid({ items, context, label }: { items: SearchResult[]; context: CardContext; label: string }) {
+  const credited = items.some((item) => context.covers.has(item.game.id));
   return (
+    <>
     <ul aria-label={label} className="grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4" data-game-grid="">
       {items.map((item) => (
         <li key={item.kind === "release" ? `release-${item.release.id}` : `game-${item.game.id}`} className="flex">
@@ -171,5 +183,16 @@ export function GameGrid({ items, context, label }: { items: SearchResult[]; con
         </li>
       ))}
     </ul>
+    {/* M18a: IGDB's covers are credited wherever they're shown. */}
+    {credited ? (
+      <p className="mt-3 text-xs text-muted-foreground" data-igdb-credit="">
+        Cover art:{" "}
+        <a href="https://www.igdb.com" className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
+          IGDB.com
+        </a>
+        . Game artwork, not a photo of a specific release.
+      </p>
+    ) : null}
+    </>
   );
 }

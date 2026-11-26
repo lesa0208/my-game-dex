@@ -21,6 +21,11 @@ const nextConfig: NextConfig = {
       bodySizeLimit: 2 * 1024 * 1024 + 64 * 1024,
     },
   },
+  // M18a: IGDB's images, by their id (igdbImageUrl), through the app's image optimizer only:
+  // the server fetches and caches them, so a browser never contacts IGDB. Nothing else remote.
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "images.igdb.com", port: "", pathname: "/igdb/image/upload/**", search: "" }],
+  },
   partialPrefetching: true,
   // M8d (D10): the review pages moved under /admin/catalog. Permanent (308), applied
   // before the proxy, with the query passed through. Each page still checks access.

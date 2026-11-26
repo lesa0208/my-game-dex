@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
 import { GameWishlist, GameWishlistSkeleton, WantRelease } from "@/components/wishlist/game-wishlist";
 import { getPlatformYears } from "@/features/catalog/discover";
+import { getProviderMetadata, igdbImageUrl } from "@/features/catalog/provider-metadata";
 import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { LICENSE_LABELS } from "@/features/media/game-images";
 import { approvedImageFor, approvedImagesOf } from "@/features/media/registry";
@@ -65,7 +66,9 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const everything = requested.platform || requested.release ? await getReleasePicker(slug, null, null, null) : null;
   const all = everything?.ok && everything.data ? everything.data : picker;
   const overview = gameOverview(all);
-  const [summary, years] = await Promise.all([getGameSummary(picker.game.id), getPlatformYears()]);
+  const [summary, years, metadata] = await Promise.all([getGameSummary(picker.game.id), getPlatformYears(), getProviderMetadata([picker.game.id])]);
+  // M18a: IGDB's metadata for the game, when it's linked: shown as IGDB's, never as the catalog's.
+  const provider = metadata.get(picker.game.id) ?? null;
 
   // The system the page shows: the one asked for, else the game's earliest system by the
   // platform's own release year (its other systems are a click away). A release asked for
@@ -84,7 +87,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const game = { id: picker.game.id, slug: picker.game.slug, title: picker.game.title };
 
   const tabs: GameTab[] = [
-    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} summary={summary} /> },
+    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} summary={summary} provider={provider} /> },
     {
       id: "releases",
       label: "Physical Releases",
@@ -127,13 +130,14 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
         </div>
       ),
     },
-    ...(gallery.length
+    ...(gallery.length || provider?.screenshots.length
       ? [
           {
             id: "gallery",
             label: "Gallery",
-            count: gallery.length,
+            count: gallery.length + (provider?.screenshots.length ?? 0),
             content: (
+              <>
               <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {gallery.map((g) => (
                   <li key={g.id} className="flex flex-col gap-1.5">
@@ -145,7 +149,25 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
                     </p>
                   </li>
                 ))}
+                {/* M18a: IGDB's screenshots of the game, credited below. */}
+                {provider?.screenshots.map((shot, i) => (
+                  <li key={shot.imageId} className="flex flex-col gap-1.5" data-screenshot="igdb">
+                    <div className="relative aspect-video overflow-hidden rounded-xl border border-white/[0.08] bg-black/20">
+                      <Image src={igdbImageUrl(shot, "screenshot_big")} alt={`Screenshot ${i + 1} of ${picker.game.title}`} fill sizes="(min-width: 640px) 300px, 45vw" className="object-cover" />
+                    </div>
+                  </li>
+                ))}
               </ul>
+              {provider?.screenshots.length ? (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Screenshots from{" "}
+                  <a href={provider.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
+                    IGDB.com
+                  </a>
+                  .
+                </p>
+              ) : null}
+              </>
             ),
           },
         ]
@@ -163,7 +185,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
               the facts; from md up the artwork stands on the left of both, centred. */}
           <div className="grid gap-y-5 [grid-template-areas:'head'_'art'_'facts'] md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:grid-rows-[1fr_auto_auto_1fr] md:gap-x-8 md:gap-y-0 md:[grid-template-areas:'art_.'_'art_head'_'art_facts'_'art_.'] xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] 2xl:gap-x-10">
             <div className="mx-auto w-full max-w-[14rem] [grid-area:art] md:max-w-none md:self-center">
-              <GameArtwork image={image} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
+              <GameArtwork image={image} cover={provider?.cover ? { image: provider.cover, url: provider.url } : null} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
             </div>
             <div className="min-w-0 [grid-area:head]">
               <GameHeading
@@ -191,7 +213,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] xl:gap-8 2xl:grid-cols-[minmax(0,1fr)_21rem]">
         <GameTabs tabs={tabs} />
         <div className="min-w-0 lg:sticky lg:top-22">
-          <GameFactsCard game={picker.game} overview={overview} />
+          <GameFactsCard game={picker.game} overview={overview} provider={provider} />
         </div>
       </div>
     </>

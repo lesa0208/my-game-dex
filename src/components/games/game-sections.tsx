@@ -11,6 +11,7 @@ import { getCurrentViewer } from "@/features/account/queries";
 import { signInHref, welcomeHref } from "@/features/auth/redirect";
 import { selfRegistrationOpen } from "@/features/auth/registration";
 import { aliasKindLabel, languageName, regionLabel, releaseCountLabel } from "@/features/catalog/format";
+import type { ProviderMetadata } from "@/features/catalog/provider-metadata";
 import type { ReleasePicker } from "@/features/catalog/types";
 import { ownershipHeadline } from "@/features/collection/details";
 import { getMyGameOwnership } from "@/features/collection/queries";
@@ -18,6 +19,7 @@ import { getExploreContext } from "@/features/explore/context";
 import type { MediaKind, ShelfItem } from "@/features/shelf/browse";
 import { getMyCopiesOfGame } from "@/features/shelf/collection";
 import { consoleFor, type gameOverview } from "@/features/shelf/copies";
+import { cn } from "@/lib/utils";
 
 import { AddCopyButton } from "./add-copy-button";
 import { HeroMore } from "./hero-more";
@@ -283,7 +285,7 @@ export function MyCopyPanelSkeleton() {
  * with its own verified releases, and the regions of those releases. What the catalog
  * records, never a guess.
  */
-export function GameFactsCard({ game, overview }: { game: ReleasePicker["game"]; overview: Overview }) {
+export function GameFactsCard({ game, overview, provider = null }: { game: ReleasePicker["game"]; overview: Overview; provider?: ProviderMetadata | null }) {
   return (
     <section aria-labelledby="game-facts" className="rounded-2xl border border-white/10 bg-[#141319] p-5" data-game-facts={game.slug}>
       <h2 id="game-facts" className="text-lg font-semibold text-white">
@@ -321,23 +323,81 @@ export function GameFactsCard({ game, overview }: { game: ReleasePicker["game"];
           </div>
         ) : null}
       </dl>
+      {provider ? <ProviderFacts provider={provider} /> : null}
     </section>
   );
 }
 
 /**
- * Overview: about the game, and its other titles folded away. The release facts are in
- * the hero and Game Details, said once. With no summary, a quiet line, never invented.
+ * M18a: what IGDB says about the game (developers, publishers, genres, themes), under its own
+ * heading and credit: the provider's metadata, not the catalog's verified facts. Only what IGDB
+ * records; an empty field is left out.
  */
-export function OverviewTab({ game, summary }: { game: ReleasePicker["game"]; summary: string | null }) {
+function ProviderFacts({ provider }: { provider: ProviderMetadata }) {
+  const rows = [
+    provider.developers.length ? { label: provider.developers.length === 1 ? "Developer" : "Developers", value: provider.developers.join(", ") } : null,
+    provider.publishers.length ? { label: provider.publishers.length === 1 ? "Publisher" : "Publishers", value: provider.publishers.join(", ") } : null,
+    provider.genres.length ? { label: provider.genres.length === 1 ? "Genre" : "Genres", value: provider.genres.join(", ") } : null,
+    provider.themes.length ? { label: provider.themes.length === 1 ? "Theme" : "Themes", value: provider.themes.join(", ") } : null,
+  ].filter((row) => row !== null);
+  return (
+    <div className="mt-3 border-t border-white/[0.08] pt-3" data-provider-facts={provider.provider}>
+      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">From IGDB</h3>
+      {rows.length ? (
+        <dl className="mt-1 divide-y divide-white/[0.06]">
+          {rows.map((row) => (
+            <div key={row.label} className="grid grid-cols-[7rem_1fr] gap-3 py-2.5 text-sm">
+              <dt className="text-muted-foreground">{row.label}</dt>
+              <dd className="text-pretty text-white">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-1 text-sm text-muted-foreground">No further details recorded.</p>
+      )}
+      <IgdbCredit url={provider.url} className="mt-2" />
+    </div>
+  );
+}
+
+/** The visible credit wherever IGDB's data or images are shown. */
+export function IgdbCredit({ url, className }: { url: string | null; className?: string }) {
+  return (
+    <p className={cn("text-xs text-muted-foreground", className)} data-igdb-credit="">
+      Game data from{" "}
+      <a href={url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
+        IGDB.com
+      </a>
+    </p>
+  );
+}
+
+/**
+ * Overview: about the game, and its other titles folded away. The release facts are in
+ * the hero and Game Details, said once. The catalog's own summary first; else (M18a) IGDB's,
+ * credited; with neither, a quiet line, never invented.
+ */
+export function OverviewTab({ game, summary, provider = null }: { game: ReleasePicker["game"]; summary: string | null; provider?: ProviderMetadata | null }) {
+  const fromIgdb = !summary && provider?.summary ? provider.summary : null;
   return (
     <div className="flex flex-col gap-6">
-      <section aria-labelledby="about-game" data-summary={summary ? "yes" : "none"}>
+      <section aria-labelledby="about-game" data-summary={summary ? "yes" : fromIgdb ? "igdb" : "none"}>
         <h2 id="about-game" className="text-xl font-semibold text-white">
           About the Game
         </h2>
         {summary ? (
           <p className="mt-3 max-w-prose text-[15px] leading-relaxed text-pretty text-foreground/90">{summary}</p>
+        ) : fromIgdb ? (
+          <>
+            <p className="mt-3 max-w-prose text-[15px] leading-relaxed text-pretty whitespace-pre-line text-foreground/90">{fromIgdb}</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Description from{" "}
+              <a href={provider?.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
+                IGDB.com
+              </a>
+              .
+            </p>
+          </>
         ) : (
           <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
             <BookOpen aria-hidden="true" className="size-4 shrink-0" />

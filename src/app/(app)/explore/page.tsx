@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { CatalogSearchForm, CatalogSearchFormSkeleton } from "@/components/catalog/catalog-search-form";
 import { type CardContext, GameGrid } from "@/components/explore/game-card";
+import { getProviderMetadata } from "@/features/catalog/provider-metadata";
 import { SystemChips as SystemChipRow } from "@/components/explore/system-chips";
 import { HomeContainer, SectionHeading } from "@/components/home/home-parts";
 import { ConsoleArt } from "@/components/shelf/console-art";
@@ -87,8 +88,10 @@ function Unavailable() {
 }
 
 async function cardContext(items: SearchResult[], params: ExploreParams, intent: Intent): Promise<CardContext> {
-  const { viewer, owned, wished } = await getExploreContext(items.map((item) => item.game.id));
-  return { viewer, owned, wished, platform: params.platform, returnPath: exploreHref(params), intent };
+  const ids = items.map((item) => item.game.id);
+  const [{ viewer, owned, wished }, metadata] = await Promise.all([getExploreContext(ids), getProviderMetadata(ids)]);
+  const covers = new Map([...metadata].flatMap(([id, m]) => (m.cover ? [[id, m.cover] as const] : [])));
+  return { viewer, owned, wished, platform: params.platform, returnPath: exploreHref(params), intent, covers };
 }
 
 /** Systems with games, as quick filters above the results: one tap, no extra Search. */

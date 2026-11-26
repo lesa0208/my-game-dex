@@ -34,6 +34,8 @@ const env = {
   ENABLE_SEED_DATA: "false",
   // The banner: "Demo catalog … Not the real catalog." Set at build time, in this build only.
   NEXT_PUBLIC_MGD_DEMO_CATALOG: "1",
+  // M18a: IGDB covers and screenshots may be shown here (the demo database records whether they are cleared).
+  MGD_PROVIDER_MEDIA: "igdb",
   // Self-registration (features/auth/registration.ts): open on this server only, a server-side
   // variable the browser never sees. The demo stack's Auth allows sign-up and sends the
   // confirmation email to its Mailpit (scripts/test-stack.mjs).

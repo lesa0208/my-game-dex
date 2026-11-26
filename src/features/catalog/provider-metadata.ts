@@ -1,0 +1,104 @@
+import "server-only";
+
+import { cacheLife, cacheTag } from "next/cache";
+
+import type { ProviderImage } from "./provider-images";
+import { CATALOG_TAG } from "./queries";
+
+export { igdbImageUrl, type ProviderImage } from "./provider-images";
+
+/**
+ * M18a: provider metadata (IGDB) for published games, read through
+ * public.get_game_provider_metadata as anon, like the rest of the public catalog. It is the
+ * provider's, labelled as such wherever it's shown: never the catalog's own verified facts.
+ *
+ * Images have two gates: the database returns them only while the provider's media are cleared
+ * (private.record_provider_media), and this deployment shows them only when MGD_PROVIDER_MEDIA
+ * names the provider (the local demo preview sets it; nothing else does). They are served by the
+ * app's image optimizer (next.config.ts remotePatterns), so a browser never contacts IGDB.
+ */
+
+export type ProviderMetadata = {
+  gameId: string;
+  provider: "igdb";
+  providerName: string;
+  externalId: string;
+  url: string | null;
+  name: string | null;
+  summary: string | null;
+  genres: string[];
+  themes: string[];
+  developers: string[];
+  publishers: string[];
+  firstReleaseDate: string | null;
+  platforms: string[];
+  cover: ProviderImage | null;
+  screenshots: ProviderImage[];
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IMAGE_ID = /^[a-z0-9]{1,40}$/;
+
+function mediaAllowed(provider: string) {
+  return (process.env.MGD_PROVIDER_MEDIA ?? "").split(",").map((s) => s.trim()).includes(provider);
+}
+
+function image(value: unknown): ProviderImage | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.image_id !== "string" || !IMAGE_ID.test(v.image_id)) return null;
+  const size = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null);
+  return { imageId: v.image_id, width: size(v.width), height: size(v.height) };
+}
+
+const strings = (value: unknown) => (Array.isArray(value) ? value.filter((s): s is string => typeof s === "string" && s.trim() !== "") : []);
+const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+
+/** Parses the read's rows; anything unexpected is dropped, never guessed. */
+export function parseProviderMetadata(rows: unknown, allowMedia: (provider: string) => boolean = mediaAllowed): ProviderMetadata[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row): ProviderMetadata[] => {
+    if (typeof row !== "object" || row === null) return [];
+    const r = row as Record<string, unknown>;
+    if (r.provider !== "igdb" || typeof r.game_id !== "string" || typeof r.external_id !== "string") return [];
+    const media = allowMedia(r.provider);
+    return [
+      {
+        gameId: r.game_id,
+        provider: "igdb",
+        providerName: text(r.provider_name) ?? "IGDB",
+        externalId: r.external_id,
+        url: typeof r.url === "string" && r.url.startsWith("https://www.igdb.com/games/") ? r.url : null,
+        name: text(r.name),
+        summary: text(r.summary),
+        genres: strings(r.genres),
+        themes: strings(r.themes),
+        developers: strings(r.developers),
+        publishers: strings(r.publishers),
+        firstReleaseDate: typeof r.first_release_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.first_release_date) ? r.first_release_date : null,
+        platforms: strings(r.platforms),
+        cover: media ? image(r.cover) : null,
+        screenshots: media && Array.isArray(r.screenshots) ? r.screenshots.map(image).filter((i): i is ProviderImage => i !== null) : [],
+      },
+    ];
+  });
+}
+
+/** Provider metadata for these games (up to 200), by game id. Empty when the catalog isn't connected. */
+export async function getProviderMetadata(gameIds: readonly string[]): Promise<Map<string, ProviderMetadata>> {
+  "use cache";
+  cacheLife("minutes");
+  cacheTag(CATALOG_TAG);
+  const ids = [...new Set(gameIds.filter((id) => UUID.test(id)))].slice(0, 200);
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!ids.length || !url || !key) return new Map();
+  const response = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/get_game_provider_metadata`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_games: ids }),
+  }).catch(() => null);
+  if (!response?.ok) return new Map();
+  const rows: unknown = await response.json().catch(() => null);
+  return new Map(parseProviderMetadata(rows).map((m) => [m.gameId, m]));
+}

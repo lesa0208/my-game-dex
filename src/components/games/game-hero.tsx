@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { ConsoleArt } from "@/components/shelf/console-art";
 import { shellFor } from "@/components/shelf/media-shells";
 import { formatCatalogDate, gameKindLabel, releaseCountLabel } from "@/features/catalog/format";
+import { igdbImageUrl, type ProviderImage } from "@/features/catalog/provider-images";
 import type { ReleasePicker } from "@/features/catalog/types";
 import { type GameImage, imageCaption, LICENSE_LABELS } from "@/features/media/game-images";
 import type { Region } from "@/features/shelf/browse";
@@ -35,10 +36,53 @@ export function HeroBackdrop({ platform }: { platform: string | null }) {
 
 /**
  * The large artwork on the left: the real item from an approved image, with its source and
- * terms; or, until one exists, the system's own cartridge or case shape with its label
- * area plainly marked "Artwork not available": a shape, never a made-up label or title.
+ * terms; else (M18a) the game's cover art from IGDB, credited and captioned as game artwork,
+ * never laid on a cartridge or presented as a particular release; or, until either exists, the
+ * system's own cartridge or case shape with its label area plainly marked "Artwork not
+ * available": a shape, never a made-up label or title.
  */
-export function GameArtwork({ image, platform, region, regionName, title }: { image: GameImage | null; platform: Platform | null; region: string | null; regionName: string | null; title: string }) {
+export function GameArtwork({
+  image,
+  cover,
+  platform,
+  region,
+  regionName,
+  title,
+}: {
+  image: GameImage | null;
+  cover?: { image: ProviderImage; url: string | null } | null;
+  platform: Platform | null;
+  region: string | null;
+  regionName: string | null;
+  title: string;
+}) {
+  if (!image && cover) {
+    return (
+      <figure className="flex flex-col items-center" data-game-image="igdb-cover">
+        <div className="relative flex aspect-[4/4.2] w-full items-center justify-center">
+          <span aria-hidden="true" className="absolute inset-[4%] rounded-full bg-[radial-gradient(closest-side,rgb(196_181_253/0.16),transparent)]" />
+          <span aria-hidden="true" className="absolute inset-x-[20%] bottom-[2%] h-5 rounded-[50%] bg-black/70 blur-xl" />
+          <div className="relative aspect-[264/374] h-[94%] overflow-hidden rounded-lg shadow-[0_28px_36px_rgb(0_0_0/0.65)] ring-1 ring-white/10">
+            <Image
+              src={igdbImageUrl(cover.image, "cover_big_2x")}
+              alt={`Cover art for ${title}`}
+              fill
+              sizes="(min-width: 1536px) 17rem, (min-width: 1280px) 14rem, (min-width: 768px) 11rem, 10rem"
+              priority
+              className="object-cover"
+            />
+          </div>
+        </div>
+        <figcaption className="mt-2 max-w-[20rem] text-center text-xs leading-relaxed text-muted-foreground" data-artwork-caption="">
+          Cover art from{" "}
+          <a href={cover.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
+            IGDB.com
+          </a>
+          . Game artwork, not a photo of a specific release.
+        </figcaption>
+      </figure>
+    );
+  }
   if (image) {
     return (
       <figure className="flex flex-col items-center" data-game-image={image.id}>
