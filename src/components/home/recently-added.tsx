@@ -1,73 +1,113 @@
 import { PlugZap } from "lucide-react";
 import Link from "next/link";
+import type { CSSProperties } from "react";
 
 import { GameMedia } from "@/components/shelf/game-media";
 import { frameAspect } from "@/components/shelf/media-shells";
-import { ShelfBoard } from "@/components/shelf/shelf-parts";
-import { formatDay } from "@/features/collection/details";
-import type { RecentCopy } from "@/features/shelf/collection";
+import { Cabinet, ShelfBoard, ShelfLight } from "@/components/shelf/shelf-parts";
+import type { MediaKind } from "@/features/shelf/browse";
+import type { RecentGame } from "@/features/shelf/collection";
 import { shelfFrame } from "@/features/shelf/copies";
 
-/** The height every copy stands in (rem), so mixed shells share one baseline. */
-const STAGE_REM = 7;
-/** A placeholder with no system frame is a little wider than tall, as on a shelf. */
-const PLACEHOLDER_ASPECT = 1.3;
+import { ShelfScroller } from "./shelf-scroller";
 
 /**
- * The collector's newest copies, each standing on its own small ledge in the approved
- * shell art (or the neutral placeholder when its shell isn't decided by the record).
- * `recent` null: they couldn't be read, which is said, never shown as nothing.
+ * Each shell's height on the shelf, relative to the tallest (a Saturn case). The real
+ * items' heights, square-root compressed, so a Game Boy cartridge still reads clearly
+ * beside a disc case while each keeps its own proportions.
  */
-export function RecentlyAdded({ recent }: { recent: RecentCopy[] | null }) {
+const HEIGHT: Record<MediaKind, number> = {
+  "saturn-case": 1,
+  "nes-cart": 0.94,
+  "ps1-case": 0.91,
+  "snes-cart": 0.75,
+  "n64-cart": 0.71,
+  "md-cart": 0.68,
+  "gb-cart": 0.66,
+};
+/** A neutral placeholder (the shell isn't decided by the record): a mid-height box. */
+const PLACEHOLDER = { height: 0.72, aspect: 1.3 };
+
+/** The narrowest column, so a short title still has room under a small cartridge. */
+const MIN_COLUMN = "6.75rem";
+
+function shape(frame: MediaKind | null) {
+  if (!frame) return PLACEHOLDER;
+  return { height: HEIGHT[frame], aspect: frameAspect(frame) };
+}
+
+/**
+ * The collector's most recently added distinct games, newest first, standing side by side
+ * on one continuous shelf in the approved shell art (or the neutral placeholder when the
+ * record doesn't decide the shell). Mixed media share one baseline. When there are more
+ * than fit, the shelf scrolls sideways; the page never does. `recent` null: they couldn't
+ * be read, which is said, never shown as nothing.
+ */
+export function RecentlyAdded({ recent }: { recent: RecentGame[] | null }) {
   if (recent === null) {
     return (
       <p className="flex items-center gap-2 rounded-xl border border-dashed border-white/15 px-4 py-6 text-sm text-muted-foreground">
         <PlugZap aria-hidden="true" className="size-4 shrink-0" />
-        Your recently added copies can&apos;t be shown right now. They&apos;re still in your collection.
+        Your recently added games can&apos;t be shown right now. They&apos;re still in your collection.
       </p>
     );
   }
   return (
-    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-      {recent.map(({ item, platform }) => {
-        const frame = platform ? shelfFrame(platform.slug) : null;
-        const aspect = frame ? frameAspect(frame) : PLACEHOLDER_ASPECT;
-        const facts = [platform?.shortName ?? null, item.region].filter(Boolean).join(" · ");
-        return (
-          <li key={item.key}>
-            <Link
-              href={item.href}
-              className="group flex h-full flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#141319] outline-none transition-colors hover:border-primary/60 focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none"
-            >
-              <div className="shelf-wall relative px-4 pt-5">
-                <div aria-hidden="true" className="absolute inset-x-0 top-0 h-px bg-amber-100/50 shadow-[0_0_10px_2px_rgb(255_190_120/0.25)]" />
-                <div className="flex items-end justify-center" style={{ height: `${STAGE_REM}rem` }}>
-                  <div
-                    className="transition-transform duration-300 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
-                    style={{ width: `min(100%, ${(STAGE_REM * aspect).toFixed(2)}rem)` }}
-                  >
-                    <GameMedia
-                      media={item.media}
-                      frame={frame}
-                      seed={item.labelSeed}
-                      title={item.title}
-                      systemLabel={platform?.shortName ?? ""}
-                      sizes="140px"
-                      interactive
-                    />
-                  </div>
-                </div>
-              </div>
-              <ShelfBoard className="-mx-px" />
-              <div className="flex flex-1 flex-col gap-0.5 px-3 pt-2.5 pb-3">
-                <p className="line-clamp-2 text-sm leading-snug font-medium text-pretty">{item.title}</p>
-                {facts ? <p className="text-xs text-muted-foreground">{facts}</p> : null}
-                {item.added ? <p className="mt-auto pt-1 text-xs text-muted-foreground">Added {formatDay(item.added)}</p> : null}
-              </div>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <Cabinet>
+        <div className="relative [--stage:6.25rem] sm:[--stage:7.5rem] xl:[--stage:8.25rem]">
+          <ShelfLight />
+          <ShelfScroller label="Recently added games">
+            {/* One wrapper as wide as the games (at least the shelf), so the board under them is continuous. */}
+            <div className="relative w-max min-w-full">
+              <ShelfBoard className="absolute inset-x-0 top-[calc(1.75rem+var(--stage))]" />
+              <ul className="flex min-w-full justify-evenly gap-x-4 px-4 pt-7 pb-3 sm:gap-x-5 sm:px-6" data-recent-shelf="">
+                {recent.map(({ item, platform }) => {
+                  const frame = platform ? shelfFrame(platform.slug) : null;
+                  const { height, aspect } = shape(frame);
+                  const facts = [platform?.shortName ?? null, item.region].filter(Boolean).join(" · ");
+                  const width = `calc(var(--stage) * ${(height * aspect).toFixed(3)})`;
+                  return (
+                    <li key={item.key} className="shrink-0 snap-start scroll-mx-4" style={{ width: `max(${width}, ${MIN_COLUMN})` } as CSSProperties}>
+                      <Link
+                        href={item.href}
+                        className="group flex flex-col items-center rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring"
+                        data-recent-game={item.title}
+                      >
+                        <div className="flex w-full items-end justify-center" style={{ height: "var(--stage)" }}>
+                          <div
+                            className="transition-transform duration-300 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+                            style={{ width }}
+                          >
+                            <GameMedia
+                              media={item.media}
+                              frame={frame}
+                              seed={item.labelSeed}
+                              title={item.title}
+                              systemLabel={platform?.shortName ?? ""}
+                              sizes="(min-width: 1280px) 220px, 170px"
+                              interactive
+                            />
+                          </div>
+                        </div>
+                        {/* Room for the board, which is drawn once across the whole shelf. */}
+                        <div aria-hidden="true" className="h-[22px]" />
+                        <div className="w-full px-0.5 pt-2.5 text-center">
+                          <p className="line-clamp-2 text-[13px] leading-snug font-medium text-pretty group-hover:text-primary-text sm:text-sm">{item.title}</p>
+                          {facts ? <p className="mt-0.5 text-xs text-muted-foreground">{facts}</p> : null}
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </ShelfScroller>
+        </div>
+      </Cabinet>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Each game is shown by its newest copy. Shells follow the copy&apos;s recorded system and region; label art is illustrative, not the exact edition.
+      </p>
+    </>
   );
 }

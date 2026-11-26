@@ -34,6 +34,9 @@ const CONSOLES = [
   ["Sega_Mega_Drive", "mega-drive"],
   ["PlayStation_1", "playstation"],
   ["Sega_Saturn", "saturn"],
+  ["Game_Boy_Color", "game-boy-color"],
+  ["Game_Boy_Advance", "game-boy-advance"],
+  ["PlayStation_2", "playstation-2"],
 ];
 
 /**

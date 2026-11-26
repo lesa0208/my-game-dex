@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getMyRecentCopies, getMySystems, type MySystem, type RecentCopy } from "@/features/shelf/collection";
+import { getMyRecentGames, getMySystems, type MySystem, type RecentGame } from "@/features/shelf/collection";
 import { getMyCollectionStatistics } from "@/features/statistics/queries";
 
 // Home (M16): the signed-in collector's own collection at a glance, read with their session
@@ -10,8 +10,10 @@ import { getMyCollectionStatistics } from "@/features/statistics/queries";
 
 /** How many systems Home shows; the rest are one link away on the Systems page. */
 export const HOME_SYSTEMS = 6;
-/** How many recently added copies Home shows. */
-export const HOME_RECENT = 6;
+/** On phones (below 640px) only the first few, so Recently Added is reached quickly. */
+export const HOME_SYSTEMS_PHONE = 3;
+/** How many recently added distinct games stand on Home's shelf. */
+export const HOME_RECENT = 7;
 
 export type HomeCollection = {
   /** Every system the collector has copies on, most copies first, ties by name. */
@@ -20,8 +22,8 @@ export type HomeCollection = {
   copies: number;
   /** Distinct games among the copies; null when they couldn't be counted. */
   games: number | null;
-  /** Newest first; null when they couldn't be read (never shown as "nothing added"). */
-  recent: RecentCopy[] | null;
+  /** Distinct games, newest first; null when they couldn't be read (never shown as "nothing added"). */
+  recent: RecentGame[] | null;
 };
 
 export type HomeOutcome = { ok: true; data: HomeCollection } | { ok: false };
@@ -33,7 +35,7 @@ export async function getHomeCollection(): Promise<HomeOutcome> {
   // An empty collection needs neither the statistics nor the recent copies.
   if (total === 0) return { ok: true, data: { systems: [], copies: 0, games: 0, recent: [] } };
 
-  const [statistics, recent] = await Promise.all([getMyCollectionStatistics(), getMyRecentCopies(HOME_RECENT)]);
+  const [statistics, recent] = await Promise.all([getMyCollectionStatistics(), getMyRecentGames(HOME_RECENT)]);
   return {
     ok: true,
     data: {

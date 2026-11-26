@@ -170,25 +170,48 @@ async function toItems(entries: CollectionEntry[]): Promise<ShelfItem[]> {
   return entries.map((entry) => copyItem(entry, { labels: LABELS, preservedTitle: titles.get(entry.id)?.title ?? null, copyNumber: numbers.get(entry.id) ?? null }));
 }
 
-export type RecentCopy = {
+export type RecentGame = {
+  /** The game's most recently added copy. */
   item: ShelfItem;
-  /** The system the copy is on, as its release or claim names it; null when it can't be read. */
+  /** The system that copy is on, as its release or claim names it; null when it can't be read. */
   platform: { slug: string; name: string; shortName: string } | null;
 };
 
+/** Copies read per page, and the most pages read, when looking for distinct games. */
+const RECENT_PAGE = 50;
+const RECENT_PAGES = 4;
+
 /**
- * Home (M16): the signed-in collector's most recently added copies, newest first. Read
- * through get_my_collection with its "added" sort (the copies' own creation dates), which
- * returns only the caller's copies. Null when it can't be read.
+ * Home (M16): the signed-in collector's most recently added distinct games, newest first,
+ * each placed by (and drawn as) its most recently added copy: a game with several copies
+ * appears once. Read through get_my_collection with its "added" sort (the copies' own
+ * creation dates), which returns only the caller's copies, a page at a time until `limit`
+ * games are found or RECENT_PAGES pages are read. A copy whose game left the catalog
+ * counts as its own game. Null when it can't be read.
  */
-export async function getMyRecentCopies(limit = 6): Promise<RecentCopy[] | null> {
+export async function getMyRecentGames(limit = 7): Promise<RecentGame[] | null> {
   const supabase = await createSupabaseServerClient();
   if (!supabase) return null;
-  const { data, error } = await supabase.rpc("get_my_collection", { p_sort: "added", p_limit: Math.min(Math.max(limit, 1), 24) });
-  if (error || typeof data !== "object" || data === null || !Array.isArray((data as CollectionPage).items)) return null;
-  const entries = (data as CollectionPage).items;
-  const items = await toItems(entries);
-  return entries.map((entry, i) => {
+  const chosen: CollectionEntry[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const { data, error } = await supabase.rpc("get_my_collection", { p_sort: "added", p_limit: RECENT_PAGE, p_cursor: cursor });
+    if (error || typeof data !== "object" || data === null || !Array.isArray((data as CollectionPage).items)) return null;
+    const page = data as CollectionPage;
+    for (const entry of page.items) {
+      const key = entry.game?.id ?? `copy:${entry.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      chosen.push(entry);
+      if (chosen.length === limit) break;
+    }
+    cursor = page.next_cursor;
+    pages += 1;
+  } while (cursor && chosen.length < limit && pages < RECENT_PAGES);
+  const items = await toItems(chosen);
+  return chosen.map((entry, i) => {
     const platform = copyPlatform(entry);
     return { item: items[i]!, platform: platform ? { slug: platform.slug, name: platform.name, shortName: platform.short_name } : null };
   });

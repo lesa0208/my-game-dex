@@ -5,12 +5,15 @@
  *
  * - signed out: the landing, with Create Account, Explore and Sign in, an example shelf, no feed;
  * - a new collector with no copies: "Your collection starts here", no zero statistics;
- * - after their first game, after three systems, and with seven systems (six shown, the rest one
- *   link away): their own counts (checked against the database), their systems' tiles linking to
- *   their shelves, and their newest copies, newest first;
+ * - after their first game, after three systems, and with seven systems (six shown, three on a
+ *   phone, the rest one link away): their own counts (checked against the database), their
+ *   systems' tiles (with the approved console art, the Game Boy Advance's included) linking to
+ *   their shelves, and their seven most recently added distinct games on one continuous shelf,
+ *   newest first, a game with two copies shown once;
  * - another new collector seeing none of it; signing out returning to the landing;
  * - no horizontal scrolling at 390, 768 and 1440 pixels, three, two and one tiles per row,
- *   My Systems in the first desktop viewport, keyboard use, and axe at a phone and a desktop width.
+ *   My Systems in the first desktop viewport, the shelf scrolling sideways on a phone (swipe,
+ *   arrows, Tab) without the page doing so, keyboard use, and axe at a phone and a desktop width.
  *
  * Screenshots go to HOME_SCREENSHOTS (default ~/.my-game-dex/demo/home-screens).
  *
@@ -154,18 +157,38 @@ async function axe(page, label) {
   check(`${label}: no critical or serious axe findings`, found.length === 0, found.join("; "));
 }
 
-/** The My Systems tiles: link, and the top of each on screen. */
+/** The My Systems tiles shown at this width: link, and the top of each on screen. */
 const systemTiles = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll('section[aria-labelledby="home-systems"] ul a')].map((a) => ({ href: a.getAttribute("href"), text: a.innerText.replace(/\s+/g, " "), top: Math.round(a.getBoundingClientRect().top) })),
+    [...document.querySelectorAll('section[aria-labelledby="home-systems"] ul a')]
+      .filter((a) => a.getClientRects().length > 0)
+      .map((a) => ({ href: a.getAttribute("href"), text: a.innerText.replace(/\s+/g, " "), top: Math.round(a.getBoundingClientRect().top), art: Boolean(a.querySelector("span[aria-hidden] img")) })),
   );
 const perRow = (tiles) => tiles.filter((t) => t.top === tiles[0]?.top).length;
 const overview = (page) =>
   page.evaluate(() =>
     Object.fromEntries([...document.querySelectorAll('dl[aria-label="Collection overview"] > div')].map((d) => [d.querySelector("dt").innerText.trim(), d.querySelector("dd").innerText.trim()])),
   );
+const RECENT = 'section[aria-labelledby="home-recent"]';
+/** The games on the Recently Added shelf: link, title, where its media stands, and its column's top. */
 const recentTitles = (page) =>
-  page.evaluate(() => [...document.querySelectorAll('section[aria-labelledby="home-recent"] li a')].map((a) => ({ href: a.getAttribute("href"), title: a.querySelector(":scope > div:last-child > p")?.textContent.trim() })));
+  page.evaluate(
+    (recent) =>
+      [...document.querySelectorAll(`${recent} a[data-recent-game]`)].map((a) => ({
+        href: a.getAttribute("href"),
+        title: a.getAttribute("data-recent-game"),
+        text: a.innerText.replace(/\s+/g, " "),
+        baseline: Math.round(a.querySelector("[data-media]").getBoundingClientRect().bottom),
+        top: Math.round(a.getBoundingClientRect().top),
+      })),
+    RECENT,
+  );
+/** The shelf's scroller: how far it can and does scroll. */
+const shelfScroll = (page) =>
+  page.evaluate((recent) => {
+    const el = document.querySelector(`${recent} [data-shelf-scroller]`);
+    return el ? { overflow: el.scrollWidth - el.clientWidth, left: Math.round(el.scrollLeft) } : null;
+  }, RECENT);
 
 const FEED = ["For You", "Following", "Latest", "No posts yet"];
 const made = [];
@@ -253,6 +276,8 @@ try {
     { query: "tetris", title: "Tetris", platform: "Game Boy", region: "NTSC-J" },
     { query: "ocarina of time", title: "The Legend of Zelda: Ocarina of Time", platform: "Nintendo 64", region: "NTSC-U/C" },
     { query: "pokemon emerald", title: "Pokémon Emerald", platform: "Game Boy Advance", region: "PAL" },
+    // A second copy of a game already owned: the newest copy, but the game stands on the shelf once.
+    { query: "mario kart 64", title: "Mario Kart 64", platform: "Nintendo 64", region: "PAL" },
   ]) {
     check(`${game.title} added`, await addGame(desk, game));
   }
@@ -262,38 +287,62 @@ try {
   ).split("/");
   const shown = await overview(desk);
   check("the overview matches their copies in the database", shown.Systems === db[0] && shown.Games === db[1] && shown.Copies === db[2], `${JSON.stringify(shown)} vs ${db.join("/")}`);
-  check("which are 7 systems, 8 games, 8 copies", db.join("/") === "7/8/8", db.join("/"));
+  check("which are 7 systems, 8 games, 9 copies", db.join("/") === "7/8/9", db.join("/"));
   const seven = await systemTiles(desk);
-  check("six tiles on Home, the N64 (2 copies) first", seven.length === 6 && seven[0].href === "/collection/systems/nintendo-64" && seven[0].text.includes("2 copies"), JSON.stringify(seven.map((t) => t.href)));
+  check("six tiles on Home, the N64 (3 copies) first", seven.length === 6 && seven[0].href === "/collection/systems/nintendo-64" && seven[0].text.includes("3 copies"), JSON.stringify(seven.map((t) => t.href)));
+  const gba = seven.find((t) => t.href === "/collection/systems/game-boy-advance");
+  check("the Game Boy Advance tile shows its approved console art, not the placeholder", Boolean(gba?.art), JSON.stringify(gba));
+  check("every tile shown has console art (each of these systems has an approved image)", seven.every((t) => t.art), JSON.stringify(seven.filter((t) => !t.art).map((t) => t.href)));
   const owned = psql(`select string_agg(distinct p.slug, ',') from public.collection_items c join public.platforms p on p.id = c.claimed_platform_id where c.owner_id = '${alexId}';`).split(",");
   check("every tile is one of their systems, linking to its shelf", seven.every((t) => owned.some((slug) => t.href === `/collection/systems/${slug}`)));
   check("and the link says there are seven", (await desk.locator("main").getByRole("link", { name: "View All 7 Systems" }).getAttribute("href")) === "/collection/systems");
   const recent = await recentTitles(desk);
-  const newest = psql(`select string_agg(g.title, '|' order by c.created_at desc, c.id desc) from (select * from public.collection_items where owner_id = '${alexId}' order by created_at desc, id desc limit 6) c join public.games g on g.id = c.claimed_game_id;`);
-  check("Recently Added: their six newest copies, newest first", recent.map((r) => r.title).join("|") === newest, recent.map((r) => r.title).join("|"));
-  check("each linking to that copy's page", recent.every((r) => /^\/collection\/[0-9a-f-]{36}$/.test(r.href)));
-  const recentText = (await desk.locator('section[aria-labelledby="home-recent"]').innerText()).replace(/\s+/g, " ");
-  check("with system, region and date added", recentText.includes("GBA · PAL") && recentText.includes("GB · NTSC-J") && /Added \w+ \d{1,2}, \d{4}/.test(recentText), recentText.slice(0, 200));
-  const shortcuts = await desk.locator('section[aria-labelledby="home-continue"] a').evaluateAll((as) => as.map((a) => `${a.querySelector("span span")?.textContent}>${a.getAttribute("href")}`).join());
-  check("Continue Collecting: Explore, Collection, Wishlist", shortcuts === "Find Another Game>/explore,View My Collection>/collection,My Wishlist>/collection/wishlist", shortcuts);
+  const newest = psql(
+    `select string_agg(title, '|' order by latest desc) from (select g.title, max(c.created_at) as latest from public.collection_items c join public.games g on g.id = c.claimed_game_id where c.owner_id = '${alexId}' group by g.id, g.title order by latest desc limit 7) t;`,
+  );
+  check("Recently Added: their seven most recently added distinct games, newest first", recent.map((r) => r.title).join("|") === newest, `${recent.map((r) => r.title).join("|")} vs ${newest}`);
+  check("Mario Kart 64, owned twice, stands once, at its newest copy", recent.filter((r) => r.title === "Mario Kart 64").length === 1 && recent[0]?.title === "Mario Kart 64");
+  check("the oldest game, Super Mario World, is the eighth and not on the shelf", recent.length === 7 && !recent.some((r) => r.title === "Super Mario World"));
+  check("each linking to that game's newest copy", recent.every((r) => /^\/collection\/[0-9a-f-]{36}$/.test(r.href)));
+  check("one shelf, with no card around each game", (await desk.locator(`${RECENT} ul[data-recent-shelf]`).count()) === 1 && (await desk.locator(`${RECENT} a[data-recent-game].border`).count()) === 0);
+  check("cartridges and cases stand on one baseline", new Set(recent.map((r) => r.baseline)).size === 1, recent.map((r) => r.baseline).join());
+  const deskScroll = await shelfScroll(desk);
+  check("all seven side by side at 1440, without scrolling", new Set(recent.map((r) => r.top)).size === 1 && deskScroll?.overflow <= 0, JSON.stringify(deskScroll));
+  check("no arrows when everything fits", (await desk.locator("[data-shelf-arrow]").count()) === 0);
+  const recentText = recent.map((r) => r.text).join(" ");
+  check("each with its title, system and region", recentText.includes("Pokémon Emerald GBA · PAL") && recentText.includes("Tetris GB · NTSC-J"), recentText.slice(0, 240));
+  check("the label art is said to be illustrative", (await mainText(desk)).includes("label art is illustrative"));
+  check("no Continue Collecting section", (await desk.locator("#home-continue").count()) === 0 && !(await mainText(desk)).includes("Continue Collecting"));
   const heading = await desk.locator("#home-systems").boundingBox();
   check("My Systems and its first row are in the first 1440×900 view", heading && heading.y < 900 && seven[0].top < 900 - 150, `${heading?.y} / ${seven[0].top}`);
   check("no horizontal scrolling at 1440", await noSideScroll(desk));
   await shoot(desk, "07-seven-systems-desktop-1440", { fullPage: false });
   await shoot(desk, "07-seven-systems-desktop-1440-full");
+  await desk.locator(RECENT).screenshot({ path: join(SHOTS, "11-recently-added-shelf-desktop-1440.png") });
   await axe(desk, "populated, 1440");
+  const sharp = await (await browser.newContext({ viewport: DESKTOP, deviceScaleFactor: 2, colorScheme: "dark", storageState: await desk.context().storageState() })).newPage();
+  await goHome(sharp, "My Systems");
+  await sharp.evaluate(() => document.fonts.ready);
+  await sharp.waitForTimeout(400);
+  await sharp.locator('section[aria-labelledby="home-systems"] a[href="/collection/systems/game-boy-advance"]').screenshot({ path: join(SHOTS, "10-game-boy-advance-tile-closeup.png") });
+  await sharp.context().close();
 
   await desk.setViewportSize(TABLET);
   await desk.waitForTimeout(300);
   const tablet = await systemTiles(desk);
   check("two tiles in a row at 768", perRow(tablet) === 2, String(perRow(tablet)));
   check("no horizontal scrolling at 768", await noSideScroll(desk));
+  check("six tiles at 768", tablet.length === 6, String(tablet.length));
   await shoot(desk, "08-seven-systems-tablet-768");
   await desk.setViewportSize(DESKTOP);
 
   await goHome(phone, "My Systems");
   const mobile = await systemTiles(phone);
+  check("three systems on a phone, the first three", mobile.length === 3 && mobile.map((t) => t.href).join() === seven.slice(0, 3).map((t) => t.href).join(), JSON.stringify(mobile.map((t) => t.href)));
+  check("and the link still names all seven", (await phone.locator("main").getByRole("link", { name: "View All 7 Systems" }).count()) === 1);
   check("one tile a row at 390, nothing cut off", perRow(mobile) === 1 && (await noSideScroll(phone)));
+  const recentTop = await phone.evaluate(() => Math.round(document.querySelector("#home-recent").getBoundingClientRect().top + window.scrollY));
+  check("Recently Added starts within two phone screens", recentTop < 844 * 2, String(recentTop));
   check("the console art stays inside its tile at 390", await phone.evaluate(() =>
     [...document.querySelectorAll('section[aria-labelledby="home-systems"] ul a')].every((a) => {
       const tile = a.getBoundingClientRect();
@@ -304,6 +353,28 @@ try {
   await shoot(phone, "09-seven-systems-mobile-390");
   await shoot(phone, "09-seven-systems-mobile-390-viewport", { fullPage: false });
   await axe(phone, "populated, 390");
+  const phoneShelf = await recentTitles(phone);
+  check("the phone keeps one shelf of seven, not a stack", phoneShelf.length === 7 && new Set(phoneShelf.map((r) => r.top)).size === 1 && new Set(phoneShelf.map((r) => r.baseline)).size === 1);
+  const before = await shelfScroll(phone);
+  check("the shelf scrolls sideways at 390, the page doesn't", before?.overflow > 0 && before.left === 0 && (await noSideScroll(phone)), JSON.stringify(before));
+  check("an arrow shows there's more, and none points back yet", (await phone.locator('[data-shelf-arrow="right"]').count()) === 1 && (await phone.locator('[data-shelf-arrow="left"]').count()) === 0);
+  await phone.locator(RECENT).scrollIntoViewIfNeeded();
+  await phone.locator(RECENT).screenshot({ path: join(SHOTS, "12-recently-added-mobile-390-start.png") });
+  await phone.locator('[data-shelf-arrow="right"]').click();
+  check("the arrow moves the shelf on", await eventually(async () => (await shelfScroll(phone)).left > 100, 3000), JSON.stringify(await shelfScroll(phone)));
+  check("and a back arrow appears", await eventually(async () => (await phone.locator('[data-shelf-arrow="left"]').count()) === 1, 3000));
+  await phone.waitForTimeout(600);
+  await phone.locator(RECENT).screenshot({ path: join(SHOTS, "13-recently-added-mobile-390-scrolled.png") });
+  const scroller = phone.locator(`${RECENT} [data-shelf-scroller]`);
+  await scroller.evaluate((el) => el.scrollTo({ left: 0 }));
+  await eventually(async () => (await shelfScroll(phone)).left === 0, 3000);
+  await phone.locator(`${RECENT} a[data-recent-game]`).last().focus();
+  check("keyboard focus on the last game scrolls it into view", await eventually(async () => (await shelfScroll(phone)).left > 100, 3000));
+  const swipeFrom = await shelfScroll(phone);
+  await scroller.evaluate((el) => el.scrollBy({ left: -200 }));
+  check("and it scrolls back, as a swipe would", await eventually(async () => (await shelfScroll(phone)).left < swipeFrom.left, 3000));
+  check("still no page-wide horizontal scrolling", await noSideScroll(phone));
+  await axe(phone, "populated, 390, shelf scrolled");
 
   section("6. Keyboard and links");
   await goHome(desk, "My Systems");
@@ -324,9 +395,9 @@ try {
   await desk.goto(`${ORIGIN}/collection/systems`, { waitUntil: "networkidle" });
   check("the SNES, seventh by copies, is on Systems, one link away", await eventually(async () => (await desk.locator('main a[href="/collection/systems/snes"]').count()) === 1));
   await goHome(desk, "Recently Added");
-  await desk.locator('section[aria-labelledby="home-recent"] li a').first().click();
+  await desk.locator(`${RECENT} a[data-recent-game]`).first().click();
   await desk.waitForURL(/\/collection\/[0-9a-f-]{36}$/);
-  check("a recent copy opens its copy page", await eventually(async () => (await mainText(desk)).includes("Pokémon Emerald")));
+  check("a game on the shelf opens its newest copy's page", await eventually(async () => (await mainText(desk)).includes("Mario Kart 64")));
 
   section("7. Another new collector");
   const samEmail = email("sam");

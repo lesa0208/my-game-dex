@@ -6,7 +6,7 @@
 export type MediaKind = "snes-cart" | "nes-cart" | "gb-cart" | "n64-cart" | "md-cart" | "ps1-case" | "saturn-case";
 
 /** A console drawing in src/components/shelf/console-art.tsx. */
-export type ConsoleKind = "snes" | "nes" | "gameboy" | "n64" | "megadrive" | "playstation" | "saturn";
+export type ConsoleKind = "snes" | "nes" | "gameboy" | "gbc" | "gba" | "n64" | "megadrive" | "playstation" | "ps2" | "saturn";
 
 /** The regional shells the media art distinguishes (only the SNES cartridge differs). */
 export type Region = "NTSC-U" | "PAL" | "NTSC-J";

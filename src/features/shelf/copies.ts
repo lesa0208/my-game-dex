@@ -30,6 +30,9 @@ const CONSOLES: Record<string, ConsoleKind> = {
   "mega-drive": "megadrive",
   playstation: "playstation",
   "sega-saturn": "saturn",
+  "game-boy-color": "gbc",
+  "game-boy-advance": "gba",
+  "playstation-2": "ps2",
 };
 
 /** The console drawn for a platform, or null when there is no art for it. */

@@ -1,26 +1,22 @@
-import { Compass, Copy, Disc3, Heart, Info, Layers, Library, Plus } from "lucide-react";
+import { Copy, Disc3, Info, Layers, Plus } from "lucide-react";
 import Link from "next/link";
 
 import { Cabinet, ShelfBoard, ShelfFillers, ShelfLight } from "@/components/shelf/shelf-parts";
 import { SystemTile } from "@/components/shelf/system-tile";
 import { Button } from "@/components/ui/button";
-import { HOME_SYSTEMS, type HomeCollection } from "@/features/home/queries";
+import { HOME_SYSTEMS, HOME_SYSTEMS_PHONE, type HomeCollection } from "@/features/home/queries";
 import { cn } from "@/lib/utils";
 
-import { GlowPanel, SectionHeading, type Shortcut, Shortcuts } from "./home-parts";
+import { GlowPanel, SectionHeading } from "./home-parts";
 import { RecentlyAdded } from "./recently-added";
 
 const copies = (n: number) => `${n.toLocaleString("en")} ${n === 1 ? "copy" : "copies"}`;
 
-const SHORTCUTS: readonly Shortcut[] = [
-  { href: "/explore", label: "Find Another Game", description: "Search the catalog and add a copy", icon: Compass },
-  { href: "/collection", label: "View My Collection", description: "Every copy, with filters and sorting", icon: Library },
-  { href: "/collection/wishlist", label: "My Wishlist", description: "The games you're looking for", icon: Heart },
-];
-
 /** Home for a collector with at least one copy: their systems first, then what they added last. */
 export function CollectionHome({ data }: { data: HomeCollection }) {
   const shown = data.systems.slice(0, HOME_SYSTEMS);
+  // Phones show fewer systems, so the link names the total whenever some may be hidden.
+  const allLabel = data.systems.length > HOME_SYSTEMS_PHONE ? `View All ${data.systems.length} Systems` : "View All Systems";
   const shelved = data.systems.reduce((sum, s) => sum + s.copies, 0);
   const unshelved = data.copies - shelved;
   const stats = [
@@ -68,13 +64,13 @@ export function CollectionHome({ data }: { data: HomeCollection }) {
         <SectionHeading
           id="home-systems"
           title="My Systems"
-          link={{ href: "/collection/systems", label: data.systems.length > HOME_SYSTEMS ? `View All ${data.systems.length} Systems` : "View All Systems" }}
+          link={{ href: "/collection/systems", label: allLabel }}
         />
         {shown.length ? (
           <Cabinet>
             <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
-              {shown.map((system) => (
-                <li key={system.slug} className="relative flex flex-col">
+              {shown.map((system, i) => (
+                <li key={system.slug} className={cn("relative flex-col", i < HOME_SYSTEMS_PHONE ? "flex" : "hidden sm:flex")}>
                   <ShelfLight />
                   <div className="relative px-3 pt-7 pb-3 sm:px-4">
                     <SystemTile
@@ -111,11 +107,6 @@ export function CollectionHome({ data }: { data: HomeCollection }) {
       <section aria-labelledby="home-recent" className="mt-8">
         <SectionHeading id="home-recent" title="Recently Added" link={{ href: "/collection", label: "View Collection" }} />
         <RecentlyAdded recent={data.recent} />
-      </section>
-
-      <section aria-labelledby="home-continue" className="mt-8">
-        <SectionHeading id="home-continue" title="Continue Collecting" />
-        <Shortcuts items={SHORTCUTS} labelledBy="home-continue" />
       </section>
     </>
   );

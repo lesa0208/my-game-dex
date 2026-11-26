@@ -1,4 +1,3 @@
-import type { LucideIcon } from "lucide-react";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -40,32 +39,5 @@ export function GlowPanel({ children, className }: { children: ReactNode; classN
       />
       <div className="relative">{children}</div>
     </div>
-  );
-}
-
-export type Shortcut = { href: string; label: string; description: string; icon: LucideIcon };
-
-/** Practical next steps: lighter than the systems, never a copy of the sidebar. */
-export function Shortcuts({ items, labelledBy }: { items: readonly Shortcut[]; labelledBy: string }) {
-  return (
-    <ul aria-labelledby={labelledBy} className="grid gap-2.5 sm:grid-cols-3">
-      {items.map(({ href, label, description, icon: Icon }) => (
-        <li key={href}>
-          <Link
-            href={href}
-            className="group flex h-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3.5 outline-none transition-colors hover:border-primary/50 hover:bg-white/[0.045] focus-visible:ring-3 focus-visible:ring-ring motion-reduce:transition-none"
-          >
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10">
-              <Icon aria-hidden="true" className="size-5 text-primary-text" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium">{label}</span>
-              <span className="block text-xs text-muted-foreground">{description}</span>
-            </span>
-            <ArrowRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground motion-reduce:transition-none" />
-          </Link>
-        </li>
-      ))}
-    </ul>
   );
 }
