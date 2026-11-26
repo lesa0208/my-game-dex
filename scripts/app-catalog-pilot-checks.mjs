@@ -64,7 +64,8 @@ const collectionsBefore = psql("select count(*) || ':' || coalesce(md5(string_ag
 
 function choices(html, slug) {
   const out = [];
-  for (const m of html.matchAll(new RegExp(`href="/games/${slug}\\?([^"]*)"`, "g"))) out.push(Object.fromEntries(new URLSearchParams(decode(m[1]))));
+  // M17b: the fast-add steps are on the step-by-step add page.
+  for (const m of html.matchAll(new RegExp(`href="/games/${slug}/add\\?([^"]*)"`, "g"))) out.push(Object.fromEntries(new URLSearchParams(decode(m[1]))));
   return out;
 }
 const addForm = (html) => forms(html).find((f) => "release_id" in f.hidden && "item_id" in f.hidden && "components" in f.hidden);
@@ -106,7 +107,7 @@ async function gamePages() {
     const mine = published.filter((r) => r.game === g.key);
     const search = await visitor.get(`/explore?q=${encodeURIComponent(g.title)}`);
     check(`${g.title}: found by search`, search.html.includes(`href="/games/${slug}"`));
-    const page = await visitor.get(`/games/${slug}`);
+    const page = await visitor.get(`/games/${slug}/add`);
     check(`${g.title}: its page loads, titled`, page.response.status === 200 && plain(page.html).includes(g.title));
     const platforms = distinct(mine.map((r) => r.platform));
     check(`${g.title}: platform ${platforms.join(", ")} only`, platforms.length === 1 && plain(page.html).includes("2. Region"));
@@ -114,7 +115,7 @@ async function gamePages() {
     const offeredRegions = distinct(choices(page.html, slug).filter((c) => c.region && !c.edition && !["other", "unsure"].includes(c.region)).map((c) => c.region));
     check(`${g.title}: regions ${regions.join(", ")}, as published`, sameSet(offeredRegions, regions), offeredRegions.join(","));
     for (const region of regions) {
-      const step = await visitor.get(`/games/${slug}?platform=${platforms[0]}&region=${region}`);
+      const step = await visitor.get(`/games/${slug}/add?platform=${platforms[0]}&region=${region}`);
       const offered = distinct(choices(step.html, slug).filter((c) => c.region === region && c.edition && !c.release && !["other", "unsure"].includes(c.edition)).map((c) => c.edition));
       const expected = distinct(mine.filter((r) => r.region === region).map(editionKey));
       check(`${g.title} ${region}: editions ${expected.join(", ")}`, sameSet(offered, expected), offered.join(","));
@@ -187,7 +188,7 @@ async function collecting() {
 
   // A copy whose edition the collector doesn't know: kept unidentified, nothing invented.
   const base = ps ?? published[0];
-  const unsurePath = `/games/${slugOf(base.game)}?platform=${base.platform}&region=${base.region}&edition=unsure`;
+  const unsurePath = `/games/${slugOf(base.game)}/add?platform=${base.platform}&region=${base.region}&edition=unsure`;
   const unsure = await user.browser.get(unsurePath);
   const claim = claimForm(unsure.html);
   check("with the edition not sure, no release is offered, only an unidentified copy", Boolean(claim) && !addForm(unsure.html));

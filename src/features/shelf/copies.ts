@@ -208,5 +208,7 @@ export function copyItem(
     details: [identity, copyNumber ? `Copy ${copyNumber.number} of ${copyNumber.total}` : null].filter(Boolean).join(" · "),
     note: labels.status(entry.status),
     format: format?.name ?? null,
+    platformName: platform?.name ?? null,
+    edition: entry.release?.edition_name ?? entry.claim?.edition_name ?? null,
   };
 }

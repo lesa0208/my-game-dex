@@ -315,7 +315,7 @@ try {
 
   section("5. The game's page, then signing out");
   await desk.goto(`${ORIGIN}/games/sonic-the-hedgehog`, { waitUntil: "networkidle" });
-  check("the game's page shows the copy", await eventually(async () => /1 copy|Your cop/i.test(await mainText(desk))));
+  check("the game's page shows the copy", await eventually(async () => (await desk.locator('[data-my-copy-panel="owned"]').count()) === 1 && /Owned: Yes/.test(await mainText(desk))));
   for (const [size, label] of [
     [SMALL, "320"],
     [PHONE, "390"],

@@ -480,8 +480,8 @@ test("the catalog's unknown region is never a claim's region (M12b)", () => {
 });
 
 test("the fast add's addresses keep each step (M12b)", () => {
-  assert.equal(fastAddHref("crash", {}), "/games/crash");
-  assert.equal(fastAddHref("crash", { platform: "snes", region: "pal", edition: "reprint~Platinum" }), "/games/crash?platform=snes&region=pal&edition=reprint%7EPlatinum");
+  assert.equal(fastAddHref("crash", {}), "/games/crash/add");
+  assert.equal(fastAddHref("crash", { platform: "snes", region: "pal", edition: "reprint~Platinum" }), "/games/crash/add?platform=snes&region=pal&edition=reprint%7EPlatinum");
   assert.equal(editionKey(null), "~");
   assert.equal(UNSURE, "unsure");
   assert.equal(OTHER, "other");

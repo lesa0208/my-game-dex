@@ -216,5 +216,6 @@ export function fastAddHref(slug: string, { platform, region, edition, release }
   if (edition) params.set("edition", edition);
   if (release) params.set("release", release);
   const search = params.toString();
-  return search ? `/games/${slug}?${search}` : `/games/${slug}`;
+  // M17b: the step-by-step add has its own page; the game page adds through its dialog.
+  return search ? `/games/${slug}/add?${search}` : `/games/${slug}/add`;
 }

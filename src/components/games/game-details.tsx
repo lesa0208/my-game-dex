@@ -42,7 +42,8 @@ export function PhysicalReleases({ slug, title, overview, renderAction }: { slug
         <h2 id="physical-releases" className="text-lg font-semibold tracking-tight">
           Physical releases
         </h2>
-        <p className="text-sm text-muted-foreground">{overview.releaseCount ? releaseCountLabel(overview.releaseCount) : NO_VERIFIED_RELEASE}</p>
+        {/* Said once: when there's none, the paragraph below says so. */}
+        {overview.releaseCount ? <p className="text-sm text-muted-foreground">{releaseCountLabel(overview.releaseCount)}</p> : null}
       </div>
       {overview.groups.length === 0 ? (
         <div className="mt-3 flex flex-col gap-1.5 text-sm text-muted-foreground">
@@ -51,7 +52,7 @@ export function PhysicalReleases({ slug, title, overview, renderAction }: { slug
             {overview.platforms.length
               ? `The catalog records ${title} on ${overview.platforms.map((p) => p.name).join(", ")}, but none of its editions, regions, publishers, formats or packaging yet.`
               : "The catalog doesn't record any of this game's editions, regions, publishers, formats or packaging yet."}{" "}
-            You can still add your copy below, as your own record.
+            You can still add your copy with Add to Collection, as your own record.
           </p>
         </div>
       ) : (
@@ -89,7 +90,7 @@ export function PhysicalReleases({ slug, title, overview, renderAction }: { slug
                             <p className="mt-0.5 text-xs text-pretty text-muted-foreground">{facts.length ? facts.join(" · ") : "No further details recorded"}</p>
                           </div>
                           <span className="hidden shrink-0 items-center gap-1 text-xs text-primary-text sm:inline-flex">
-                            Choose
+                            Add this release
                             <ChevronRight aria-hidden="true" className="size-3.5" />
                           </span>
                         </Link>

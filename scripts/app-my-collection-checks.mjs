@@ -339,7 +339,7 @@ async function removing({ owner, third }) {
   check("the removed copy's page is unavailable", text(gone.html).includes("This copy isn't available"));
   const again = await owner.browser.submit(path, form, {});
   check("removing it again is safe", location(again.response).endsWith("notice=already_removed") && copiesOf(owner.id, starfall) === before - 1);
-  const game = await owner.browser.get(`/games/starfall-odyssey?release=${starfall}`);
+  const game = await owner.browser.get(`/games/starfall-odyssey/add?release=${starfall}`);
   check("and the game page's count follows", text(game.html).includes("You have 2 copies of this release"));
 }
 
@@ -476,12 +476,12 @@ async function regressions() {
   section("The catalog and adding are unchanged");
   const visitor = new Browser();
   check("search still works signed out", (await visitor.get("/explore?q=starfall")).html.includes("Starfall Odyssey"));
-  const game = await visitor.get(`/games/starfall-odyssey?release=${starfall}`);
+  const game = await visitor.get(`/games/starfall-odyssey/add?release=${starfall}`);
   check("the game page stays public, with sign-in to add", game.response.status === 200 && game.html.includes("Sign in to add to your collection"));
   const user = await collector();
-  const page = await user.browser.get(`/games/starfall-odyssey?release=${starfall}`);
+  const page = await user.browser.get(`/games/starfall-odyssey/add?release=${starfall}`);
   const form = forms(page.html).find((f) => "release_id" in f.hidden && "components" in f.hidden);
-  await user.browser.submit(`/games/starfall-odyssey?release=${starfall}`, form, {});
+  await user.browser.submit(`/games/starfall-odyssey/add?release=${starfall}`, form, {});
   check("adding from the game page still works", copiesOf(user.id, starfall) === 1);
   check("and the copy appears in My Collection", rowIds((await user.browser.get("/collection")).html).length === 1);
 }

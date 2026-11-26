@@ -17,7 +17,7 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { api, appErrorLines, Browser, check, createUser, decode, deleteUsers, formWith, psql, publishableKey, readSession, results, root, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
+import { api, appErrorLines, Browser, check, createUser, decode, deleteUsers, formWith, location, psql, publishableKey, readSession, results, root, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { footprint } from "./lib/footprint.mjs";
 
@@ -131,8 +131,11 @@ async function visitor() {
   const rows = overviewReleases(html);
   check("every published release is its own row in the overview", rows.length === published.length && published.every((id) => rows.includes(id)), `${rows.length} of ${published.length}`);
   check("the overview never merges two regional releases", new Set(rows).size === rows.length);
-  check("the add steps are still there, with their releases", html.includes('id="choose-release"') && html.includes('aria-label="Releases"'));
-  check("their full release list is folded away until something is chosen", /<details[^>]*>s*<summary[^>]*><span id="catalog-releases">/.test(html));
+  // M17b: the game page adds through its quick add; the step-by-step add has its own page.
+  check("the game page has no add steps of its own", !html.includes('id="choose-release"'));
+  const steps = await browser.get("/games/starfall-odyssey/add");
+  check("the step-by-step add is on its own page, with its releases", steps.response.status === 200 && steps.html.includes('id="choose-release"') && steps.html.includes('aria-label="Releases"'));
+  check("their full release list is folded away until something is chosen", /<details[^>]*>s*<summary[^>]*><span id="catalog-releases">/.test(steps.html));
   check("nothing about anyone's collection is shown", !text.includes("Owned:") && !text.includes("Not in your collection") && !text.includes("Your copies"));
   check("no developer or genre is made up", !text.includes("Developer") && !text.includes("Genre"));
 
@@ -144,12 +147,15 @@ async function visitor() {
   check("a game the catalog knows little about still has a page", missing.response.status === 200 && missingText.includes("Quiet Meadow"));
   check("with no first release date or summary invented", !missingText.includes("First released") && !missingText.includes(SUMMARY));
   // M17b: no generated shell in the hero; it says there's no approved artwork yet.
-  check("the hero says there's no artwork, rather than drawing a made-up one", missingText.includes("No artwork for Quiet Meadow yet"));
+  check("the hero says there's no artwork, rather than drawing a made-up one", missingText.includes("No approved artwork for Quiet Meadow yet") && missingText.includes("Artwork not available"));
   check("and its unknown-region release drawn as a placeholder, not a guessed shell", missing.html.includes('data-media="placeholder"') && !/data-media="snes-cart/.test(missing.html));
 
-  const chosen = await browser.get(`/games/starfall-odyssey?platform=snes&region=pal&release=${release("Starfall Odyssey", "snes", "pal", "rom-cartridge")}`);
+  const palRelease = release("Starfall Odyssey", "snes", "pal", "rom-cartridge");
+  const old = await browser.get(`/games/starfall-odyssey?platform=snes&region=pal&release=${palRelease}`);
+  check("an old step address on the game page goes to the step-by-step add, with the same choices", old.response.status === 308 && location(old.response) === `/games/starfall-odyssey/add?platform=snes&region=pal&release=${palRelease}`, `${old.response.status} ${location(old.response)}`);
+  const chosen = await browser.get(`/games/starfall-odyssey/add?platform=snes&region=pal&release=${palRelease}`);
   check("choosing a release from the overview opens it in the add steps", plain(chosen.html).includes("Your release: SNES · PAL"));
-  check("and the overview still lists every release", overviewReleases(chosen.html).length === published.length);
+  check("and the game page with that release still lists every release", overviewReleases((await browser.get(`/games/starfall-odyssey?release=${palRelease}`)).html).length === published.length);
   check("with the add steps' release list open once a release is chosen", !/<details[^>]*>s*<summary[^>]*><span id="catalog-releases">/.test(chosen.html) && chosen.html.includes('<h3 id="catalog-releases"'));
 
   await shot(null, "01-game-visitor", "/games/starfall-odyssey");

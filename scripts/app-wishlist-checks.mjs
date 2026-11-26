@@ -774,7 +774,9 @@ async function inBrowser() {
   const kb = (people.keyboard = await collector("wlk"));
   const context = await contextFor(kb, { width: 1280, height: 900 });
   const page = await context.newPage();
-  await page.goto(`http://127.0.0.1:${PORT}${gamePath(F.neon.slug)}`, { waitUntil: "networkidle" });
+  // M17b: the wishlist panel is in the game page's My Copies tab, opened by its address.
+  await page.goto(`http://127.0.0.1:${PORT}${gamePath(F.neon.slug)}#my-copies`, { waitUntil: "networkidle" });
+  await page.locator("#game-wishlist").waitFor({ state: "visible", timeout: 10000 });
   const summary = page.locator("#game-wishlist").locator("xpath=..").locator(":scope > details > summary");
   await summary.focus();
   const open = await summary.evaluate((el) => el.parentElement.open);
@@ -792,6 +794,8 @@ async function inBrowser() {
   await page.locator('#add-wish button[type="submit"]').click();
   await page.locator('#add-wish [role="status"]').getByText("Already on your wishlist.").waitFor({ timeout: 10000 });
   check("with JavaScript, adding it again says it's already there, and links to it", wishes(kb) === 1 && (await page.locator('#add-wish [role="status"] a').getAttribute("href"))?.startsWith(WISHLIST));
+  // The releases, each with “Want this release”, are in the Physical Releases tab.
+  await page.getByRole("tab", { name: /Physical Releases/ }).click();
   const want = page.getByRole("button", { name: /Want this release: Neon Drift Racing, PS1/ }).first();
   await want.focus();
   await page.keyboard.press("Enter");

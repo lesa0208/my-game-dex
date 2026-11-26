@@ -79,7 +79,6 @@ async function confirmationMail(address, { after = 0, wait = 20000 } = {}) {
 
 const mailCount = async (address) => ((await (await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${address}"`)}`)).json()).messages ?? []).length;
 const mainText = async (page) => (await page.locator("main").innerText().catch(() => "")).replace(/\s+/g, " ");
-const visible = (page, selector) => page.locator(`${selector}:visible`);
 
 async function signUpVia(page, address, pass, confirm = pass) {
   await page.goto(`${ORIGIN}/sign-up`, { waitUntil: "networkidle" });
@@ -96,24 +95,27 @@ async function signInVia(page, address, pass) {
   await page.locator('main button[type="submit"]').click();
 }
 
-/** Adds a copy as a collector does: the header search, the result, the platform if asked, a region, Add. */
+/** Adds a copy as a collector does (M17b): the header search, the result, then the game's Add to Collection: platform, region, Add. */
 async function addGame(page, { query, title, platform, region }) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   await page.locator('header input[type="search"]').fill(query);
   await page.keyboard.press("Enter");
   await page.waitForURL(/\/explore\?/);
-  const result = page.locator("main [data-game-card] h3 a:visible").filter({ hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }).first();
+  const result = page.locator("main [data-game-card] h3 a:visible").filter({ hasText: new RegExp(`^${esc(title)}$`) }).first();
   await result.waitFor({ timeout: 15000 });
   await result.click();
   await page.waitForURL(/\/games\//);
-  const regions = page.getByRole("navigation", { name: "Region", exact: true });
-  if (!(await eventually(async () => (await regions.count()) === 1, 3000))) {
-    await page.getByRole("navigation", { name: "Platform", exact: true }).getByRole("link", { name: new RegExp(`^${platform}\\b`) }).first().click();
-  }
-  await regions.getByRole("link", { name: region, exact: true }).first().click();
-  const add = page.locator("main").getByRole("button", { name: /^Add to collection$/ }).first();
-  await eventually(async () => (await add.count()) === 1);
+  const add = page.locator("main [data-action=add]").first();
+  await add.waitFor({ timeout: 15000 });
   await add.click();
-  return eventually(async () => (await visible(page, 'main [role="status"]').filter({ hasText: "Added" }).count()) > 0);
+  const dialog = page.getByRole("dialog");
+  await eventually(async () => (await dialog.getByRole("radio").count()) > 0);
+  await dialog.locator("fieldset").first().locator("label").filter({ hasText: new RegExp(`^${esc(platform)}`) }).first().click();
+  await dialog.locator("label").filter({ hasText: new RegExp(`^${esc(region)}$`) }).first().click();
+  await dialog.getByRole("button", { name: "Add to collection" }).click();
+  const done = await eventually(async () => (await dialog.locator("[data-quick-add-done]").count()) === 1);
+  await page.keyboard.press("Escape");
+  return done;
 }
 
 const made = [];

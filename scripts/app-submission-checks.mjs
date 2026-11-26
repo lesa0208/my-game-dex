@@ -250,8 +250,8 @@ async function regressions() {
   check("search still works", (await visitor.get("/explore?q=starfall")).html.includes("Starfall Odyssey"));
   const release = psql("select id from public.releases where product_code = 'SNS-ZSFE-USA';");
   const user = await collector();
-  const page = await user.browser.get(`/games/starfall-odyssey?release=${release}`);
-  await user.browser.submit(`/games/starfall-odyssey?release=${release}`, forms(page.html).find((f) => "release_id" in f.hidden && "components" in f.hidden), {});
+  const page = await user.browser.get(`/games/starfall-odyssey/add?release=${release}`);
+  await user.browser.submit(`/games/starfall-odyssey/add?release=${release}`, forms(page.html).find((f) => "release_id" in f.hidden && "components" in f.hidden), {});
   check("adding a published release still works", count(`select count(*) from public.collection_items where owner_id = '${user.id}' and release_id = '${release}';`) === 1);
   const picker = await visitor.get(`/games/starfall-odyssey`);
   check("the release picker lists no submitted release", !plain(picker.html).includes("Players Choice") && !plain(picker.html).includes("Limit 3"));

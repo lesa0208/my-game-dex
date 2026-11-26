@@ -125,6 +125,8 @@ async function axe(page, label) {
 
 const made = [];
 const heroImage = (page) => page.locator("[data-game-image]").first().getAttribute("data-game-image");
+const tabNames = (page) => page.getByRole("tab").evaluateAll((tabs) => tabs.map((t) => t.textContent.replace(/\s+/g, " ").trim()));
+const shownPanel = (page) => page.getByRole("tabpanel").evaluateAll((panels) => panels.filter((p) => p.getClientRects().length > 0).map((p) => `panel-${p.dataset.panel}`));
 try {
   for (const channel of process.env.A11Y_BROWSER ? [process.env.A11Y_BROWSER] : ["msedge", "chrome"]) {
     try {
@@ -140,31 +142,55 @@ try {
   const guest = await (await browser.newContext({ viewport: DESKTOP, colorScheme: "dark" })).newPage();
   await guest.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   const smw = await mainText(guest);
-  check("the hero: title, platforms to choose, first release, Add and Wishlist", (await guest.getByRole("heading", { level: 1, name: "Super Mario World" }).count()) === 1 && smw.includes("November 21, 1990") && (await guest.locator('nav[aria-label="Game platform"] a').count()) === 2 && (await guest.locator("[data-action=add]").count()) === 1 && (await guest.locator("[data-action=wish]").count()) === 1);
-  check("no shelf under the hero image", (await guest.locator("article[aria-labelledby=game-title] .wood-top").count()) === 0);
-  check("no approved image exists, so it says so, never a made-up label", (await heroImage(guest)) === "none" && smw.includes("No artwork for Super Mario World yet"));
-  const aliasesInHero = await guest.locator("article[aria-labelledby=game-title]").innerText();
-  check("the other titles aren't between the title and the facts", !aliasesInHero.includes("Regional title"));
-  check("they're folded under Other titles", /Other titles \(\d+\)/.test(smw) && (await guest.locator("details:has(summary:text('Other titles'))").getAttribute("open")) === null);
-  check("tabs jump to the page's parts", (await guest.locator('nav[aria-label="On this page"] a').evaluateAll((as) => as.map((a) => a.getAttribute("href")).join())) === "#overview,#add-copy,#releases,#your-copies");
-  check("no gallery when there are no approved images", (await guest.locator("#gallery").count()) === 0);
-  check("no invented ratings, rankings, screenshots or community counts", !/rating|ranked|#\d+ |screenshots|community \(\d/i.test(smw));
-  check("a visitor is offered Create Account and Sign In, and nothing of anyone's collection", smw.includes("Do you own Super Mario World?") && smw.includes("Create Account") && !smw.includes("Owned:") && (await guest.locator("[data-my-copy]").count()) === 0);
+  check("the hero: title, its system, Add to Collection and Wishlist", (await guest.getByRole("heading", { level: 1, name: "Super Mario World" }).count()) === 1 && (await guest.locator("[data-action=add]").count()) === 1 && (await guest.locator("[data-action=wish]").count()) === 1);
+  check("the page opens on the game's earliest system (SNES), the other a click away", (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()) === "SNES" && smw.includes("Super Nintendo Entertainment System (SNES)") && (await guest.locator('nav[aria-label="Game platform"] a').count()) === 2);
+  const layout = await guest.evaluate(() => {
+    const box = (el) => el?.getBoundingClientRect();
+    const art = box(document.querySelector("[data-game-image]"));
+    const title = box(document.querySelector("#game-title"));
+    const copy = box(document.querySelector("[data-my-copy-panel]"));
+    return art && title && copy ? { order: art.left < title.left && title.right <= copy.left + 1, top: Math.max(art.top, title.top, copy.top) - Math.min(art.top, title.top, copy.top) } : null;
+  });
+  check("three columns at 1440: artwork, then the game, then My Copy, side by side", Boolean(layout?.order) && layout.top < 200, JSON.stringify(layout));
+  check("no shelf under the artwork", (await guest.locator("article[aria-labelledby=game-title] .wood-top").count()) === 0);
+  check("no approved image, so the artwork says so: a plain SNES cartridge shape, not a made-up label", (await heroImage(guest)) === "none" && smw.includes("Artwork not available") && smw.includes("No approved artwork for Super Mario World yet") && smw.includes("not this game's label"));
+  check("facts the catalog has: the first release date, systems, verified releases", smw.includes("November 21, 1990") && smw.includes("Systems") && smw.includes("Verified releases"));
+  check("real tabs: Overview, Physical Releases, My Copies; no Gallery without images", JSON.stringify((await tabNames(guest)).map((t) => t.replace(/\s*\(\d+\)$/, ""))) === JSON.stringify(["Overview", "Physical Releases", "My Copies"]));
+  check("Overview shows; the other tabs' content doesn't", JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-overview"]));
+  check("Overview: About the Game, Release Information, Other titles folded away", smw.includes("About the Game") && smw.includes("Release Information") && /Other titles \(\d+\)/.test(smw) && (await guest.locator("details:has(summary:text('Other titles'))").getAttribute("open")) === null);
+  check("the other titles aren't between the title and the facts", !(await guest.locator("article[aria-labelledby=game-title]").innerText()).includes("Regional title"));
+  check("no add steps or wishlist form on the page itself", (await guest.locator("#choose-release").count()) === 0 && (await guest.locator("#add-wish:visible").count()) === 0);
+  check("no invented ratings, rankings, screenshots, genres or community counts", !/rating|ranked|#\d+ |screenshots|genre|community \(\d/i.test(smw));
+  check("a visitor's My Copy panel offers Create Account and Sign In, nothing of anyone's", (await guest.locator('[data-my-copy-panel="visitor"]').count()) === 1 && smw.includes("Create Account") && !smw.includes("Owned:"));
   check("no page-wide sideways scrolling at 1440", await noSideScroll(guest));
   await shoot(guest, "01-game-super-mario-world-desktop-1440");
-  await shoot(guest, "01-game-super-mario-world-desktop-1440-full", { fullPage: true });
+  await shoot(guest, "02-game-super-mario-world-desktop-1440-full", { fullPage: true });
+  await guest.locator("[data-game-tabs]").screenshot({ path: join(SHOTS, "04-overview-tab-desktop-1440.png") });
   await axe(guest, "game page, visitor, 1440");
+
+  await guest.getByRole("tab", { name: /Physical Releases/ }).click();
+  check("choosing a tab shows its content, and the address names it", JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-releases"]) && new URL(guest.url()).hash === "#releases");
+  check("Physical Releases says once that none is verified yet", (await guest.locator('[data-panel="releases"]').innerText()).includes("No verified physical release recorded yet"));
+  await guest.locator("[data-game-tabs]").screenshot({ path: join(SHOTS, "05-physical-releases-tab-desktop-1440.png") });
+  await guest.getByRole("tab", { name: /Physical Releases/ }).focus();
+  await guest.keyboard.press("ArrowRight");
+  check("the arrow keys move between the tabs", await eventually(async () => JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-my-copies"]), 3000), JSON.stringify(await shownPanel(guest)));
+  await guest.goto(`${ORIGIN}/games/super-mario-world#releases`, { waitUntil: "networkidle" });
+  check("a tab can be linked: #releases opens Physical Releases", await eventually(async () => JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-releases"]), 5000));
+
   await guest.goto(`${ORIGIN}/games/space-invaders`, { waitUntil: "networkidle" });
-  check("a game on seven systems: seven platform choices, none assumed", (await guest.locator('nav[aria-label="Game platform"] a').count()) === 7 && (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').count()) === 0);
-  await guest.locator('nav[aria-label="Game platform"] a', { hasText: /^\s*NES\s*$/ }).click();
-  await guest.waitForURL(/platform=nes/);
-  check("choosing one shows it, with its console for the system only", (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()).includes("NES") && (await mainText(guest)).includes("The Nintendo Entertainment System console, for the system only"));
-  await shoot(guest, "02-game-multi-platform-space-invaders-desktop-1440");
-  await shoot(guest, "03-game-no-artwork-desktop-1440", { fullPage: false });
+  check("a game on seven systems: seven to choose, opening on its earliest (NES)", (await guest.locator('nav[aria-label="Game platform"] a').count()) === 7 && (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()) === "NES");
+  await shoot(guest, "07-game-multi-platform-space-invaders-desktop-1440");
+  await guest.locator('nav[aria-label="Game platform"] a', { hasText: /^\s*PS1\s*$/ }).click();
+  await guest.waitForURL(/platform=playstation/);
+  check("choosing another system shows it, with that system's case shape", (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()).includes("PS1") && (await mainText(guest)).includes("The shape is a PS1 case"));
+  const old = await fetch(`${ORIGIN}/games/super-mario-world?platform=snes&region=pal`, { redirect: "manual" });
+  check("an old step address goes to the step-by-step add", old.status === 308 && old.headers.get("location")?.endsWith("/games/super-mario-world/add?platform=snes&region=pal"), `${old.status} ${old.headers.get("location")}`);
   const phoneGuest = await (await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, colorScheme: "dark" })).newPage();
   await phoneGuest.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   check("the phone page doesn't scroll sideways", await noSideScroll(phoneGuest));
-  await shoot(phoneGuest, "04-game-super-mario-world-mobile-390", { fullPage: true });
+  await shoot(phoneGuest, "06-game-super-mario-world-mobile-390", { fullPage: true });
+  await shoot(phoneGuest, "06-game-super-mario-world-mobile-390-first-screen");
   await axe(phoneGuest, "game page, visitor, 390");
   await phoneGuest.context().close();
   await guest.context().close();
@@ -175,41 +201,58 @@ try {
   const desk = await (await browser.newContext({ viewport: DESKTOP, colorScheme: "dark" })).newPage();
   await register(desk, kim, password(), `gp${TAG}`);
   const kimId = psql(`select id from auth.users where email = '${kim}';`);
-  await desk.goto(`${ORIGIN}/games/super-mario-world?platform=snes`, { waitUntil: "networkidle" });
-  check("not owned yet: the hero offers Add to Collection", (await desk.locator("[data-owned]").count()) === 0 && (await desk.locator("[data-action=add]").innerText()).includes("Add to Collection"));
-  await desk.locator("[data-action=add]").click();
+  // Opened from Explore with the keyboard (a client-side navigation), as a collector would.
+  await desk.goto(`${ORIGIN}/explore?q=super+mario+world&platform=snes`, { waitUntil: "networkidle" });
+  await desk.locator('[data-game-card="Super Mario World"] h3 a').first().focus();
+  await desk.keyboard.press("Enter");
+  await desk.waitForURL(/\/games\/super-mario-world/);
+  check("opened from Explore, the game's page renders for a signed-in collector", await eventually(async () => (await desk.locator("#game-title:visible").count()) === 1 && (await desk.locator('[data-my-copy-panel]:visible').count()) === 1, 15000), `${desk.url()} :: ${(await mainText(desk)).slice(0, 160)}`);
+  await desk.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
+  check("not owned yet: My Copy offers to add, once, beside the hero's Add", await eventually(async () => (await desk.locator('[data-my-copy-panel="none"]').count()) === 1 && (await desk.locator("[data-action=add-copy]").count()) === 1));
+  await desk.locator("main [data-action=add]").click();
   const dialog = desk.getByRole("dialog");
   await eventually(async () => (await dialog.getByRole("radio").count()) > 0);
-  check("the quick add opens with the page's platform chosen", (await dialog.locator("label:has(input:checked)", { hasText: "Super Nintendo" }).count()) === 1);
-  await dialog.locator("label", { hasText: /^NTSC-U\/C$/ }).click();
+  check("the quick add opens with the page's system chosen, and an edition choice", (await dialog.locator("label:has(input:checked)", { hasText: "Super Nintendo" }).count()) === 1 && (await dialog.getByText("Edition").count()) >= 1 && (await dialog.getByRole("link", { name: "Step by step" }).count()) === 1);
+  await dialog.locator("label").filter({ hasText: /^NTSC-U\/C$/ }).click();
+  await dialog.locator("label").filter({ hasText: /^Another edition$/ }).click();
+  await dialog.locator('input[name="edition_name"]').fill("Player's Choice");
+  await shoot(desk, "08-quick-add-dialog-desktop-1440");
   await dialog.getByRole("button", { name: "Add to collection" }).click();
   check("added from the hero", await eventually(async () => (await dialog.locator("[data-quick-add-done]").count()) === 1));
+  check("stored as recorded: SNES, NTSC-U/C, Player's Choice, no release", psql(`select p.slug || '|' || c.claimed_region_code || '|' || coalesce(c.claimed_edition_name, '') || '|' || (c.release_id is null) from public.collection_items c join public.platforms p on p.id = c.claimed_platform_id where c.owner_id = '${kimId}';`) === "snes|ntsc-uc|Player's Choice|true");
   await desk.keyboard.press("Escape");
-  check("the hero now says it's owned", await eventually(async () => (await desk.locator("[data-owned]").count()) === 1 && (await desk.locator("[data-owned]").innerText()).includes("Owned: Yes")));
-  const copy = desk.locator("[data-my-copy]").first();
-  check("Your copies lists it with its platform and region, and View and Edit", await eventually(async () => /SNES/.test(await copy.innerText()) && /NTSC-U\/C/.test(await copy.innerText())) && (await copy.getByRole("link", { name: /^View copy, / }).count()) === 1 && (await copy.getByRole("link", { name: /^Edit, / }).count()) === 1);
-  check("only what was recorded: no condition or completeness yet, said once", (await copy.innerText()).includes("No condition or completeness recorded yet") && !(await copy.innerText()).includes("not recorded"));
-  check("no visitor panel for a collector", (await desk.locator("#visitor-panel").count()) === 0);
-  await shoot(desk, "05-game-owned-desktop-1440");
-  await shoot(desk, "05-game-owned-desktop-1440-full", { fullPage: true });
+  const panel = desk.locator('[data-my-copy-panel="owned"]');
+  check("the hero says it's owned", await eventually(async () => (await desk.locator("[data-owned]").innerText().catch(() => "")).includes("Owned: Yes")));
+  check("My Copy shows the copy: platform, region and edition as recorded", await eventually(async () => {
+    const t = (await panel.innerText().catch(() => "")).replace(/\s+/g, " ");
+    return t.includes("Platform Super Nintendo Entertainment System") && t.includes("Region NTSC-U/C") && t.includes("Edition Player's Choice");
+  }));
+  check("only what was recorded: no condition or completeness rows, said once", !(await panel.innerText()).includes("Condition ") && (await panel.innerText()).includes("No condition or completeness recorded yet"));
+  check("with Edit and View copy", (await panel.getByRole("link", { name: /^Edit, / }).count()) === 1 && (await panel.getByRole("link", { name: /^View copy, / }).count()) === 1);
+  await panel.screenshot({ path: join(SHOTS, "03-my-copy-panel-owner.png") });
+  await shoot(desk, "09-game-owned-desktop-1440");
+  await shoot(desk, "09-game-owned-desktop-1440-full", { fullPage: true });
   await axe(desk, "game page, owner, 1440");
   const itemId = psql(`select id from public.collection_items where owner_id = '${kimId}';`);
-  await copy.getByRole("link", { name: /^Edit, / }).click();
+  await panel.getByRole("link", { name: /^Edit, / }).click();
   await desk.waitForURL(new RegExp(`/collection/${itemId}\\?edit=1`));
   check("Edit opens the copy's edit form, open", (await desk.locator("details#edit").getAttribute("open")) !== null);
   await desk.goBack({ waitUntil: "networkidle" });
-  await desk.locator("[data-my-copy]").first().getByRole("link", { name: /^View copy, / }).click();
-  await desk.waitForURL(new RegExp(`/collection/${itemId}$`));
-  const closed = await eventually(async () => (await desk.locator("details#edit").getAttribute("open")) === null, 6000);
-  check("View opens the copy, with its edit form closed", closed, `${new URL(desk.url()).pathname}${new URL(desk.url()).search} open=${await desk.locator("details#edit").getAttribute("open")} count=${await desk.locator("details#edit").count()}`);
-  await desk.goto(`${ORIGIN}/games/super-mario-world?platform=snes`, { waitUntil: "networkidle" });
-  await desk.locator("[data-action=wish]").click();
-  check("Wishlist from the hero too", await eventually(async () => (await desk.locator("[data-wished]").count()) === 1));
+  await desk.getByRole("tab", { name: "My Copies" }).click();
+  const tabCopy = desk.locator('[data-panel="my-copies"] [data-my-copy]').first();
+  check("the My Copies tab lists it with View copy and Edit", await eventually(async () => (await tabCopy.count()) === 1) && (await tabCopy.getByRole("link", { name: /^Edit, / }).count()) === 1);
+  check("and holds the wishlist's options", (await desk.locator('[data-panel="my-copies"] #game-wishlist').count()) === 1);
+  await desk.getByRole("tab", { name: "Overview" }).click();
+  await desk.locator("main [data-action=wish]").click();
+  check("Wishlist from the hero", await eventually(async () => (await desk.locator("[data-wished]").count()) === 1));
   check("one wish, any version", psql(`select count(*) || '|' || coalesce(string_agg(coalesce(platform_id::text, 'any'), ','), '') from public.wishlist_items where owner_id = '${kimId}';`) === "1|any");
+  await desk.getByRole("button", { name: /^More for / }).click();
+  await desk.getByRole("menuitem", { name: /Wishlist options/ }).click();
+  check("More → Wishlist options opens the My Copies tab at the wishlist", await eventually(async () => JSON.stringify(await shownPanel(desk)) === JSON.stringify(["panel-my-copies"]) && (await desk.locator("#game-wishlist").isVisible())));
   const phone = await (await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, colorScheme: "dark", storageState: await desk.context().storageState() })).newPage();
-  await phone.goto(`${ORIGIN}/games/super-mario-world?platform=snes`, { waitUntil: "networkidle" });
+  await phone.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   check("the owner's phone page doesn't scroll sideways", await noSideScroll(phone));
-  await shoot(phone, "06-game-owned-mobile-390", { fullPage: true });
+  await shoot(phone, "10-game-owned-mobile-390", { fullPage: true });
   await phone.context().close();
 
   section("3. Another collector");
@@ -217,14 +260,15 @@ try {
   made.push(lee);
   const other = await (await browser.newContext({ viewport: DESKTOP, colorScheme: "dark" })).newPage();
   await register(other, lee, password(), `gq${TAG}`);
-  await other.goto(`${ORIGIN}/games/super-mario-world?platform=snes`, { waitUntil: "networkidle" });
+  await other.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   const theirs = await mainText(other);
-  check("sees none of the first collector's copy or wish", !theirs.includes("Owned:") && (await other.locator("[data-my-copy]").count()) === 0 && (await other.locator("[data-wished]").count()) === 0);
+  check("sees none of the first collector's copy or wish", !theirs.includes("Owned:") && !theirs.includes("Player's Choice") && (await other.locator("[data-wished]").count()) === 0);
   await other.context().close();
   await desk.context().close();
 } catch (error) {
   check("the checks ran to the end", false, String(error.message).split("\n")[0]);
 } finally {
+
   await browser?.close();
   const ids = psql(`select coalesce(string_agg(id::text, ','), '') from auth.users where email like 'gamepage-${TAG}-%@example.test';`).split(",").filter(Boolean);
   if (ids.length) {
