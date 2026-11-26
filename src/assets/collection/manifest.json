@@ -60,6 +60,16 @@
         "height": 75.76
       }
     },
+    "gba": {
+      "width": 600,
+      "height": 380,
+      "label": {
+        "left": 17.5,
+        "top": 30.7,
+        "width": 65.65,
+        "height": 51.46
+      }
+    },
     "playstation": {
       "width": 600,
       "height": 532,

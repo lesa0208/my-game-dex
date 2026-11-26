@@ -2,6 +2,7 @@ import type { StaticImageData } from "next/image";
 
 import manifest from "@/assets/collection/manifest.json";
 import gameBoy from "@/assets/collection/media/game-boy.webp";
+import gba from "@/assets/collection/media/gba.webp";
 import megaDrive from "@/assets/collection/media/mega-drive.webp";
 import n64 from "@/assets/collection/media/n64.webp";
 import nes from "@/assets/collection/media/nes.webp";
@@ -34,6 +35,7 @@ const IMAGES: Record<ShellKey, StaticImageData> = {
   nes,
   n64,
   "game-boy": gameBoy,
+  gba,
   "mega-drive": megaDrive,
   playstation,
   saturn,
@@ -45,6 +47,7 @@ const RADIUS: Record<ShellKey, string> = {
   nes: "2%",
   n64: "9% 9% 4% 4% / 6% 6% 3% 3%",
   "game-boy": "3%",
+  gba: "3% / 5%",
   "mega-drive": "2%",
   playstation: "0.5%",
   saturn: "0.5%",
@@ -61,6 +64,7 @@ const KEYS: Record<MediaKind, readonly ShellKey[]> = {
   "nes-cart": ["nes"],
   "n64-cart": ["n64"],
   "gb-cart": ["game-boy"],
+  "gba-cart": ["gba"],
   "md-cart": ["mega-drive"],
   "ps1-case": ["playstation"],
   "saturn-case": ["saturn"],

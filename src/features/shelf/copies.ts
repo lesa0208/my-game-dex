@@ -30,6 +30,9 @@ const CONSOLES: Record<string, ConsoleKind> = {
   "mega-drive": "megadrive",
   playstation: "playstation",
   "sega-saturn": "saturn",
+  "game-boy-color": "gbc",
+  "game-boy-advance": "gba",
+  "playstation-2": "ps2",
 };
 
 /** The console drawn for a platform, or null when there is no art for it. */
@@ -43,6 +46,7 @@ const FRAMES: Record<string, MediaKind> = {
   nes: "nes-cart",
   "nintendo-64": "n64-cart",
   "game-boy": "gb-cart",
+  "game-boy-advance": "gba-cart",
   "mega-drive": "md-cart",
   playstation: "ps1-case",
   "sega-saturn": "saturn-case",
@@ -86,6 +90,9 @@ export function physicalMedia(platform: string, format: string | null, region: s
       return generic ? { kind: "n64-cart", region: "NTSC-U" } : null;
     case "game-boy":
       return format === null || format === "game-boy-game-pak" ? { kind: "gb-cart", region: "NTSC-U" } : null;
+    case "game-boy-advance":
+      // One cartridge shell in every region.
+      return format === null || format === "gba-game-pak" ? { kind: "gba-cart", region: "NTSC-U" } : null;
     case "mega-drive":
       // The art is the Genesis and PAL shell; Japanese cartridges have a different one.
       return generic && (region === NORTH_AMERICA || region === PAL) ? { kind: "md-cart", region: "NTSC-U" } : null;

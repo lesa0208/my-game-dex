@@ -1,10 +1,13 @@
 import Image, { type StaticImageData } from "next/image";
 
 import gameBoy from "@/assets/collection/consoles/game-boy.webp";
+import gameBoyAdvance from "@/assets/collection/consoles/game-boy-advance.webp";
+import gameBoyColor from "@/assets/collection/consoles/game-boy-color.webp";
 import megaDrive from "@/assets/collection/consoles/mega-drive.webp";
 import n64 from "@/assets/collection/consoles/n64.webp";
 import nes from "@/assets/collection/consoles/nes.webp";
 import playstation from "@/assets/collection/consoles/playstation.webp";
+import playstation2 from "@/assets/collection/consoles/playstation-2.webp";
 import saturn from "@/assets/collection/consoles/saturn.webp";
 import snes from "@/assets/collection/consoles/snes.webp";
 import type { ConsoleKind } from "@/features/shelf/browse";
@@ -18,8 +21,11 @@ const CONSOLES: Record<ConsoleKind, StaticImageData> = {
   nes,
   n64,
   gameboy: gameBoy,
+  gbc: gameBoyColor,
+  gba: gameBoyAdvance,
   megadrive: megaDrive,
   playstation,
+  ps2: playstation2,
   saturn,
 };
 

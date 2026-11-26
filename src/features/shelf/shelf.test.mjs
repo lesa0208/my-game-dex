@@ -132,8 +132,15 @@ test("one-shell platforms draw their shell in every region", () => {
 test("consoles and shelf frames exist only for platforms with art", () => {
   assert.equal(consoleFor("sega-saturn"), "saturn");
   assert.equal(consoleFor("nintendo-64"), "n64");
+  assert.equal(consoleFor("game-boy-advance"), "gba");
+  assert.equal(consoleFor("game-boy-color"), "gbc");
+  assert.equal(consoleFor("playstation-2"), "ps2");
   assert.equal(consoleFor("gamecube"), null);
   assert.equal(shelfFrame("playstation"), "ps1-case");
+  assert.equal(shelfFrame("game-boy-advance"), "gba-cart");
+  assert.deepEqual(physicalMedia("game-boy-advance", null, "pal"), { kind: "gba-cart", region: "NTSC-U" });
+  assert.deepEqual(physicalMedia("game-boy-advance", "gba-game-pak", null), { kind: "gba-cart", region: "NTSC-U" });
+  assert.equal(physicalMedia("game-boy-advance", "nintendo-ds-game-card", null), null);
   assert.equal(shelfFrame("xbox"), null);
 });
 

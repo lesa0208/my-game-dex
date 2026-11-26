@@ -99,6 +99,7 @@
     "demo:catalog": "node scripts/catalog-demo.mjs",
     "app:demo-catalog-checks": "node scripts/app-demo-catalog-checks.mjs",
     "app:sign-up-journey-checks": "node scripts/app-sign-up-journey-checks.mjs",
+    "app:home-checks": "node scripts/app-home-checks.mjs",
     "app:sign-up-checks": "node scripts/app-sign-up-checks.mjs"
   },
   "dependencies": {
