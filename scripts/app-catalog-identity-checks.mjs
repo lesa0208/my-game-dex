@@ -177,9 +177,9 @@ async function gameDetails() {
   const text = plain(page.html);
   people.gameText = text;
   check("the page loads for a visitor", page.response.status === 200, `${page.response.status}`);
-  check("its facts give the platform and the message", text.includes("Platform Super Nintendo Entertainment System") && text.includes(`Physical releases ${MESSAGE}`));
-  check("the releases section says none is recorded, and invents no edition, region, publisher, format or packaging",
-    text.includes(`${MESSAGE}. The catalog records ${CONFIRMED} on Super Nintendo Entertainment System, but none of its editions, regions, publishers, formats or packaging yet.`));
+  check("its facts give the platform and the message", text.includes("System Super Nintendo Entertainment System") && text.includes(`Physical releases ${MESSAGE}`));
+  check("the releases section says briefly that none is recorded, and that a copy can still be added",
+    text.includes(`${MESSAGE} You can still add your copy. It's kept without a specific release.`));
   check("no release row, product code or shell is shown", !/Want this release|SNS-|NTSC-U\/C release|PAL release/.test(text) && !resolveSegments(page.html).includes('data-media="snes-cart"'));
   check("its first release date is the catalog's", text.includes("First released") && text.includes("1994"));
   const awaiting = await visitor.get(`/games/${encodeURIComponent(psql(`select coalesce(slug, 'zqx-awaiting-evidence') from public.games where id = ${sql(G.awaiting.id)};`))}`);

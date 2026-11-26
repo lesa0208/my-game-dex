@@ -7,8 +7,8 @@ import { Suspense } from "react";
 import { gameHref } from "@/components/catalog/release-picker";
 import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-details";
-import { GameArtwork, GameIdentity, HeroBackdrop } from "@/components/games/game-hero";
-import { GameFactsCard, HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, MyCopyPanelSkeleton, OverviewTab } from "@/components/games/game-sections";
+import { GameArtwork, GameHeading, GameKeyFacts, HeroBackdrop } from "@/components/games/game-hero";
+import { GameFactsCard, HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, MyCopyPanelSkeleton, OverviewTab, ReleasesEmptyAction } from "@/components/games/game-sections";
 import { type GameTab, GameTabs } from "@/components/games/game-tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
@@ -84,7 +84,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const game = { id: picker.game.id, slug: picker.game.slug, title: picker.game.title };
 
   const tabs: GameTab[] = [
-    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} summary={summary} overview={overview} publisher={publisher} /> },
+    { id: "overview", label: "Overview", content: <OverviewTab game={picker.game} summary={summary} /> },
     {
       id: "releases",
       label: "Physical Releases",
@@ -94,6 +94,11 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
           slug={picker.game.slug}
           title={picker.game.title}
           overview={overview}
+          emptyAction={
+            <Suspense fallback={null}>
+              <ReleasesEmptyAction game={game} platform={platformSlug} returnPath={here} />
+            </Suspense>
+          }
           renderAction={(release) => (
             <Suspense fallback={null}>
               <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />
@@ -154,30 +159,30 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
       <article aria-labelledby="game-title" className="relative mt-4 overflow-hidden rounded-3xl border border-white/10 bg-[#100e16]">
         <HeroBackdrop platform={platformSlug} />
         <div className="relative grid gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_19rem] xl:gap-8 xl:p-8 2xl:grid-cols-[minmax(0,1fr)_21rem]">
-          <div className="grid items-center gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] 2xl:gap-10">
-            <div className="mx-auto w-full max-w-[18rem] md:max-w-none">
+          {/* A phone reads the title and the actions first, then the artwork (smaller), then
+              the facts; from md up the artwork stands on the left of both, centred. */}
+          <div className="grid gap-y-5 [grid-template-areas:'head'_'art'_'facts'] md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:grid-rows-[1fr_auto_auto_1fr] md:gap-x-8 md:gap-y-0 md:[grid-template-areas:'art_.'_'art_head'_'art_facts'_'art_.'] xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] 2xl:gap-x-10">
+            <div className="mx-auto w-full max-w-[14rem] [grid-area:art] md:max-w-none md:self-center">
               <GameArtwork image={image} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
             </div>
-            <GameIdentity
-              game={picker.game}
-              overview={overview}
-              platform={platform}
-              publisher={publisher}
-              actions={
-                <Suspense fallback={<HeroActionsSkeleton />}>
-                  <HeroActions
-                    game={game}
-                    platform={platformSlug}
-                    returnPath={here}
-                    autoOpen={intent}
-                  />
-                </Suspense>
-              }
-            />
+            <div className="min-w-0 [grid-area:head]">
+              <GameHeading
+                game={picker.game}
+                platform={platform}
+                actions={
+                  <Suspense fallback={<HeroActionsSkeleton />}>
+                    <HeroActions game={game} platform={platformSlug} returnPath={here} autoOpen={intent} />
+                  </Suspense>
+                }
+              />
+            </div>
+            <div className="min-w-0 [grid-area:facts] md:mt-6">
+              <GameKeyFacts game={picker.game} overview={overview} platform={platform} publisher={publisher} />
+            </div>
           </div>
           <aside aria-label="Your collection" className="min-w-0 lg:self-start">
             <Suspense fallback={<MyCopyPanelSkeleton />}>
-              <MyCopyPanel game={game} platform={platformSlug} returnPath={here} />
+              <MyCopyPanel game={game} platform={platformSlug} platforms={overview.platforms} returnPath={here} />
             </Suspense>
           </aside>
         </div>
@@ -186,7 +191,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] xl:gap-8 2xl:grid-cols-[minmax(0,1fr)_21rem]">
         <GameTabs tabs={tabs} />
         <div className="min-w-0 lg:sticky lg:top-22">
-          <GameFactsCard game={picker.game} overview={overview} publisher={publisher} />
+          <GameFactsCard game={picker.game} overview={overview} />
         </div>
       </div>
     </>

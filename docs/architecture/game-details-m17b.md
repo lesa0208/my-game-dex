@@ -6,20 +6,22 @@ The game page (`src/app/(app)/games/[slug]/page.tsx`) follows the product owner'
 
 | Where | What |
 | --- | --- |
-| Hero, left | **Artwork** (`GameArtwork`): the real cartridge or case from an approved image, with its source and terms. Until one exists, the chosen system's own cartridge or case shape, with its label area plainly marked "Artwork not available" and a caption saying it's the system's shape, not the game's label. A spotlight, no shelf |
-| Hero, centre | **The game** (`GameIdentity`): title, the chosen system with its console, ownership, **Add to Collection** and **Wishlist**, a "More" menu, the facts the catalog has (first release, systems, verified releases, the publisher when every release agrees), and the game's other systems to switch to |
+| Hero, left | **Artwork** (`GameArtwork`): the real cartridge or case from an approved image, with its source and terms. Until one exists, the chosen system's own cartridge or case shape, with its label area plainly marked "Artwork not available" and a short caption ("No approved artwork yet. Shown: a generic SNES cartridge."). A spotlight, no shelf |
+| Hero, centre | **The game** (`GameHeading`): title, the chosen system with its console, ownership, **Add to Collection** and **Wishlist**, a "More" menu. Then **key facts** (`GameKeyFacts`): first release, the publisher when every release agrees, verified releases; and the game's other systems to switch to |
 | Hero, right | **My Copy** (`MyCopyPanel`): see below |
-| Below | **Tabs** (`GameTabs`) beside a **Game Details** card (`GameFactsCard`): systems, first release, publisher, verified releases, regions, other titles |
+| Below | **Tabs** (`GameTabs`) beside a **Game Details** card (`GameFactsCard`): each system by its full name with its own verified releases, and the regions of those releases |
 
 Behind the hero, violet and lamp-warm light, and the chosen system's console blurred far behind (`HeroBackdrop`): the system's approved art as scenery, never the game's.
 
 The system shown is the one in the address (`?platform=`), else the game's earliest system by the platform's own release year (Super Mario World opens on the SNES, not the Game Boy Advance).
 
-On a phone everything stacks: artwork, the game and its actions, My Copy, the tabs, Game Details.
+**Each fact is said once.** The hero has the facts a collector looks for first; Game Details has the detail behind them; Overview has the summary and other titles. Nothing is dropped from the model.
+
+On a phone the hero reads title, system and actions first, then the artwork (smaller, about 14rem), then the key facts; then My Copy, the tabs and Game Details. From md up the artwork stands on the left of the title and facts (CSS grid areas, one markup).
 
 ## My Copy
 
-- **Owned:** the first copy's recorded platform, region, edition, condition and completeness (only what was recorded), with **Edit** (the copy's edit form, opened) and **View copy**. Other copies follow as short lines, with "See all N copies" opening the My Copies tab.
+- **Owned:** the first copy as a card: the approved generic shell for its platform and region (label recess blank), captioned "Illustration: SNES cartridge" so it never reads as the game's label or the collector's own item; its recorded platform, region and edition; its completeness and condition as badges ("Condition not recorded" when neither was); **Edit** (the copy's edit form, opened) and **View copy** as two buttons. Other copies follow as short lines, with "See all N copies" opening the My Copies tab.
 - **Not owned:** "Not in your collection yet" and **Add your copy** (the same quick add).
 - **Visitor:** **Create Account** and **Sign In**.
 
@@ -31,8 +33,8 @@ Real tabs (Radix: tablist, tab and tabpanel roles; the arrow keys, Home and End)
 
 | Tab | What |
 | --- | --- |
-| Overview | About the Game (the catalog's summary, or that it has none), Release Information (first release, publisher when known, the systems with their verified releases), and Other titles folded away |
-| Physical Releases | The verified releases by platform, each with "Add this release" (the step-by-step add with it chosen) and "Want this release"; said once when there are none |
+| Overview | About the Game (the catalog's summary, or a quiet "No description yet."), and Other titles folded away |
+| Physical Releases | The verified releases by platform, each with "Add this release" (the step-by-step add with it chosen) and "Want this release". With none: one short line and the way to still add a copy (the quick add, or Sign in to add), kept without a release |
 | My Copies | The collector's copies, each with View copy and Edit; then the wishlist's options (any version, a platform, a region or one release, priority and note) |
 | Gallery | Only when approved images exist |
 
@@ -65,11 +67,11 @@ The registry is empty until images with permission exist. No migration.
 | Title, platform with console | Built, with the other systems as chips |
 | In My Collection, Wishlist, "…" | In your collection, Add to Collection / Add another, Wishlist, More |
 | Rating, "#12 Top SNES" | Not shown: no ratings or rankings exist |
-| Release date, publisher stats | First release, systems, verified releases, publisher when known |
+| Release date, publisher stats | First release, publisher when known, verified releases |
 | Genre chips | The game's systems instead; the catalog has no genres |
 | Tabs: Overview, Releases, My Copies, Gallery, Community | Overview, Physical Releases, My Copies, Gallery (only with images); no Community (no data) |
 | About the Game, screenshot carousel | About the Game; no screenshots (none sourced) |
-| My Copy card with cartridge photo, Edit | My Copy with recorded facts, Edit and View copy; no photo (collector photos aren't a feature yet) |
+| My Copy card with cartridge photo, Edit | My Copy with a generic shell illustration (captioned as such), recorded facts and badges, Edit and View copy; no photo of the copy (collector photos aren't a feature yet) |
 | Game Details table (developer, regional dates) | Game Details with the catalog's facts; no developer (not recorded), regional dates per verified release |
 | Scene backdrop (room, lamp, figure) | Violet and lamp light with the system's console blurred behind; no scene imagery |
 
@@ -77,9 +79,10 @@ The registry is empty until images with permission exist. No migration.
 
 `MGD_STACK=demo npm run app:game-page-checks` runs on the demo preview with collectors registered through the sign-up page and Mailpit:
 
-- **Layout:** the three columns at 1440 and the default system.
+- **Layout:** the three columns at 1440, the default system, and on a phone the title and actions before the artwork.
+- **No repetition:** the first release date said once; Game Details without the hero's facts.
 - **Artwork and content:** the honest artwork fallback; the tabs (choosing, the arrow keys, linking by hash); Overview; and that there are no add steps or wishlist form on the page.
-- **Adding:** adding from the hero with an edition, the My Copy panel with Edit and View, the My Copies tab with the wishlist, and Wishlist and its options.
+- **Adding:** adding from the hero with an edition, completeness and condition; the My Copy panel (illustration caption, badges, nothing private, compact) with Edit and View; the empty Physical Releases' add; the My Copies tab with the wishlist, and Wishlist and its options.
 - **Systems and old links:** a multi-platform game, and the redirect of old step addresses.
 - **Privacy and quality:** another collector seeing nothing of the first's; a phone; axe.
 

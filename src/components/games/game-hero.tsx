@@ -1,4 +1,4 @@
-import { Building2, CalendarDays, Disc3, Layers } from "lucide-react";
+import { Building2, CalendarDays, Disc3 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -94,58 +94,69 @@ export function GameArtwork({ image, platform, region, regionName, title }: { im
           </div>
         )}
       </div>
-      <figcaption className="mt-1 max-w-[20rem] text-center text-xs leading-relaxed text-muted-foreground">
-        No approved artwork for {title} yet{platform && shell ? `. The shape is a ${platform.shortName} ${frame?.endsWith("case") ? "case" : "cartridge"}, not this game's label` : ""}.
+      <figcaption className="mt-1 max-w-[20rem] text-center text-xs leading-relaxed text-muted-foreground" data-artwork-caption="">
+        <span className="sr-only">{title}: </span>No approved artwork yet{platform && shell ? `. Shown: a generic ${platform.shortName} ${frame?.endsWith("case") ? "case" : "cartridge"}` : ""}.
       </figcaption>
     </figure>
   );
 }
 
 /**
- * The centre: the title, the chosen system, the collector's actions (`actions`, streamed
- * on their own), the facts the catalog has, and the game's other systems to switch to.
+ * The centre's top: the title, the chosen system and the collector's actions (`actions`,
+ * streamed on their own). On a phone this comes first, before the artwork.
  */
-export function GameIdentity({ game, overview, platform, publisher, actions }: { game: ReleasePicker["game"]; overview: Overview; platform: Platform | null; publisher: string | null; actions: ReactNode }) {
-  const platforms = overview.platforms;
+export function GameHeading({ game, platform, actions }: { game: ReleasePicker["game"]; platform: Platform | null; actions: ReactNode }) {
   const kind = platform ? consoleFor(platform.slug) : null;
-  const facts = [
-    game.firstRelease ? { icon: CalendarDays, label: game.firstRelease.precision === "year" ? "First released" : "First release date", value: formatCatalogDate(game.firstRelease) } : null,
-    platforms.length ? { icon: Layers, label: platforms.length === 1 ? "System" : "Systems", value: String(platforms.length) } : null,
-    { icon: Disc3, label: "Verified releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount).replace(/ releases?$/, "") : "None yet" },
-    publisher ? { icon: Building2, label: "Publisher", value: publisher } : null,
-  ].filter((fact) => fact !== null);
-
   return (
     <div className="min-w-0">
-      <h1 id="game-title" className="text-4xl leading-[1.05] font-bold tracking-tight text-balance text-white sm:text-5xl lg:text-[2.6rem] 2xl:text-5xl">
+      <h1 id="game-title" className="text-[2.1rem] leading-[1.05] font-bold tracking-tight text-balance text-white sm:text-5xl lg:text-[2.6rem] 2xl:text-5xl">
         {game.title}
       </h1>
       {platform ? (
-        <p className="mt-3 flex items-center gap-2.5 text-base text-foreground/85 sm:text-lg">
-          {kind ? <ConsoleArt kind={kind} sizes="48px" className="h-7 w-10 shrink-0" /> : null}
+        <p className="mt-2.5 flex items-center gap-2.5 text-[15px] text-foreground/85 sm:mt-3 sm:text-lg">
+          {kind ? <ConsoleArt kind={kind} sizes="48px" className="h-6 w-9 shrink-0 sm:h-7 sm:w-10" /> : null}
           <span>
-            {platform.name} <span className="text-muted-foreground">({platform.shortName})</span>
+            <span className="sm:hidden">{platform.shortName}</span>
+            <span className="max-sm:hidden">
+              {platform.name} <span className="text-muted-foreground">({platform.shortName})</span>
+            </span>
           </span>
         </p>
       ) : null}
       {game.kind !== "game" ? <p className="mt-1 text-sm text-muted-foreground">{gameKindLabel(game.kind)}</p> : null}
 
-      <div className="mt-6">{actions}</div>
+      <div className="mt-5 sm:mt-6">{actions}</div>
+    </div>
+  );
+}
 
-      {facts.length ? (
-        <dl className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-x-6 gap-y-4 border-y border-white/[0.08] py-4">
-          {facts.map(({ icon: Icon, label, value }) => (
-            // The label is read first; the value is shown above it, the icon beside both.
-            <div key={label} className="relative flex flex-col-reverse justify-center pl-9 leading-tight">
-              <dt className="text-xs text-muted-foreground">{label}</dt>
-              <dd className="text-base font-semibold text-white">
-                <Icon aria-hidden="true" className="absolute top-1/2 left-0 size-6 -translate-y-1/2 text-primary-text" />
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
+/**
+ * The centre's foot: the facts a collector looks for first (the first release, the
+ * publisher when the releases agree, how many releases are verified) and the game's other
+ * systems to switch to. Each fact is said here only: the rest is in Game Details.
+ */
+export function GameKeyFacts({ game, overview, platform, publisher }: { game: ReleasePicker["game"]; overview: Overview; platform: Platform | null; publisher: string | null }) {
+  const platforms = overview.platforms;
+  const facts = [
+    game.firstRelease ? { icon: CalendarDays, label: "First released", value: formatCatalogDate(game.firstRelease) } : null,
+    publisher ? { icon: Building2, label: "Publisher", value: publisher } : null,
+    { icon: Disc3, label: "Verified releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount).replace(/ releases?$/, "") : "None yet" },
+  ].filter((fact) => fact !== null);
+
+  return (
+    <div className="min-w-0">
+      <dl className="grid grid-cols-2 gap-x-5 gap-y-4 border-y border-white/[0.08] py-4 sm:grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] sm:gap-x-6">
+        {facts.map(({ icon: Icon, label, value }) => (
+          // The label is read first; the value is shown above it, the icon beside both.
+          <div key={label} className="relative flex flex-col-reverse justify-center pl-8 leading-tight sm:pl-9">
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="text-sm font-semibold text-white sm:text-base">
+              <Icon aria-hidden="true" className="absolute top-1/2 left-0 size-5 -translate-y-1/2 text-primary-text sm:size-6" />
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
 
       {platforms.length > 1 ? (
         <nav aria-label="Game platform" className="mt-5">

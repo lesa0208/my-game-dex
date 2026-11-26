@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Disc3 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -35,7 +35,20 @@ function releaseFacts(release: PickerRelease) {
  * regional release, an edition and a variant are separate rows. Choosing one opens it
  * in the add steps below, with platform, region and edition already chosen.
  */
-export function PhysicalReleases({ slug, title, overview, renderAction }: { slug: string; title: string; overview: Overview; renderAction?: (release: PickerRelease) => ReactNode }) {
+export function PhysicalReleases({
+  slug,
+  title,
+  overview,
+  renderAction,
+  emptyAction,
+}: {
+  slug: string;
+  title: string;
+  overview: Overview;
+  renderAction?: (release: PickerRelease) => ReactNode;
+  /** With no verified release: how the viewer can still add their copy (streamed on its own). */
+  emptyAction?: ReactNode;
+}) {
   return (
     <section aria-labelledby="physical-releases" className="rounded-2xl border border-white/10 bg-card/60 p-5 sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -46,14 +59,16 @@ export function PhysicalReleases({ slug, title, overview, renderAction }: { slug
         {overview.releaseCount ? <p className="text-sm text-muted-foreground">{releaseCountLabel(overview.releaseCount)}</p> : null}
       </div>
       {overview.groups.length === 0 ? (
-        <div className="mt-3 flex flex-col gap-1.5 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">{NO_VERIFIED_RELEASE}.</p>
-          <p>
-            {overview.platforms.length
-              ? `The catalog records ${title} on ${overview.platforms.map((p) => p.name).join(", ")}, but none of its editions, regions, publishers, formats or packaging yet.`
-              : "The catalog doesn't record any of this game's editions, regions, publishers, formats or packaging yet."}{" "}
-            You can still add your copy with Add to Collection, as your own record.
-          </p>
+        // Said briefly, once: no release is verified yet, and a copy can still be added.
+        <div className="mt-4 flex flex-col items-start gap-4 rounded-xl border border-dashed border-white/12 bg-white/[0.02] p-4 sm:flex-row sm:items-center sm:p-5" data-releases-empty="">
+          <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary-text">
+            <Disc3 className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1 text-sm">
+            <p className="font-medium text-foreground">{NO_VERIFIED_RELEASE}</p>
+            <p className="mt-0.5 text-muted-foreground">You can still add your copy. It&apos;s kept without a specific release.</p>
+          </div>
+          {emptyAction ? <div className="shrink-0 empty:hidden">{emptyAction}</div> : null}
         </div>
       ) : (
         <div className="mt-4 flex flex-col gap-5">
