@@ -83,11 +83,18 @@ function Arrow({ side, visible, onClick }: { side: "left" | "right"; visible: bo
       aria-label={side === "left" ? "Show earlier games on the shelf" : "Show more games on the shelf"}
       data-shelf-arrow={side}
       className={cn(
-        "absolute top-[calc(1.75rem+var(--stage,6rem)/2)] flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/70 text-foreground shadow-lg backdrop-blur-sm outline-none hover:bg-black/85 focus-visible:ring-3 focus-visible:ring-ring",
-        side === "left" ? "left-2" : "right-2",
+        // A 44px tap target, transparent; the small visible circle sits on the board's
+        // front edge, below the games and above their titles.
+        "group/arrow absolute top-[calc(1.75rem+var(--stage,6rem)+15px)] flex size-11 -translate-y-1/2 items-center justify-center rounded-full outline-none",
+        side === "left" ? "left-0" : "right-0",
       )}
     >
-      <Icon aria-hidden="true" className="size-5" />
+      <span
+        data-shelf-arrow-face=""
+        className="flex size-7 items-center justify-center rounded-full border border-white/20 bg-black/55 text-foreground/85 group-hover/arrow:bg-black/75 group-hover/arrow:text-foreground group-focus-visible/arrow:ring-3 group-focus-visible/arrow:ring-ring"
+      >
+        <Icon aria-hidden="true" className="size-4" />
+      </span>
     </button>
   );
 }

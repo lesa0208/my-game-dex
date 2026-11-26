@@ -76,6 +76,7 @@ const MEDIA = [
     mirror: { axis: 566.3, from: 878, to: 947, notch: true },
   },
   { file: "Sega_Mega_Drive_Genesis_Cartridge", name: "mega-drive", label: [235, 258, 609, 480], plastic: "#3a3a40", lift: 0.95, mirror: { axis: 539, from: 976, to: 1014 } },
+  { file: "Game_Boy_Advance_Cartridge", name: "gba", label: [212, 406, 612, 308], plastic: "#696970", lift: 0.9 },
 ];
 
 /**

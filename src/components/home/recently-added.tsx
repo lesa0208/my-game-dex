@@ -24,6 +24,7 @@ const HEIGHT: Record<MediaKind, number> = {
   "n64-cart": 0.71,
   "md-cart": 0.68,
   "gb-cart": 0.66,
+  "gba-cart": 0.48,
 };
 /** A neutral placeholder (the shell isn't decided by the record): a mid-height box. */
 const PLACEHOLDER = { height: 0.72, aspect: 1.3 };
@@ -106,7 +107,7 @@ export function RecentlyAdded({ recent }: { recent: RecentGame[] | null }) {
         </div>
       </Cabinet>
       <p className="mt-2 text-xs text-muted-foreground">
-        Each game is shown by its newest copy. Shells follow the copy&apos;s recorded system and region; label art is illustrative, not the exact edition.
+        Illustrative artwork. Actual editions may differ.
       </p>
     </>
   );

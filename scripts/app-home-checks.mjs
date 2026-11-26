@@ -309,9 +309,11 @@ try {
   const deskScroll = await shelfScroll(desk);
   check("all seven side by side at 1440, without scrolling", new Set(recent.map((r) => r.top)).size === 1 && deskScroll?.overflow <= 0, JSON.stringify(deskScroll));
   check("no arrows when everything fits", (await desk.locator("[data-shelf-arrow]").count()) === 0);
+  const emerald = await desk.locator(`${RECENT} a[data-recent-game="Pokémon Emerald"] [data-media]`).getAttribute("data-media");
+  check("Pokémon Emerald stands in the approved GBA cartridge shell, not the placeholder", emerald === "gba-cart:NTSC-U", String(emerald));
   const recentText = recent.map((r) => r.text).join(" ");
   check("each with its title, system and region", recentText.includes("Pokémon Emerald GBA · PAL") && recentText.includes("Tetris GB · NTSC-J"), recentText.slice(0, 240));
-  check("the label art is said to be illustrative", (await mainText(desk)).includes("label art is illustrative"));
+  check("the artwork is said to be illustrative", (await mainText(desk)).includes("Illustrative artwork. Actual editions may differ."));
   check("no Continue Collecting section", (await desk.locator("#home-continue").count()) === 0 && !(await mainText(desk)).includes("Continue Collecting"));
   const heading = await desk.locator("#home-systems").boundingBox();
   check("My Systems and its first row are in the first 1440×900 view", heading && heading.y < 900 && seven[0].top < 900 - 150, `${heading?.y} / ${seven[0].top}`);
@@ -358,11 +360,32 @@ try {
   const before = await shelfScroll(phone);
   check("the shelf scrolls sideways at 390, the page doesn't", before?.overflow > 0 && before.left === 0 && (await noSideScroll(phone)), JSON.stringify(before));
   check("an arrow shows there's more, and none points back yet", (await phone.locator('[data-shelf-arrow="right"]').count()) === 1 && (await phone.locator('[data-shelf-arrow="left"]').count()) === 0);
+  const clear = async () =>
+    phone.evaluate((recent) => {
+      const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const covered = [...document.querySelectorAll(`${recent} [data-media] > div, ${recent} a[data-recent-game] p`)].map((el) => el.getBoundingClientRect());
+      return [...document.querySelectorAll("[data-shelf-arrow-face]")].every((face) => {
+        const r = face.getBoundingClientRect();
+        // The visible button may not cover any game's artwork or title.
+        return !covered.some((c) => c.width > 0 && overlaps(r, c));
+      });
+    }, RECENT);
+  check("the arrow covers no game artwork or title", await clear());
   await phone.locator(RECENT).scrollIntoViewIfNeeded();
+  const target = await phone.evaluate(() => {
+    const button = document.querySelector('[data-shelf-arrow="right"]');
+    const r = button.getBoundingClientRect();
+    const face = button.querySelector("[data-shelf-arrow-face]").getBoundingClientRect();
+    const hit = (dx, dy) => button.contains(document.elementFromPoint(r.left + r.width / 2 + dx, r.top + r.height / 2 + dy));
+    return { size: Math.round(face.width), target: Math.round(Math.min(r.width, r.height)), tap: hit(0, 0) && hit(-20, 0) && hit(0, -20) && hit(0, 20) };
+  });
+  check("small arrow, still a 44px tap target", target.size <= 32 && target.target >= 44 && target.tap, JSON.stringify(target));
   await phone.locator(RECENT).screenshot({ path: join(SHOTS, "12-recently-added-mobile-390-start.png") });
   await phone.locator('[data-shelf-arrow="right"]').click();
   check("the arrow moves the shelf on", await eventually(async () => (await shelfScroll(phone)).left > 100, 3000), JSON.stringify(await shelfScroll(phone)));
   check("and a back arrow appears", await eventually(async () => (await phone.locator('[data-shelf-arrow="left"]').count()) === 1, 3000));
+  await phone.waitForTimeout(600);
+  check("neither arrow covers any game artwork or title once scrolled", await clear());
   await phone.waitForTimeout(600);
   await phone.locator(RECENT).screenshot({ path: join(SHOTS, "13-recently-added-mobile-390-scrolled.png") });
   const scroller = phone.locator(`${RECENT} [data-shelf-scroller]`);
