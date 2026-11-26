@@ -4,7 +4,7 @@
 -- Calls the importer functions as their owner, as 17_catalog_import does. Synthetic data.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(34);
+select plan(35);
 
 create function pg_temp.u(s text) returns uuid language sql immutable as $$ select ('00000000-0000-0000-0000-0000000000' || s)::uuid $$;
 create function pg_temp.try(p_sql text) returns text language plpgsql as $t$
@@ -64,7 +64,7 @@ select is(pg_temp.try($$select catalog_import.enrichment_candidates('wikidata', 
 select catalog_import.stage_records(pg_temp.run('r1'), pg_temp.u('e1'), $$[
   {"entity_type": "game", "external_id": "1001", "payload": {"id": "1001", "slug": "star-voyage", "name": "Zqx Star Voyage", "url": "https://www.igdb.com/games/star-voyage",
     "summary": "A synthetic summary from the provider.", "genres": ["Shooter", "Arcade"], "themes": ["Science fiction"], "developers": ["Zqx Studio"], "publishers": ["Zqx Publishing"],
-    "first_release_date": "1992-04-03", "platforms": ["Super Nintendo Entertainment System"], "cover": {"image_id": "co1zqx", "width": 264, "height": 374},
+    "first_release_date": "1992-04-03", "platforms": ["Super Nintendo Entertainment System"], "platform_ids": [19, "x"], "cover": {"image_id": "co1zqx", "width": 264, "height": 374},
     "screenshots": [{"image_id": "sc1zqx", "width": 889, "height": 500}, {"image_id": "../etc/passwd"}], "fetched_at": "2026-11-26T00:00:00Z"}},
   {"entity_type": "game", "external_id": "1002", "payload": {"id": "1002", "slug": "moon-patrol", "name": "Zqx Moon Patrol"}, "review_reason": "IGDB match needs review: ambiguous"}
 ]$$::jsonb, null);
@@ -110,6 +110,7 @@ select is(pg_temp.meta('zqx-star-voyage') ->> 'summary', 'A synthetic summary fr
 select is((pg_temp.meta('zqx-star-voyage') ->> 'provider') || '/' || (pg_temp.meta('zqx-star-voyage') ->> 'provider_name') || '/' || (pg_temp.meta('zqx-star-voyage') ->> 'url'),
   'igdb/IGDB/https://www.igdb.com/games/star-voyage', 'labelled with its provider and the IGDB page');
 select is(pg_temp.meta('zqx-star-voyage') -> 'genres', '["Shooter", "Arcade"]'::jsonb, 'its genres');
+select is(pg_temp.meta('zqx-star-voyage') -> 'platform_ids', '[19]'::jsonb, 'the IGDB platform ids it lists, an invalid one dropped');
 select is(pg_temp.meta('zqx-star-voyage') ->> 'cover', null, 'no cover while media aren''t cleared');
 select private.record_provider_media('igdb', true, 'M18a test: local display');
 select is(pg_temp.meta('zqx-star-voyage') -> 'cover' ->> 'image_id', 'co1zqx', 'the cover once media are cleared');
@@ -122,8 +123,10 @@ select private.record_provider_clearance('igdb', false, 'https://api-docs.igdb.c
 select is((select count(*)::int from public.get_game_provider_metadata(array[pg_temp.g('zqx-star-voyage')])), 0, 'withdrawing the provider hides everything');
 
 -- 8. Access.
-select ok(has_function_privilege('anon', 'public.get_game_provider_metadata(uuid[])', 'execute') and has_function_privilege('authenticated', 'public.get_game_provider_metadata(uuid[])', 'execute'),
-  'anyone may read provider metadata of published games');
+-- 20261222100000: IGDB's records as stored are the app server's only (no redistribution through our API).
+select is((select string_agg(r, ',' order by r) from unnest(array['anon', 'authenticated', 'service_role', 'catalog_importer']) r
+  where has_function_privilege(r, 'public.get_game_provider_metadata(uuid[])', 'execute')), 'service_role',
+  'only the app server (service_role) may read provider metadata: no public client, signed in or not');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role', 'catalog_importer']) r
   where has_function_privilege(r, 'private.record_provider_media(text,boolean,text)', 'execute')), 0, 'no client role or the importer can clear media');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, unnest(array[

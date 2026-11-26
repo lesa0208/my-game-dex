@@ -45,7 +45,7 @@
     "collection:test": "node --experimental-strip-types --no-warnings --test src/features/collection/collection.test.mjs",
     "media:add": "node --experimental-strip-types --no-warnings scripts/game-image-add.mjs",
     "igdb": "node scripts/igdb.mjs",
-    "igdb:test": "node --test scripts/igdb.test.mjs",
+    "igdb:test": "node --experimental-strip-types --no-warnings --test scripts/igdb.test.mjs",
     "media:test": "node --experimental-strip-types --no-warnings --test src/features/media/game-images.test.mjs",
     "shelf:test": "node --experimental-strip-types --no-warnings --test src/features/shelf/shelf.test.mjs",
     "statistics:test": "node --experimental-strip-types --no-warnings --test src/features/statistics/statistics.test.mjs",

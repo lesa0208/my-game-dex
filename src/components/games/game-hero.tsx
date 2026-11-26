@@ -74,11 +74,11 @@ export function GameArtwork({
           </div>
         </div>
         <figcaption className="mt-2 max-w-[20rem] text-center text-xs leading-relaxed text-muted-foreground" data-artwork-caption="">
-          Cover art from{" "}
+          Game artwork from{" "}
           <a href={cover.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
             IGDB.com
           </a>
-          . Game artwork, not a photo of a specific release.
+          . General game artwork, not verified for a specific platform, region or edition.
         </figcaption>
       </figure>
     );

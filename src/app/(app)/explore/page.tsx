@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { CatalogSearchForm, CatalogSearchFormSkeleton } from "@/components/catalog/catalog-search-form";
 import { type CardContext, GameGrid } from "@/components/explore/game-card";
+import { coverFitsPlatform } from "@/features/catalog/provider-images";
 import { getProviderMetadata } from "@/features/catalog/provider-metadata";
 import { SystemChips as SystemChipRow } from "@/components/explore/system-chips";
 import { HomeContainer, SectionHeading } from "@/components/home/home-parts";
@@ -90,7 +91,8 @@ function Unavailable() {
 async function cardContext(items: SearchResult[], params: ExploreParams, intent: Intent): Promise<CardContext> {
   const ids = items.map((item) => item.game.id);
   const [{ viewer, owned, wished }, metadata] = await Promise.all([getExploreContext(ids), getProviderMetadata(ids)]);
-  const covers = new Map([...metadata].flatMap(([id, m]) => (m.cover ? [[id, m.cover] as const] : [])));
+  // A game-level cover only where it can stand for the game: with a platform chosen, only on one IGDB lists.
+  const covers = new Map([...metadata].flatMap(([id, m]) => (m.cover && (!params.platform || coverFitsPlatform(m.platformIds, params.platform)) ? [[id, m.cover] as const] : [])));
   return { viewer, owned, wished, platform: params.platform, returnPath: exploreHref(params), intent, covers };
 }
 

@@ -190,7 +190,7 @@ export function GameGrid({ items, context, label }: { items: SearchResult[]; con
         <a href="https://www.igdb.com" className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
           IGDB.com
         </a>
-        . Game artwork, not a photo of a specific release.
+        . General game artwork, not a specific platform, region or release.
       </p>
     ) : null}
     </>

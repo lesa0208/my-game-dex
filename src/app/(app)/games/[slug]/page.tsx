@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
 import { GameWishlist, GameWishlistSkeleton, WantRelease } from "@/components/wishlist/game-wishlist";
 import { getPlatformYears } from "@/features/catalog/discover";
+import { coverFitsPlatform } from "@/features/catalog/provider-images";
 import { getProviderMetadata, igdbImageUrl } from "@/features/catalog/provider-metadata";
 import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { LICENSE_LABELS } from "@/features/media/game-images";
@@ -160,11 +161,11 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
               </ul>
               {provider?.screenshots.length ? (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Screenshots from{" "}
+                  Game screenshots from{" "}
                   <a href={provider.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
                     IGDB.com
                   </a>
-                  .
+                  , not tied to a platform or release.
                 </p>
               ) : null}
               </>
@@ -185,7 +186,7 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
               the facts; from md up the artwork stands on the left of both, centred. */}
           <div className="grid gap-y-5 [grid-template-areas:'head'_'art'_'facts'] md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:grid-rows-[1fr_auto_auto_1fr] md:gap-x-8 md:gap-y-0 md:[grid-template-areas:'art_.'_'art_head'_'art_facts'_'art_.'] xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] 2xl:gap-x-10">
             <div className="mx-auto w-full max-w-[14rem] [grid-area:art] md:max-w-none md:self-center">
-              <GameArtwork image={image} cover={provider?.cover ? { image: provider.cover, url: provider.url } : null} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
+              <GameArtwork image={image} cover={provider?.cover && coverFitsPlatform(provider.platformIds, platformSlug) ? { image: provider.cover, url: provider.url } : null} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
             </div>
             <div className="min-w-0 [grid-area:head]">
               <GameHeading

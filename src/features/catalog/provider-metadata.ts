@@ -9,8 +9,10 @@ export { igdbImageUrl, type ProviderImage } from "./provider-images";
 
 /**
  * M18a: provider metadata (IGDB) for published games, read through
- * public.get_game_provider_metadata as anon, like the rest of the public catalog. It is the
- * provider's, labelled as such wherever it's shown: never the catalog's own verified facts.
+ * public.get_game_provider_metadata with the server's SUPABASE_SECRET_KEY: only service_role may
+ * call it (migration 20261222100000), so no browser or public Supabase client can fetch IGDB's
+ * records as stored (IGDB's terms rule out redistributing its data through our own API). It is
+ * the provider's, labelled as such wherever it's shown: never the catalog's own verified facts.
  *
  * Images have two gates: the database returns them only while the provider's media are cleared
  * (private.record_provider_media), and this deployment shows them only when MGD_PROVIDER_MEDIA
@@ -32,6 +34,8 @@ export type ProviderMetadata = {
   publishers: string[];
   firstReleaseDate: string | null;
   platforms: string[];
+  /** The IGDB platform ids IGDB lists for the game: a game-level cover is shown only on these. */
+  platformIds: number[];
   cover: ProviderImage | null;
   screenshots: ProviderImage[];
 };
@@ -77,6 +81,7 @@ export function parseProviderMetadata(rows: unknown, allowMedia: (provider: stri
         publishers: strings(r.publishers),
         firstReleaseDate: typeof r.first_release_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.first_release_date) ? r.first_release_date : null,
         platforms: strings(r.platforms),
+        platformIds: Array.isArray(r.platform_ids) ? r.platform_ids.filter((n): n is number => Number.isInteger(n) && n > 0) : [],
         cover: media ? image(r.cover) : null,
         screenshots: media && Array.isArray(r.screenshots) ? r.screenshots.map(image).filter((i): i is ProviderImage => i !== null) : [],
       },
@@ -91,7 +96,8 @@ export async function getProviderMetadata(gameIds: readonly string[]): Promise<M
   cacheTag(CATALOG_TAG);
   const ids = [...new Set(gameIds.filter((id) => UUID.test(id)))].slice(0, 200);
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  // The server's secret key: read here, on the server, and sent only to the database.
+  const key = process.env.SUPABASE_SECRET_KEY;
   if (!ids.length || !url || !key) return new Map();
   const response = await fetch(`${url.replace(/\/$/, "")}/rest/v1/rpc/get_game_provider_metadata`, {
     method: "POST",

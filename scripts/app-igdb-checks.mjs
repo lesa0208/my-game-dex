@@ -6,9 +6,13 @@
  *      stand-in (within the rate limit), decides, stages and attaches. A game whose only anchor
  *      is a remake stays held. No game is created or changed; IGDB ids sit beside Wikidata's.
  *      Run again, it attaches nothing twice.
- *   3. The game page and Explore show IGDB's description, metadata and cover, credited, with the
- *      catalog's own summary first; a held game shows nothing from IGDB. The browser never
- *      contacts IGDB or Twitch: images come from the app's own optimizer. axe on the page.
+ *   3. Security: no public Supabase client (the publishable key, signed out or signed in) can
+ *      call the provider read or reach the provider records; the server's secret key can.
+ *   4. The game page and Explore show IGDB's description, metadata and cover, credited, with the
+ *      catalog's own summary first; a held game shows nothing from IGDB. A game-level cover is
+ *      shown only on a platform IGDB lists for the game, captioned as general game artwork; on
+ *      another platform the honest fallback stays. The browser never contacts IGDB or Twitch:
+ *      images come from the app's own optimizer. axe on the page.
  *
  *   npm run build && MGD_STACK=scratch node scripts/app-igdb-checks.mjs
  */
@@ -23,7 +27,7 @@ import { promisify } from "node:util";
 
 import { chromium } from "playwright-core";
 
-import { appErrorLines, check, psql, results, root, section, startApp, stopApp } from "./app-harness.mjs";
+import { api, appErrorLines, check, createUser, deleteUsers, psql, publishableKey, results, root, section, service, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 
 if (process.env.MGD_STACK !== "scratch") {
@@ -32,7 +36,7 @@ if (process.env.MGD_STACK !== "scratch") {
 }
 
 const axeSource = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
-const GAMES = ["starfall-odyssey", "quiet-meadow", "neon-drift-racing"];
+const GAMES = ["starfall-odyssey", "quiet-meadow", "neon-drift-racing", "the-crystal-warden"];
 const PLATFORM_IDS = { nes: 18, snes: 19, "mega-drive": 29, "game-boy": 33, "game-boy-color": 22, "game-boy-advance": 24, "nintendo-64": 4, playstation: 7, "playstation-2": 8, "sega-saturn": 32 };
 const PLATFORM_NAMES = { 18: "Nintendo Entertainment System", 19: "Super Nintendo Entertainment System", 29: "Sega Mega Drive/Genesis", 33: "Game Boy", 22: "Game Boy Color", 24: "Game Boy Advance", 4: "Nintendo 64", 7: "PlayStation", 8: "PlayStation 2", 32: "Sega Saturn" };
 const SUMMARY = "A synthetic description from the IGDB stand-in, for the M18a checks.";
@@ -81,6 +85,8 @@ const igdbEnv = {
 // Asynchronous: the stand-in answers from this same process.
 const igdb = async (...args) => (await promisify(execFile)(process.execPath, [join(root, "scripts", "igdb.mjs"), ...args], { env: igdbEnv, encoding: "utf8" })).stdout;
 
+const rpc = (headers, body) => fetch(`${api}/rest/v1/rpc/get_game_provider_metadata`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+
 let browser;
 let wikidataRun = null;
 try {
@@ -94,19 +100,21 @@ try {
       return [slug, { id, date, platforms: platforms.split(",").filter(Boolean) }];
     }),
   );
-  check("the three fixture games are published", GAMES.every((s) => games[s].id), JSON.stringify(games));
+  check("the four fixture games are published", GAMES.every((s) => games[s].id), JSON.stringify(games));
+  check("Neon Drift Racing is on the PlayStation and the Saturn", games["neon-drift-racing"].platforms.join(",") === "playstation,sega-saturn", games["neon-drift-racing"].platforms.join(","));
   wikidataRun = sql(`insert into private.import_runs (provider_code, platform_id, source_name, source_sha256, source_fetched_at, status, reason, finished_at)
     select 'wikidata', p.id, 'm18a-checks.json', encode(sha256(convert_to('m18a-checks-${randomBytes(4).toString("hex")}', 'UTF8')), 'hex'), now(), 'completed', 'M18a checks', now()
     from public.platforms p where p.slug = 'snes' returning id;`);
+  const anchors = { "starfall-odyssey": "starfall-odyssey", "quiet-meadow": "quiet-meadow", "neon-drift-racing": "neon-drift-racing", "the-crystal-warden": "the-crystal-warden-remake" };
   for (const slug of GAMES) {
-    const anchor = slug === "neon-drift-racing" ? "neon-drift-racing-remake" : slug;
     sql(`insert into private.provider_records (provider_code, entity_type, external_id, payload, payload_sha256, import_run_id, status, matched_game_id)
-      values ('wikidata', 'game', ${lit(`Qm18a-${slug}`)}, ${lit(JSON.stringify({ title: slug, source: { external_ids: { igdb: [anchor] } } }))}::jsonb,
+      values ('wikidata', 'game', ${lit(`Qm18a-${slug}`)}, ${lit(JSON.stringify({ title: slug, source: { external_ids: { igdb: [anchors[slug]] } } }))}::jsonb,
         encode(sha256(convert_to(${lit(`m18a-${slug}-${wikidataRun}`)}, 'UTF8')), 'hex'), ${lit(wikidataRun)}, 'promoted', ${lit(games[slug].id)});`);
   }
-  // The stand-in's games: two that match, and a remake under the third game's only anchor.
+  // The stand-in's games: three that match (Neon listed on the PlayStation only), and a remake
+  // under the Crystal Warden's only anchor.
   const titleOf = (slug) => sql(`select title from public.games where slug = ${lit(slug)};`);
-  const seconds = (date, fallbackYear) => Date.UTC(date ? Number(date.slice(0, 4)) : fallbackYear, date ? Number(date.slice(5, 7)) - 1 : 0, date ? Number(date.slice(8, 10)) : 1) / 1000;
+  const seconds = (date) => Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10))) / 1000;
   const record = (id, slug, game, over = {}) => ({
     id, slug, name: titleOf(game), url: `https://www.igdb.com/games/${slug}`, summary: SUMMARY,
     first_release_date: games[game].date ? seconds(games[game].date) : undefined, game_type: { type: "Main Game" },
@@ -119,7 +127,8 @@ try {
   records = new Map([
     ["starfall-odyssey", record(9101, "starfall-odyssey", "starfall-odyssey")],
     ["quiet-meadow", record(9102, "quiet-meadow", "quiet-meadow")],
-    ["neon-drift-racing-remake", record(9103, "neon-drift-racing-remake", "neon-drift-racing", { game_type: { type: "Remake" } })],
+    ["neon-drift-racing", record(9103, "neon-drift-racing", "neon-drift-racing", { platforms: [{ id: 7, name: "PlayStation" }] })],
+    ["the-crystal-warden-remake", record(9104, "the-crystal-warden-remake", "the-crystal-warden", { game_type: { type: "Remake" } })],
   ]);
   const catalogBefore = sql(`select md5(string_agg(row(g.*)::text, ',' order by g.id)) || '/' || count(*) from public.games g;`);
   const aliasesBefore = sql("select count(*) from public.game_aliases;");
@@ -140,20 +149,41 @@ try {
   section("2. Enrichment");
   const before = seen.length;
   const out = await igdb("enrich", "--games", GAMES.join(","), "--basis-file", basis, "--reason", "M18a checks", "--out", join(work, "run1"));
-  check("2 matched, 1 for review", out.includes("decisions: 2 matched, 1 for review"), out.split("\n").find((l) => l.startsWith("decisions")));
+  check("3 matched, 1 for review", out.includes("decisions: 3 matched, 1 for review"), out.split("\n").find((l) => l.startsWith("decisions")));
   const starts = seen.slice(before).map((s) => s.at);
   check("never more than 4 requests to the stand-in in any second", starts.every((s) => starts.filter((x) => x >= s && x < s + 1000).length <= 4), String(starts.length));
   check("the IGDB ids sit beside the Wikidata ids, one identity each",
-    sql(`select string_agg(g.slug || '=' || x.external_id, ',' order by g.slug) from private.external_references x join public.games g on g.id = x.game_id where x.provider_code = 'igdb';`) === "quiet-meadow=9102,starfall-odyssey=9101");
+    sql(`select string_agg(g.slug || '=' || x.external_id, ',' order by g.slug) from private.external_references x join public.games g on g.id = x.game_id where x.provider_code = 'igdb';`) === "neon-drift-racing=9103,quiet-meadow=9102,starfall-odyssey=9101");
   check("the remake is held for review, never attached",
-    sql("select status || '/' || coalesce(matched_game_id::text, 'none') || '/' || (review_reason like 'IGDB match needs review%') from private.provider_records where provider_code = 'igdb' and external_id = '9103';") === "needs_review/none/true");
+    sql("select status || '/' || coalesce(matched_game_id::text, 'none') || '/' || (review_reason like 'IGDB match needs review%') from private.provider_records where provider_code = 'igdb' and external_id = '9104';") === "needs_review/none/true");
   check("no game created or changed, no alias added", sql(`select md5(string_agg(row(g.*)::text, ',' order by g.id)) || '/' || count(*) from public.games g;`) === catalogBefore && sql("select count(*) from public.game_aliases;") === aliasesBefore);
   const report = readFileSync(join(work, "run1", "report.md"), "utf8");
   check("the report lists each game's match, confidence, coverage and images", report.includes("| Quiet Meadow | matched |") && report.includes("high") && report.includes("summary, genres, themes, developers, publishers") && report.includes("cover, 1 screenshots"));
+  check("and notes a platform the catalog lists that IGDB doesn't", report.includes("our platforms IGDB doesn't list: sega-saturn"));
   const again = await igdb("enrich", "--games", GAMES.join(","), "--basis-file", basis, "--reason", "M18a checks, again", "--out", join(work, "run1"), "--snapshot", join(work, "run1", "igdb.json"));
-  check("run again from the same snapshot: nothing attached twice", /"skipped": 2/.test(again) && sql("select count(*) from private.external_references where provider_code = 'igdb';") === "2", again.slice(-200));
+  check("run again from the same snapshot: nothing attached twice", /"skipped": 3/.test(again) && sql("select count(*) from private.external_references where provider_code = 'igdb';") === "3", again.slice(-200));
 
-  section("3. The pages");
+  section("3. Security: the provider read is the server's only");
+  const ids = [games["quiet-meadow"].id];
+  const asAnon = await rpc({ apikey: publishableKey, Authorization: `Bearer ${publishableKey}` }, { p_games: ids });
+  const anonBody = await asAnon.text();
+  check("a signed-out public client can't call it", !asAnon.ok && !anonBody.includes(SUMMARY), `${asAnon.status} ${anonBody.slice(0, 120)}`);
+  const user = await createUser({ prefix: "igdb-check" });
+  const signIn = await fetch(`${api}/auth/v1/token?grant_type=password`, { method: "POST", headers: { apikey: publishableKey, "Content-Type": "application/json" }, body: JSON.stringify({ email: user.email, password: user.password }) });
+  const token = (await signIn.json()).access_token;
+  const asUser = await rpc({ apikey: publishableKey, Authorization: `Bearer ${token}` }, { p_games: ids });
+  const userBody = await asUser.text();
+  check("nor a signed-in collector", Boolean(token) && !asUser.ok && !userBody.includes(SUMMARY), `${asUser.status} ${userBody.slice(0, 120)}`);
+  const records1 = await fetch(`${api}/rest/v1/provider_records?select=payload&provider_code=eq.igdb`, { headers: { apikey: publishableKey, Authorization: `Bearer ${token}`, "Accept-Profile": "private" } });
+  const recordsBody = await records1.text();
+  check("the provider records themselves aren't reachable through the API", !records1.ok && !recordsBody.includes(SUMMARY), `${records1.status} ${recordsBody.slice(0, 120)}`);
+  const asServer = await rpc(service, { p_games: ids });
+  const serverRows = asServer.ok ? await asServer.json() : [];
+  check("the server's secret key can, for the pages", asServer.ok && serverRows[0]?.summary === SUMMARY && Array.isArray(serverRows[0]?.platform_ids), String(asServer.status));
+  check("the database grants it to service_role only",
+    sql("select string_agg(r, ',' order by r) from unnest(array['anon','authenticated','service_role','catalog_importer']) r where has_function_privilege(r, 'public.get_game_provider_metadata(uuid[])', 'execute');") === "service_role");
+
+  section("4. The pages");
   process.env.MGD_PROVIDER_MEDIA = "igdb";
   const origin = await startApp(3418);
   const channels = process.env.A11Y_BROWSER ? [process.env.A11Y_BROWSER] : ["msedge", "chrome"];
@@ -168,9 +198,11 @@ try {
   if (!browser) throw new Error("no installed browser could be started");
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" })).newPage();
   const outside = [];
+  const providerCalls = [];
   page.on("request", (r) => {
     const host = new URL(r.url()).hostname;
     if (/igdb\.com$|twitch\.tv$/.test(host)) outside.push(r.url());
+    if (r.url().includes("get_game_provider_metadata")) providerCalls.push(r.url());
   });
   // The optimizer would fetch the stand-in's made-up image ids from IGDB: not in a check.
   await page.route("**/_next/image**", (route) => route.abort());
@@ -179,26 +211,39 @@ try {
   check("Quiet Meadow shows IGDB's description, credited", main.includes(SUMMARY) && main.includes("Description from IGDB.com"));
   check("and IGDB's developer, publisher, genre and theme under From IGDB", await page.locator("[data-provider-facts=igdb]").innerText().then((t) => /Stand-in Studio/.test(t) && /Stand-in Publishing/.test(t) && /Adventure/.test(t) && /Fantasy/.test(t)));
   const coverSrc = await page.locator('[data-game-image="igdb-cover"] img').getAttribute("src");
-  check("its cover, from the app's own optimizer, as game artwork", Boolean(coverSrc?.startsWith("/_next/image?url=https%3A%2F%2Fimages.igdb.com%2Figdb%2Fimage%2Fupload%2Ft_cover_big_2x%2Fco9102m18a.jpg")) && main.includes("Game artwork, not a photo of a specific release"), coverSrc);
+  check("its cover, from the app's own optimizer, as general game artwork", Boolean(coverSrc?.startsWith("/_next/image?url=https%3A%2F%2Fimages.igdb.com%2Figdb%2Fimage%2Fupload%2Ft_cover_big_2x%2Fco9102m18a.jpg")) && main.includes("General game artwork, not verified for a specific platform, region or edition"), coverSrc);
   check("never laid on a cartridge: no label overlay with the cover", (await page.locator('[data-game-image="igdb-cover"]').innerText()).includes("Artwork not available") === false);
-  check("the Gallery tab holds IGDB's screenshot, credited", (await page.getByRole("tab", { name: /Gallery/ }).count()) === 1 && (await page.locator("[data-screenshot=igdb]").count()) === 1);
-  check("the catalog's own facts are unchanged: no verified release invented", main.includes("No verified physical release recorded yet") || main.includes("Verified releases"));
+  await page.getByRole("tab", { name: /Gallery/ }).click();
+  const gallery = await page.locator('[data-panel="gallery"]').innerText();
+  check("the Gallery tab holds IGDB's screenshot, credited", (await page.locator("[data-screenshot=igdb]").count()) === 1 && gallery.includes("Game screenshots from IGDB.com, not tied to a platform or release"), gallery.slice(0, 160));
+  await page.getByRole("tab", { name: "Overview" }).click();
   await page.addScriptTag({ content: axeSource });
   const axe = await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] } })).violations.filter((v) => ["critical", "serious"].includes(v.impact)).map((v) => v.id));
   check("axe: no critical or serious findings on the enriched page", axe.length === 0, axe.join(","));
+
+  await page.goto(`${origin}/games/neon-drift-racing?platform=playstation`, { waitUntil: "networkidle" });
+  check("Neon Drift Racing on the PlayStation, which IGDB lists: the cover", (await page.locator('[data-game-image="igdb-cover"]').count()) === 1);
+  await page.goto(`${origin}/games/neon-drift-racing?platform=sega-saturn`, { waitUntil: "networkidle" });
+  const saturn = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check("on the Saturn, which IGDB doesn't list: no cover, the honest fallback", (await page.locator('[data-game-image="igdb-cover"]').count()) === 0 && (await page.locator('[data-game-image="none"]').count()) === 1, saturn.slice(0, 160));
+  check("the game's description stays, as IGDB's", saturn.includes(SUMMARY) && saturn.includes("Description from IGDB.com"));
 
   await page.goto(`${origin}/games/starfall-odyssey`, { waitUntil: "networkidle" });
   const starfall = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   const own = sql("select coalesce(summary, '') from public.games where slug = 'starfall-odyssey';");
   check("Starfall Odyssey: the catalog's own summary first, IGDB's not shown", own ? starfall.includes(own.slice(0, 40)) && !starfall.includes(SUMMARY) : starfall.includes(SUMMARY));
-  await page.goto(`${origin}/games/neon-drift-racing`, { waitUntil: "networkidle" });
-  const neon = (await page.locator("main").innerText()).replace(/\s+/g, " ");
-  check("Neon Drift Racing, held: nothing from IGDB", !neon.includes(SUMMARY) && (await page.locator("[data-provider-facts]").count()) === 0 && (await page.locator('[data-game-image="igdb-cover"]').count()) === 0);
+  await page.goto(`${origin}/games/the-crystal-warden`, { waitUntil: "networkidle" });
+  const warden = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check("The Crystal Warden, held: nothing from IGDB", !warden.includes(SUMMARY) && (await page.locator("[data-provider-facts]").count()) === 0 && (await page.locator('[data-game-image="igdb-cover"]').count()) === 0);
 
   await page.goto(`${origin}/explore?q=quiet+meadow`, { waitUntil: "networkidle" });
   check("Explore: the card shows the cover, and the grid credits IGDB", (await page.locator('[data-game-card="Quiet Meadow"] [data-cover=igdb]').count()) === 1 && (await page.locator("[data-igdb-credit]").count()) >= 1);
+  await page.goto(`${origin}/explore?q=neon+drift&platform=sega-saturn`, { waitUntil: "networkidle" });
+  check("Explore on the Saturn: Neon Drift Racing's card keeps its console, not the cover", (await page.locator('[data-game-card="Neon Drift Racing"]').count()) === 1 && (await page.locator('[data-game-card="Neon Drift Racing"] [data-cover=igdb]').count()) === 0);
   check("the browser never contacted IGDB or Twitch", outside.length === 0, outside.slice(0, 3).join(", "));
-
+  check("nor called the provider read itself", providerCalls.length === 0, providerCalls.join(", "));
+  const html = await (await fetch(`${origin}/games/quiet-meadow`)).text();
+  check("no secret key in the page", !html.includes(service.apikey));
   const appErrors = appErrorLines();
   check("the app logged no errors", appErrors.length === 0, appErrors.slice(0, 3).join(" | "));
 } catch (error) {
@@ -207,6 +252,7 @@ try {
   await browser?.close();
   await stopApp();
   server.close();
+  await deleteUsers();
   // The scratch stack goes back as it was: IGDB records, links, runs and clearance removed.
   try {
     sql(`begin;

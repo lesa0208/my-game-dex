@@ -278,3 +278,21 @@ test("the stored payload: bounded, dated, companies split by role, only valid im
   assert.equal(p.url, "https://www.igdb.com/games/space-quest-zero");
   assert.ok(JSON.stringify(p).length < 32768);
 });
+
+// ---- the app's platform rule (src/features/catalog/provider-images.ts) -----------------
+
+test("the app's platform map is the matcher's", async () => {
+  const { IGDB_PLATFORM_IDS } = await import("../src/features/catalog/provider-images.ts");
+  const { PLATFORM_IDS } = await import("./lib/igdb-match.mjs");
+  assert.deepEqual({ ...IGDB_PLATFORM_IDS }, PLATFORM_IDS);
+});
+
+test("a game-level cover stands only on a platform IGDB lists for the game", async () => {
+  const { coverFitsPlatform } = await import("../src/features/catalog/provider-images.ts");
+  // Listed on the SNES (19) only, like a game Wikidata also pairs with a later GBA port.
+  assert.equal(coverFitsPlatform([19], "snes"), true);
+  assert.equal(coverFitsPlatform([19], "game-boy-advance"), false, "never the SNES cover on the GBA page");
+  assert.equal(coverFitsPlatform([19], "atari-lynx"), false, "a platform outside the map: the fallback");
+  assert.equal(coverFitsPlatform([19], null), false);
+  assert.equal(coverFitsPlatform([], "snes"), false);
+});
