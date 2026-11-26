@@ -7,8 +7,8 @@ import { Suspense } from "react";
 import { gameHref } from "@/components/catalog/release-picker";
 import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-details";
-import { GameArtwork, GameHeading, GameKeyFacts, HeroBackdrop } from "@/components/games/game-hero";
-import { GameFactsCard, HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, MyCopyPanelSkeleton, OverviewTab, ReleasesEmptyAction } from "@/components/games/game-sections";
+import { GameArtwork, GameHeroInfo, GameIdentity, type HeroDescription, HeroBackdrop } from "@/components/games/game-hero";
+import { GameFactsCard, HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, OverviewTab, ReleasesEmptyAction } from "@/components/games/game-sections";
 import { type GameTab, GameTabs } from "@/components/games/game-tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Breadcrumbs } from "@/components/shelf/shelf-parts";
@@ -81,6 +81,9 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   // platform IGDB lists for the game, never the SNES game's on the GBA page. Its text stays.
   const igdbFits = provider ? coverFitsPlatform(provider.platformIds, platformSlug) : false;
   const igdbImages = { cover: igdbFits ? (provider?.cover ?? null) : null, screenshots: igdbFits ? (provider?.screenshots ?? []) : [] };
+  const heroCover = igdbImages.cover;
+  // The hero's description preview: the catalog's own summary first, else IGDB's, credited.
+  const heroDescription: HeroDescription | null = summary ? { text: summary, source: "catalog", url: null } : provider?.summary ? { text: provider.summary, source: "igdb", url: provider.url } : null;
   const releaseRegion = picker.releases.find((r) => r.id === picker.selection.releaseId)?.region.code ?? null;
   const regionName = options?.regions.find((r) => r.code === releaseRegion)?.label ?? null;
   const image = approvedImageFor({ game: picker.game.slug, platform: platformSlug, region: releaseRegion, release: picker.selection.releaseId });
@@ -183,35 +186,46 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
     <>
       <Breadcrumbs items={[{ label: "Explore", href: "/explore" }, { label: picker.game.title }]} />
 
-      <article aria-labelledby="game-title" className="relative mt-4 overflow-hidden rounded-3xl border border-white/10 bg-[#100e16]">
-        <HeroBackdrop platform={platformSlug} />
-        <div className="relative grid gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_19rem] xl:gap-8 xl:p-8 2xl:grid-cols-[minmax(0,1fr)_21rem]">
-          {/* A phone reads the title and the actions first, then the artwork (smaller), then
-              the facts; from md up the artwork stands on the left of both, centred. */}
-          <div className="grid gap-y-5 [grid-template-areas:'head'_'art'_'facts'] md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:grid-rows-[1fr_auto_auto_1fr] md:gap-x-8 md:gap-y-0 md:[grid-template-areas:'art_.'_'art_head'_'art_facts'_'art_.'] xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] 2xl:gap-x-10">
-            <div className="mx-auto w-full max-w-[14rem] [grid-area:art] md:max-w-none md:self-center">
-              <GameArtwork image={image} cover={igdbImages.cover && provider ? { image: igdbImages.cover, url: provider.url } : null} platform={platform} region={releaseRegion} regionName={regionName} title={picker.game.title} />
-            </div>
-            <div className="min-w-0 [grid-area:head]">
-              <GameHeading
-                game={picker.game}
-                platform={platform}
-                actions={
-                  <Suspense fallback={<HeroActionsSkeleton />}>
-                    <HeroActions game={game} platform={platformSlug} returnPath={here} autoOpen={intent} />
-                  </Suspense>
-                }
-              />
-            </div>
-            <div className="min-w-0 [grid-area:facts] md:mt-6">
-              <GameKeyFacts game={picker.game} overview={overview} platform={platform} publisher={publisher} />
-            </div>
+      {/* Game Details 2.0, Phase 1: the hero. A phone reads the identity and actions first, then
+          the artwork, then the collector's copies (owners only). From md up the artwork stands on
+          the left; from xl a third column holds Your copies, only when there is a copy to show:
+          the column has no width otherwise, so a visitor's hero is two columns. */}
+      <article aria-labelledby="game-title" className="relative mt-4 overflow-hidden rounded-3xl border border-white/10 bg-[#100e16]" data-hero="">
+        <HeroBackdrop platform={platformSlug} artwork={heroCover ? igdbImageUrl(heroCover, "cover_big") : null} />
+        <div className="relative flex flex-col gap-6 p-5 sm:p-7 md:grid md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:content-center md:gap-x-9 md:gap-y-5 md:[grid-template-areas:'art_head'_'art_info'_'art_copy'] lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)_auto] xl:gap-x-0 xl:gap-y-6 xl:p-9 xl:[grid-template-areas:'art_head_copy'_'art_info_copy'] 2xl:grid-cols-[minmax(0,21rem)_minmax(0,1fr)_auto]">
+          <div className="order-1 min-w-0 md:[grid-area:head] md:self-end xl:pl-10">
+            <GameIdentity
+              game={picker.game}
+              overview={overview}
+              platform={platform}
+              developers={provider?.developers ?? []}
+              genre={provider?.genres[0] ?? null}
+              actions={
+                <Suspense fallback={<HeroActionsSkeleton />}>
+                  <HeroActions game={game} platform={platformSlug} returnPath={here} autoOpen={intent} />
+                </Suspense>
+              }
+            />
           </div>
-          <aside aria-label="Your collection" className="min-w-0 lg:self-start">
-            <Suspense fallback={<MyCopyPanelSkeleton />}>
+          <div className="order-2 mx-auto w-full max-w-[15rem] min-w-0 md:mx-0 md:max-w-none md:self-start md:[grid-area:art] xl:self-center">
+            <GameArtwork
+              image={image}
+              cover={heroCover && provider ? { image: heroCover, url: provider.url } : null}
+              providerKnown={Boolean(provider?.cover)}
+              platform={platform}
+              region={releaseRegion}
+              regionName={regionName}
+              title={picker.game.title}
+            />
+          </div>
+          <div className="order-3 min-w-0 empty:hidden md:[grid-area:copy] xl:self-center">
+            <Suspense fallback={null}>
               <MyCopyPanel game={game} platform={platformSlug} platforms={overview.platforms} returnPath={here} />
             </Suspense>
-          </aside>
+          </div>
+          <div className="order-4 min-w-0 md:[grid-area:info] md:self-start xl:pl-10">
+            <GameHeroInfo game={picker.game} overview={overview} publisher={publisher} description={heroDescription} />
+          </div>
         </div>
       </article>
 

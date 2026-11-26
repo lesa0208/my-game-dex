@@ -2,8 +2,22 @@
 export type ProviderImage = { imageId: string; width: number | null; height: number | null };
 
 /** IGDB's image sizes the app uses: the only sizes its image route serves. */
-export const IGDB_IMAGE_SIZES = ["cover_big", "cover_big_2x", "screenshot_big", "720p"] as const;
+export const IGDB_IMAGE_SIZES = ["cover_big", "cover_big_2x", "screenshot_big", "720p", "1080p"] as const;
 export type IgdbImageSize = (typeof IGDB_IMAGE_SIZES)[number];
+
+/**
+ * The largest IGDB size of a cover that isn't upscaled from its original. IGDB's 720p and 1080p
+ * fit the image to that height and do upscale a smaller original (a 710 × 947 cover comes back
+ * 810 × 1080 at 1080p), so a size is used only when the original is at least that tall.
+ */
+export function coverSize(image: ProviderImage): IgdbImageSize {
+  const height = image.height ?? 0;
+  const width = image.width ?? 0;
+  if (height >= 1080) return "1080p";
+  if (height >= 720) return "720p";
+  if (width >= 528) return "cover_big_2x";
+  return "cover_big";
+}
 
 /**
  * Our platform slugs to IGDB platform ids: the same map as scripts/lib/igdb-match.mjs

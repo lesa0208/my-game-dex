@@ -225,7 +225,8 @@ try {
   check("Quiet Meadow shows IGDB's description, credited", main.includes(SUMMARY) && main.includes("Description from IGDB.com"));
   check("and IGDB's developer, publisher, genre and theme under From IGDB", await page.locator("[data-provider-facts=igdb]").innerText().then((t) => /Stand-in Studio/.test(t) && /Stand-in Publishing/.test(t) && /Adventure/.test(t) && /Fantasy/.test(t)));
   const coverSrc = await page.locator('[data-game-image="igdb-cover"] img').getAttribute("src");
-  check("its cover, from the app's own image route, as general game artwork", coverSrc === "/media/igdb/cover_big_2x/co9102m18a.jpg" && main.includes("General game artwork, not verified for a specific platform, region or edition"), coverSrc);
+  check("its cover, from the app's own image route, as general game artwork", coverSrc === "/media/igdb/cover_big/co9102m18a.jpg" && (await page.locator("[data-artwork-caption]").textContent()).includes("General game artwork, not verified for a specific platform, region or edition"), coverSrc);
+  check("the hero's backdrop is the authorized cover's wash, through the same route", (await page.locator("[data-hero-backdrop] img").getAttribute("src")) === "/media/igdb/cover_big/co9102m18a.jpg");
   check("and it loads", await page.locator('[data-game-image="igdb-cover"] img').evaluate((i) => i.complete && i.naturalWidth > 0));
   check("never laid on a cartridge: no label overlay with the cover", (await page.locator('[data-game-image="igdb-cover"]').innerText()).includes("Artwork not available") === false);
   await page.getByRole("tab", { name: /Gallery/ }).click();
@@ -241,6 +242,7 @@ try {
   await page.goto(`${origin}/games/neon-drift-racing?platform=sega-saturn`, { waitUntil: "networkidle" });
   const saturn = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   check("on the Saturn, which IGDB doesn't list: no cover, the honest fallback", (await page.locator('[data-game-image="igdb-cover"]').count()) === 0 && (await page.locator('[data-game-image="none"]').count()) === 1, saturn.slice(0, 160));
+  check("and no wash of the cover behind it", (await page.locator("[data-hero-backdrop]").getAttribute("data-hero-backdrop")) === "generic" && (await page.locator('[data-hero-backdrop] img[src^="/media/igdb/"]').count()) === 0);
   check("the game's description stays, as IGDB's", saturn.includes(SUMMARY) && saturn.includes("Description from IGDB.com"));
   check("and no Gallery of IGDB's screenshots on a platform IGDB doesn't list", (await page.getByRole("tab", { name: /Gallery/ }).count()) === 0 && (await page.locator("[data-screenshot=igdb]").count()) === 0);
 

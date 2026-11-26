@@ -143,18 +143,22 @@ try {
   await guest.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
   const smw = await mainText(guest);
   check("the hero: title, its system, Add to Collection and Wishlist", (await guest.getByRole("heading", { level: 1, name: "Super Mario World" }).count()) === 1 && (await guest.locator("[data-action=add]").count()) === 1 && (await guest.locator("[data-action=wish]").count()) === 1);
-  check("the page opens on the game's earliest system (SNES), the other a click away", (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()) === "SNES" && smw.includes("Super Nintendo Entertainment System (SNES)") && (await guest.locator('nav[aria-label="Game platform"] a').count()) === 2);
+  check("the page opens on the game's earliest system (SNES), the other a click away", (await guest.locator('nav[aria-label="Game platform"] a[aria-current] [aria-hidden]').innerText()) === "SNES" && (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').getAttribute("title")) === "Super Nintendo Entertainment System" && (await guest.locator('nav[aria-label="Game platform"] a').count()) === 2);
   const layout = await guest.evaluate(() => {
     const box = (el) => el?.getBoundingClientRect();
     const art = box(document.querySelector("[data-game-image]"));
     const title = box(document.querySelector("#game-title"));
-    const copy = box(document.querySelector("[data-my-copy-panel]"));
-    return art && title && copy ? { order: art.left < title.left && title.right <= copy.left + 1, top: Math.max(art.top, title.top, copy.top) - Math.min(art.top, title.top, copy.top) } : null;
+    return art && title ? { order: art.right < title.left, top: Math.abs(art.top - title.top) } : null;
   });
-  check("three columns at 1440: artwork, then the game, then My Copy, side by side", Boolean(layout?.order) && layout.top < 200, JSON.stringify(layout));
+  check("at 1440 the artwork stands left of the game, side by side", Boolean(layout?.order) && layout.top < 200, JSON.stringify(layout));
   check("no shelf under the artwork", (await guest.locator("article[aria-labelledby=game-title] .wood-top").count()) === 0);
   // M18a: Super Mario World is enriched from IGDB on the demo; Tetris (held for review) keeps the empty states, checked below.
-  check("IGDB's cover as general game artwork, credited, never on a cartridge", (await heroImage(guest)) === "igdb-cover" && smw.includes("Game artwork from IGDB.com") && smw.includes("not verified for a specific platform, region or edition") && !(await guest.locator("[data-game-image]").innerText()).includes("Artwork not available"));
+  const caption = (await guest.locator("[data-artwork-caption]").textContent()).replace(/\s+/g, " ");
+  check("IGDB's cover as standalone game artwork, credited, its full wording a tap away", (await heroImage(guest)) === "igdb-cover" && caption.includes("Game artwork · IGDB.com") && caption.includes("General game artwork, not verified for a specific platform, region or edition"));
+  check("the cover keeps its own proportions, from a size never upscaled", await guest.locator('[data-game-image="igdb-cover"] img').evaluate((i) => { const r = i.getBoundingClientRect(); return i.complete && i.naturalWidth > 0 && Math.abs(r.width / r.height - i.naturalWidth / i.naturalHeight) < 0.01; }));
+  check("the backdrop is the cover's own wash, the cover being authorized for the SNES", (await guest.locator("[data-hero-backdrop]").getAttribute("data-hero-backdrop")) === "artwork");
+  check("a meta line: the catalog's year, then IGDB's developer and genre, marked as IGDB's", await guest.locator("[data-hero-meta]").evaluate((p) => p.textContent.startsWith("1990") && p.textContent.includes("(from IGDB)")));
+  check("a description preview from IGDB, credited, with Read more", (await guest.locator('[data-hero-description="igdb"]').count()) === 1 && (await guest.locator('[data-hero-description="igdb"]').innerText()).includes("Description from IGDB.com"));
   check("key facts by the title: the first release date and verified releases", /First released/.test(await guest.locator("article[aria-labelledby=game-title]").innerText()) && smw.includes("Verified releases"));
   check("each fact said once: the first release date isn't repeated in Overview or Game Details", smw.split("November 21, 1990").length === 2 && !smw.includes("Release Information"));
   check("Game Details gives the detail behind them: each system by its full name, with its verified releases", await (async () => { const t = await guest.locator("[data-game-facts]").innerText(); return t.includes("Super Nintendo Entertainment System") && t.includes("Game Boy Advance") && t.includes("No verified release yet") && !t.includes("First released"); })());
@@ -168,11 +172,14 @@ try {
   const empty = await guest.context().newPage();
   await empty.goto(`${ORIGIN}/games/tetris`, { waitUntil: "networkidle" });
   const tetris = await mainText(empty);
-  check("a game without IGDB data (Tetris, held): the plain cartridge shape, not a made-up label", (await heroImage(empty)) === "none" && tetris.includes("Artwork not available") && tetris.includes("No approved artwork yet") && tetris.includes("Shown: a generic GB cartridge"));
+  check("a game without IGDB data (Tetris, held): the plain cartridge shape, not a made-up label", (await heroImage(empty)) === "none" && !tetris.includes("Artwork not available") && tetris.includes("No artwork for this game yet.") && tetris.includes("Shown: a neutral GB cartridge, without a label.") && (await empty.locator("[data-neutral-shell]").count()) === 1);
+  check("its label recess carries no words at all", (await empty.locator("[data-neutral-shell]").innerText()).trim() === "");
+  check("and its backdrop stays the generic light, with no description preview invented", (await empty.locator("[data-hero-backdrop]").getAttribute("data-hero-backdrop")) === "generic" && (await empty.locator("[data-hero-description]").count()) === 0);
   check("and its tabs: Overview, Physical Releases, My Copies; no Gallery without images", JSON.stringify((await tabNames(empty)).map((t) => t.replace(/\s*\(\d+\)$/, ""))) === JSON.stringify(["Overview", "Physical Releases", "My Copies"]));
   check("and a quiet line for the missing description; nothing from IGDB", tetris.includes("No description yet.") && !tetris.includes("IGDB") && (await empty.locator("[data-provider-facts]").count()) === 0);
   await empty.close();
-  check("a visitor's My Copy panel offers Create Account and Sign In, nothing of anyone's", (await guest.locator('[data-my-copy-panel="visitor"]').count()) === 1 && smw.includes("Create Account") && !smw.includes("Owned:"));
+  check("a visitor sees no My Copy panel and no sign-up card in the hero, nothing of anyone's", (await guest.locator("[data-my-copy-panel]").count()) === 0 && !(await guest.locator("[data-hero]").innerText()).includes("Create Account") && !smw.includes("Owned:"));
+  check("a two-column hero: no empty third column", await guest.evaluate(() => { const art = document.querySelector("[data-game-image]").getBoundingClientRect(); const hero = document.querySelector("[data-hero]").getBoundingClientRect(); const title = document.querySelector("#game-title").getBoundingClientRect(); return title.left > art.right && hero.right - title.right < hero.width * 0.4; }));
   check("no page-wide sideways scrolling at 1440", await noSideScroll(guest));
   await shoot(guest, "01-game-super-mario-world-desktop-1440");
   await shoot(guest, "02-game-super-mario-world-desktop-1440-full", { fullPage: true });
@@ -192,11 +199,11 @@ try {
   check("a tab can be linked: #releases opens Physical Releases", await eventually(async () => JSON.stringify(await shownPanel(guest)) === JSON.stringify(["panel-releases"]), 5000));
 
   await guest.goto(`${ORIGIN}/games/space-invaders`, { waitUntil: "networkidle" });
-  check("a game on seven systems: seven to choose, opening on its earliest (NES)", (await guest.locator('nav[aria-label="Game platform"] a').count()) === 7 && (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()) === "NES");
+  check("a game on seven systems: seven to choose, opening on its earliest (NES)", (await guest.locator('nav[aria-label="Game platform"] a').count()) === 7 && (await guest.locator('nav[aria-label="Game platform"] a[aria-current] [aria-hidden]').innerText()) === "NES");
   await shoot(guest, "07-game-multi-platform-space-invaders-desktop-1440");
-  await guest.locator('nav[aria-label="Game platform"] a', { hasText: /^\s*PS1\s*$/ }).click();
+  await guest.locator('nav[aria-label="Game platform"]').getByRole("link", { name: "PlayStation", exact: true }).click();
   await guest.waitForURL(/platform=playstation/);
-  check("choosing another system shows it, with that system's case shape", (await guest.locator('nav[aria-label="Game platform"] a[aria-current]').innerText()).includes("PS1") && (await mainText(guest)).includes("Shown: a generic PS1 case"));
+  check("choosing another system shows it, with that system's case shape", (await guest.locator('nav[aria-label="Game platform"] a[aria-current] [aria-hidden]').innerText()).includes("PS1") && (await mainText(guest)).includes("Shown: a neutral PS1 case, without a label."));
   const old = await fetch(`${ORIGIN}/games/super-mario-world?platform=snes&region=pal`, { redirect: "manual" });
   check("an old step address goes to the step-by-step add", old.status === 308 && old.headers.get("location")?.endsWith("/games/super-mario-world/add?platform=snes&region=pal"), `${old.status} ${old.headers.get("location")}`);
   const phoneGuest = await (await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, colorScheme: "dark" })).newPage();
@@ -211,7 +218,7 @@ try {
     return title && add && wish && art ? { addBottom: Math.round(add.bottom), wishBottom: Math.round(wish.bottom), titleAboveArt: title.bottom <= art.top, view: innerHeight } : null;
   });
   check("on a phone the title, system, Add to Collection and Wishlist come first, before the artwork", Boolean(phoneHero?.titleAboveArt) && phoneHero.addBottom < phoneHero.view * 0.7 && phoneHero.wishBottom < phoneHero.view * 0.7, JSON.stringify(phoneHero));
-  check("and the artwork is still there, smaller", await phoneGuest.locator("[data-game-image]").evaluate((el) => el.getBoundingClientRect().width <= 230 && el.getBoundingClientRect().width > 120));
+  check("and the artwork follows, prominent but within the screen", await phoneGuest.locator("[data-game-image]").evaluate((el) => el.getBoundingClientRect().width <= 260 && el.getBoundingClientRect().width > 160));
   await shoot(phoneGuest, "06-game-super-mario-world-mobile-390", { fullPage: true });
   await shoot(phoneGuest, "06-game-super-mario-world-mobile-390-first-screen");
   await axe(phoneGuest, "game page, visitor, 390");
@@ -229,9 +236,9 @@ try {
   await desk.locator('[data-game-card="Super Mario World"] h3 a').first().focus();
   await desk.keyboard.press("Enter");
   await desk.waitForURL(/\/games\/super-mario-world/);
-  check("opened from Explore, the game's page renders for a signed-in collector", await eventually(async () => (await desk.locator("#game-title:visible").count()) === 1 && (await desk.locator('[data-my-copy-panel]:visible').count()) === 1, 15000), `${desk.url()} :: ${(await mainText(desk)).slice(0, 160)}`);
+  check("opened from Explore, the game's page renders for a signed-in collector", await eventually(async () => (await desk.locator("#game-title:visible").count()) === 1 && (await desk.locator("main [data-action=add]:visible").count()) >= 1, 15000), `${desk.url()} :: ${(await mainText(desk)).slice(0, 160)}`);
   await desk.goto(`${ORIGIN}/games/super-mario-world`, { waitUntil: "networkidle" });
-  check("not owned yet: My Copy offers to add, once, beside the hero's Add", await eventually(async () => (await desk.locator('[data-my-copy-panel="none"]').count()) === 1 && (await desk.locator('[data-my-copy-panel="none"] [data-action=add-copy]').count()) === 1));
+  check("not owned yet: no My Copy panel, only the hero's Add to Collection and Wishlist", await eventually(async () => (await desk.locator("main [data-action=add]").count()) >= 1) && (await desk.locator("[data-my-copy-panel]").count()) === 0 && (await desk.locator("[data-hero] [data-action=add-copy]").count()) === 0);
   check("and Physical Releases, with none verified, still offers to add a copy", (await desk.locator("[data-releases-empty] [data-action=add-copy]").count()) === 1);
   await desk.locator("main [data-action=add]").click();
   const dialog = desk.getByRole("dialog");
@@ -249,13 +256,13 @@ try {
   check("stored as recorded: SNES, NTSC-U/C, Player's Choice, no release", psql(`select p.slug || '|' || c.claimed_region_code || '|' || coalesce(c.claimed_edition_name, '') || '|' || (c.release_id is null) from public.collection_items c join public.platforms p on p.id = c.claimed_platform_id where c.owner_id = '${kimId}';`) === "snes|ntsc-uc|Player's Choice|true");
   await desk.keyboard.press("Escape");
   const panel = desk.locator('[data-my-copy-panel="owned"]');
-  check("the hero says it's owned", await eventually(async () => (await desk.locator("[data-owned]").innerText().catch(() => "")).includes("Owned: Yes")));
+  check("the hero says it's owned (Your copies, beside it on a wide screen)", await eventually(async () => (await desk.locator("[data-owned]").textContent().catch(() => "")).includes("Owned: Yes") && (await panel.count()) === 1));
   check("My Copy shows the copy: platform, region and edition as recorded", await eventually(async () => {
     const t = (await panel.innerText().catch(() => "")).replace(/\s+/g, " ");
     return /platform snes/i.test(t) && /region ntsc-u\/c/i.test(t) && /edition player's choice/i.test(t);
   }));
   check("its recorded completeness and condition, as badges", await eventually(async () => { const t = await panel.innerText().catch(() => ""); return t.includes("Complete in box") && t.includes("Very good") && !t.includes("not recorded"); }));
-  check("drawn with the generic SNES cartridge, captioned as an illustration, not as this copy or its label", (await panel.locator("[data-copy-illustration] img[alt='']").count()) === 1 && (await panel.locator("[data-copy-illustration] figcaption").innerText()) === "Illustration: SNES cartridge" && !(await panel.innerText()).includes("Super Mario World"));
+  check("no picture in Your copies: not the cover, not a cartridge", (await panel.locator("img, svg image, [data-copy-illustration]").count()) === 0 && !(await panel.innerText()).includes("Super Mario World"));
   check("nothing private in the panel: no price, purchase or notes", !/price|paid|purchase|notes?:/i.test(await panel.innerText()));
   check("compact: the panel is no taller than the hero's centre", await (async () => { const h = await panel.evaluate((el) => el.getBoundingClientRect().height); return h > 0 && h < 380; })());
   check("with Edit and View copy", (await panel.getByRole("link", { name: /^Edit, / }).count()) === 1 && (await panel.getByRole("link", { name: /^View copy, / }).count()) === 1);
