@@ -16,7 +16,7 @@ import { BASE_API_PORT, EDITORIAL_STACKS, PILOT_PROTECTION_MARKER, STACKS, edito
 import { markerProblems, readMarker, writeMarker } from "./lib/stack-marker.mjs";
 import { ENV_FILE, KEY_VARIABLES, OWN_KEY_CONFIG_LINES, SIGNING_KEYS_FILE, ensureStackKeys, generateStackKeys, ownKeyProblems, readStackKeys, runningKeyProblems, runningKeyProblemsSync } from "./lib/stack-keys.mjs";
 import { CHECKPOINTS, BACKUP_DIR, DUMP_FILES, backupTarget, checkpointName, dumpPlan, manifestEntries, snapshotPlan, stamp } from "./pilot-backup.mjs";
-import { VARIANTS, driftProblems, guardCreate, guardPersistent, guardRun, startStack, testConfig, volumeExists } from "./test-stack.mjs";
+import { VARIANTS, driftProblems, guardCreate, guardPersistent, guardRun, portSharingProblem, startStack, testConfig, volumeExists } from "./test-stack.mjs";
 
 const scripts = import.meta.dirname;
 const repo = join(scripts, "..");
@@ -73,8 +73,20 @@ test("the pilot: its own project, folder, ports, preview and work folder, collid
   for (const name of ["dev", "test", "scratch", "b1"]) assert.ok(!STACKS[name].ownKeys, `${name} keeps the CLI's keys`);
   assert.equal(EDITORIAL_STACKS.pilot.apiPort, 58321);
   assert.equal(EDITORIAL_STACKS.pilot.preview, "http://127.0.0.5:3005");
-  const names = Object.keys(STACKS);
-  for (const key of ["project", "dir", "offset"]) assert.equal(new Set(names.map((n) => STACKS[n][key])).size, names.length, `${key} unique`);
+  for (const key of ["project", "dir"]) assert.equal(new Set(Object.keys(STACKS).map((n) => STACKS[n][key])).size, Object.keys(STACKS).length, `${key} unique`);
+  // M16: the demo catalog uses the rehearsal stack's ports, which its firewall rule already blocks;
+  // the two never run at once (portSharingProblem, checked by start). No other stack shares a port.
+  assert.equal(STACKS.demo.offset, STACKS.rehearsal.offset);
+  assert.equal(VARIANTS.demo.sharesPortsWith, "rehearsal");
+  assert.equal(VARIANTS.rehearsal.sharesPortsWith, "demo");
+  const runningOnly = (name) => (project) => (project === name ? `supabase_db_${name}` : "");
+  assert.ok(portSharingProblem(VARIANTS.demo, runningOnly("my-game-dex-rehearsal")), "the demo refuses to start while the rehearsal runs");
+  assert.ok(portSharingProblem(VARIANTS.rehearsal, runningOnly("my-game-dex-demo")), "and the rehearsal while the demo runs");
+  assert.equal(portSharingProblem(VARIANTS.demo, () => ""), null);
+  assert.equal(portSharingProblem(VARIANTS.pilot, runningOnly("my-game-dex-demo")), null, "the pilot shares nothing");
+  assert.equal(VARIANTS.demo.testTarget, false, "the demo is never a test target");
+  const names = Object.keys(STACKS).filter((n) => n !== "demo");
+  for (const key of ["offset"]) assert.equal(new Set(names.map((n) => STACKS[n][key])).size, names.length, `${key} unique`);
   // Every port of every stack (the dev ports plus the offset) is distinct from every other stack's.
   const source = readFileSync(join(repo, "supabase", "config.toml"), "utf8");
   const ports = [...source.matchAll(/^(?:port|shadow_port|inspector_port)\s*=\s*(\d+)\s*$/gm)].map((m) => Number(m[1]));
@@ -169,7 +181,8 @@ test("a pilot restart never changes its config or migrations", () => {
   assert.match(driftProblems({ ...same, repoMigrations: { "1.sql": "changed" } })[0], /1\.sql differs/);
   // The start command goes through startStack (tested below), with the real drift check.
   const tool = readFileSync(join(scripts, "test-stack.mjs"), "utf8");
-  assert.match(tool, /case "start":\n\s*return startStack\(STACK, VARIANTS\[STACK\], process\.env, startIo\(VARIANTS\[STACK\]\)\);/);
+  // M16: the port-sharing guard runs first, then the same guarded start.
+  assert.match(tool, /case "start": \{\n\s*const shared = portSharingProblem\(\);\n\s*if \(shared\) throw new Error\(shared\);\n\s*return startStack\(STACK, VARIANTS\[STACK\], process\.env, startIo\(VARIANTS\[STACK\]\)\);/);
   assert.match(tool, /function startIo\(variant\) \{[\s\S]*?drift: \(\) => driftProblems\(\{[\s\S]*?existingMigrations: readMigrations\(join\(target, "migrations"\)\),\n\s*repoMigrations: readMigrations\(join\(root, "supabase", "migrations"\)\)/);
   assert.match(tool, /volumeExists: \(\) => Boolean\(variant\.createFlag\) && volumeExists\(/, "the pilot and its twin check their real volume");
 });
@@ -751,4 +764,23 @@ test("the running-key probe: against a fake Auth, with timeouts, retries and a c
   const sync = runningKeyProblemsSync("http://127.0.0.1:9", keys);
   assert.equal(sync.length, 1);
   assert.match(sync[0], /couldn't be checked/);
+});
+
+test("self-registration and its confirmation email are the demo's only (M16)", () => {
+  const source = readFileSync(join(repo, "supabase", "config.toml"), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(!source.includes("[auth.email.template.confirmation]"), "the shared config has no confirmation email: every other stack is unchanged");
+  const demo = testConfig(source, { project: "my-game-dex-demo", offset: 5000, confirmationEmail: true });
+  assert.match(demo, /\[auth\.email\.template\.confirmation\]\nsubject = "Confirm your My Game Dex account"\ncontent_path = "\.\/supabase\/templates\/confirmation\.html"/);
+  assert.ok(!testConfig(source, { project: "my-game-dex-pilot", offset: 4000, signup: false }).includes("template.confirmation"), "nor does the pilot's");
+  assert.deepEqual(Object.keys(VARIANTS).filter((n) => VARIANTS[n].confirmationEmail), ["demo"]);
+  assert.equal(VARIANTS.pilot.signup, false, "the pilot's Auth refuses sign-ups itself");
+  assert.equal(VARIANTS.demo.site, "http://127.0.0.6:3006", "the demo's email links go to its preview");
+  // Each preview pins the app server's setting; the checks' app servers keep it closed by default.
+  assert.match(readFileSync(join(scripts, "demo-preview.mjs"), "utf8"), /MGD_SELF_REGISTRATION: "open"/);
+  assert.match(readFileSync(join(scripts, "pilot-preview.mjs"), "utf8"), /MGD_SELF_REGISTRATION: "closed"/);
+  assert.match(readFileSync(join(scripts, "app-harness.mjs"), "utf8"), /selfRegistration = "closed"/);
+  // A server-side variable only: never one Next.js would send to the browser.
+  const gate = readFileSync(join(repo, "src", "features", "auth", "registration.ts"), "utf8");
+  assert.match(gate, /return env\.MGD_SELF_REGISTRATION === "open";/);
+  assert.match(gate, /^import "server-only";/);
 });

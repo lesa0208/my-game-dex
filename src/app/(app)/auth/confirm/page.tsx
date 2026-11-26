@@ -8,6 +8,7 @@ import { PageLayout } from "@/components/layout/page-layout";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { getCurrentViewer } from "@/features/account/queries";
+import { confirmSignUp } from "@/features/auth/sign-up";
 import { acceptInvitation } from "@/features/invitations/onboarding";
 import { verifyRecovery } from "@/features/password/actions";
 import { TOKEN_HASH } from "@/features/password/form";
@@ -33,6 +34,7 @@ async function ConfirmContent({ search }: { search: Search }) {
   const type = one(search.type);
   const status = one(search.status);
   if (type === "recovery") return <RecoveryContent tokenHash={tokenHash} status={status} />;
+  if (type === "email") return <SignUpConfirmContent tokenHash={tokenHash} status={status} />;
 
   if (status === "unavailable") {
     return (
@@ -75,6 +77,63 @@ async function ConfirmContent({ search }: { search: Search }) {
         <input type="hidden" name="type" value="invite" />
         <Button type="submit" size="lg" className="h-10 px-4">
           Accept the invitation
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * M16: a new account's confirmation link. As for the others, opening it spends nothing; the
+ * button's POST (confirmSignUp) verifies it and signs the new collector in. An expired, used or
+ * invalid link gets the same message, with the way to a new one: signing up again with the same
+ * address sends a new link to an account that isn't confirmed yet.
+ */
+async function SignUpConfirmContent({ tokenHash, status }: { tokenHash: string; status: string }) {
+  if (status === "unavailable") {
+    return (
+      <EmptyState icon={MailX} title="Accounts can't be confirmed right now">
+        Try the link again later. It stays valid for an hour after it was sent.
+      </EmptyState>
+    );
+  }
+  if (status === "invalid" || !TOKEN_HASH.test(tokenHash)) {
+    return (
+      <EmptyState
+        icon={MailX}
+        title="This link can't be used"
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button asChild variant="outline" size="lg" className="h-10 px-4">
+              <Link href="/sign-in">Go to sign in</Link>
+            </Button>
+          </div>
+        }
+      >
+        It may have expired (links work for an hour), been used already, or been replaced by a newer one. If you already confirmed your email, sign in. If not, sign up again
+        with the same address to get a new link.
+      </EmptyState>
+    );
+  }
+  const viewer = await getCurrentViewer();
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-start gap-3">
+        <MailCheck aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary-text" />
+        <p className="text-sm text-muted-foreground">
+          Confirm this email address to finish creating your My Game Dex account. Then you&apos;ll choose your handle. The link works once, for an hour after it was sent.
+        </p>
+      </div>
+      {viewer ? (
+        <p className="rounded-lg border px-3 py-2.5 text-sm">
+          You&apos;re signed in{viewer.handle ? ` as @${viewer.handle}` : ""}. Confirming signs you out of that account on this device first.
+        </p>
+      ) : null}
+      <form action={confirmSignUp}>
+        <input type="hidden" name="token_hash" value={tokenHash} />
+        <input type="hidden" name="type" value="email" />
+        <Button type="submit" size="lg" className="h-10 px-4">
+          Confirm my email
         </Button>
       </form>
     </div>
@@ -131,10 +190,11 @@ async function RecoveryContent({ tokenHash, status }: { tokenHash: string; statu
 
 async function Confirm({ searchParams }: { searchParams: PageProps<"/auth/confirm">["searchParams"] }) {
   const search = await searchParams;
-  const recovery = one(search.type) === "recovery";
+  const type = one(search.type);
+  const title = type === "recovery" ? "Reset your password" : type === "email" ? "Confirm your email" : "Accept your invitation";
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold tracking-tight">{recovery ? "Reset your password" : "Accept your invitation"}</h1>
+      <h1 className="mb-4 text-xl font-semibold tracking-tight">{title}</h1>
       <ConfirmContent search={search} />
     </>
   );

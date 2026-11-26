@@ -289,9 +289,12 @@ const withFormats = (claims) => {
 
 test("every format the SNES pilot states is classified once, and the two classes don't overlap", () => {
   const pilot = ["Q5293", "Q7982", "Q34467", "Q47770", "Q149757", "Q160710", "Q234870", "Q269415", "Q633454", "Q849572", "Q17048824", "Q54820071"];
-  assert.deepEqual(Object.keys(DISTRIBUTION_FORMAT_TABLE).sort(), [...pilot].sort());
-  assert.deepEqual([...DISTRIBUTION_FORMATS.non_physical].sort(), ["Q269415", "Q54820071"]);
-  assert.equal(DISTRIBUTION_FORMATS.physical.length, 10);
+  // M16: the demo catalog's formats, classified the same way; the pilot's twelve are unchanged.
+  const demoPhysical = ["Q5294", "Q270309", "Q1071532", "Q1190785", "Q1942227", "Q2144513", "Q2270470", "Q14827909", "Q37753524", "Q55194959", "Q55215790", "Q55215818", "Q55219460", "Q55219685", "Q108039701"];
+  const demoDigital = ["Q719629", "Q821067", "Q1066707", "Q7126717", "Q25450609", "Q30943865"];
+  assert.deepEqual(Object.keys(DISTRIBUTION_FORMAT_TABLE).sort(), [...pilot, ...demoPhysical, ...demoDigital].sort());
+  assert.deepEqual([...DISTRIBUTION_FORMATS.non_physical].sort(), ["Q269415", "Q54820071", ...demoDigital].sort());
+  assert.equal(DISTRIBUTION_FORMATS.physical.length, 10 + demoPhysical.length);
   assert.ok(!DISTRIBUTION_FORMATS.physical.some((q) => DISTRIBUTION_FORMATS.non_physical.includes(q)));
   assert.ok(Object.isFrozen(DISTRIBUTION_FORMAT_TABLE) && Object.isFrozen(DISTRIBUTION_FORMAT_TABLE.Q633454));
 });

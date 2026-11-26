@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-pilot/
+/.next-demo/
 /out/
 
 # production
@@ -57,3 +58,4 @@ pilot-reevaluation-*.json
 /.supabase-b1/
 /.supabase-pilot/
 /.supabase-rehearsal/
+/.supabase-demo/

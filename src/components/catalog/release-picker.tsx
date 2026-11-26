@@ -253,6 +253,8 @@ export function ReleasePickerView({
   const target = outcome?.kind === "release" ? outcome.release : only;
 
   const platform = plan.platform;
+  // No catalog release on the chosen platform: its region step offers every region.
+  const noCatalogRegions = Boolean(platform) && (!platform?.inCatalog || picker.regions.length === 0);
   const regionValue = plan.region === "unsure" ? UNSURE : plan.region ? plan.region.code : null;
   const editionValue = plan.edition === "unsure" ? UNSURE : plan.edition === "other" ? OTHER : plan.edition ? plan.edition.key : null;
   const href = (s: Href) => fastAddHref(game.slug, s);
@@ -365,21 +367,38 @@ export function ReleasePickerView({
           <Step id="step-region" number={2} title="Region">
             <Chips
               label="Region"
-              items={[
-                ...(platform.inCatalog ? picker.regions : []).map((r) => ({
-                  key: r.code,
-                  text: regionLabel(r),
-                  count: r.releaseCount,
-                  href: href({ platform: platform.slug, region: r.code }),
-                  current: regionValue === r.code,
-                })),
-                ...(plan.region && plan.region !== "unsure" && !plan.region.inCatalog
-                  ? [{ key: plan.region.code, text: `${regionText(plan.region.code)} (not in the catalog)`, href: href({ platform: platform.slug, region: plan.region.code }), current: true }]
-                  : []),
-                { key: OTHER, text: "Another region", href: href({ platform: platform.slug, region: OTHER }), current: plan.choosingRegion },
-                { key: UNSURE, text: "Not sure", href: href({ platform: platform.slug, region: UNSURE }), current: plan.region === "unsure" },
-              ]}
+              items={
+                noCatalogRegions
+                  ? // M16: the catalog has no release here yet, so every region is one click away:
+                    // the copy is the collector's own record, with the region they say.
+                    [
+                      ...reference.regions.map((r) => ({
+                        key: r.code,
+                        text: r.label,
+                        href: href({ platform: platform.slug, region: r.code }),
+                        current: regionValue === r.code,
+                      })),
+                      { key: UNSURE, text: "Not sure", href: href({ platform: platform.slug, region: UNSURE }), current: plan.region === "unsure" },
+                    ]
+                  : [
+                      ...picker.regions.map((r) => ({
+                        key: r.code,
+                        text: regionLabel(r),
+                        count: r.releaseCount,
+                        href: href({ platform: platform.slug, region: r.code }),
+                        current: regionValue === r.code,
+                      })),
+                      ...(plan.region && plan.region !== "unsure" && !plan.region.inCatalog
+                        ? [{ key: plan.region.code, text: `${regionText(plan.region.code)} (not in the catalog)`, href: href({ platform: platform.slug, region: plan.region.code }), current: true }]
+                        : []),
+                      { key: OTHER, text: "Another region", href: href({ platform: platform.slug, region: OTHER }), current: plan.choosingRegion },
+                      { key: UNSURE, text: "Not sure", href: href({ platform: platform.slug, region: UNSURE }), current: plan.region === "unsure" },
+                    ]
+              }
             />
+            {noCatalogRegions ? (
+              <p className="text-xs text-muted-foreground">The catalog has no release of {game.title} here yet. Choose your copy&apos;s region, or not sure.</p>
+            ) : null}
             {plan.choosingRegion ? (
               <OtherChoice
                 action={`/games/${game.slug}`}
@@ -421,7 +440,11 @@ export function ReleasePickerView({
               ]}
             />
             {plan.suggested.edition ? (
-              <Suggestion>Chosen for you: the only edition the catalog lists for this region. Yours is different? Choose another edition or not sure.</Suggestion>
+              <Suggestion>
+                {plan.edition === "unsure"
+                  ? "Not sure, for now: the catalog lists no edition here yet. Know it? Name the edition."
+                  : "Chosen for you: the only edition the catalog lists for this region. Yours is different? Choose another edition or not sure."}
+              </Suggestion>
             ) : null}
           </Step>
         ) : null}

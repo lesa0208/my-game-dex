@@ -87,7 +87,7 @@ export default function SystemsPreviewPage() {
                     accent={system.accent}
                     count={count(system.stats.games, "game")}
                     empty={system.stats.games === 0}
-                    label={system.stats.games === 0 ? `${system.name}: no games yet` : `${system.name}: ${count(system.stats.games, "game")}, ${count(system.stats.copies, "copy", "copies")}`}
+                    fullName={system.stats.games === 0 ? system.name : `${system.name}, ${count(system.stats.copies, "copy", "copies")}`}
                   />
                 </div>
                 <ShelfBoard />

@@ -650,6 +650,10 @@ async function performance() {
     select private.uuid_v7(), ${sql(big.id)}, g.id, p.id, rc.code, 1 + (row_number() over ()) % 3
     from public.games g cross join public.platforms p cross join public.region_codes rc
     where g.status = 'published' and rc.code <> 'unknown'
+    -- In a fixed order, so the same 3,000 are made every run (the title search below needs at
+    -- least 30 of Echoes of Tessaly's, which sort early; without an order, the database's row
+    -- order decided, and the search sometimes found fewer).
+    order by g.sort_title, p.slug, rc.code
     limit 3000;
     analyze public.wishlist_items;`);
   const total = wishes(big);

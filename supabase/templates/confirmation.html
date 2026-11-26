@@ -1,0 +1,11 @@
+<!--
+  The new account confirmation email (M16). Used where self-registration is open: the local demo
+  stack only (scripts/test-stack.mjs adds it to that stack's generated config). Like the invitation
+  and reset emails, the link carries the token's hash to the app's own confirmation page, which
+  verifies it only on an explicit POST, so a mail scanner fetching the link can't use the
+  single-use token.
+-->
+<h2>Confirm your My Game Dex account</h2>
+<p>Someone created a My Game Dex account with this address.</p>
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email">Confirm my email</a></p>
+<p>The link works once, for an hour. Then you'll choose your handle and can start your collection. If you didn't create this account, you can ignore this email: it won't be confirmed.</p>

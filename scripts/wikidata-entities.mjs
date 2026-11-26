@@ -55,6 +55,14 @@ export const PLATFORM_ERAS = {
   Q172742: { slug: "nes", launch: "1983-07-15", lateAfter: "1995-12-31" },
   Q135321: { slug: "famicom-disk-system", launch: "1986-02-21", lateAfter: "1993-12-31" },
   Q10677: { slug: "playstation", launch: "1994-12-03", lateAfter: "2006-12-31" },
+  // M16: first launches anywhere (Mega Drive 1988-10-29, Nintendo 64 1996-06-23, Game Boy
+  // 1989-04-21, Game Boy Color 1998-10-21, Game Boy Advance 2001-03-21, PlayStation 2 2000-03-04).
+  Q10676: { slug: "mega-drive", launch: "1988-10-29", lateAfter: "1998-12-31" },
+  Q184839: { slug: "nintendo-64", launch: "1996-06-23", lateAfter: "2003-12-31" },
+  Q186437: { slug: "game-boy", launch: "1989-04-21", lateAfter: "2003-12-31" },
+  Q203992: { slug: "game-boy-color", launch: "1998-10-21", lateAfter: "2004-12-31" },
+  Q188642: { slug: "game-boy-advance", launch: "2001-03-21", lateAfter: "2010-12-31" },
+  Q10680: { slug: "playstation-2", launch: "2000-03-04", lateAfter: "2014-12-31" },
 };
 
 /**
@@ -153,6 +161,31 @@ export const DISTRIBUTION_FORMAT_TABLE = Object.freeze({
   Q633454: Object.freeze({ label: "ROM cartridge", class: "physical", media: "cartridge" }),
   Q849572: Object.freeze({ label: "GD-ROM", class: "physical", media: "optical_disc" }),
   Q17048824: Object.freeze({ label: "Super Nintendo Entertainment System Game Pak", class: "physical", media: "cartridge" }),
+  // M16: the formats the demo catalog's 789 entities state (wikidata-formats-2026-11-25T20-30-42-116Z.json,
+  // sha256 6e99c048…6496), each by its own Wikidata label and description. Items that aren't
+  // distribution formats (consoles, a circuit board, an arcade machine, "kilobit") stay out, so
+  // they keep the "unclassified" flag for a person.
+  Q5294: Object.freeze({ label: "DVD", class: "physical", media: "optical_disc" }),
+  Q270309: Object.freeze({ label: "Universal Media Disc", class: "physical", media: "optical_disc" }),
+  Q1071532: Object.freeze({ label: "MiniDVD", class: "physical", media: "optical_disc" }),
+  Q1190785: Object.freeze({ label: "HuCard", class: "physical", media: "cartridge" }),
+  Q1942227: Object.freeze({ label: "(no English label) type of game cartridge", class: "physical", media: "cartridge" }),
+  Q2144513: Object.freeze({ label: "DVD-ROM", class: "physical", media: "optical_disc" }),
+  Q2270470: Object.freeze({ label: "Nintendo optical disc", class: "physical", media: "optical_disc" }),
+  Q14827909: Object.freeze({ label: "Nintendo 64 Game Pak", class: "physical", media: "cartridge" }),
+  Q37753524: Object.freeze({ label: "3½-inch floppy disk", class: "physical", media: "floppy_disk" }),
+  Q55194959: Object.freeze({ label: "5¼-inch floppy disk", class: "physical", media: "floppy_disk" }),
+  Q55215790: Object.freeze({ label: "Nintendo GameCube Disc", class: "physical", media: "optical_disc" }),
+  Q55215818: Object.freeze({ label: "Nintendo Wii Disc", class: "physical", media: "optical_disc" }),
+  Q55219460: Object.freeze({ label: "Nintendo Game Boy Game Pak", class: "physical", media: "cartridge" }),
+  Q55219685: Object.freeze({ label: "Nintendo Game Boy Color Game Pak", class: "physical", media: "cartridge" }),
+  Q108039701: Object.freeze({ label: "physical distribution", class: "physical", media: "unspecified" }),
+  Q719629: Object.freeze({ label: "PlayStation Network", class: "non_physical", media: "digital" }),
+  Q821067: Object.freeze({ label: "Virtual Console", class: "non_physical", media: "digital" }),
+  Q1066707: Object.freeze({ label: "downloadable content", class: "non_physical", media: "digital" }),
+  Q7126717: Object.freeze({ label: "download", class: "non_physical", media: "digital" }),
+  Q25450609: Object.freeze({ label: "digital game", class: "non_physical", media: "digital" }),
+  Q30943865: Object.freeze({ label: "Nintendo Switch Online", class: "non_physical", media: "digital" }),
   Q54820071: Object.freeze({ label: "digital download", class: "non_physical", media: "digital" }),
 });
 
@@ -165,6 +198,12 @@ export const PLATFORM_MEDIA = {
   Q172742: ["cartridge", "rom_unspecified"],
   Q135321: ["floppy_disk"],
   Q10677: ["optical_disc"],
+  Q10676: ["cartridge", "rom_unspecified"],
+  Q184839: ["cartridge", "rom_unspecified"],
+  Q186437: ["cartridge", "rom_unspecified"],
+  Q203992: ["cartridge", "rom_unspecified"],
+  Q188642: ["cartridge", "rom_unspecified"],
+  Q10680: ["optical_disc"],
 };
 
 /** Flags that may indicate a critical error: an item carrying one can't be ready until a person resolves it. */

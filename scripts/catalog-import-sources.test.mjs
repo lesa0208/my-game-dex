@@ -98,7 +98,8 @@ test("Wikidata: the query falls back to the shared mul label, for every pilot pl
     assert.match(query, /wikibase:language "en,mul"/);
     assert.match(query, new RegExp(`wdt:P400 wd:${WIKIDATA_PLATFORMS[platform]} `));
   }
-  assert.throws(() => wikidataQuery("mega-drive"), /no Wikidata item/);
+  // M16 added the demo catalog's platforms (mega-drive among them); one without an item still throws.
+  assert.throws(() => wikidataQuery("atari-lynx"), /no Wikidata item/);
   // An item labelled only in mul comes back with that label, and is a game like any other.
   const [shared] = parseWikidata(sparql([row("Q853143", "Super Mario World", "1990-11-21T00:00:00Z", 11)]));
   assert.equal(shared.payload.title, "Super Mario World");

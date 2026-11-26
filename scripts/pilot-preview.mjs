@@ -39,6 +39,8 @@ const env = {
   [SECRET_KEY_VARIABLE]: status.SECRET_KEY ?? status.SERVICE_ROLE_KEY,
   // Never the demo data, whatever .env.local says.
   ENABLE_SEED_DATA: "false",
+  // M16: the pilot is invitation only, whatever the shell says (its Auth has sign-up off too).
+  MGD_SELF_REGISTRATION: "closed",
   // Its own build folder (next.config.ts): never .next, which the app checks and the B1 preview use.
   MGD_NEXT_DIST_DIR: ".next-pilot",
 };

@@ -83,7 +83,7 @@ function walk(directory) {
 
 function collectBundleFindings() {
   const dist = process.env.MGD_NEXT_DIST_DIR ?? ".next";
-  if (![".next", ".next-pilot"].includes(dist)) throw new Error(`MGD_NEXT_DIST_DIR may only be ".next-pilot", not "${dist}".`);
+  if (![".next", ".next-pilot", ".next-demo"].includes(dist)) throw new Error(`MGD_NEXT_DIST_DIR may only be ".next-pilot" or ".next-demo", not "${dist}".`);
   const directory = join(root, dist, "static");
   if (!existsSync(directory)) {
     console.error(`No build found at ${dist}/static. Run npm run build first.`);

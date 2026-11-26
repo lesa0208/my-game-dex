@@ -449,7 +449,17 @@ test("a step the owner hasn't answered is suggested only when the catalog has on
   assert.equal(planFastAdd(lone, sel("snes", "unsure"), REFERENCE).outcome, null, "and nothing is inferred");
   assert.equal(planFastAdd(lone, sel("snes", "other"), REFERENCE).choosingRegion, true, "another region stays another");
   assert.equal(planFastAdd(lone, sel("snes", "ntsc-j"), REFERENCE).region.inCatalog, false, "a region the catalog lacks stays the owner's");
-  assert.equal(planFastAdd(lone, sel("snes", "ntsc-j"), REFERENCE).suggested.edition, false, "with no catalog edition suggested for it");
+  const lacking = planFastAdd(lone, sel("snes", "ntsc-j"), REFERENCE);
+  assert.equal(lacking.edition, "unsure", "with no catalog edition there, the edition starts as not sure (M16), never a catalog edition");
+  assert.deepEqual(lacking.outcome, { kind: "claim", claim: { platform: "snes", region: "ntsc-j", edition: null } }, "so the copy is the collector's own record");
+  assert.equal(planFastAdd(lone, sel("snes", "ntsc-j", OTHER), REFERENCE).outcome.claim.edition, "other", "and naming the edition still wins");
+
+  // M16: a published game with no release yet (a demo or identity-only game): its platform is
+  // chosen, any region is the collector's, and the edition starts as not sure.
+  const bare = picker({ platforms: [{ slug: "snes", name: "Super Nintendo", releaseCount: 0 }], regions: [], releases: [] });
+  assert.equal(planFastAdd(bare, sel(null), REFERENCE).region, null, "the region is never guessed");
+  assert.deepEqual(planFastAdd(bare, sel("snes", "pal"), REFERENCE).outcome, { kind: "claim", claim: { platform: "snes", region: "pal", edition: null } });
+  assert.deepEqual(planFastAdd(bare, sel("snes", "unsure"), REFERENCE).outcome, { kind: "claim", claim: { platform: "snes", region: null, edition: null } });
   assert.equal(planFastAdd(lone, sel("snes", "pal", "unsure"), REFERENCE).outcome.kind, "claim", "edition not sure stays not sure");
   assert.equal(planFastAdd(lone, sel("snes", "pal", OTHER), REFERENCE).outcome.claim.edition, "other");
   assert.equal(planFastAdd(lone, sel("snes", "pal", STANDARD), REFERENCE).suggested.edition, false, "an edition chosen isn't a suggestion");

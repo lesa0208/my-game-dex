@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_OPTIONS, supabaseConfig } from "@/features/auth/cookies";
 import { isProtectedPath, signInHref } from "@/features/auth/redirect";
+import { selfRegistrationOpen } from "@/features/auth/registration";
 import { bodyTooLarge } from "@/lib/body-limit";
 
 /**
@@ -17,6 +18,12 @@ import { bodyTooLarge } from "@/lib/body-limit";
 export async function proxy(request: NextRequest) {
   if (bodyTooLarge(request.method, request.nextUrl.pathname, request.headers.get("content-length"))) {
     return new NextResponse("Payload Too Large", { status: 413, headers: { "Cache-Control": "no-store" } });
+  }
+  // M16: where self-registration isn't open (this server's own setting), the sign-up page is a
+  // real 404 before anything renders. The page and its action check the setting again.
+  const path = request.nextUrl.pathname;
+  if ((path === "/sign-up" || path.startsWith("/sign-up/")) && !selfRegistrationOpen()) {
+    return NextResponse.rewrite(new URL("/_not-found", request.url), { status: 404 });
   }
   const config = supabaseConfig();
   if (!config) return NextResponse.next({ request });
