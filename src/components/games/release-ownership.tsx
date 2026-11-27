@@ -45,7 +45,11 @@ export async function PlatformUnidentified({ gameId, platform, platformName }: {
   if (!count) return null;
   return (
     <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-dashed border-white/12 bg-white/[0.02] px-3 py-2 text-sm" data-platform-unidentified={count}>
-      <span>
+      {/* Short on phones, so it doesn't push the cards down; the same meaning either way (one version is shown, and read, at a time). */}
+      <span className="sm:hidden" data-platform-unidentified-short="">
+        {count === 1 ? `1 ${platformName} copy has` : `${count} ${platformName} copies have`} no identified release.
+      </span>
+      <span className="hidden sm:inline">
         {count === 1 ? "1 of your copies" : `${count} of your copies`} on {platformName} {count === 1 ? "isn't" : "aren't"} linked to a release yet (exact release not identified), so no card below counts {count === 1 ? "it" : "them"}.
       </span>
       <a href="#my-copies" className="inline-flex min-h-6 items-center font-medium text-primary-text underline-offset-4 hover:underline">

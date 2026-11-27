@@ -1,4 +1,4 @@
-import { Disc3 } from "lucide-react";
+import { Disc3, Info } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ConsoleArt } from "@/components/shelf/console-art";
@@ -68,9 +68,16 @@ export function PhysicalReleases({
         <>
           {/* Said once for the whole tab, not on every card. */}
           {unpictured ? (
-            <p className="mt-1 text-sm text-muted-foreground" data-releases-media-note="">
-              Without an approved photo of the release, its cartridge or case is drawn plain, with no label.
-            </p>
+            // Optional: one short line, opened only by whoever wants to know, so it never pushes the cards down.
+            <details className="group mt-1 text-sm text-muted-foreground" data-releases-media-note="">
+              <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-md outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring sm:min-h-8 [&::-webkit-details-marker]:hidden">
+                <Info aria-hidden="true" className="size-4 shrink-0" />
+                Why some labels are blank
+              </summary>
+              <p className="mt-1 max-w-prose rounded-lg border border-white/[0.07] bg-black/15 px-3 py-2 leading-relaxed" data-releases-media-note-text="">
+                Without an approved photo of the exact release, its cartridge or case is drawn plain: the right shape for its system and region, with a blank label. No title, artwork or cover image is added, so nothing is shown that the catalog hasn&apos;t recorded.
+              </p>
+            </details>
           ) : null}
           <div className="mt-5 flex flex-col gap-7">
             {overview.groups.map(({ platform, releases }) => {

@@ -323,6 +323,15 @@ try {
       check(`${slug}: no generated label art and no IGDB image on any card`, (await tab.locator("[data-media], [data-label-art]").count()) === 0 && shells.every((s) => !s.igdb));
       check(`${slug}: the tab says once that a release without an approved photo is drawn plain`, (await tab.locator("[data-releases-media-note]").count()) === 1);
     }
+    // The explanation is optional: a closed disclosure, opened by whoever wants it.
+    await releasesTab(desk, GAMES.vale);
+    const note = desk.locator("[data-physical-releases]:visible [data-releases-media-note]");
+    check("the blank-label explanation is a closed disclosure, Why some labels are blank", (await note.evaluate((d) => d.tagName === "DETAILS" && !d.open)) && (await note.locator("summary").innerText()).trim() === "Why some labels are blank" && !(await note.locator("[data-releases-media-note-text]").isVisible()));
+    await note.locator("summary").focus();
+    await desk.keyboard.press("Enter");
+    const noteText = (await note.locator("[data-releases-media-note-text]").innerText()).replace(/\s+/g, " ");
+    check("opened from the keyboard, it explains the plain drawing: no photo of the exact release, a blank label, nothing added", (await note.evaluate((d) => d.open)) && noteText.includes("Without an approved photo of the exact release") && noteText.includes("blank label") && noteText.includes("No title, artwork or cover image is added"));
+    await note.locator("summary").click();
     check("the approved-image registry has no photo for any fixture release: no photo slot is shown (test image deferred)", (await desk.locator("[data-release-media^='photo:'], [data-release-photo-credit]").count()) === 0);
   }
 
@@ -370,6 +379,10 @@ try {
       if (name !== "tablet") {
         const heights = await p.locator('[data-release-card] [data-release-add]:visible, [data-release-card] summary:visible, [data-release-actions] button:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
         check(`${size.width}px: Add to collection, Want this release and More details are at least 44 px tall`, heights.length > 0 && heights.every((h) => h >= 44));
+        const notice = p.locator('[data-release-group="snes"] [data-platform-unidentified]');
+        check(`${size.width}px: the unlinked-copy notice is short on phones, with its link`, (await notice.innerText()).replace(/\s+/g, " ").trim() === "1 SNES copy has no identified release. Review in My Copies" && (await notice.getByRole("link", { name: "Review in My Copies" }).getAttribute("href")) === "#my-copies");
+        const mediaNote = p.locator("[data-physical-releases]:visible [data-releases-media-note]");
+        check(`${size.width}px: closed, the blank-label note is one line (a 44 px target) above the cards`, !(await mediaNote.evaluate((d) => d.open)) && (await mediaNote.evaluate((d) => d.getBoundingClientRect().height)) <= 48 && (await mediaNote.locator("summary").evaluate((e) => e.getBoundingClientRect().height)) >= 44);
         check(`${size.width}px: Add to collection is shown on phones, named for its release`, (await card(p, ids.ukv).getByRole("link", { name: /^Add to collection ?, a copy of this release: SNES, PAL, UKV$/ }).isVisible()));
         // Scrolled to the very end, the fixed bottom navigation covers none of the last card.
         await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -393,6 +406,8 @@ try {
       if (name === "small") {
         await shot(p, "08b-phone-320.png", { scrollTo: p.locator("[data-physical-releases]:visible") });
         await shot(p, "08b-phone-320-card.png", { scrollTo: card(p, ids.eu) });
+        await p.locator("[data-physical-releases]:visible [data-releases-media-note] summary").click();
+        await shot(p, "08d-phone-320-label-note-open.png", { scrollTo: p.locator("[data-physical-releases]:visible") });
       }
       await p.context().close();
     }

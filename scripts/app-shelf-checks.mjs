@@ -6,6 +6,14 @@
  * SHELF_SCREENSHOTS=<folder>, a real browser also takes screenshots of the shelves.
  *
  *   npm run build && MGD_STACK=test npm run app:shelf-checks
+ *   npm run build && MGD_STACK=scratch npm run app:shelf-checks
+ *
+ * The test stack has three published releases of its own that no fixture makes (Super Mario
+ * World's North American and PAL SNES releases, Crash Bandicoot's Japanese PlayStation one).
+ * On the scratch stack, and only there, a synthetic add-on (scripts/fixtures/
+ * shelf-regression-fixture.sql) makes releases of the same shape under fictional titles, and
+ * the suite looks those up instead. Every check is the same on both stacks. It refuses any
+ * other stack.
  *
  * Local only. Installs the catalog fixture and removes it, and every test account, at
  * the end, then checks nothing is left behind. Prints check names and statuses, never
@@ -19,6 +27,17 @@ import { join } from "node:path";
 import { api, appErrorLines, Browser, check, createUser, decode, deleteUsers, formWith, isRedirect, location, psql, publishableKey, readSession, results, root, section, signInAs, startApp, stopApp } from "./app-harness.mjs";
 import { installFixture, removeFixture } from "./catalog-fixture.mjs";
 import { footprint } from "./lib/footprint.mjs";
+import { requireStack, stackName } from "./lib/stack.mjs";
+
+if (stackName !== "test" && stackName !== "scratch") {
+  console.error(`Refusing: the shelf checks run only on the test or scratch stack (MGD_STACK=test or MGD_STACK=scratch), not "${stackName}".`);
+  process.exit(1);
+}
+const scratch = stackName === "scratch";
+if (scratch) requireStack("scratch", "the shelf regression add-on");
+/** The games the test stack has of its own, and the synthetic ones standing in for them on scratch. */
+const WORLD = scratch ? "Fixture Shelf World" : "Super Mario World";
+const BANDIT = scratch ? "Fixture Shelf Bandit" : "Crash Bandicoot";
 
 /** The copies standing on a shelf: its item links (class "group relative mt-5…"), each to a copy's page. */
 const shelfIds = (html) =>
@@ -140,8 +159,8 @@ async function small() {
   const user = await collector("shs");
   const ids = {};
   // SNES: both recorded shells, the generic cartridge by region, three copies of one release, an unknown region.
-  ids.na = await add(user, release("Super Mario World", "snes", "ntsc-uc", "snes-game-pak-na"), { completeness: "complete", overall_condition: "very_good", acquired_on: "2022-03-14" });
-  ids.pal = await add(user, release("Super Mario World", "snes", "pal", "snes-cartridge-jp-pal"), { completeness: "loose", overall_condition: "good" });
+  ids.na = await add(user, release(WORLD, "snes", "ntsc-uc", "snes-game-pak-na"), { completeness: "complete", overall_condition: "very_good", acquired_on: "2022-03-14" });
+  ids.pal = await add(user, release(WORLD, "snes", "pal", "snes-cartridge-jp-pal"), { completeness: "loose", overall_condition: "good" });
   const starfallPal = release("Starfall Odyssey", "snes", "pal", "rom-cartridge");
   ids.copies = [await add(user, starfallPal, { completeness: "sealed", overall_condition: "mint" }), await add(user, starfallPal), await add(user, starfallPal, { completeness: "incomplete" })];
   ids.jp = await add(user, release("Starfall Odyssey", "snes", "ntsc-j", "rom-cartridge"));
@@ -150,7 +169,7 @@ async function small() {
   // Disc cases, a Saturn case and a North American Saturn copy the art doesn't show.
   ids.psPal = await add(user, release("Echoes of Tessaly", "playstation", "pal", "cd-rom"), { completeness: "complete", overall_condition: "near_mint" });
   ids.psUs = await add(user, release("Neon Drift Racing", "playstation", "ntsc-uc", "cd-rom"));
-  ids.psJp = await add(user, release("Crash Bandicoot", "playstation", "ntsc-j", "cd-rom"));
+  ids.psJp = await add(user, release(BANDIT, "playstation", "ntsc-j", "cd-rom"));
   ids.psClaim = await claim(user, "Echoes of Tessaly", "playstation", null, "Platinum");
   ids.saturn = await add(user, release("Neon Drift Racing", "sega-saturn", "ntsc-j", "cd-rom"));
   ids.saturnUs = await claim(user, "Neon Drift Racing", "sega-saturn", "ntsc-uc");
@@ -166,8 +185,11 @@ async function small() {
   check("the Systems page lists every system the collector has copies on", ["snes", "playstation", "sega-saturn", "game-boy", "mega-drive", "nes", "pc-engine"].every((s) => systems.html.includes(`href="/collection/systems/${s}"`)));
   const perPlatform = psql(`select string_agg(p.slug || '=' || n, ',' order by p.slug) from (select coalesce(r.platform_id, c.claimed_platform_id) pid, count(*) n from public.collection_items c left join public.releases r on r.id = c.release_id where c.owner_id = '${user.id}' group by 1) x join public.platforms p on p.id = x.pid;`);
   const tiles = Object.fromEntries(perPlatform.split(",").map((pair) => pair.split("=")));
-  const tileLabel = (slug) => [...systems.html.matchAll(/<a\s[^>]*>/g)].map((m) => m[0]).find((tag) => tag.includes(`href="/collection/systems/${slug}"`))?.match(/aria-label="([^"]*)"/)?.[1] ?? "";
-  check("each tile counts the collector's copies on it", Object.entries(tiles).every(([slug, n]) => tileLabel(slug).endsWith(`: ${n} ${n === "1" ? "copy" : "copies"}`)), perPlatform);
+  // M16 (63a031a): a tile's accessible name is its own text (WCAG 2.5.3), no longer an aria-label, so
+  // the count is read from the tile link's text: it must say exactly the collector's copies on it.
+  const tileText = (slug) => plain(new RegExp(`<a\\s[^>]*href="/collection/systems/${slug}"[^>]*>([\\s\\S]*?)</a>`).exec(systems.html)?.[1] ?? "").trim();
+  const countIn = (text, n) => new RegExp(`(?:^|[^0-9])${n} ${n === "1" ? "copy" : "copies"}(?:[^a-z]|$)`).test(text);
+  check("each tile counts the collector's copies on it", Object.entries(tiles).every(([slug, n]) => countIn(tileText(slug), n)), `${perPlatform} | ${Object.keys(tiles).map((slug) => tileText(slug)).join(" | ")}`);
   check("the header counts systems and copies", text.includes(`${Object.keys(tiles).length} systems`) && text.includes(`${count(`select count(*) from public.collection_items where owner_id = '${user.id}'`)} copies`));
   check("a system without console art still gets a tile", systems.html.includes('href="/collection/systems/pc-engine"'));
 
@@ -181,7 +203,7 @@ async function small() {
   check("a copy whose region isn't known is a placeholder, not a guessed shell", snesMedia.filter((m) => m === "placeholder").length === 1);
   check("the shelf counts copies and games", plain(snes.html).includes("8 Copies") || /8\s*<\/span>[\s\S]{0,200}Copies/.test(snes.html));
   check("copies of the shelf link to their own pages", snesIds.includes(ids.na) && snes.html.includes(`href="/collection/${ids.na}"`));
-  check("the list's details are rendered for copies", plain(snes.html).includes("Super Mario World"));
+  check("the list's details are rendered for copies", plain(snes.html).includes(WORLD));
 
   const ps = await user.browser.get("/collection/systems/playstation");
   check("the PlayStation shelf draws every copy in a jewel case, the claim too", mediaOf(ps.html).filter((m) => m.startsWith("ps1-case")).length === 4);
@@ -222,7 +244,7 @@ async function large() {
     release("Starfall Odyssey II", "snes", "ntsc-uc", "rom-cartridge"),
     release("ClayBoxer Turbo", "snes", "ntsc-uc", "rom-cartridge"),
     release("Twin Harbor", "snes", "ntsc-uc", "rom-cartridge"),
-    release("Super Mario World", "snes", "pal", "snes-cartridge-jp-pal"),
+    release(WORLD, "snes", "pal", "snes-cartridge-jp-pal"),
   ];
   const completeness = ["complete", "loose", "sealed", "incomplete", null];
   for (let i = 0; i < 260; i += 1) await add(user, snes[i % snes.length], completeness[i % completeness.length] ? { completeness: completeness[i % completeness.length] } : {});
@@ -249,11 +271,15 @@ async function privacy(owner, others) {
 
 // ---------------------------------------------------------------------------
 
-const LEFTOVER_TABLES = ["public.collection_items", "public.games"];
+const LEFTOVER_TABLES = scratch ? ["public.collection_items", "public.games", "public.releases"] : ["public.collection_items", "public.games"];
 const startingFootprint = footprint(psql, LEFTOVER_TABLES);
 
 try {
   installFixture();
+  if (scratch) {
+    installFixture("shelf-regression-fixture.sql");
+    check("scratch: the synthetic stand-ins for the test stack's own releases are installed", count(`select count(*) from public.releases r join public.games g on g.id = r.game_id where g.title in ('${WORLD}', '${BANDIT}') and r.status = 'published'`) === 3);
+  }
   origin = await startApp(3270);
   await signedOut();
   const nobody = await empty();
@@ -271,6 +297,7 @@ try {
     psql(`begin; set local session_replication_role = replica; delete from private.audit_events where actor_id in (${ids.map((id) => `'${id}'`).join(",")}) or target_profile_id in (${ids.map((id) => `'${id}'`).join(",")}); commit;`);
   }
   removeFixture();
+  if (scratch) check("scratch: no synthetic stand-in is left behind", count(`select count(*) from public.games where title in ('${WORLD}', '${BANDIT}')`) === 0);
   check("no copies or catalog data are left behind", footprint(psql, LEFTOVER_TABLES) === startingFootprint);
 }
 
