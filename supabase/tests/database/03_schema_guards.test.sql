@@ -138,6 +138,8 @@ insert into approved_function_grants values
   ('search_catalog(text,text[],integer,text)', 'anon'), ('search_catalog(text,text[],integer,text)', 'authenticated'),
   ('get_release_picker(text,text,text,uuid)', 'anon'), ('get_release_picker(text,text,text,uuid)', 'authenticated'),
   ('list_catalog_platforms()', 'anon'), ('list_catalog_platforms()', 'authenticated'),
+  -- M18a: provider metadata (IGDB) of published games, for the app server's secret key only (20261222100000).
+  ('get_game_provider_metadata(uuid[])', 'service_role'), ('provider_image_allowed(text,text)', 'service_role'),
   -- M6b: the collection functions. Each is SECURITY INVOKER, so RLS applies.
   ('add_collection_item(uuid,uuid,jsonb)', 'authenticated'), ('update_collection_item(uuid,jsonb)', 'authenticated'),
   ('remove_collection_item(uuid)', 'authenticated'), ('get_my_collection(text,text,text,text,text,integer,text)', 'authenticated'),

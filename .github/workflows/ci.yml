@@ -57,6 +57,11 @@ jobs:
       - name: Game image registry
         run: npm run media:test
 
+      # M18a: the IGDB client's limits, retries and token handling, the credentials loader and
+      # the matcher, on synthetic data (no network, no credentials).
+      - name: IGDB client and matcher
+        run: npm run igdb:test
+
       - name: Mutation runners refuse without an explicit opt-in
         run: npm run mutation:guard-test
 

@@ -276,7 +276,7 @@ const STATUS_LABELS: Record<CopyStatus, string | null> = {
   pending: "Awaiting catalog approval",
   not_approved: "Not approved",
   invalid: "No longer in the catalog",
-  unidentified: "Not linked to a release",
+  unidentified: "Exact release not identified",
 };
 
 /** Null for an ordinary copy, which needs no label. */
@@ -336,7 +336,7 @@ const OWNERSHIP_STATUS: Record<CopyStatus, string> = {
   owned: "Confirmed",
   pending: "Awaiting catalog approval",
   not_approved: "Not approved",
-  unidentified: "Not linked to a release",
+  unidentified: "Exact release not identified",
   invalid: "Preserved, not counted",
 };
 
@@ -379,7 +379,7 @@ export function historyIdentityText(identity: Record<string, string | null> | nu
   if (identity.release_id) return "Linked to a release in the catalog";
   const region = identity.region_code ? (regionLabels.get(identity.region_code) ?? identity.region_code) : "Region not sure";
   const edition = identity.edition_name ?? (identity.edition_kind ? (EDITION_KINDS[identity.edition_kind] ?? identity.edition_kind) : null) ?? "Edition not sure";
-  return `Not linked to a release: ${region} · ${edition}`;
+  return `Exact release not identified: ${region} · ${edition}`;
 }
 
 /** M12b: who made a change in a copy's history. */

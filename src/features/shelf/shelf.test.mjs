@@ -224,7 +224,7 @@ test("an unidentified copy is placed by its claim and says it isn't linked to a 
   assert.equal(item.media?.kind, "ps1-case");
   assert.equal(item.region, null);
   assert.equal(item.details, "PS1 · Region not sure · Platinum");
-  assert.equal(item.note, "Not linked to a release");
+  assert.equal(item.note, "Exact release not identified");
 });
 
 test("a preserved copy uses the title its owner recorded, and never invents one", () => {

@@ -44,6 +44,8 @@
     "auth:test": "node --experimental-strip-types --no-warnings --test src/features/auth/auth.test.mjs",
     "collection:test": "node --experimental-strip-types --no-warnings --test src/features/collection/collection.test.mjs",
     "media:add": "node --experimental-strip-types --no-warnings scripts/game-image-add.mjs",
+    "igdb": "node scripts/igdb.mjs",
+    "igdb:test": "node --experimental-strip-types --no-warnings --test scripts/igdb.test.mjs",
     "media:test": "node --experimental-strip-types --no-warnings --test src/features/media/game-images.test.mjs",
     "shelf:test": "node --experimental-strip-types --no-warnings --test src/features/shelf/shelf.test.mjs",
     "statistics:test": "node --experimental-strip-types --no-warnings --test src/features/statistics/statistics.test.mjs",
@@ -103,6 +105,7 @@
     "app:sign-up-journey-checks": "node scripts/app-sign-up-journey-checks.mjs",
     "app:home-checks": "node scripts/app-home-checks.mjs",
     "app:explore-checks": "node scripts/app-explore-checks.mjs",
+    "app:igdb-checks": "node scripts/app-igdb-checks.mjs",
     "app:game-page-checks": "node scripts/app-game-page-checks.mjs",
     "app:sign-up-checks": "node scripts/app-sign-up-checks.mjs"
   },

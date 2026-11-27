@@ -41,7 +41,7 @@ export async function MoveCopySection({
   const current = copy.release
     ? `${copy.game?.title ?? known?.title ?? "This game"} (${releaseLine(copy.release)})`
     : copy.identity === "claim" && copy.claim
-      ? `${copy.game?.title ?? known?.title ?? "This game"} (${claimLine(copy.claim)}, not linked to a release)`
+      ? `${copy.game?.title ?? known?.title ?? "This game"} (${claimLine(copy.claim)}, exact release not identified)`
       : "A release that's no longer shown in the catalog";
 
   const [picker, search] = await Promise.all([

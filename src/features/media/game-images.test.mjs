@@ -75,3 +75,50 @@ test("the caption never claims to be the collector's copy", () => {
   assert.equal(imageCaption(image("na"), "NTSC-U/C"), "An example cartridge (NTSC-U/C), not necessarily your copy.");
   assert.equal(imageCaption(image("r", { release: "0190a0a0-0000-7000-8000-000000000001" }), null), "This release, not necessarily your copy.");
 });
+
+// Game Details 2.0, Phase 3: the Gallery's items.
+test("the Gallery: an approved photo keeps its source, licence and credit; IGDB's screenshots go through the app's route", async () => {
+  const { galleryItems, screenshotSize, viewerMaxWidth } = await import("./gallery.ts");
+  const { LICENSE_LABELS } = await import("./game-images.ts");
+  const photo = image("snes-ntsc-uc-cartridge", { source: { name: "Example Archive", url: "https://example.test/item" }, license: "licensed", licenseDetail: "CC BY 4.0", attribution: "Photo: A. Collector" });
+  const items = galleryItems({
+    title: "Chrono Trigger",
+    photos: [photo],
+    licenseLabels: LICENSE_LABELS,
+    platformName: (s) => (s === "snes" ? "SNES" : null),
+    regionName: (c) => (c === "ntsc-uc" ? "NTSC-U/C" : null),
+    screenshots: [
+      { imageId: "scabc", width: 256, height: 224 },
+      { imageId: "scdef", width: 1920, height: 1080 },
+      { imageId: "scghi", width: null, height: null },
+    ],
+    igdbUrl: "https://www.igdb.com/games/chrono-trigger",
+  });
+  assert.equal(items.length, 4);
+  const [p, s1, s2, s3] = items;
+  assert.deepEqual(
+    { src: p.src, width: p.width, height: p.height, alt: p.alt, label: p.label, credit: p.credit },
+    { src: "/game-images/chrono-trigger/snes-ntsc-uc-cartridge.webp", width: 1200, height: 760, alt: photo.alt, label: "SNES · NTSC-U/C · Cartridge", credit: { name: "Example Archive", url: "https://example.test/item", license: "Licensed · CC BY 4.0", attribution: "Photo: A. Collector" } },
+  );
+  // Never IGDB's own address, and never the cropped "screenshot_big".
+  assert.equal(s1.src, "/media/igdb/720p/scabc.jpg");
+  assert.equal(s2.src, "/media/igdb/1080p/scdef.jpg");
+  assert.equal(s3.src, "/media/igdb/720p/scghi.jpg");
+  assert.ok(items.every((i) => !/igdb\.com|screenshot_big/.test(i.src)));
+  assert.deepEqual([s1.width, s1.height], [256, 224]);
+  assert.equal(s1.alt, "Screenshot 1 of 3 from Chrono Trigger");
+  assert.deepEqual(s1.credit, { name: "IGDB.com", url: "https://www.igdb.com/games/chrono-trigger", license: null, attribution: null });
+  assert.equal(screenshotSize({ imageId: "x", width: 1280, height: 720 }), "720p");
+  // The viewer: a small original up to three times its size, a large one at its own, never past 1280.
+  assert.equal(viewerMaxWidth(256), 768);
+  assert.equal(viewerMaxWidth(512), 1024);
+  assert.equal(viewerMaxWidth(1000), 1000);
+  assert.equal(viewerMaxWidth(1595), 1280);
+  assert.equal(viewerMaxWidth(null), 1280);
+});
+
+test("the Gallery: no sources, no items; nothing filled in", async () => {
+  const { galleryItems } = await import("./gallery.ts");
+  const { LICENSE_LABELS } = await import("./game-images.ts");
+  assert.deepEqual(galleryItems({ title: "Tetris", photos: [], licenseLabels: LICENSE_LABELS, platformName: () => null, regionName: () => null, screenshots: [], igdbUrl: null }), []);
+});

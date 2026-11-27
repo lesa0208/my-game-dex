@@ -36,7 +36,7 @@ export type ShelfItem = {
   year: number | null;
   /** The known facts under its title in the list ("PS1 · PAL · Platinum"). */
   details: string;
-  /** Its standing, when it needs saying ("Not linked to a release"). */
+  /** Its standing, when it needs saying ("Exact release not identified"). */
   note: string | null;
   /** The physical format as recorded, or null. */
   format: string | null;

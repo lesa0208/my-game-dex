@@ -166,7 +166,7 @@ select is((select count(*)::int from private.audit_events where action = 'catalo
 -- ---------------------------------------------------------------------------
 select is((select array_agg(p.proname::text order by p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private', 'catalog_import') and has_function_privilege('catalog_importer', p.oid, 'execute')),
-  array['apply_record', 'claim_run', 'finish_run', 'mark_record_failed', 'pending_records', 'run_report', 'stage_records', 'start_run'],
+  array['apply_record', 'attach_game_record', 'claim_run', 'enrichment_candidates', 'finish_run', 'mark_record_failed', 'pending_records', 'run_report', 'stage_records', 'start_enrichment_run', 'start_run'],
   'the importer can still call only the import functions');
 select is((select count(*)::int from unnest(array['public.verify_release(uuid,text,bigint)', 'public.publish_release(uuid,text,bigint)', 'public.verify_game(uuid,text,bigint)',
     'public.update_release(uuid,jsonb,text)', 'public.create_release(uuid,uuid,text,text,jsonb,text)']) f where has_function_privilege('catalog_importer', f, 'execute')),

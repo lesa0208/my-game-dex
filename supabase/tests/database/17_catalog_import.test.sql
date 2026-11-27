@@ -50,10 +50,10 @@ select is((select array_agg(nspname::text order by nspname) from pg_namespace wh
   and has_schema_privilege('catalog_importer', oid, 'usage')), array['catalog_import'], 'of the protected schemas, it can use only catalog_import');
 select is((select array_agg(p.proname::text order by p.proname) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname in ('public', 'private', 'catalog_import') and has_function_privilege('catalog_importer', p.oid, 'execute')),
-  array['apply_record', 'claim_run', 'finish_run', 'mark_record_failed', 'pending_records', 'run_report', 'stage_records', 'start_run'],
+  array['apply_record', 'attach_game_record', 'claim_run', 'enrichment_candidates', 'finish_run', 'mark_record_failed', 'pending_records', 'run_report', 'stage_records', 'start_enrichment_run', 'start_run'],
   'it can call only the import functions: never an editor, verification or publication function');
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'catalog_import' and p.prosecdef and p.proconfig = array['search_path=""']), 8, 'each import function runs as its owner with an empty search_path');
+  where n.nspname = 'catalog_import' and p.prosecdef and p.proconfig = array['search_path=""']), 11, 'each import function runs as its owner with an empty search_path');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r, pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'catalog_import' and has_function_privilege(r, p.oid, 'execute')), 0, 'no API role can call an import function');
 select is((select count(*)::int from unnest(array['anon', 'authenticated', 'service_role']) r where has_schema_privilege(r, 'catalog_import', 'usage')), 0, 'or use the import schema');
