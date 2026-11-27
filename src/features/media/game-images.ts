@@ -102,6 +102,14 @@ export function imageFor(images: readonly GameImage[], query: ImageQuery): GameI
   return on.find((i) => i.region === null) ?? (new Set(on.map((i) => i.region)).size === 1 ? on[0] : null) ?? null;
 }
 
+/**
+ * Physical Releases 2.0: the approved photo of exactly this release, or null. Unlike imageFor,
+ * never an example of the platform or region: a release card only shows the release itself.
+ */
+export function releaseImageFor(images: readonly GameImage[], query: { game: string; platform: string; release: string }): GameImage | null {
+  return images.find((i) => i.game === query.game && i.platform === query.platform && i.release === query.release && imageProblems(i).length === 0) ?? null;
+}
+
 /** What the caption says it shows: the release itself, or an example. */
 export function imageCaption(image: GameImage, regionLabel: string | null): string {
   const what = image.release ? "This release" : `An example ${image.kind}${regionLabel ? ` (${regionLabel})` : ""}`;

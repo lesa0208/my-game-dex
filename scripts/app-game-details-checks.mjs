@@ -148,7 +148,8 @@ async function visitor() {
   check("with no first release date or summary invented", !missingText.includes("First released") && !missingText.includes(SUMMARY));
   // M17b: no generated shell in the hero; it says there's no approved artwork yet.
   check("the hero says there's no artwork, rather than drawing a made-up one", missingText.includes("No artwork for this game yet.") && !missingText.includes("Artwork not available"));
-  check("and its unknown-region release drawn as a placeholder, not a guessed shell", missing.html.includes('data-media="placeholder"') && !/data-media="snes-cart/.test(missing.html));
+  // Physical Releases 2.0: the release card's picture (release-card.tsx).
+  check("and its unknown-region release drawn as a placeholder, not a guessed shell", missing.html.includes('data-release-media="placeholder"') && !/data-release-media="shell:snes-cart/.test(missing.html));
 
   const palRelease = release("Starfall Odyssey", "snes", "pal", "rom-cartridge");
   const old = await browser.get(`/games/starfall-odyssey?platform=snes&region=pal&release=${palRelease}`);

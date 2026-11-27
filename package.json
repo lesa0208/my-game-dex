@@ -107,6 +107,7 @@
     "app:explore-checks": "node scripts/app-explore-checks.mjs",
     "app:igdb-checks": "node scripts/app-igdb-checks.mjs",
     "app:game-page-checks": "node scripts/app-game-page-checks.mjs",
+    "app:physical-releases-checks": "node scripts/app-physical-releases-checks.mjs",
     "app:sign-up-checks": "node scripts/app-sign-up-checks.mjs"
   },
   "dependencies": {
