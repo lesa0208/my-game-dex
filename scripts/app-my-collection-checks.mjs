@@ -118,7 +118,7 @@ async function claims() {
   const page = plain(list.html);
   check("the list shows a claim under its game, with what the owner said", list.response.status === 200 && page.includes("Starfall Odyssey") && page.includes("SNES · PAL · Platinum"));
   check("and not sure where they didn't say", page.includes("NES · Region not sure · Edition not sure"));
-  check("a claim is labelled as not linked to a release", page.includes("Not linked to a release"));
+  check("a claim is labelled: exact release not identified", page.includes("Exact release not identified"));
   check("every copy is listed", rowIds(list.html).length === 3);
   const only = await user.browser.get("/collection?status=unidentified");
   check("the unidentified filter lists only claims", new Set(rowIds(only.html)).size === 2 && rowIds(only.html).includes(platinum) && rowIds(only.html).includes(unsure));

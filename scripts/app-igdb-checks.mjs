@@ -103,6 +103,14 @@ const igdb = async (...args) => (await promisify(execFile)(process.execPath, [jo
 const rpc = (headers, body) => fetch(`${api}/rest/v1/rpc/get_game_provider_metadata`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 
 let browser;
+async function eventually(condition, ms = 15000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    if (await condition().catch(() => false)) return true;
+    if (Date.now() > until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 let wikidataRun = null;
 try {
   section("Setup: the catalog fixture, with Wikidata records stating IGDB slugs");
@@ -141,7 +149,8 @@ try {
   });
   records = new Map([
     ["starfall-odyssey", record(9101, "starfall-odyssey", "starfall-odyssey")],
-    ["quiet-meadow", record(9102, "quiet-meadow", "quiet-meadow")],
+    // Quiet Meadow: three screenshots of three shapes (16:9, 8:7, 4:3), for the Gallery's viewer.
+    ["quiet-meadow", record(9102, "quiet-meadow", "quiet-meadow", { screenshots: [{ image_id: "sc9102m18a", width: 1280, height: 720 }, { image_id: "sc9102bm18a", width: 256, height: 224 }, { image_id: "sc9102cm18a", width: 640, height: 480 }] })],
     ["neon-drift-racing", record(9103, "neon-drift-racing", "neon-drift-racing", { platforms: [{ id: 7, name: "PlayStation" }] })],
     ["the-crystal-warden-remake", record(9104, "the-crystal-warden-remake", "the-crystal-warden", { game_type: { type: "Remake" } })],
   ]);
@@ -231,7 +240,18 @@ try {
   check("never laid on a cartridge: no label overlay with the cover", (await page.locator('[data-game-image="igdb-cover"]').innerText()).includes("Artwork not available") === false);
   await page.getByRole("tab", { name: /Gallery/ }).click();
   const gallery = await page.locator('[data-panel="gallery"]').innerText();
-  check("the Gallery tab holds IGDB's screenshot, credited", (await page.locator("[data-screenshot=igdb]").count()) === 1 && gallery.includes("Game screenshots from IGDB.com, not tied to a platform or release"), gallery.slice(0, 160));
+  check("the Gallery tab holds IGDB's screenshots, credited", (await page.locator("[data-screenshot=igdb]").count()) === 3 && gallery.includes("Game screenshots from IGDB.com, not tied to a platform or release"), gallery.slice(0, 160));
+  // Game Details 2.0, Phase 3: thumbnails and viewer only through the app's route, at a proportional size.
+  const thumbSrcs = await page.$$eval("[data-gallery-item] img", (imgs) => imgs.map((i) => i.getAttribute("src")));
+  check("its thumbnails come from the app's route at IGDB's proportional size, never the cropped one", JSON.stringify(thumbSrcs) === JSON.stringify(["/media/igdb/720p/sc9102m18a.jpg", "/media/igdb/720p/sc9102bm18a.jpg", "/media/igdb/720p/sc9102cm18a.jpg"]), thumbSrcs.join(","));
+  await page.locator("[data-gallery-item] button").first().click();
+  const stage = () => page.locator("[data-gallery-stage]").getAttribute("data-gallery-stage").catch(() => null);
+  const viewerPosition = async () => ((await page.locator("[data-gallery-position]").textContent().catch(() => "")) ?? "").trim();
+  check("the viewer opens on the first, 1 of 3, shown from what the route just served", await eventually(async () => (await stage()) === "image" && (await viewerPosition()) === "1 of 3") && (await page.locator("[data-gallery-image]").getAttribute("src")).startsWith("blob:"));
+  await page.keyboard.press("ArrowRight");
+  check("and the Right arrow shows the second, 2 of 3", await eventually(async () => (await stage()) === "image" && (await viewerPosition()) === "2 of 3"));
+  await page.keyboard.press("Escape");
+  check("Escape closes it", await eventually(async () => (await page.getByRole("dialog").count()) === 0));
   await page.getByRole("tab", { name: "Overview" }).click();
   await page.addScriptTag({ content: axeSource });
   const axe = await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] } })).violations.filter((v) => ["critical", "serious"].includes(v.impact)).map((v) => v.id));
@@ -283,7 +303,20 @@ try {
   const optimizerCache = join(root, ".next", "cache", "images");
   mkdirSync(optimizerCache, { recursive: true });
   writeFileSync(join(optimizerCache, "m18a-check-stored-copy"), "a copy kept from before the fix");
+  const open = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" })).newPage();
+  await open.goto(`${origin}/games/quiet-meadow`, { waitUntil: "networkidle" });
+  await open.getByRole("tab", { name: /Gallery/ }).click();
+  await open.locator("[data-gallery-item] button").first().click();
+  const openStage = () => open.locator("[data-gallery-stage]").getAttribute("data-gallery-stage").catch(() => null);
+  check("before the withdrawal: the viewer open on an authorized screenshot", await eventually(async () => (await openStage()) === "image"));
   await igdb("withdraw", "--media-only", "--note", "M18a checks: media withdrawn");
+  await open.keyboard.press("ArrowRight");
+  check("withdrawn while the viewer is open: the next image is not shown, a safe 'not available' state instead", await eventually(async () => (await openStage()) === "unavailable") && (await open.locator("[data-gallery-image]").count()) === 0 && (await open.locator("[data-gallery-viewer] [role=status]").innerText()).includes("isn't available"));
+  await open.keyboard.press("ArrowLeft");
+  check("and going back to the image seen before: asked again, refused, not shown from a copy", await eventually(async () => (await openStage()) === "unavailable") && (await open.locator("[data-gallery-image]").count()) === 0);
+  await open.keyboard.press("Escape");
+  check("the viewer still closes", await eventually(async () => (await open.getByRole("dialog").count()) === 0));
+  await open.context().close();
   check("withdrawing media: the same image is a 404 on the next request", (await img(COVER)).status === 404);
   check("even revalidating with the old ETag", (await img(COVER, { "If-None-Match": etag })).status === 404);
   check("the withdraw command removed the optimizer's stored copies", !existsSync(optimizerCache));

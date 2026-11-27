@@ -1,12 +1,12 @@
 import { PlugZap } from "lucide-react";
 import type { Metadata } from "next";
-import Image from "next/image";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { gameHref } from "@/components/catalog/release-picker";
 import { GameCopies, GameCopiesSkeleton } from "@/components/collection/game-copies";
 import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-details";
+import { GameGallery } from "@/components/games/game-gallery";
 import { GameArtwork, GameHeroInfo, GameIdentity, type HeroDescription, HeroBackdrop } from "@/components/games/game-hero";
 import { OverviewTab } from "@/components/games/game-overview";
 import { HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, ReleasesEmptyAction } from "@/components/games/game-sections";
@@ -19,6 +19,7 @@ import { coverFitsPlatform } from "@/features/catalog/provider-images";
 import { getProviderMetadata, igdbImageUrl } from "@/features/catalog/provider-metadata";
 import { getGameSummary, getReleasePicker, resolveMergedRelease } from "@/features/catalog/queries";
 import { LICENSE_LABELS } from "@/features/media/game-images";
+import { galleryItems } from "@/features/media/gallery";
 import { approvedImageFor, approvedImagesOf } from "@/features/media/registry";
 import { gameOverview } from "@/features/shelf/copies";
 import { getSubmissionOptions } from "@/features/submissions/queries";
@@ -90,7 +91,18 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
   const image = approvedImageFor({ game: picker.game.slug, platform: platformSlug, region: releaseRegion, release: picker.selection.releaseId });
   const publishers = new Set(all.releases.map((r) => r.publisherName));
   const publisher = publishers.size === 1 ? ([...publishers][0] ?? null) : null;
-  const gallery = approvedImagesOf(picker.game.slug);
+  // Game Details 2.0, Phase 3: the Gallery's items. The registry's approved photos of the page's
+  // platform only (an image is never shown for another platform), then IGDB's screenshots where
+  // they fit the platform (above); nothing else.
+  const galleryList = galleryItems({
+    title: picker.game.title,
+    photos: approvedImagesOf(picker.game.slug).filter((g) => g.platform === platformSlug),
+    licenseLabels: LICENSE_LABELS,
+    platformName: (s) => overview.platforms.find((p) => p.slug === s)?.shortName ?? null,
+    regionName: (c) => options?.regions.find((r) => r.code === c)?.label ?? null,
+    screenshots: igdbImages.screenshots,
+    igdbUrl: provider?.url ?? null,
+  });
   const here = gameHref(picker.game.slug, { platform: requested.platform, region: null, release: requested.release });
   const intent = first(query.add) === picker.game.slug ? "add" : first(query.wish) === picker.game.slug ? "wish" : null;
   const game = { id: picker.game.id, slug: picker.game.slug, title: picker.game.title };
@@ -139,45 +151,13 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
         </div>
       ),
     },
-    ...(gallery.length || igdbImages.screenshots.length
+    ...(galleryList.length
       ? [
           {
             id: "gallery",
             label: "Gallery",
-            count: gallery.length + igdbImages.screenshots.length,
-            content: (
-              <>
-              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {gallery.map((g) => (
-                  <li key={g.id} className="flex flex-col gap-1.5">
-                    <div className="flex aspect-square items-center justify-center rounded-xl border border-white/[0.08] bg-black/20 p-3">
-                      <Image src={`/${g.file}`} alt={g.alt} width={g.width} height={g.height} sizes="(min-width: 640px) 220px, 45vw" className="h-auto max-h-full w-auto max-w-full object-contain" />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {g.source.name} · {LICENSE_LABELS[g.license]}
-                    </p>
-                  </li>
-                ))}
-                {/* M18a: IGDB's screenshots of the game, credited below. */}
-                {igdbImages.screenshots.map((shot, i) => (
-                  <li key={shot.imageId} className="flex flex-col gap-1.5" data-screenshot="igdb">
-                    <div className="relative aspect-video overflow-hidden rounded-xl border border-white/[0.08] bg-black/20">
-                      <Image src={igdbImageUrl(shot, "screenshot_big")} unoptimized alt={`Screenshot ${i + 1} of ${picker.game.title}`} fill sizes="(min-width: 640px) 300px, 45vw" className="object-cover" />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {igdbImages.screenshots.length && provider ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Game screenshots from{" "}
-                  <a href={provider.url ?? "https://www.igdb.com"} className="underline underline-offset-2 hover:text-foreground" rel="noopener noreferrer" target="_blank">
-                    IGDB.com
-                  </a>
-                  , not tied to a platform or release.
-                </p>
-              ) : null}
-              </>
-            ),
+            count: galleryList.length,
+            content: <GameGallery title={picker.game.title} items={galleryList} igdbUrl={provider?.url ?? null} />,
           },
         ]
       : []),

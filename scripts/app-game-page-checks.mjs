@@ -317,6 +317,76 @@ try {
   check("sees none of the first collector's copy or wish", !theirs.includes("Owned:") && !theirs.includes("Player's Choice") && (await other.locator("[data-wished]").count()) === 0);
   await other.context().close();
   await desk.context().close();
+
+  // Game Details 2.0, Phase 3: the Gallery, on Chrono Trigger's eight IGDB screenshots (16:9, 8:7
+  // and 6:5 originals). Images whole, from the app's route only; an accessible viewer.
+  section("4. The Gallery");
+  const viewer = await (await browser.newContext({ viewport: DESKTOP, colorScheme: "dark" })).newPage();
+  const igdbRequests = [];
+  viewer.on("request", (r) => {
+    if (/igdb\.com$|twitch\.tv$/.test(new URL(r.url()).hostname) && r.resourceType() !== "document") igdbRequests.push(r.url());
+  });
+  await viewer.goto(`${ORIGIN}/games/chrono-trigger`, { waitUntil: "networkidle" });
+  await viewer.getByRole("tab", { name: /Gallery/ }).click();
+  const thumbs = viewer.locator("[data-gallery-item] button");
+  check("Chrono Trigger's Gallery: its eight IGDB screenshots, each a button", (await thumbs.count()) === 8 && (await viewer.getByRole("tab", { name: /Gallery/ }).innerText()).includes("8"));
+  await eventually(() => viewer.$$eval("[data-gallery-item] img", (imgs) => imgs.every((i) => i.complete && i.naturalWidth > 0)));
+  const frames = await viewer.$$eval("[data-gallery-item] img", (imgs) => imgs.map((i) => ({ src: i.getAttribute("src"), fit: getComputedStyle(i).objectFit, natural: i.naturalWidth / i.naturalHeight, recorded: Number(i.getAttribute("width")) / Number(i.getAttribute("height")) })));
+  check("every thumbnail through the app's route, at a size that keeps proportions (never the cropped screenshot_big)", frames.every((f) => /^\/media\/igdb\/(720p|1080p)\/[a-z0-9]+\.jpg$/.test(f.src)), frames.map((f) => f.src).join(","));
+  check("each whole and undistorted: shown contained, its proportions the original's (16:9, 8:7 and 6:5 alike)", frames.every((f) => f.fit === "contain" && Math.abs(f.natural - f.recorded) < 0.01) && new Set(frames.map((f) => f.recorded.toFixed(1))).size >= 3, JSON.stringify(frames.map((f) => [f.natural.toFixed(3), f.recorded.toFixed(3)])));
+  check("frames of one shape, in a grid of four at 1440", await viewer.$$eval("[data-gallery-item] button", (bs) => { const r = bs.map((b) => b.getBoundingClientRect()); return new Set(r.map((x) => Math.round(x.width))).size === 1 && new Set(r.map((x) => Math.round(x.height))).size === 1 && new Set(r.map((x) => Math.round(x.top))).size === 2; }));
+  check("IGDB credited beside the screenshots, game-level", (await viewer.locator("[data-gallery] [data-igdb-credit]").innerText()).includes("Game screenshots from IGDB.com, not tied to a platform or release"));
+  await thumbs.nth(0).focus();
+  await viewer.keyboard.press("Enter");
+  const viewerDialog = viewer.getByRole("dialog");
+  const position = async () => ((await viewer.locator("[data-gallery-position]").textContent().catch(() => "")) ?? "").trim();
+  const shown = () => viewer.locator("[data-gallery-image]").evaluate((i) => { const r = i.getBoundingClientRect(); return i.complete && i.naturalWidth > 0 ? { ratio: r.width / r.height, natural: i.naturalWidth / i.naturalHeight, inView: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, alt: i.alt, src: i.getAttribute("src") } : null; });
+  check("Enter on a thumbnail opens the viewer: a modal dialog named for the image, 1 of 8", await eventually(async () => (await viewerDialog.count()) === 1 && (await position()) === "1 of 8") && (await viewerDialog.getAttribute("aria-labelledby")) !== null && (await viewer.locator("[data-gallery-viewer] h2").innerText()) === "Screenshot 1");
+  check("the image large, whole, in its own proportions, inside the screen, described", await eventually(async () => { const s = await shown(); return Boolean(s && Math.abs(s.ratio - s.natural) < 0.01 && s.inView && s.alt === "Screenshot 1 of 8 from Chrono Trigger"); }));
+  check("shown from the route's own answer (a blob of what it just served), not a stored copy", (await shown())?.src?.startsWith("blob:") === true);
+  check("focus moved into the viewer", await viewer.evaluate(() => Boolean(document.activeElement?.closest("[data-gallery-viewer]"))));
+  check("its credit: IGDB.com, linked, and that it verifies no release", (await viewer.locator("[data-gallery-viewer]").innerText().then((t) => t.includes("Screenshot from IGDB.com") && t.includes("doesn't verify any physical release"))) && (await viewer.locator('[data-gallery-viewer] a[href^="https://www.igdb.com/games/"]').count()) === 1);
+  await viewer.getByRole("button", { name: "Next image" }).click();
+  check("Next: 2 of 8", await eventually(async () => (await position()) === "2 of 8"));
+  await viewer.keyboard.press("ArrowRight");
+  await viewer.keyboard.press("ArrowRight");
+  check("the Right arrow: 4 of 8, the 8:7 original, still whole", await eventually(async () => { const s = await shown(); return (await position()) === "4 of 8" && Boolean(s && Math.abs(s.ratio - 8 / 7) < 0.01 && s.inView); }));
+  await viewer.keyboard.press("ArrowLeft");
+  check("the Left arrow: 3 of 8", await eventually(async () => (await position()) === "3 of 8"));
+  for (let i = 0; i < 3; i++) await viewer.getByRole("button", { name: "Previous image" }).click();
+  check("Previous from the first goes round to the last: 8 of 8", await eventually(async () => (await position()) === "8 of 8"));
+  let trapped = true;
+  for (let i = 0; i < 8; i++) {
+    await viewer.keyboard.press("Tab");
+    trapped &&= await viewer.evaluate(() => Boolean(document.activeElement?.closest("[data-gallery-viewer]")));
+  }
+  check("Tab stays inside the viewer while it's open", trapped);
+  check("every control on the page behind is hidden from assistive technology", await viewer.evaluate(() => { const els = [...document.querySelectorAll("main a, main button, main [tabindex]")]; return els.length > 0 && els.every((e) => e.closest("[aria-hidden=true]")); }));
+  await axe(viewer, "Gallery viewer open, 1440");
+  await viewer.keyboard.press("Escape");
+  check("Escape closes it, and focus returns to the thumbnail of the image last shown (8)", await eventually(async () => (await viewerDialog.count()) === 0 && (await viewer.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Screenshot 8, 8 of 8: open larger"));
+  await thumbs.nth(2).click();
+  await eventually(async () => (await position()) === "3 of 8");
+  await viewer.getByRole("button", { name: "Close" }).click();
+  check("the Close button closes it too, focus back on its thumbnail", await eventually(async () => (await viewerDialog.count()) === 0 && (await viewer.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Screenshot 3, 3 of 8: open larger"));
+  await axe(viewer, "Gallery tab, 1440");
+  check("the browser never asked IGDB for anything", igdbRequests.length === 0, igdbRequests.slice(0, 2).join(", "));
+  await viewer.context().close();
+  for (const size of [{ width: 390, height: 844 }, { width: 320, height: 640 }]) {
+    const small = await (await browser.newContext({ viewport: size, deviceScaleFactor: 2, colorScheme: "dark", hasTouch: true })).newPage();
+    await small.goto(`${ORIGIN}/games/chrono-trigger`, { waitUntil: "networkidle" });
+    await small.getByRole("tab", { name: /Gallery/ }).click();
+    check(`${size.width}px: the Gallery in two columns, no sideways scrolling`, (await noSideScroll(small)) && (await small.$$eval("[data-gallery-item] button", (bs) => new Set(bs.slice(0, 2).map((b) => Math.round(b.getBoundingClientRect().top))).size === 1)));
+    await small.locator("[data-gallery-item] button").nth(3).tap();
+    const smallShown = await eventually(async () => small.locator("[data-gallery-image]").evaluate((i) => { const r = i.getBoundingClientRect(); return i.complete && i.naturalWidth > 0 && Math.abs(r.width / r.height - i.naturalWidth / i.naturalHeight) < 0.01 && r.left >= 0 && r.right <= innerWidth; }));
+    const controls = await small.$$eval("[data-gallery-viewer] button", (bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+    check(`${size.width}px: the viewer fits: the image whole, Close, Previous and Next in reach (44px), no sideways scrolling`, smallShown && controls.length === 3 && controls.every(Boolean) && (await noSideScroll(small)));
+    await small.getByRole("button", { name: "Next image" }).tap();
+    check(`${size.width}px: tapping Next: 5 of 8`, await eventually(async () => (await small.locator("[data-gallery-position]").textContent()).trim() === "5 of 8"));
+    await small.getByRole("button", { name: "Close" }).tap();
+    check(`${size.width}px: Close returns to the Gallery`, await eventually(async () => (await small.getByRole("dialog").count()) === 0));
+    await small.context().close();
+  }
 } catch (error) {
   check("the checks ran to the end", false, String(error.message).split("\n")[0]);
 } finally {

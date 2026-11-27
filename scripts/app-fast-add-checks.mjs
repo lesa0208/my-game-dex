@@ -177,7 +177,7 @@ async function ownership(user) {
   const page = plain((await user.browser.get(GAME)).html);
   check("the game page says how many copies the collector has", page.includes("Owned: 7 copies"), page.match(/Owned: [^ ]+ ?\w*/)?.[0]);
   check("by platform, region and edition, counted together", page.includes("SNES · NTSC-U/C · Collector's Edition ×2"));
-  check("confirmed releases and copies without one are labelled apart", page.includes("Confirmed") && page.includes("Not linked to a release"));
+  check("confirmed releases and copies without one are labelled apart", page.includes("Confirmed") && page.includes("Exact release not identified"));
   check("a claim says when its platform isn't the catalog's", page.includes("platform not in the catalog for this game"));
 
   const search = plain((await user.browser.get("/explore?q=starfall")).html);
@@ -203,7 +203,7 @@ async function identity(user) {
   check("everything else about the copy stays", psql(`select c.completeness || '/' || p.notes || '/' || c.created_at from public.collection_items c join public.collection_item_private p on p.item_id = c.id where c.id = '${claimId}';`) === before);
   const after = plain((await user.browser.get(`/collection/${claimId}?notice=identity`)).html);
   check("the page says it's saved", after.includes("Saved. Your copy's details are updated"));
-  check("and its private history shows what it was", after.includes("What this copy was (1 change)") && after.includes("From: Not linked to a release: PAL · Edition not sure") && after.includes("To: Not linked to a release: NTSC-J · Platinum"));
+  check("and its private history shows what it was", after.includes("What this copy was (1 change)") && after.includes("From: Exact release not identified: PAL · Edition not sure") && after.includes("To: Exact release not identified: NTSC-J · Platinum"));
   await user.browser.submit(`/collection/${claimId}`, form, { region: "", edition_name: "", edition_kind: "" });
   check("the owner can go back to not sure", copiesOf(user.id).filter((c) => c === "claim:snes:?:?:?").length === 2);
 

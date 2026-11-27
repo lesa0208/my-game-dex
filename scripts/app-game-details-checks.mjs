@@ -181,7 +181,7 @@ async function collectors() {
   check("and lists each one on its own", listed.length === 5 && mine.every((id) => listed.includes(id)), `${listed.length}; missing ${mine.filter((id) => !listed.includes(id)).map((id) => `${id.slice(0, 8)}:${page.html.split(id).length - 1}`).join(",")}`);
   check("copies of the same release stay separate", text.includes("Copy 1 of 3") && text.includes("Copy 2 of 3") && text.includes("Copy 3 of 3"));
   check("a copy of another game with a similar title isn't listed", !listed.includes(sequel));
-  check("an unidentified copy is listed, and says it isn't linked to a release", listed.includes(unidentified) && text.includes("Not linked to a release"));
+  check("an unidentified copy is listed, and says its exact release isn't identified", listed.includes(unidentified) && text.includes("Exact release not identified") && !text.includes("Not linked to a release"));
   const recorded = (completeness, condition) => new RegExp(`>Completeness</dt><dd>${completeness}</dd></div><div[^>]*><dt[^>]*>Condition</dt><dd>${condition}</dd>`).test(page.html);
   check("each copy shows its completeness and condition, as recorded", recorded("Complete in box", "Very good") && recorded("Sealed", "Mint"));
   check("and nothing private: no acquisition date", !text.includes("2021"));

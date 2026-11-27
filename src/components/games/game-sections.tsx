@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentViewer } from "@/features/account/queries";
 import { signInHref } from "@/features/auth/redirect";
-import { copyStatusLabel } from "@/features/collection/details";
 import { getMyGameOwnership } from "@/features/collection/queries";
 import { getExploreContext } from "@/features/explore/context";
 import type { ShelfItem } from "@/features/shelf/browse";
@@ -51,12 +50,6 @@ export async function HeroActions({
 
 export function HeroActionsSkeleton() {
   return <Skeleton aria-hidden="true" className="h-10 w-full max-w-lg rounded-lg" />;
-}
-
-// Your copies speaks to the collector: a copy not linked to a release is one whose exact release
-// isn't identified. The same standing as the shared "Not linked to a release" label, in plainer words.
-function collectorNote(note: string) {
-  return note === copyStatusLabel("unidentified") ? "Exact release not identified" : note;
 }
 
 /** A recorded condition or completeness, as a quiet chip; what wasn't recorded is said once. */
@@ -134,7 +127,7 @@ export async function MyCopyPanel({
           ))}
         </dl>
         <CopyBadges item={first} />
-        {first.note ? <p className="text-xs text-muted-foreground">{collectorNote(first.note)}</p> : null}
+        {first.note ? <p className="text-xs text-muted-foreground">{first.note}</p> : null}
         <div className="grid grid-cols-2 gap-2">
           <Button asChild size="sm" className="h-9 gap-1.5">
             <Link href={`${first.href}?edit=1#edit`} aria-label={`Edit, ${first.details || first.title}`}>

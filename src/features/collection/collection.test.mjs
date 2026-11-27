@@ -270,7 +270,7 @@ test("an unidentified copy reads as what its owner claims, and 'not sure' where 
   assert.equal(claimLine({ platform, region: null, edition_kind: null, edition_name: null }), "PS1 · Region not sure · Edition not sure");
   assert.equal(claimEdition({ edition_kind: "collector", edition_name: null }), "Collector's edition", "a kind alone names the edition");
   assert.equal(claimEdition({ edition_kind: "nonsense", edition_name: null }), null, "an unknown kind isn't invented into a name");
-  assert.equal(copyStatusLabel("unidentified"), "Not linked to a release");
+  assert.equal(copyStatusLabel("unidentified"), "Exact release not identified");
 });
 
 test("claim errors become fixed messages, and nothing else gets through (M12a)", () => {
@@ -493,7 +493,7 @@ test("ownership is worded per copy's standing, and preserved copies aren't count
   assert.equal(ownershipHeadline(3), "Owned: 3 copies");
   assert.deepEqual(
     ["owned", "pending", "not_approved", "unidentified", "invalid"].map(ownershipStatusLabel),
-    ["Confirmed", "Awaiting catalog approval", "Not approved", "Not linked to a release", "Preserved, not counted"],
+    ["Confirmed", "Awaiting catalog approval", "Not approved", "Exact release not identified", "Preserved, not counted"],
   );
   const platform = { short_name: "PS1" };
   const pal = { code: "pal", label: "PAL" };
@@ -515,11 +515,11 @@ test("a copy's history says what it was and who changed it (M12b)", () => {
   assert.equal(historyIdentityText({ release_id: "r" }, regions), "Linked to a release in the catalog");
   assert.equal(
     historyIdentityText({ game_id: "g", platform_id: "p", region_code: "pal", edition_kind: "reprint", edition_name: null }, regions),
-    "Not linked to a release: PAL · Reprint",
+    "Exact release not identified: PAL · Reprint",
   );
   assert.equal(
     historyIdentityText({ game_id: "g", platform_id: "p", region_code: null, edition_kind: null, edition_name: null }, regions),
-    "Not linked to a release: Region not sure · Edition not sure",
+    "Exact release not identified: Region not sure · Edition not sure",
   );
   assert.equal(historyIdentityText(null, regions), "Not recorded");
   assert.deepEqual(["owner", "catalog", "maintenance"].map(historySourceLabel), ["You", "The catalog, when it merged a duplicate release", "Site maintenance"]);
