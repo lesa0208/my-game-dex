@@ -9,6 +9,7 @@ import { GameDetailsSkeleton, PhysicalReleases } from "@/components/games/game-d
 import { GameGallery } from "@/components/games/game-gallery";
 import { GameArtwork, GameHeroInfo, GameIdentity, type HeroDescription, HeroBackdrop } from "@/components/games/game-hero";
 import { OverviewTab } from "@/components/games/game-overview";
+import { PlatformUnidentified, ReleaseOwned } from "@/components/games/release-ownership";
 import { HeroActions, HeroActionsSkeleton, MyCopiesVisitor, MyCopyPanel, ReleasesEmptyAction } from "@/components/games/game-sections";
 import { type GameTab, GameTabs } from "@/components/games/game-tabs";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -116,13 +117,22 @@ async function GameContent({ params, searchParams }: PageProps<"/games/[slug]">)
       content: (
         <PhysicalReleases
           slug={picker.game.slug}
-          title={picker.game.title}
           overview={overview}
           emptyAction={
             <Suspense fallback={null}>
               <ReleasesEmptyAction game={game} platform={platformSlug} returnPath={here} />
             </Suspense>
           }
+          renderOwned={(release) => (
+            <Suspense fallback={null}>
+              <ReleaseOwned gameId={picker.game.id} releaseId={release.id} />
+            </Suspense>
+          )}
+          renderPlatformNote={(p) => (
+            <Suspense fallback={null}>
+              <PlatformUnidentified gameId={picker.game.id} platform={p.slug} platformName={p.shortName} />
+            </Suspense>
+          )}
           renderAction={(release) => (
             <Suspense fallback={null}>
               <WantRelease gameId={picker.game.id} release={release} title={picker.game.title} />

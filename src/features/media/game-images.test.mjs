@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { imageCaption, imageFor, imageProblems } from "./game-images.ts";
+import { imageCaption, imageFor, imageProblems, releaseImageFor } from "./game-images.ts";
 
 const root = join(import.meta.dirname, "..", "..", "..");
 const base = {
@@ -121,4 +121,19 @@ test("the Gallery: no sources, no items; nothing filled in", async () => {
   const { galleryItems } = await import("./gallery.ts");
   const { LICENSE_LABELS } = await import("./game-images.ts");
   assert.deepEqual(galleryItems({ title: "Tetris", photos: [], licenseLabels: LICENSE_LABELS, platformName: () => null, regionName: () => null, screenshots: [], igdbUrl: null }), []);
+});
+
+test("Physical Releases 2.0: a release card shows only a photo of exactly that release, never an example", () => {
+  const release = "0190a0a0-0000-7000-8000-000000000001";
+  const other = "0190a0a0-0000-7000-8000-000000000002";
+  const images = [image("na"), image("any", { region: null }), image("rel", { release })];
+  const q = (rel, extra = {}) => releaseImageFor(images, { game: "chrono-trigger", platform: "snes", release: rel, ...extra })?.id ?? null;
+  assert.equal(q(release), "rel");
+  // Another release of the same platform and region gets no stand-in.
+  assert.equal(q(other), null);
+  // Never across platforms or games, even with the release's id.
+  assert.equal(q(release, { platform: "playstation" }), null);
+  assert.equal(q(release, { game: "another-game" }), null);
+  // An image that fails its checks (no licence) is never shown.
+  assert.equal(releaseImageFor([image("bad", { release, license: "unknown" })], { game: "chrono-trigger", platform: "snes", release }), null);
 });
