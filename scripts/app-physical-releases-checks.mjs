@@ -110,6 +110,11 @@ async function facts(p, id, where = "[data-release-facts]") {
     .evaluateAll((rows) => Object.fromEntries(rows.map((r) => [r.querySelector("dt").textContent.trim(), r.querySelector("dd").textContent.trim()])));
 }
 const more = (p, id) => facts(p, id, "[data-release-more]");
+/** The product code shown under the card's heading, or null. */
+const code = async (p, id) => {
+  const el = card(p, id).locator("[data-release-product-code]");
+  return (await el.count()) ? (await el.locator("span").nth(1).innerText()).trim() : null;
+};
 const media = (p, id) => card(p, id).locator("[data-release-media]").getAttribute("data-release-media");
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -135,7 +140,11 @@ async function shot(p, file, { element = null, scrollTo = null, full = false } =
   const style = { padding: "4px 8px", background: "#facc15", color: "#111", font: "600 12px/1.4 system-ui", textAlign: "center", borderRadius: "6px", margin: "0 0 8px" };
   const path = join(SHOTS, file);
   await p.evaluate(() => document.querySelectorAll("[data-synthetic-caption]").forEach((el) => el.remove()));
+  // The resting state: no focus ring left from the last click or key.
+  await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
   if (element) {
+    // A list is captured with its section, the caption above it (never as one of its items).
+    if (await element.evaluate((el) => el.tagName === "UL")) element = element.locator("xpath=..");
     await element.evaluate((el, [text, css]) => {
       const tag = document.createElement("div");
       tag.setAttribute("data-synthetic-caption", "");
@@ -148,13 +157,14 @@ async function shot(p, file, { element = null, scrollTo = null, full = false } =
     await p.evaluate(() => document.querySelectorAll("[data-synthetic-caption]").forEach((el) => el.remove()));
     return;
   }
-  await p.evaluate(([text, css, fixed]) => {
+  await p.evaluate(([text, css, inTab]) => {
     const tag = document.createElement("div");
     tag.setAttribute("data-synthetic-caption", "");
     tag.textContent = text;
-    Object.assign(tag.style, css, fixed ? { position: "fixed", left: "8px", right: "8px", bottom: "76px", zIndex: "9999", margin: "0" } : {});
-    if (fixed) document.body.append(tag);
-    else document.querySelector("main")?.prepend(tag);
+    Object.assign(tag.style, css);
+    // In the page's flow, never over a control: at the top of the releases tab, or of the page.
+    const host = inTab ? [...document.querySelectorAll("[data-physical-releases]")].find((el) => el.getClientRects().length) : document.querySelector("main");
+    host?.prepend(tag);
   }, [caption, style, !full]);
   if (scrollTo) {
     await scrollTo.evaluate((el) => el.scrollIntoView({ block: "start" }));
@@ -221,9 +231,11 @@ try {
     const usFacts = await facts(desk, ids.us);
     check(
       "the North American card's facts, exactly as recorded and in order",
-      same(usFacts, { Format: "North American SNES Game Pak", Packaging: "Cardboard box", "Product code": "SNS-ZZLV-USA", Barcode: "2000000000015", Released: "November 18, 1994", Publisher: "Placeholder Interactive" }),
+      same(usFacts, { Format: "North American SNES Game Pak", Packaging: "Cardboard box", Barcode: "2000000000015", Released: "November 18, 1994", Publisher: "Placeholder Interactive" }),
       JSON.stringify(usFacts),
     );
+    check("its product code stands under the heading, labelled", (await code(desk, ids.us)) === "SNS-ZZLV-USA" && (await card(desk, ids.us).locator("[data-release-product-code]").innerText()).replace(/\s+/g, " ") === "Product code SNS-ZZLV-USA");
+    check("the physical object is a real part of the card: its stage is at least 160 px wide on desktop", (await card(desk, ids.us).locator("[data-release-media]").evaluate((el) => el.getBoundingClientRect().width)) >= 160);
     const usMore = await more(desk, ids.us);
     check(
       "its More details: markets, language, contents and rating, as recorded",
@@ -236,7 +248,7 @@ try {
       return card(desk, ids.us).locator("details").evaluate((d) => d.open);
     })()));
     const euFacts = await facts(desk, ids.eu);
-    check("the PAL card: its own format, code, barcode, date and publisher", same(euFacts, { Format: "Super Famicom / PAL SNES Cartridge", Packaging: "Cardboard box", "Product code": "SNSP-ZZLV-EUR", Barcode: "2000000000039", Released: "March 23, 1995", Publisher: "Placeholder Interactive Europe" }), JSON.stringify(euFacts));
+    check("the PAL card: its own format, code, barcode, date and publisher", same(euFacts, { Format: "Super Famicom / PAL SNES Cartridge", Packaging: "Cardboard box", Barcode: "2000000000039", Released: "March 23, 1995", Publisher: "Placeholder Interactive Europe" }) && (await code(desk, ids.eu)) === "SNSP-ZZLV-EUR", JSON.stringify(euFacts));
     check("the PAL card's languages: English, German, French", (await more(desk, ids.eu)).Languages === "English, German, French");
     check("the Japanese card: the title on the box, and the date to the month only", (await card(desk, ids.jp).locator("[data-release-local-title]").innerText()) === "Title on the box: フィクスチャー・クエスト" && (await facts(desk, ids.jp)).Released === "August 1994");
     check("no card has a barcode, date or publisher it doesn't record", !("Barcode" in (await facts(desk, ids.jp))) && !("Released" in (await facts(desk, ids.nfr))) && !("Barcode" in (await facts(desk, ids.ukv))));
@@ -245,13 +257,15 @@ try {
 
   section("2. SNES: editions and variants");
   {
-    check("the standard edition goes unsaid: no edition on the standard North American card", (await card(desk, ids.us).locator("[data-release-edition]").count()) === 0 && (await card(desk, ids.us).locator("[data-release-variant]").count()) === 0);
+    check("no Standard Edition label is invented: no edition chip on the standard North American card, and no card says Standard", !/\bStandard\b/.test(await desk.locator('[data-release-group="snes"]:visible').innerText()) && (await card(desk, ids.us).locator("[data-release-edition]").count()) === 0 && (await card(desk, ids.us).locator("[data-release-variant]").count()) === 0);
     check("a reprint: Player's Choice (Reprint)", (await card(desk, ids.pc).locator("[data-release-edition]").innerText()) === "Player's Choice (Reprint)");
     check("a collector's edition by its name", (await card(desk, ids.ce).locator("[data-release-edition]").innerText()) === "Collector's Edition");
     check("its extras under More details", (await more(desk, ids.ce)).Includes?.split(", ").sort().join(", ") === "Art print, Cloth map, Instruction manual");
     check("variants of the standard edition: Not for Resale, and UKV", (await card(desk, ids.nfr).locator("[data-release-variant]").innerText()) === "Variant: Not for Resale" && (await card(desk, ids.ukv).locator("[data-release-variant]").innerText()) === "Variant: UKV");
-    check("a variant shares its product code but stays its own card", (await facts(desk, ids.nfr))["Product code"] === "SNS-ZZLV-USA" && ids.nfr !== ids.us);
+    check("a variant shares its product code but stays its own card", (await code(desk, ids.nfr)) === "SNS-ZZLV-USA" && ids.nfr !== ids.us);
     check("the edition and variant are a labelled list", (await card(desk, ids.pc).getByRole("list", { name: "Edition and variant" }).count()) === 1);
+    await shot(desk, "02b-snes-collectors-edition-card-desktop.png", { element: card(desk, ids.ce) });
+    await shot(desk, "02c-snes-variant-card-desktop.png", { element: card(desk, ids.nfr) });
     await card(desk, ids.ce).locator("summary").click();
     await shot(desk, "02-snes-editions-variants-desktop.png", { element: desk.locator('[data-release-group="snes"]:visible') });
   }
@@ -263,9 +277,9 @@ try {
     check("the Famicom cartridge: no drawn shell, so a plain neutral shape, never the NES one", (await media(desk, ids.fc)) === "placeholder" && (await facts(desk, ids.fc)).Format === "Famicom Cartridge");
     check("Genesis and PAL Mega Drive: the Mega Drive shell", (await media(desk, ids.gen)) === "shell:md-cart:NTSC-U" && (await media(desk, ids.mdEu)) === "shell:md-cart:NTSC-U");
     check("the Japanese Mega Drive cartridge: a plain shape, its shell isn't drawn", (await media(desk, ids.mdJp)) === "placeholder");
-    check("Mega Drive packaging as recorded: Plastic case", (await facts(desk, ids.gen)).Packaging === "Plastic case" && (await facts(desk, ids.gen))["Product code"] === "MK-ZZ01");
+    check("Mega Drive packaging as recorded: Plastic case", (await facts(desk, ids.gen)).Packaging === "Plastic case" && (await code(desk, ids.gen)) === "MK-ZZ01");
     check("the date at its recorded precision: 1991, June 1990, December 1989", (await facts(desk, ids.gen)).Released === "1991" && (await facts(desk, ids.nesUs)).Released === "June 1990" && (await facts(desk, ids.fc)).Released === "December 1989");
-    check("a card with little recorded says only that: the PAL NES card", same(await facts(desk, ids.nesEu), { Format: "NES Game Pak", Packaging: "Cardboard box", "Product code": "NES-ZZ-EEC" }));
+    check("a card with little recorded says only that: the PAL NES card", same(await facts(desk, ids.nesEu), { Format: "NES Game Pak", Packaging: "Cardboard box" }) && (await code(desk, ids.nesEu)) === "NES-ZZ-EEC");
     await shot(desk, "03-nes-mega-drive-cartridges-desktop.png", { element: desk.locator("[data-physical-releases]:visible") });
   }
 
@@ -274,7 +288,7 @@ try {
     await releasesTab(desk, GAMES.tower);
     check("PlayStation: the neutral jewel case", (await media(desk, ids.psUs)) === "shell:ps1-case:NTSC-U" && (await media(desk, ids.psEu)) === "shell:ps1-case:NTSC-U");
     const psFacts = await facts(desk, ids.psUs);
-    check("three discs and their case, as recorded: 3 × CD-ROM, Double-depth jewel case", psFacts.Format === "3 × CD-ROM" && psFacts.Packaging === "Double-depth jewel case" && psFacts["Product code"] === "SLUS-90001" && psFacts.Released === "September 8, 1998", JSON.stringify(psFacts));
+    check("three discs and their case, as recorded: 3 × CD-ROM, Double-depth jewel case", psFacts.Format === "3 × CD-ROM" && psFacts.Packaging === "Double-depth jewel case" && (await code(desk, ids.psUs)) === "SLUS-90001" && psFacts.Released === "September 8, 1998", JSON.stringify(psFacts));
     const psMore = await more(desk, ids.psUs);
     check("its contents: one manual, three disc booklets", psMore.Includes?.split(", ").sort().join(", ") === "3 × Disc booklet, Instruction manual", JSON.stringify(psMore));
     check("Greatest Hits is its own card, as a reprint", (await card(desk, ids.psGh).locator("[data-release-edition]").innerText()) === "Greatest Hits (Reprint)");
@@ -282,6 +296,7 @@ try {
     const saturn = { media: await media(desk, ids.saturn), facts: await facts(desk, ids.saturn), more: await more(desk, ids.saturn) };
     check("Saturn: the Saturn case, two discs, and the 4 MB RAM cartridge it needs", saturn.media === "shell:saturn-case:NTSC-J" && saturn.facts.Format === "2 × CD-ROM" && saturn.more.Requires === "4 MB RAM cartridge", JSON.stringify(saturn));
     await card(desk, ids.psUs).locator("summary").click();
+    await shot(desk, "04b-playstation-multi-disc-card-desktop.png", { element: card(desk, ids.psUs) });
     await shot(desk, "04-playstation-multi-disc-desktop.png", { element: desk.locator('[data-release-group="playstation"]:visible') });
   }
 
@@ -290,9 +305,9 @@ try {
     await releasesTab(desk, GAMES.loose);
     check("an unknown region says so: Region unknown", (await card(desk, ids.ps2).getByRole("heading").innerText()).includes("Region unknown"));
     check("a format with no drawn shell (a PlayStation 2 DVD): a plain shape", (await media(desk, ids.ps2)) === "placeholder");
-    check("only what's recorded: the format, and packaging Unknown as an editor recorded it", same(await facts(desk, ids.ps2), { Format: "DVD-ROM", Packaging: "Unknown" }));
+    check("only what's recorded: the format, and packaging Unknown as an editor recorded it; no product code", same(await facts(desk, ids.ps2), { Format: "DVD-ROM", Packaging: "Unknown" }) && (await code(desk, ids.ps2)) === null);
     check("nothing else is shown or invented: no More details, no edition or variant", (await card(desk, ids.ps2).locator("[data-release-more]").count()) === 0 && (await card(desk, ids.ps2).locator("[data-release-edition], [data-release-variant]").count()) === 0);
-    check("the Game Boy card: the Game Boy shell and its product code", (await media(desk, ids.gb)) === "shell:gb-cart:NTSC-U" && (await facts(desk, ids.gb))["Product code"] === "DMG-ZZ-USA");
+    check("the Game Boy card: the Game Boy shell and its product code", (await media(desk, ids.gb)) === "shell:gb-cart:NTSC-U" && (await code(desk, ids.gb)) === "DMG-ZZ-USA");
     await shot(desk, "06-release-without-artwork-desktop.png", { element: desk.locator("[data-physical-releases]:visible") });
   }
 
@@ -329,11 +344,17 @@ try {
     const mine = await page(SIZES.desktop, alex);
     await releasesTab(mine, GAMES.vale);
     await mine.locator("[data-release-owned]").first().waitFor();
-    check("the North American card says You own 2", (await card(mine, ids.us).locator("[data-release-owned]").getAttribute("data-release-owned")) === "2" && (await card(mine, ids.us).locator("[data-release-owned]").evaluate((a) => [...a.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim())) === "You own 2");
+    check("the North American card says You own 2 of this release", (await card(mine, ids.us).locator("[data-release-owned]").getAttribute("data-release-owned")) === "2" && (await card(mine, ids.us).locator("[data-release-owned]").evaluate((a) => [...a.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim())) === "You own 2 of this release");
     check("no other card claims a copy", (await mine.locator("[data-release-owned]:visible").count()) === 1);
-    check("its accessible name says what and where: copies of this release, see My Copies", /You own 2 copies of this release: see My Copies/.test((await card(mine, ids.us).locator("[data-release-owned]").evaluate((a) => a.textContent)).replace(/\s+/g, " ")));
-    check("the SNES group notes the copy whose exact release isn't identified, without assigning it", (await mine.locator('[data-release-group="snes"] [data-platform-unidentified]').getAttribute("data-platform-unidentified")) === "1" && (await mine.locator("[data-platform-unidentified]").innerText()).includes("1 of your copies on SNES: exact release not identified."));
-    await shot(mine, "07-desktop-signed-in-1440.png", { full: true });
+    check("its accessible name says they're copies linked to this exact release, and where to see them", /You own 2 of this release: copies linked to this exact release\. See My Copies/.test((await card(mine, ids.us).locator("[data-release-owned]").evaluate((a) => a.textContent)).replace(/\s+/g, " ")));
+    check("the SNES group notes the copy whose exact release isn't identified, without assigning it", (await mine.locator('[data-release-group="snes"] [data-platform-unidentified]').getAttribute("data-platform-unidentified")) === "1" && (await mine.locator("[data-platform-unidentified]").innerText()).includes("1 of your copies on SNES isn't linked to a release yet (exact release not identified), so no card below counts it."));
+    check("each card's add action is worded for the collector: Add to collection", (await card(mine, ids.us).locator("[data-release-add]").evaluate((a) => [...a.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim())) === "Add to collection" && (await card(mine, ids.us).getByRole("link", { name: /^Add to collection ?, a copy of this release: SNES, NTSC-U\/C$/ }).count()) === 1);
+    check("Want this release stays a separate action beside it", (await card(mine, ids.us).getByRole("button", { name: /^Want this release: / }).count()) === 1);
+    check("Add to collection still opens the add steps with this release chosen (no new write path)", new URL(await card(mine, ids.us).locator("[data-release-add]").getAttribute("href"), origin).searchParams.get("release") === ids.us);
+    // The desktop grid as a person sees it (a full-page capture repeats the sticky header mid-page).
+    await mine.setViewportSize({ width: 1440, height: 1800 });
+    await shot(mine, "07-desktop-signed-in-1440.png", { scrollTo: mine.locator("[data-physical-releases]:visible") });
+    await mine.setViewportSize(SIZES.desktop);
     await card(mine, ids.us).locator("[data-release-owned]").click();
     check("You own 2 opens the My Copies tab", await mine.waitForFunction(() => location.hash === "#my-copies" && document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.includes("My Copies"), null, { timeout: 5000 }).then(() => true, async () => false), await mine.evaluate(() => location.hash + " " + document.querySelector('[role="tab"][aria-selected="true"]')?.textContent));
     check("viewing changed no copy: nothing written to the collection or its history", footprint(psql, ["public.collection_items", "private.collection_item_identity_events"]) === before);
@@ -347,9 +368,20 @@ try {
       const columns = await p.locator('[data-release-group="snes"] ul').first().evaluate((ul) => getComputedStyle(ul).gridTemplateColumns.split(" ").length);
       check(`${size.width}px: the cards are one column`, columns === 1);
       if (name !== "tablet") {
-        const heights = await p.locator('[data-release-card] [data-release-add]:visible, [data-release-card] summary:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
-        check(`${size.width}px: Add this release and More details are at least 44 px tall`, heights.length > 0 && heights.every((h) => h >= 44));
-        check(`${size.width}px: Add this release is shown on phones, named for its release`, (await card(p, ids.ukv).getByRole("link", { name: "Add this release to your collection: SNES, PAL, UKV" }).isVisible()));
+        const heights = await p.locator('[data-release-card] [data-release-add]:visible, [data-release-card] summary:visible, [data-release-actions] button:visible').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+        check(`${size.width}px: Add to collection, Want this release and More details are at least 44 px tall`, heights.length > 0 && heights.every((h) => h >= 44));
+        check(`${size.width}px: Add to collection is shown on phones, named for its release`, (await card(p, ids.ukv).getByRole("link", { name: /^Add to collection ?, a copy of this release: SNES, PAL, UKV$/ }).isVisible()));
+        // Scrolled to the very end, the fixed bottom navigation covers none of the last card.
+        await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        await p.waitForTimeout(300);
+        const clear = await p.evaluate(() => {
+          const nav = [...document.querySelectorAll("nav")].find((n) => getComputedStyle(n).position === "fixed" && n.getClientRects().length && n.getBoundingClientRect().bottom >= innerHeight - 1);
+          const last = [...document.querySelectorAll("[data-release-card]")].filter((c) => c.getClientRects().length).at(-1)?.getBoundingClientRect();
+          return nav && last ? Math.round(nav.getBoundingClientRect().top - last.bottom) : null;
+        });
+        check(`${size.width}px: at the end of the list, the bottom navigation doesn't cover the last card`, clear !== null && clear >= 0, String(clear));
+        const wide = await p.locator("[data-release-card]:visible dd, [data-release-card]:visible h4").evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent.slice(0, 40)));
+        check(`${size.width}px: no fact or heading is cut off`, wide.length === 0, wide.join(" | "));
       }
       await audit(p, "signed in, Physical Releases");
       if (name === "tablet") await shot(p, "07b-tablet-820.png", { scrollTo: p.locator("[data-physical-releases]:visible") });

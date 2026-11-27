@@ -16,7 +16,7 @@ const ownershipOf = cache(async (gameId: string) => {
   return getMyGameOwnership(gameId);
 });
 
-/** "You own 2", on the card of a release the collector has copies of. */
+/** "You own 2 of this release": the collector's copies linked to exactly this release, never a claim. */
 export async function ReleaseOwned({ gameId, releaseId }: { gameId: string; releaseId: string }) {
   const ownership = await ownershipOf(gameId);
   const count = ownership?.entries.filter((e) => e.release_id === releaseId).reduce((sum, e) => sum + e.count, 0) ?? 0;
@@ -25,12 +25,12 @@ export async function ReleaseOwned({ gameId, releaseId }: { gameId: string; rele
     // A plain link: the tabs follow the address hash (game-tabs.tsx), as Overview links do.
     <a
       href="#my-copies"
-      className="inline-flex min-h-6 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-xs font-medium text-emerald-200 outline-none hover:bg-emerald-400/15 focus-visible:ring-3 focus-visible:ring-ring"
+      className="inline-flex min-h-7 items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-200 outline-none hover:bg-emerald-400/15 focus-visible:ring-3 focus-visible:ring-ring"
       data-release-owned={count}
     >
       <Library aria-hidden="true" className="size-3.5" />
-      You own {count}
-      <span className="sr-only"> {count === 1 ? "copy" : "copies"} of this release: see My Copies</span>
+      You own {count} of this release
+      <span className="sr-only">: {count === 1 ? "a copy" : "copies"} linked to this exact release. See My Copies</span>
     </a>
   );
 }
@@ -46,7 +46,7 @@ export async function PlatformUnidentified({ gameId, platform, platformName }: {
   return (
     <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-dashed border-white/12 bg-white/[0.02] px-3 py-2 text-sm" data-platform-unidentified={count}>
       <span>
-        {count === 1 ? "1 of your copies" : `${count} of your copies`} on {platformName}: exact release not identified.
+        {count === 1 ? "1 of your copies" : `${count} of your copies`} on {platformName} {count === 1 ? "isn't" : "aren't"} linked to a release yet (exact release not identified), so no card below counts {count === 1 ? "it" : "them"}.
       </span>
       <a href="#my-copies" className="inline-flex min-h-6 items-center font-medium text-primary-text underline-offset-4 hover:underline">
         Review in My Copies
