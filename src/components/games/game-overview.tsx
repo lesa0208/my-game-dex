@@ -77,6 +77,8 @@ function plural(count: number, one: string, many: string) {
 }
 
 export function OverviewTab({ game, overview, summary, provider = null }: { game: ReleasePicker["game"]; overview: Overview; summary: string | null; provider?: ProviderMetadata | null }) {
+  const verifiedOn = (slug: string) => overview.groups.find((g) => g.platform.slug === slug)?.releases.length ?? 0;
+  const anyVerified = overview.platforms.some((p) => verifiedOn(p.slug) > 0);
   const fromIgdb = !summary && provider?.summary ? provider.summary : null;
   const aliases = game.aliases.map((alias) => ({
     key: `${alias.title}-${alias.languageCode}-${alias.regionCode}`,
@@ -180,13 +182,13 @@ export function OverviewTab({ game, overview, summary, provider = null }: { game
             <ul className="mt-3 flex flex-col gap-3">
               {overview.platforms.map((p) => {
                 const kind = consoleFor(p.slug);
-                const verified = overview.groups.find((g) => g.platform.slug === p.slug)?.releases.length ?? 0;
+                const verified = verifiedOn(p.slug);
                 return (
                   <li key={p.slug} className="flex items-center gap-3">
                     {kind ? <ConsoleArt kind={kind} sizes="48px" className="h-7 w-10 shrink-0" /> : <span aria-hidden="true" className="w-10 shrink-0" />}
                     <span className="min-w-0 leading-tight">
                       <span className="block text-sm text-pretty text-white">{p.name}</span>
-                      <span className="text-xs text-muted-foreground">{verified ? releaseCountLabel(verified) : "No verified release yet"}</span>
+                      {anyVerified ? <span className="block text-xs text-muted-foreground">{verified ? releaseCountLabel(verified) : "No verified release yet"}</span> : null}
                     </span>
                   </li>
                 );
@@ -195,6 +197,12 @@ export function OverviewTab({ game, overview, summary, provider = null }: { game
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">Not recorded</p>
           )}
+          {/* None verified on any of them: said once, not under every platform. */}
+          {overview.platforms.length && !anyVerified ? (
+            <p className="mt-3 text-xs text-muted-foreground" data-platforms-unverified="">
+              No physical release verified on {overview.platforms.length === 1 ? "this platform" : "these platforms"} yet.
+            </p>
+          ) : null}
           <a href="#releases" className="mt-3 inline-flex text-sm font-medium text-primary-text underline-offset-4 hover:underline">
             See physical releases
           </a>

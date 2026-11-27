@@ -284,7 +284,8 @@ export function GameIdentity({
 export function GameHeroInfo({ overview, publisher, description }: { overview: Overview; publisher: string | null; description: HeroDescription | null }) {
   const facts = [
     publisher ? { label: "Publisher", value: publisher } : null,
-    { label: "Verified releases", value: overview.releaseCount ? releaseCountLabel(overview.releaseCount).replace(/ releases?$/, "") : "None yet" },
+    // Only a real count: a game with none says so in Physical Releases, not as a lone "None yet".
+    overview.releaseCount ? { label: "Verified releases", value: releaseCountLabel(overview.releaseCount).replace(/ releases?$/, "") } : null,
   ].filter((f) => f !== null);
   return (
     <div className="flex min-w-0 flex-col gap-4 sm:gap-5">
@@ -307,14 +308,16 @@ export function GameHeroInfo({ overview, publisher, description }: { overview: O
           </p>
         </div>
       ) : null}
-      <dl className="flex flex-wrap gap-x-7 gap-y-3 border-t border-white/[0.08] pt-4" data-hero-facts="">
-        {facts.map(({ label, value }) => (
-          <div key={label} className="flex flex-col-reverse leading-tight">
-            <dt className="mt-1 text-xs text-muted-foreground">{label}</dt>
-            <dd className="font-heading text-[15px] font-semibold text-white">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      {facts.length ? (
+        <dl className="flex flex-wrap gap-x-7 gap-y-3 border-t border-white/[0.08] pt-4" data-hero-facts="">
+          {facts.map(({ label, value }) => (
+            <div key={label} className="flex flex-col-reverse leading-tight">
+              <dt className="mt-1 text-xs text-muted-foreground">{label}</dt>
+              <dd className="font-heading text-[15px] font-semibold text-white">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
     </div>
   );
 }
