@@ -335,6 +335,7 @@ try {
   check("every thumbnail through the app's route, at a size that keeps proportions (never the cropped screenshot_big)", frames.every((f) => /^\/media\/igdb\/(720p|1080p)\/[a-z0-9]+\.jpg$/.test(f.src)), frames.map((f) => f.src).join(","));
   check("each whole and undistorted: shown contained, its proportions the original's (16:9, 8:7 and 6:5 alike)", frames.every((f) => f.fit === "contain" && Math.abs(f.natural - f.recorded) < 0.01) && new Set(frames.map((f) => f.recorded.toFixed(1))).size >= 3, JSON.stringify(frames.map((f) => [f.natural.toFixed(3), f.recorded.toFixed(3)])));
   check("frames of one shape, in a grid of four at 1440", await viewer.$$eval("[data-gallery-item] button", (bs) => { const r = bs.map((b) => b.getBoundingClientRect()); return new Set(r.map((x) => Math.round(x.width))).size === 1 && new Set(r.map((x) => Math.round(x.height))).size === 1 && new Set(r.map((x) => Math.round(x.top))).size === 2; }));
+  check("no repeated visible \"Screenshot 1, 2, …\" under the thumbnails; each still named for assistive technology", !/Screenshot \d/.test(await viewer.locator("[data-gallery]").innerText()) && (await thumbs.nth(2).getAttribute("aria-label")) === "Screenshot 3, 3 of 8: open larger");
   check("IGDB credited beside the screenshots, game-level", (await viewer.locator("[data-gallery] [data-igdb-credit]").innerText()).includes("Game screenshots from IGDB.com, not tied to a platform or release"));
   await thumbs.nth(0).focus();
   await viewer.keyboard.press("Enter");
@@ -377,10 +378,21 @@ try {
     await small.goto(`${ORIGIN}/games/chrono-trigger`, { waitUntil: "networkidle" });
     await small.getByRole("tab", { name: /Gallery/ }).click();
     check(`${size.width}px: the Gallery in two columns, no sideways scrolling`, (await noSideScroll(small)) && (await small.$$eval("[data-gallery-item] button", (bs) => new Set(bs.slice(0, 2).map((b) => Math.round(b.getBoundingClientRect().top))).size === 1)));
+    // The fixed phone nav never covers the last thumbnails: scrolled to the end, the last row sits above it.
+    await small.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await small.waitForTimeout(300);
+    const clearOfNav = await small.evaluate(() => {
+      const nav = [...document.querySelectorAll("nav")].find((n) => getComputedStyle(n).position === "fixed" && n.getBoundingClientRect().bottom >= innerHeight - 1 && n.getClientRects().length);
+      const last = [...document.querySelectorAll("[data-gallery-item] button")].slice(-2).map((b) => b.getBoundingClientRect());
+      return Boolean(nav) && last.every((r) => r.bottom <= nav.getBoundingClientRect().top);
+    });
+    check(`${size.width}px: scrolled to the end, the fixed nav covers none of the last thumbnails`, clearOfNav);
     await small.locator("[data-gallery-item] button").nth(3).tap();
     const smallShown = await eventually(async () => small.locator("[data-gallery-image]").evaluate((i) => { const r = i.getBoundingClientRect(); return i.complete && i.naturalWidth > 0 && Math.abs(r.width / r.height - i.naturalWidth / i.naturalHeight) < 0.01 && r.left >= 0 && r.right <= innerWidth; }));
     const controls = await small.$$eval("[data-gallery-viewer] button", (bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
     check(`${size.width}px: the viewer fits: the image whole, Close, Previous and Next in reach (44px), no sideways scrolling`, smallShown && controls.length === 3 && controls.every(Boolean) && (await noSideScroll(small)));
+    const credit = small.locator("[data-gallery-viewer] p", { hasText: "IGDB.com" }).first();
+    check(`${size.width}px: the viewer's credit is short: IGDB.com, linked, and not a verified release image`, (await credit.innerText().then((t) => t.includes("Game-level, not a verified release image.") && !t.includes("physical release, region or edition"))) && (await small.locator('[data-gallery-viewer] a[href^="https://www.igdb.com/games/"]:visible').count()) === 1);
     await small.getByRole("button", { name: "Next image" }).tap();
     check(`${size.width}px: tapping Next: 5 of 8`, await eventually(async () => (await small.locator("[data-gallery-position]").textContent()).trim() === "5 of 8"));
     await small.getByRole("button", { name: "Close" }).tap();

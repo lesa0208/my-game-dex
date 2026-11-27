@@ -37,7 +37,9 @@ function Credit({ item, className }: { item: GalleryItem; className?: string }) 
         </a>
         <span aria-hidden="true"> · </span>
         <span className="sr-only">. </span>
-        Of the game as a whole; it doesn&apos;t verify any physical release, region or edition.
+        {/* Short on a phone, in full from 640px: either way, game-level, not release evidence. */}
+        <span className="sm:hidden">Game-level, not a verified release image.</span>
+        <span className="hidden sm:inline">Of the game as a whole; it doesn&apos;t verify any physical release, region or edition.</span>
       </p>
     );
   }
@@ -117,8 +119,14 @@ function Group({ id, title, note, items, offset, total, failed, onFail, onOpen, 
                 refs.current[offset + i] = el;
               }}
             />
-            <p className="truncate text-xs text-muted-foreground">{item.label}</p>
-            {item.source === "registry" ? <Credit item={item} /> : null}
+            {/* A photo's label says what it shows; a screenshot's would only repeat its number,
+                which its accessible name and the viewer's counter already give. */}
+            {item.source === "registry" ? (
+              <>
+                <p className="truncate text-xs text-muted-foreground">{item.label}</p>
+                <Credit item={item} />
+              </>
+            ) : null}
           </li>
         ))}
       </ul>
